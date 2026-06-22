@@ -5,7 +5,8 @@
     "packages": [
       "packages/*",
       "apps/*",
-      "examples/*"
+      "examples/*",
+      "integration"
     ],
     "catalog": {
       "@moonrepo/cli": "2.3.3",

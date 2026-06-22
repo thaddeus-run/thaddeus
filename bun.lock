@@ -66,6 +66,17 @@
         "@types/bun": "catalog:",
       },
     },
+    "integration": {
+      "name": "@thaddeus.run/integration",
+      "version": "0.0.0",
+      "dependencies": {
+        "@thaddeus.run/identity": "workspace:*",
+        "@thaddeus.run/store": "workspace:*",
+      },
+      "devDependencies": {
+        "@types/bun": "catalog:",
+      },
+    },
     "packages/identity": {
       "name": "@thaddeus.run/identity",
       "version": "0.0.0",
@@ -486,6 +497,8 @@
     "@thaddeus.run/example-offboarding": ["@thaddeus.run/example-offboarding@workspace:examples/offboarding"],
 
     "@thaddeus.run/identity": ["@thaddeus.run/identity@workspace:packages/identity"],
+
+    "@thaddeus.run/integration": ["@thaddeus.run/integration@workspace:integration"],
 
     "@thaddeus.run/landing": ["@thaddeus.run/landing@workspace:apps/landing"],
 
