@@ -31,7 +31,7 @@ type ObjectInfo = {
 };
 
 export default function PermissionModelDemo(): ReactNode {
-  const [phase, setPhase] = useState<'loading' | 'ready'>('loading');
+  const [phase, setPhase] = useState<'loading' | 'ready' | 'error'>('loading');
   const store = useRef<MemoryStore | null>(null);
   const alice = useRef<Identity | null>(null);
   const bob = useRef<Identity | null>(null);
@@ -47,24 +47,47 @@ export default function PermissionModelDemo(): ReactNode {
   const [tick, setTick] = useState(0);
 
   const boot = useCallback(async (): Promise<void> => {
-    await ready();
-    store.current = new MemoryStore();
-    alice.current = Identity.create();
-    bob.current = Identity.create();
-    obj.current = null;
-    setAliceDid(alice.current.did);
-    setBobDid(bob.current.did);
-    setObject(null);
-    setAliceView(null);
-    setBobView(null);
-    setGranted(false);
-    setStatus(
-      <>
-        Two fresh identities, nothing stored yet. <b>Store the secret</b> to
-        begin.
-      </>
-    );
-    setPhase('ready');
+    try {
+      await ready();
+      store.current = new MemoryStore();
+      alice.current = Identity.create();
+      bob.current = Identity.create();
+      obj.current = null;
+      setAliceDid(alice.current.did);
+      setBobDid(bob.current.did);
+      setObject(null);
+      setAliceView(null);
+      setBobView(null);
+      setGranted(false);
+      setStatus(
+        <>
+          Two fresh identities, nothing stored yet. <b>Store the secret</b> to
+          begin.
+        </>
+      );
+      setPhase('ready');
+    } catch (err) {
+      setStatus(
+        <>
+          Couldn&rsquo;t start the substrate:{' '}
+          {err instanceof Error ? err.message : String(err)}
+        </>
+      );
+      setPhase('error');
+    }
+  }, []);
+
+  // Run an async handler, surfacing any failure in the status line instead of
+  // letting it become an unhandled rejection.
+  const run = useCallback((fn: () => Promise<void>): void => {
+    fn().catch((err: unknown) => {
+      setStatus(
+        <>
+          Something went wrong:{' '}
+          {err instanceof Error ? err.message : String(err)}
+        </>
+      );
+    });
   }, []);
 
   useEffect(() => {
@@ -180,6 +203,19 @@ export default function PermissionModelDemo(): ReactNode {
     );
   }
 
+  if (phase === 'error') {
+    return (
+      <section aria-label="Permission model demo">
+        <p className="pm-status">{status}</p>
+        <div className="pm-controls">
+          <button type="button" className="pm-btn" onClick={() => void boot()}>
+            Retry
+          </button>
+        </div>
+      </section>
+    );
+  }
+
   const stored = object !== null;
 
   return (
@@ -238,7 +274,7 @@ export default function PermissionModelDemo(): ReactNode {
         <button
           type="button"
           className="pm-btn"
-          onClick={() => void doStore()}
+          onClick={() => run(doStore)}
           disabled={stored}
         >
           Store the secret
@@ -246,7 +282,7 @@ export default function PermissionModelDemo(): ReactNode {
         <button
           type="button"
           className="pm-btn pm-btn--bob"
-          onClick={() => void doGrant()}
+          onClick={() => run(doGrant)}
           disabled={!stored || granted}
         >
           Grant Bob
@@ -254,7 +290,7 @@ export default function PermissionModelDemo(): ReactNode {
         <button
           type="button"
           className="pm-btn pm-btn--revoke"
-          onClick={() => void doRevoke()}
+          onClick={() => run(doRevoke)}
           disabled={!granted}
         >
           Revoke Bob

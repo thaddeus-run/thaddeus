@@ -7,7 +7,6 @@ const nextConfig = {
   transpilePackages: [
     '@thaddeus.run/identity',
     '@thaddeus.run/store',
-    '@thaddeus.run/theme',
   ],
 };
 
