@@ -7,10 +7,10 @@ All notable changes to Thaddeus. Format follows
 
 ### Added
 
-- (in progress) `@thaddeus.run/identity` — self-owned `did:key` identity:
-  sign/verify, anonymous seal/unseal.
-- (in progress) `@thaddeus.run/store` — encrypted, content-addressed objects
-  with per-object capabilities (grant/revoke = key rotation). Pillar 01.
+- `@thaddeus.run/identity` — self-owned `did:key` identity: sign/verify,
+  anonymous seal/unseal.
+- `@thaddeus.run/store` — encrypted, content-addressed objects with per-object
+  capabilities (grant/revoke = key rotation). Pillar 01.
 
 ### Changed
 

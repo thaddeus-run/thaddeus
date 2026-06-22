@@ -33,19 +33,19 @@ becomes a real assertion. When the last stub is gone, the substrate is whole.
 
 ## Status / traceability
 
-| Pillar                                | Package              | Status      | Resolves         |
-| ------------------------------------- | -------------------- | ----------- | ---------------- |
-| 01 Encrypted objects + capabilities   | `identity` + `store` | in progress | P1 P2 P4 P18 P21 |
-| 02 Membrane (time-varying visibility) | _(planned)_          | planned     | P2 P3 P4         |
-| 03 Operation log                      | _(planned)_          | planned     | P5 P6 P12        |
-| 04 Provenance ("why")                 | _(planned)_          | planned     | P12              |
-| 05 Virtual FS                         | _(planned)_          | planned     | P6 P7 P8 P11     |
-| 06 Platform                           | _(planned)_          | planned     | P9 P10 P11       |
-| 07 Identity federation / reputation   | _(planned)_          | planned     | P13 P19 P20      |
-| 08 Semantic graph                     | _(planned)_          | planned     | P14 P5 P18       |
-| 09 Agents as principals               | _(planned)_          | planned     | P16 P3 P21       |
-| 10 Review as policy                   | _(planned)_          | planned     | P15 P12          |
-| 11 Live database                      | _(planned)_          | planned     | P17 P10          |
+| Pillar                                | Package              | Status  | Resolves         |
+| ------------------------------------- | -------------------- | ------- | ---------------- |
+| 01 Encrypted objects + capabilities   | `identity` + `store` | built   | P1 P2 P4 P18 P21 |
+| 02 Membrane (time-varying visibility) | _(planned)_          | planned | P2 P3 P4         |
+| 03 Operation log                      | _(planned)_          | planned | P5 P6 P12        |
+| 04 Provenance ("why")                 | _(planned)_          | planned | P12              |
+| 05 Virtual FS                         | _(planned)_          | planned | P6 P7 P8 P11     |
+| 06 Platform                           | _(planned)_          | planned | P9 P10 P11       |
+| 07 Identity federation / reputation   | _(planned)_          | planned | P13 P19 P20      |
+| 08 Semantic graph                     | _(planned)_          | planned | P14 P5 P18       |
+| 09 Agents as principals               | _(planned)_          | planned | P16 P3 P21       |
+| 10 Review as policy                   | _(planned)_          | planned | P15 P12          |
+| 11 Live database                      | _(planned)_          | planned | P17 P10          |
 
 ## Per-primitive loop
 
