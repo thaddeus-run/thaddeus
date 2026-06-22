@@ -15,7 +15,6 @@
     "@types/react": "catalog:",
     "@types/react-dom": "catalog:",
     "postcss": "catalog:",
-    "postcss-import": "catalog:",
     "tailwindcss": "catalog:",
     "typescript": "catalog:"
   }

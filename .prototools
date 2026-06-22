@@ -4,6 +4,9 @@ node = "24.11.0"
 proto = "0.57.4"
 moon = "2.3.3"
 
+[plugins]
+gh = "https://raw.githubusercontent.com/appthrust/proto-toml-plugins/main/gh/plugin.toml"
+
 [settings]
 auto-clean = false
 auto-install = true
