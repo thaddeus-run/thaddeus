@@ -1,7 +1,29 @@
 {
   "name": "@thaddeus.run/identity",
   "version": "0.0.0",
+  "description": "Self-owned did:key identity — ed25519 sign/verify and x25519 sealed-box seal/unseal.",
+  "keywords": [
+    "did",
+    "did-key",
+    "ed25519",
+    "identity",
+    "sealed-box",
+    "x25519"
+  ],
+  "homepage": "https://thaddeus.run",
+  "bugs": {
+    "url": "https://github.com/thaddeus-run/thaddeus/issues"
+  },
   "license": "Apache-2.0",
+  "author": {
+    "name": "thaddeus.run",
+    "url": "https://thaddeus.run"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/thaddeus-run/thaddeus.git",
+    "directory": "packages/identity"
+  },
   "files": [
     "dist",
     "LICENSE.md",
