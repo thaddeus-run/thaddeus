@@ -1,0 +1,14 @@
+$schema: 'https://moonrepo.dev/schemas/project.json'
+
+language: 'typescript'
+layer: 'application'
+
+tasks:
+  # Build-graph-connected, so CI-skipped; run in agent shells with a CI= prefix.
+  demo:
+    command: 'bun src/offboarding.ts'
+    deps:
+      - '^:build'
+    options:
+      cache: false
+      runInCI: 'skip'

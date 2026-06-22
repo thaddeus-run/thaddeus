@@ -55,6 +55,17 @@
         "vite": "catalog:",
       },
     },
+    "examples/offboarding": {
+      "name": "@thaddeus.run/example-offboarding",
+      "version": "0.0.0",
+      "dependencies": {
+        "@thaddeus.run/identity": "workspace:*",
+        "@thaddeus.run/store": "workspace:*",
+      },
+      "devDependencies": {
+        "@types/bun": "catalog:",
+      },
+    },
     "packages/identity": {
       "name": "@thaddeus.run/identity",
       "version": "0.0.0",
@@ -471,6 +482,8 @@
     "@tanstack/virtual-file-routes": ["@tanstack/virtual-file-routes@1.162.0", "", {}, "sha512-uhOeFyxLcU41HzvrxsGpiWdcMbScY1EDgbZ5K7DVRMYInbLYWAC0EA/kx9wXAoSM8q82bUG2hRl8+EAjE6XAbA=="],
 
     "@thaddeus.run/docs": ["@thaddeus.run/docs@workspace:apps/docs"],
+
+    "@thaddeus.run/example-offboarding": ["@thaddeus.run/example-offboarding@workspace:examples/offboarding"],
 
     "@thaddeus.run/identity": ["@thaddeus.run/identity@workspace:packages/identity"],
 

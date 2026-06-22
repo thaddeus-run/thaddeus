@@ -4,7 +4,8 @@
   "workspaces": {
     "packages": [
       "packages/*",
-      "apps/*"
+      "apps/*",
+      "examples/*"
     ],
     "catalog": {
       "@moonrepo/cli": "2.3.3",
