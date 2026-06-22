@@ -7,6 +7,10 @@ language: 'typescript'
 layer: 'application'
 
 tasks:
+  # No test suite yet; keep `moon run :test` green repo-wide.
+  test:
+    args: '--pass-with-no-tests'
+
   build:
     command: 'vite build'
     deps:

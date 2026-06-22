@@ -238,7 +238,6 @@ class Identity {
   sign(bytes: Uint8Array): Uint8Array; // ed25519 detached signature
   unseal(box: Uint8Array): Uint8Array; // open a sealed box addressed to me
   toPublic(): PublicIdentity; // the shareable half
-  export(): SecretKeyMaterial; // for the demo only; not a key-mgmt design
 }
 
 class PublicIdentity {

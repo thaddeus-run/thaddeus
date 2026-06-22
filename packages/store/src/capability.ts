@@ -50,6 +50,8 @@ export function verifyCapability(cap: Capability): boolean {
   );
 }
 
+// Assumes the capability has ALREADY BEEN VERIFIED. The store always calls
+// verifyCapability before unwrapping; any direct caller must do the same.
 export function unwrapKey(cap: Capability, reader: Identity): Uint8Array {
   return reader.unseal(cap.wrapped_key);
 }

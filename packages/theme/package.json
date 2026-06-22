@@ -1,7 +1,7 @@
 {
   "name": "@thaddeus.run/theme",
   "version": "0.0.0",
-  "license": "apache-2.0",
+  "license": "Apache-2.0",
   "files": [
     "dist",
     "LICENSE.md",
