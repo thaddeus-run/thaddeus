@@ -1,5 +1,5 @@
 {
-  "name": "@thaddeus/core",
+  "name": "@thaddeus.run/store",
   "version": "0.0.0",
   "license": "apache-2.0",
   "files": [
@@ -18,7 +18,7 @@
     "access": "public"
   },
   "scripts": {
-    "prepublishOnly": "moon run core:prepublish"
+    "prepublishOnly": "moon run store:prepublish"
   },
   "dependencies": {},
   "devDependencies": {

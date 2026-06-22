@@ -1,4 +1,4 @@
-# @thaddeus/landing
+# @thaddeus.run/landing
 
 The marketing/landing site for **Strata** (working name) — built with
 [TanStack Start](https://tanstack.com/start).

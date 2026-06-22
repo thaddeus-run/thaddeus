@@ -10,8 +10,8 @@ STATUS: SCAFFOLD
 ~~~
 
 PACKAGES:
- - @thaddeus/core   — substrate primitive (stub)
- - @thaddeus/theme  — shared design tokens
+ - @thaddeus.run/store  — encrypted capability store (Pillar 01)
+ - @thaddeus.run/theme  — shared design tokens
 
 APPS:
  - apps/docs     — documentation site (Next.js)

@@ -1,4 +1,4 @@
-# @thaddeus/core
+# @thaddeus.run/store
 
 The first substrate primitive for **Strata** (working name) — the live,
 permissioned, agent-native code substrate from [Thaddeus](https://thaddeus.dev).
@@ -12,13 +12,13 @@ permissioned, agent-native code substrate from [Thaddeus](https://thaddeus.dev).
 ## Install
 
 ```bash
-bun add @thaddeus/core
+bun add @thaddeus.run/store
 ```
 
 ## Usage
 
 ```ts
-import { createSubstrate } from '@thaddeus/core';
+import { createSubstrate } from '@thaddeus.run/store';
 
 const substrate = createSubstrate({ name: 'demo' });
 console.log(substrate.name, substrate.version());

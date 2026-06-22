@@ -4,7 +4,7 @@ const nextConfig = {
   devIndicators: false,
   // Resolve and transpile workspace packages so subpath exports resolve
   // correctly when Next follows client-component imports from the server.
-  transpilePackages: ['@thaddeus/core', '@thaddeus/theme'],
+  transpilePackages: ['@thaddeus.run/store', '@thaddeus.run/theme'],
 };
 
 export default nextConfig;

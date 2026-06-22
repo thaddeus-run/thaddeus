@@ -1,5 +1,5 @@
 @import 'tailwindcss';
-@import '@thaddeus/theme/style.css';
+@import '@thaddeus.run/theme/style.css';
 
 body {
   background: var(--thaddeus-background);

@@ -35,15 +35,17 @@ CI-skipped — run those with a `CI=` prefix, e.g. `CI= moonx docs:dev`.
   arguments. Discover tasks with `moon tasks <project>`.
 - Preserve trailing newlines at the end of files.
 - Setup steps for a fresh clone live in `CONTRIBUTING.md`.
+- Commit messages follow Conventional Commits 1.0.0
+  (https://www.conventionalcommits.org/en/v1.0.0/).
 
 ## Naming
 
 - **Thaddeus** is the company (the umbrella for these projects).
 - **Strata** is the current working name for the substrate product described in
   the architecture brief. It may be renamed.
-- Packages live under the `@thaddeus/*` npm scope with neutral, product-agnostic
-  names (e.g. `core`, `theme`) — not `strata-*` — so a product rename never
-  forces a package rename.
+- Packages live under the `@thaddeus.run/*` npm scope with neutral,
+  product-agnostic names (e.g. `store`, `identity`, `theme`) — not `strata-*` —
+  so a product rename never forces a package rename.
 
 ## Skills
 

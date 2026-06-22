@@ -1,12 +1,12 @@
 {
-  "name": "@thaddeus/landing",
+  "name": "@thaddeus.run/landing",
   "version": "0.0.0",
   "private": true,
   "type": "module",
   "dependencies": {
     "@tanstack/react-router": "catalog:",
     "@tanstack/react-start": "catalog:",
-    "@thaddeus/theme": "workspace:*",
+    "@thaddeus.run/theme": "workspace:*",
     "react": "catalog:",
     "react-dom": "catalog:"
   },

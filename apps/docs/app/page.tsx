@@ -1,8 +1,8 @@
-import { createSubstrate } from '@thaddeus/core';
+import { createSubstrate } from '@thaddeus.run/store';
 import type { ReactNode } from 'react';
 
 // Touch the workspace package so the build/typecheck graph exercises the
-// cross-package resolution (docs -> @thaddeus/core) end to end.
+// cross-package resolution (docs -> @thaddeus.run/store) end to end.
 const substrate = createSubstrate({ name: 'docs' });
 
 export default function HomePage(): ReactNode {
@@ -28,7 +28,7 @@ export default function HomePage(): ReactNode {
         substrate from Thaddeus.
       </p>
       <p style={{ marginTop: '2rem', fontFamily: 'ui-monospace, monospace' }}>
-        @thaddeus/core says: {substrate.name} v{substrate.version()}
+        @thaddeus.run/store says: {substrate.name} v{substrate.version()}
       </p>
     </main>
   );

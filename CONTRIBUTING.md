@@ -48,7 +48,7 @@ moon is the only task runner; `package.json` scripts exist solely for npm
 lifecycle hooks. Tasks run from anywhere in the repo:
 
 ```bash
-moon run <project>:<task>      # e.g. moon run core:build
+moon run <project>:<task>      # e.g. moon run store:build
 moonx <project>:<task>         # shorthand
 moon run :test                 # run a task across every project that has it
 moon tasks <project>           # discover a project's tasks
@@ -64,7 +64,7 @@ Common entry points:
 | -------------------------------- | ------------------------------------------------- |
 | `moonx docs:dev`                 | Docs site (Next.js) dev server                    |
 | `CI= moonx landing:dev`          | Landing site (TanStack Start) dev server          |
-| `moonx core:build`               | Build a package (bundle dist + type declarations) |
+| `moonx store:build`              | Build a package (bundle dist + type declarations) |
 | `moonx <project>:typecheck`      | Typecheck (builds workspace deps first)           |
 | `moon run root:format root:lint` | Repo-wide format + type-aware lint                |
 
@@ -84,6 +84,6 @@ a green PR.
 - Agent-facing rules and the verification baseline live in `AGENTS.md`; deeper
   domain conventions live in `.agents/skills/`.
 - **Thaddeus** is the company; **Strata** is the working product name; packages
-  are scoped `@thaddeus/*` with neutral names. See `AGENTS.md` → Naming.
+  are scoped `@thaddeus.run/*` with neutral names. See `AGENTS.md` → Naming.
 - Published packages use plain `bun publish`, which runs their moon `prepublish`
   guard chain automatically.

@@ -1,4 +1,4 @@
-# @thaddeus/theme
+# @thaddeus.run/theme
 
 Shared design tokens for [Thaddeus](https://thaddeus.dev)'s open-source UI — one
 source of truth for color so every app and package resolves to the same palette.
@@ -9,14 +9,14 @@ source of truth for color so every app and package resolves to the same palette.
 ## Install
 
 ```bash
-bun add @thaddeus/theme
+bun add @thaddeus.run/theme
 ```
 
 ## Usage
 
 ```ts
-import { resolveTokens } from '@thaddeus/theme';
-import '@thaddeus/theme/style.css';
+import { resolveTokens } from '@thaddeus.run/theme';
+import '@thaddeus.run/theme/style.css';
 
 const { accent } = resolveTokens('dark');
 ```

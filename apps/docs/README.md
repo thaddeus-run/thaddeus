@@ -1,9 +1,10 @@
-# @thaddeus/docs
+# @thaddeus.run/docs
 
 The documentation site for **Strata** (working name) — built with Next.js.
 
-> **Status: scaffold.** A single home page that wires in `@thaddeus/core` and
-> `@thaddeus/theme`. Add MDX content, navigation, and component examples here.
+> **Status: scaffold.** A single home page that wires in `@thaddeus.run/store`
+> and `@thaddeus.run/theme`. Add MDX content, navigation, and component examples
+> here.
 
 ## Develop
 

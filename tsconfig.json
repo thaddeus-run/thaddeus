@@ -9,7 +9,7 @@
       "path": "apps/landing/tsconfig.json"
     },
     {
-      "path": "packages/core/tsconfig.json"
+      "path": "packages/store/tsconfig.json"
     },
     {
       "path": "packages/theme/tsconfig.json"

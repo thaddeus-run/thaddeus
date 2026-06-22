@@ -1,4 +1,4 @@
-// @thaddeus/core — placeholder for the first substrate primitive.
+// @thaddeus.run/store — placeholder for the first substrate primitive.
 //
 // This is a buildable stub so the workspace graph (build, typecheck,
 // type-aware lint) has something real to resolve. Replace the API below as

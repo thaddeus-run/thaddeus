@@ -1,4 +1,4 @@
-// @thaddeus/theme — shared design tokens for Thaddeus's apps and packages.
+// @thaddeus.run/theme — shared design tokens for Thaddeus's apps and packages.
 //
 // Scaffold: a single source of truth for colors so the apps (docs, landing)
 // and product packages render consistently. Ships a tokens object plus a

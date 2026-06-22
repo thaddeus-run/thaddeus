@@ -4,7 +4,7 @@
   "exclude": ["node_modules", ".next"],
   "references": [
     {
-      "path": "../../packages/core/tsconfig.json"
+      "path": "../../packages/store/tsconfig.json"
     },
     {
       "path": "../../packages/theme/tsconfig.json"
