@@ -1,0 +1,32 @@
+{
+  "name": "@thaddeus/theme",
+  "version": "0.0.0",
+  "license": "apache-2.0",
+  "files": [
+    "dist",
+    "LICENSE.md",
+    "README.md"
+  ],
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./style.css": {
+      "import": "./dist/style.css"
+    }
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "scripts": {
+    "prepublishOnly": "moon run theme:prepublish"
+  },
+  "dependencies": {},
+  "devDependencies": {
+    "@typescript/native-preview": "catalog:",
+    "tsdown": "catalog:",
+    "typescript": "catalog:"
+  }
+}

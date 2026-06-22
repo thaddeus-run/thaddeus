@@ -1,0 +1,28 @@
+$schema: 'https://moonrepo.dev/schemas/workspace.json'
+
+# Fail fast when a developer's proto-installed moon drifts from the repo pin
+# in .prototools; both must move together.
+versionConstraint: '2.3.3'
+
+projects:
+  globs:
+    - 'packages/*'
+    - 'apps/*'
+  sources:
+    # Repo-wide tooling (lint, format, clean) lives on the root project.
+    root: '.'
+
+vcs:
+  client: 'git'
+  defaultBranch: 'main'
+  # moon generates .moon/hooks/* (gitignored) and points the worktree-local
+  # core.hooksPath at it, so every clone gets hooks from any moon command
+  # without an install-time side effect like husky's prepare.
+  sync: true
+  hooks:
+    pre-commit:
+      # Typecheck the projects affected by staged files (and their dependents),
+      # format the worktree, then run lint-staged (which re-stages fixes).
+      - 'moon exec :typecheck --affected --status staged'
+      - 'moon run root:format'
+      - 'bun lint-staged'

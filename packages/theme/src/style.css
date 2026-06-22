@@ -1,0 +1,19 @@
+/* @thaddeus/theme — shared CSS custom properties.
+ * Mirrors the token values exported from `index.ts`. Apps import this once
+ * (`import '@thaddeus/theme/style.css'`) and read the variables. */
+
+:root {
+  --thaddeus-background: #ffffff;
+  --thaddeus-foreground: #0a0a0a;
+  --thaddeus-muted: #6b7280;
+  --thaddeus-accent: #2563eb;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --thaddeus-background: #0a0a0a;
+    --thaddeus-foreground: #fafafa;
+    --thaddeus-muted: #9ca3af;
+    --thaddeus-accent: #60a5fa;
+  }
+}

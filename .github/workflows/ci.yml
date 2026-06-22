@@ -1,0 +1,27 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # proto installs the pinned bun/node/moon/gh from .prototools.
+      - name: Install proto toolchain
+        uses: moonrepo/setup-toolchain@v0
+        with:
+          auto-install: true
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      # moon ci runs the affected portion of the build graph: build, then
+      # type-aware lint and format-check on the root project, typecheck and
+      # tests on affected packages.
+      - name: Run CI pipeline
+        run: moon ci

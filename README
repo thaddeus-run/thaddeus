@@ -1,0 +1,23 @@
+THADDEUS █
+OPEN SOURCE [TYPESCRIPT]
+
+~~~
+
+PRODUCT: STRATA (WORKING NAME)
+THE ARCHITECTURE FOR SOURCE CONTROL AFTER GIT
+STATUS: SCAFFOLD
+
+~~~
+
+PACKAGES:
+ - @thaddeus/core   — substrate primitive (stub)
+ - @thaddeus/theme  — shared design tokens
+
+APPS:
+ - apps/docs     — documentation site (Next.js)
+ - apps/landing  — marketing site (TanStack Start)
+
+~~~
+
+SETUP: see CONTRIBUTING.md
+AGENTS: see AGENTS.md

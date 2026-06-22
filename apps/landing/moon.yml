@@ -1,0 +1,39 @@
+$schema: 'https://moonrepo.dev/schemas/project.json'
+
+# Local-only tasks avoid presets and set options explicitly. Graph-connected
+# local tasks (dev/start) stay `runInCI: 'skip'`; run those in CI-marked
+# shells with a `CI=` prefix, e.g. `CI= moonx landing:dev`.
+language: 'typescript'
+layer: 'application'
+
+tasks:
+  build:
+    command: 'vite build'
+    deps:
+      - '^:build'
+    inputs:
+      - '**/*'
+      - '!node_modules/**'
+      - '!.output/**'
+      - '!.vinxi/**'
+    outputs:
+      - '.output'
+
+  dev:
+    script: 'vite dev --port "${PORT:-3001}"'
+    deps:
+      - '^:build'
+      - '^:dev'
+    options:
+      cache: false
+      persistent: true
+      runInCI: 'skip'
+
+  start:
+    command: 'vite preview'
+    deps:
+      - 'build'
+    options:
+      cache: false
+      persistent: true
+      runInCI: 'skip'

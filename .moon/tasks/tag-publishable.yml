@@ -1,0 +1,24 @@
+$schema: 'https://moonrepo.dev/schemas/tasks.json'
+
+# Guard chain for packages published to npm. Each published package keeps a
+# single npm lifecycle script, `"prepublishOnly": "moon run <name>:prepublish"`,
+# which `bun publish` fires automatically; everything it runs is defined here.
+#
+# The chain stays `runInCI: 'skip'`: it depends on `build`, and moon ci
+# --include-relations runs affected runInCI-enabled tasks even when they are
+# not requested targets — which would drag publish guards into every CI run.
+# Consequence: publishing from a CI-marked shell needs a `CI=` prefix, e.g.
+# `CI= bun publish --dry-run`.
+inheritedBy:
+  tags: ['publishable']
+
+tasks:
+  # Aggregator the prepublishOnly lifecycle hook points at. Projects can append
+  # extra guards via dep merge.
+  prepublish:
+    command: 'noop'
+    deps:
+      - 'build'
+    options:
+      cache: false
+      runInCI: 'skip'

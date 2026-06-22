@@ -1,0 +1,14 @@
+@import 'tailwindcss';
+@import '@thaddeus/theme/style.css';
+
+body {
+  background: var(--thaddeus-background);
+  color: var(--thaddeus-foreground);
+  font-family:
+    ui-sans-serif,
+    system-ui,
+    -apple-system,
+    'Segoe UI',
+    Roboto,
+    sans-serif;
+}

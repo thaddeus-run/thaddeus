@@ -1,0 +1,50 @@
+$schema: 'https://moonrepo.dev/schemas/project.json'
+
+# Local-only tasks avoid presets and set options explicitly. moon ci executes
+# EVERY affected runInCI-enabled task, so `runInCI: 'always'` is safe only for
+# tasks that can never be affected through the graph (no deps, no dependents).
+# Graph-connected local tasks (dev/prod) stay `runInCI: 'skip'`; run those with
+# a `CI=` prefix, e.g. `CI= moonx docs:dev`.
+language: 'typescript'
+layer: 'application'
+
+tasks:
+  build:
+    command: 'next build'
+    deps:
+      - '^:build'
+    inputs:
+      - '**/*'
+      - '!node_modules/**'
+      - '!.next/**'
+    outputs:
+      - '.next'
+
+  # Aggregator for environments that run `next build` outside moon (Vercel):
+  # builds the workspace dependencies, nothing else.
+  build-deps:
+    command: 'noop'
+    deps:
+      - '^:build'
+    options:
+      cache: false
+      runInCI: 'always'
+
+  dev:
+    script: 'next dev -p "${PORT:-3000}"'
+    deps:
+      - '^:build'
+      - '^:dev'
+    options:
+      cache: false
+      persistent: true
+      runInCI: 'skip'
+
+  prod:
+    script: 'next start -p "${PORT:-3000}"'
+    deps:
+      - 'build'
+    options:
+      cache: false
+      persistent: true
+      runInCI: 'skip'

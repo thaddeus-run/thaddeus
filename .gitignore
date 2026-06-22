@@ -1,0 +1,38 @@
+# Logs
+logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+node_modules
+dist
+.next
+.output
+.vinxi
+dist-ssr
+
+# TanStack Start generates this from src/routes/ on dev/build.
+apps/landing/src/routeTree.gen.ts
+*.local
+tsconfig.tsbuildinfo
+*.tsbuildinfo
+
+# Editor directories and files
+.vscode/*
+!.vscode/extensions.json
+!.vscode/launch.json
+!.vscode/settings.json
+!.vscode/tasks.json
+.idea
+.DS_Store
+*.suo
+*.sw?
+.vercel
+.claude/*
+.agents/ignore/
+
+# moon (generated per-clone/worktree state)
+.moon/cache/
+.moon/hooks/

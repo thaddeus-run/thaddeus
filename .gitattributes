@@ -1,0 +1,2 @@
+# Keep the lockfile collapsed in PR diffs.
+bun.lock linguist-generated

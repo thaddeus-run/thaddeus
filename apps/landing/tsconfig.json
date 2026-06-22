@@ -1,0 +1,28 @@
+{
+  "extends": "../../tsconfig.options.json",
+  "include": ["**/*.ts", "**/*.tsx", "vite.config.ts"],
+  "exclude": ["node_modules", ".output", ".vinxi"],
+  "references": [
+    {
+      "path": "../../packages/theme/tsconfig.json"
+    }
+  ],
+  "compilerOptions": {
+    "target": "ES2022",
+    "lib": ["dom", "dom.iterable", "esnext"],
+    "skipLibCheck": true,
+    "strict": true,
+    "noEmit": true,
+    "esModuleInterop": true,
+    "module": "esnext",
+    "moduleResolution": "bundler",
+    "resolveJsonModule": true,
+    "isolatedModules": true,
+    "jsx": "react-jsx",
+    "composite": false,
+    "verbatimModuleSyntax": false,
+    "paths": {
+      "@/*": ["./src/*"]
+    }
+  }
+}

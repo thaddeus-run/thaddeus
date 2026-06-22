@@ -1,0 +1,114 @@
+$schema: 'https://moonrepo.dev/schemas/project.json'
+
+# Root project: repo-wide tooling that intentionally runs over the whole
+# workspace in one pass (type-aware oxlint, oxfmt, stylelint). These are fast
+# enough that we always run them in CI rather than sharding per project.
+#
+# Local-only tasks avoid presets and set options explicitly: presets force
+# `runInCI: skip`, and moon refuses to run such tasks in CI-detected shells —
+# which includes agent harnesses that export CI=1. `runInCI: 'always'` is
+# reserved for tasks with no graph edges (no deps, no dependents) so they can
+# never be pulled into the CI pipeline uninvited.
+language: 'typescript'
+
+# Type-aware lint resolves @thaddeus/* imports through each package's built
+# dist (exactly like typecheck), so the root project depends on every
+# dist-producing package and lint orders itself after their builds.
+dependsOn:
+  - 'core'
+  - 'theme'
+
+workspace:
+  inheritedTasks:
+    # The root manifest matches the bun toolchain, but `bun test` here would
+    # run every suite in the repo and there is no root tsconfig to typecheck.
+    exclude: ['test', 'typecheck']
+
+tasks:
+  lint:
+    command: 'oxlint --type-aware --tsconfig tsconfig.oxlint.json .'
+    deps:
+      - '^:build'
+    inputs:
+      - '**/*.{js,jsx,mjs,cjs,ts,tsx,mts,cts}'
+      - '!.moon/cache/**'
+      - '!.moon/hooks/**'
+      - '!**/node_modules/**'
+      - '!**/dist/**'
+      - '!**/.next/**'
+      - '!**/.output/**'
+      - '!**/.vinxi/**'
+      - '.oxlintrc.json'
+      - 'tsconfig.oxlint.json'
+    options:
+      runInCI: 'always'
+
+  # Mutates code based on type information, so it needs fresh dist (like lint)
+  # and must never be graph-pulled into CI: runInCI stays skip. In CI-marked
+  # shells: `CI= moon run root:lint-fix`.
+  lint-fix:
+    command: 'oxlint --type-aware --tsconfig tsconfig.oxlint.json --fix .'
+    deps:
+      - '^:build'
+    options:
+      cache: false
+      runInCI: 'skip'
+
+  # Quoted glob is expanded by stylelint itself, not the shell. Generated CSS
+  # is excluded via ignoreFiles in stylelint.config.js so results do not
+  # depend on whether builds have run.
+  lint-css:
+    script: 'stylelint "**/*.css"'
+    inputs:
+      - '**/*.css'
+      - '!**/node_modules/**'
+      - '!**/dist/**'
+      - '!**/.next/**'
+      - '!**/.output/**'
+      - '!**/.vinxi/**'
+      - 'stylelint.config.js'
+    options:
+      runInCI: 'always'
+
+  lint-css-fix:
+    script: 'stylelint "**/*.css" --fix'
+    options:
+      cache: false
+      runInCI: 'always'
+
+  format:
+    command: 'oxfmt .'
+    options:
+      cache: false
+      runInCI: 'always'
+
+  format-check:
+    command: 'oxfmt --check .'
+    inputs:
+      - '**/*'
+      - '!.moon/cache/**'
+      - '!.moon/hooks/**'
+      - '!**/node_modules/**'
+      - '!**/dist/**'
+      - '!**/.next/**'
+      - '!**/.output/**'
+      - '!**/.vinxi/**'
+    options:
+      runInCI: 'always'
+
+  clean:
+    script:
+      'rm -rf apps/*/.next apps/*/.output apps/*/.vinxi packages/*/dist
+      apps/*/tsconfig.tsbuildinfo packages/*/tsconfig.tsbuildinfo'
+    options:
+      cache: false
+      runInCI: 'always'
+
+  clean-all:
+    script:
+      'rm -rf apps/*/.next apps/*/.output apps/*/.vinxi packages/*/dist
+      apps/*/tsconfig.tsbuildinfo packages/*/tsconfig.tsbuildinfo node_modules
+      packages/*/node_modules apps/*/node_modules'
+    options:
+      cache: false
+      runInCI: 'always'
