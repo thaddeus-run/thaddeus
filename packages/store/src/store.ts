@@ -32,6 +32,7 @@ export interface Store {
   grant(ref: Ref, grantee: PublicIdentity, by: Identity): Promise<void>;
   revoke(ref: Ref, grantee: PublicIdentity, by: Identity): Promise<void>;
   rawObject(id: string): EncryptedObject | undefined;
+  current(plaintextId: string): EncryptedObject | undefined;
   verify(id: string): boolean;
 }
 
@@ -109,6 +110,13 @@ export class MemoryStore implements Store {
 
   rawObject(id: string): EncryptedObject | undefined {
     return this.#objects.get(id);
+  }
+
+  // The current (latest) object for a plaintext id — follows key rotation, so a
+  // mirror or viewer always sees the live ciphertext. Undefined if not stored.
+  current(plaintextId: string): EncryptedObject | undefined {
+    const id = this.#current.get(plaintextId);
+    return id === undefined ? undefined : this.#objects.get(id);
   }
 
   verify(id: string): boolean {

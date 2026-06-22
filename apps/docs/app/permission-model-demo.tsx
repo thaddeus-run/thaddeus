@@ -102,10 +102,10 @@ export default function PermissionModelDemo(): ReactNode {
       return { readable: true, text: dec(await s.get(ref, who)) };
     } catch (err) {
       if (err instanceof AccessDenied) {
-        const raw = s.rawObject(ref.id);
+        const cur = s.current(ref.plaintext_id);
         return {
           readable: false,
-          text: raw !== undefined ? hex(raw.ciphertext) : '',
+          text: cur !== undefined ? hex(cur.ciphertext) : '',
         };
       }
       throw err;
@@ -123,13 +123,13 @@ export default function PermissionModelDemo(): ReactNode {
     ) {
       return;
     }
-    const raw = s.rawObject(ref.id);
-    if (raw !== undefined) {
+    const cur = s.current(ref.plaintext_id);
+    if (cur !== undefined) {
       setObject({
-        address: ref.id,
-        cipherHex: hex(raw.ciphertext),
-        verified: s.verify(ref.id),
-        leaks: dec(raw.ciphertext).includes('DATABASE'),
+        address: cur.id,
+        cipherHex: hex(cur.ciphertext),
+        verified: s.verify(cur.id),
+        leaks: dec(cur.ciphertext).includes('DATABASE'),
       });
     }
     setAliceView(await readView(alice.current));
