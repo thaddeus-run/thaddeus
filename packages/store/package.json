@@ -20,8 +20,14 @@
   "scripts": {
     "prepublishOnly": "moon run store:prepublish"
   },
-  "dependencies": {},
+  "dependencies": {
+    "@noble/hashes": "catalog:",
+    "@thaddeus.run/identity": "workspace:*",
+    "libsodium-wrappers-sumo": "catalog:"
+  },
   "devDependencies": {
+    "@types/bun": "catalog:",
+    "@types/libsodium-wrappers-sumo": "catalog:",
     "@typescript/native-preview": "catalog:",
     "tsdown": "catalog:",
     "typescript": "catalog:"
