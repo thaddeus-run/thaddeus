@@ -1,7 +1,30 @@
 {
   "name": "@thaddeus.run/store",
   "version": "0.0.0",
+  "description": "Encrypted, content-addressed objects with per-object capabilities — secrets are ciphertext at rest, access is a key sealed to an identity, revocation is key rotation.",
+  "keywords": [
+    "blake3",
+    "capabilities",
+    "content-addressed",
+    "did",
+    "encryption",
+    "strata",
+    "substrate"
+  ],
+  "homepage": "https://thaddeus.run",
+  "bugs": {
+    "url": "https://github.com/thaddeus-run/thaddeus/issues"
+  },
   "license": "Apache-2.0",
+  "author": {
+    "name": "thaddeus.run",
+    "url": "https://thaddeus.run"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/thaddeus-run/thaddeus.git",
+    "directory": "packages/store"
+  },
   "files": [
     "dist",
     "LICENSE.md",

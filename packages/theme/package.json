@@ -1,7 +1,26 @@
 {
   "name": "@thaddeus.run/theme",
   "version": "0.0.0",
+  "description": "Shared design tokens for thaddeus.run apps and packages.",
+  "keywords": [
+    "css",
+    "design-tokens",
+    "theme"
+  ],
+  "homepage": "https://thaddeus.run",
+  "bugs": {
+    "url": "https://github.com/thaddeus-run/thaddeus/issues"
+  },
   "license": "Apache-2.0",
+  "author": {
+    "name": "thaddeus.run",
+    "url": "https://thaddeus.run"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/thaddeus-run/thaddeus.git",
+    "directory": "packages/theme"
+  },
   "files": [
     "dist",
     "LICENSE.md",
