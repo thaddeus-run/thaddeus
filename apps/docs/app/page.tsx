@@ -1,18 +1,14 @@
-import { createSubstrate } from '@thaddeus.run/store';
+import { address } from '@thaddeus.run/store';
 import type { ReactNode } from 'react';
 
 // Touch the workspace package so the build/typecheck graph exercises the
 // cross-package resolution (docs -> @thaddeus.run/store) end to end.
-const substrate = createSubstrate({ name: 'docs' });
+const sample = address(new TextEncoder().encode('Strata'));
 
 export default function HomePage(): ReactNode {
   return (
     <main
-      style={{
-        maxWidth: '42rem',
-        margin: '0 auto',
-        padding: '6rem 1.5rem',
-      }}
+      style={{ maxWidth: '42rem', margin: '0 auto', padding: '6rem 1.5rem' }}
     >
       <h1
         style={{
@@ -28,7 +24,7 @@ export default function HomePage(): ReactNode {
         substrate from Thaddeus.
       </p>
       <p style={{ marginTop: '2rem', fontFamily: 'ui-monospace, monospace' }}>
-        @thaddeus.run/store says: {substrate.name} v{substrate.version()}
+        content address of &ldquo;Strata&rdquo;: {sample.slice(0, 16)}…
       </p>
     </main>
   );
