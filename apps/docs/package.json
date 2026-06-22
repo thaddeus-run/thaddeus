@@ -3,6 +3,7 @@
   "version": "0.0.0",
   "private": true,
   "dependencies": {
+    "@thaddeus.run/identity": "workspace:*",
     "@thaddeus.run/store": "workspace:*",
     "@thaddeus.run/theme": "workspace:*",
     "next": "catalog:",
