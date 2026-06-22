@@ -17,6 +17,7 @@ language: 'typescript'
 dependsOn:
   - 'store'
   - 'theme'
+  - 'identity'
 
 workspace:
   inheritedTasks:
