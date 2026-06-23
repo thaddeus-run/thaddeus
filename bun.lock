@@ -77,6 +77,18 @@
         "@types/bun": "catalog:",
       },
     },
+    "examples/oplog": {
+      "name": "@thaddeus.run/example-oplog",
+      "version": "0.0.0",
+      "dependencies": {
+        "@thaddeus.run/identity": "workspace:*",
+        "@thaddeus.run/log": "workspace:*",
+        "@thaddeus.run/store": "workspace:*",
+      },
+      "devDependencies": {
+        "@types/bun": "catalog:",
+      },
+    },
     "integration": {
       "name": "@thaddeus.run/integration",
       "version": "0.0.0",
@@ -523,6 +535,8 @@
     "@thaddeus.run/example-disclosure": ["@thaddeus.run/example-disclosure@workspace:examples/disclosure"],
 
     "@thaddeus.run/example-offboarding": ["@thaddeus.run/example-offboarding@workspace:examples/offboarding"],
+
+    "@thaddeus.run/example-oplog": ["@thaddeus.run/example-oplog@workspace:examples/oplog"],
 
     "@thaddeus.run/identity": ["@thaddeus.run/identity@workspace:packages/identity"],
 
