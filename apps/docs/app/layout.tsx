@@ -16,7 +16,20 @@ export default function RootLayout({
 }): ReactNode {
   return (
     <html lang="en">
-      <body>{children}</body>
+      <body>
+        <header className="site-nav">
+          <div className="site-nav__inner">
+            <a className="site-nav__brand" href="/">
+              Strata
+            </a>
+            <nav className="site-nav__links" aria-label="Primary">
+              <a href="/">Permission model</a>
+              <a href="/concepts">Concepts</a>
+            </nav>
+          </div>
+        </header>
+        {children}
+      </body>
     </html>
   );
 }
