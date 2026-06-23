@@ -3,7 +3,7 @@ import { OpLog } from '@thaddeus.run/log';
 import { MemoryStore } from '@thaddeus.run/store';
 import { beforeAll, describe, expect, test } from 'bun:test';
 
-import { signProvenance } from '../src/provenance';
+import { signProvenance, verifyProvenance } from '../src/provenance';
 import { ProvenanceLog } from '../src/provenancelog';
 
 beforeAll(async () => {
@@ -135,33 +135,54 @@ describe('ProvenanceLog', () => {
     expect(prov.status(prov.forOp(op.id)[0])).toBe('unverified');
   });
 
-  test('a same-sig tampered copy cannot evict the valid record it duplicates', async () => {
-    const store = new MemoryStore();
-    const actor = Identity.create();
-    const op = await anOp(store, actor);
-    const prov = new ProvenanceLog(store);
+  test('a same-sig forgery never evicts the genuine record, in either arrival order', async () => {
+    // A forged record reuses the genuine signature: `{ ...good, reasoning }`
+    // keeps good.sig. Dedup keys on full content, not (actor, sig), so the two
+    // are distinct records — BOTH are kept (keep-and-label) and the genuine one
+    // always survives and verifies regardless of which arrives first. (Keying
+    // on (actor, sig) would let the first arrival win and drop the other.)
+    const make = async (order: 'good-first' | 'forged-first') => {
+      const store = new MemoryStore();
+      const actor = Identity.create();
+      const op = await anOp(store, actor);
+      const prov = new ProvenanceLog(store);
 
-    const good = signProvenance(
-      {
-        op: op.id,
-        actor_kind: 'human',
-        intent: 'i',
-        reasoning: 'the real reasoning',
-        task: null,
-        prompt_ref: null,
-        prompt: null,
-      },
-      actor
-    );
-    prov.append(good);
-    // Same actor + same sig, mutated body: #insert dedups on (actor, sig), so
-    // this is treated as a duplicate and dropped — the valid record stays and
-    // the tampered body never shadows it.
-    prov.append({ ...good, reasoning: 'forged' });
+      const good = signProvenance(
+        {
+          op: op.id,
+          actor_kind: 'human',
+          intent: 'i',
+          reasoning: 'the real reasoning',
+          task: null,
+          prompt_ref: null,
+          prompt: null,
+        },
+        actor
+      );
+      const forged = { ...good, reasoning: 'forged' };
 
-    expect(prov.forOp(op.id)).toHaveLength(1);
-    expect(prov.forOp(op.id)[0].reasoning).toBe('the real reasoning');
-    expect(prov.status(prov.forOp(op.id)[0])).toBe('verified');
+      if (order === 'good-first') {
+        prov.append(good);
+        prov.append(forged);
+      } else {
+        prov.append(forged);
+        prov.append(good);
+      }
+      return prov.forOp(op.id);
+    };
+
+    for (const order of ['good-first', 'forged-first'] as const) {
+      const records = await make(order);
+      // Both kept; the genuine record is present and verifies, the forgery does
+      // not — neither displaces the other.
+      expect(records).toHaveLength(2);
+      const verified = records.filter((r) => verifyProvenance(r));
+      expect(verified).toHaveLength(1);
+      expect(verified[0].reasoning).toBe('the real reasoning');
+      expect(
+        records.some((r) => r.reasoning === 'forged' && !verifyProvenance(r))
+      ).toBe(true);
+    }
   });
 
   test('append is idempotent on (op, actor, sig); forOp order is deterministic', async () => {

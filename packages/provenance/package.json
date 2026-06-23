@@ -44,10 +44,10 @@
   "dependencies": {
     "@noble/hashes": "catalog:",
     "@thaddeus.run/identity": "workspace:*",
-    "@thaddeus.run/log": "workspace:*",
     "@thaddeus.run/store": "workspace:*"
   },
   "devDependencies": {
+    "@thaddeus.run/log": "workspace:*",
     "@types/bun": "catalog:",
     "@typescript/native-preview": "catalog:",
     "tsdown": "catalog:",

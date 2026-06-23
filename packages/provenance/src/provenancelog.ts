@@ -64,26 +64,49 @@ export class ProvenanceLog {
   }
 
   // Ingest a provenance record from a peer. KEEPS it regardless of validity so
-  // it can be rendered `unverified`. Idempotent on (op, actor, sig).
+  // it can be rendered `unverified`. Idempotent on the full record content.
   append(p: Provenance): void {
     this.#insert(p);
   }
 
-  // Store a record under its op id, deduped by (actor, sig).
+  // A total identity key over EVERY field of a record. Dedup keys on this, not
+  // on (actor, sig): a forged record reusing a genuine record's signature
+  // (`{ ...valid, reasoning: 'forged' }` keeps valid.sig) differs in body, so it
+  // gets a distinct key and is kept alongside the genuine one — each rendered on
+  // its own merits. Keying on (actor, sig) would let whichever arrived first win
+  // and silently drop the other, so a peer could suppress a genuine record by
+  // pre-empting it with a same-sig forgery (never throws — append must not).
+  #contentKey(p: Provenance): string {
+    return JSON.stringify([
+      p.op,
+      p.actor,
+      p.actor_kind,
+      p.intent,
+      p.reasoning,
+      p.task,
+      p.prompt_ref,
+      p.prompt === null ? null : [p.prompt.id, p.prompt.plaintext_id],
+      bytesToHex(p.sig),
+    ]);
+  }
+
+  // Store a record under its op id, deduped on full content so re-appending the
+  // identical record is a no-op while any distinct record is kept.
   #insert(p: Provenance): void {
     const list = this.#byOp.get(p.op) ?? [];
-    const sigHex = bytesToHex(p.sig);
-    const dup = list.some(
-      (e) => e.actor === p.actor && bytesToHex(e.sig) === sigHex
-    );
+    const key = this.#contentKey(p);
+    const dup = list.some((e) => this.#contentKey(e) === key);
     if (!dup) {
       list.push(p);
       this.#byOp.set(p.op, list);
     }
   }
 
-  // All provenance records known for an op id, in a deterministic order
-  // (by actor, then signature bytes) independent of insertion order.
+  // All provenance records known for an op id, in a deterministic order (by
+  // actor, then signature bytes, then full content) independent of insertion
+  // order. The content tiebreak keeps the order total even for two records that
+  // share an (actor, sig) but differ in body (a genuine record and a same-sig
+  // forgery).
   forOp(opId: string): readonly Provenance[] {
     return [...(this.#byOp.get(opId) ?? [])].sort((a, b) => {
       if (a.actor !== b.actor) {
@@ -91,7 +114,12 @@ export class ProvenanceLog {
       }
       const sa = bytesToHex(a.sig);
       const sb = bytesToHex(b.sig);
-      return sa < sb ? -1 : sa > sb ? 1 : 0;
+      if (sa !== sb) {
+        return sa < sb ? -1 : 1;
+      }
+      const ka = this.#contentKey(a);
+      const kb = this.#contentKey(b);
+      return ka < kb ? -1 : ka > kb ? 1 : 0;
     });
   }
 
