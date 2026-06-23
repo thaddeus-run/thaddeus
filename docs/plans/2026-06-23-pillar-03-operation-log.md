@@ -1003,14 +1003,28 @@ export interface Conflict {
     }
     const out: Conflict[] = [];
     for (const [path, ops] of byPath) {
-      const concurrent = ops.filter((a) =>
-        ops.some((b) => a.id !== b.id && !this.#isAncestor(a.id, b.id))
-      );
+      // Concurrent = same path, mutual non-ancestry; then drop any op
+      // superseded by a concurrent descendant so the set is the minimal frontier.
+      const concurrent = ops
+        .filter((a) =>
+          ops.some(
+            (b) =>
+              a.id !== b.id &&
+              !this.#isAncestor(a.id, b.id) &&
+              !this.#isAncestor(b.id, a.id)
+          )
+        )
+        .filter(
+          (a, _i, kept) =>
+            !kept.some((b) => a.id !== b.id && this.#isAncestor(a.id, b.id))
+        );
       if (concurrent.length > 1) {
         // The LWW winner is the last in (lamport, id) order — `ordered` already
         // sorts that way, so the max-index concurrent op wins.
-        const winner = concurrent[concurrent.length - 1]!;
-        out.push({ path, ops: concurrent.map((o) => o.id), winner: winner.id });
+        const winner = concurrent.at(-1);
+        if (winner !== undefined) {
+          out.push({ path, ops: concurrent.map((o) => o.id), winner: winner.id });
+        }
       }
     }
     return out;

@@ -56,6 +56,12 @@ All notable changes to Thaddeus. Format follows
   behind the wire-format seam only when a _measured_ hot path demands it —
   likely P03 (op-log/CRDT) and P08 (semantic graph). Never pre-optimize the
   spike.
+- **Op-record deep immutability (P03).** `Op.sig` is a `Uint8Array`; the record
+  fields are `readonly` but the array is not deep-frozen, so a same-process
+  caller holding a locally-created op could mutate its `sig` after it is stored.
+  Real peer ingestion deserializes a fresh array (and `append` re-verifies), so
+  the wire path is safe; when hardening beyond the in-memory spike, defensive-copy
+  or use an immutable wire encoding for `sig` at the store boundary.
 
 ### Scope-cut — planned for a later pillar/release (no open unknowns)
 

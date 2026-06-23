@@ -50,6 +50,16 @@ export class OpLog {
     author: Identity,
     opts?: { embargoUntil?: string }
   ): Promise<Op> {
+    // Validate the embargo trigger BEFORE the op is placed. Otherwise a bad
+    // timestamp (e.g. "" or "next tuesday") would throw only after #appendLocal
+    // committed the op, leaving it in the log with no embargo guard — i.e.
+    // publicly placeable. Fail before any state changes.
+    if (
+      opts?.embargoUntil !== undefined &&
+      Number.isNaN(Date.parse(opts.embargoUntil))
+    ) {
+      throw new RangeError(`invalid embargoUntil: ${opts.embargoUntil}`);
+    }
     const ref = await this.#store.put(bytes, author);
     const op = this.#appendLocal(view, path, ref, author);
     if (opts?.embargoUntil !== undefined) {
@@ -203,14 +213,23 @@ export class OpLog {
     }
     const out: Conflict[] = [];
     for (const [path, ops] of byPath) {
-      const concurrent = ops.filter((a) =>
-        ops.some(
-          (b) =>
-            a.id !== b.id &&
-            !this.#isAncestor(a.id, b.id) &&
-            !this.#isAncestor(b.id, a.id)
+      const concurrent = ops
+        .filter((a) =>
+          ops.some(
+            (b) =>
+              a.id !== b.id &&
+              !this.#isAncestor(a.id, b.id) &&
+              !this.#isAncestor(b.id, a.id)
+          )
         )
-      );
+        // Drop ops superseded by a concurrent descendant on the same path, so
+        // the reported set is the minimal concurrent frontier — not the
+        // ancestors a later op already won over. (A chain a1→a2 plus a
+        // concurrent d must report {a2, d}, never {a1, a2, d}.)
+        .filter(
+          (a, _i, kept) =>
+            !kept.some((b) => a.id !== b.id && this.#isAncestor(a.id, b.id))
+        );
       if (concurrent.length > 1) {
         // The LWW winner is the last in (lamport, id) order — `ordered` already
         // sorts that way, so the max-index concurrent op wins.

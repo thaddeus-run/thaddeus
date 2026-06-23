@@ -144,6 +144,27 @@ describe('OpLog conflicts + tombstones', () => {
     // Sequential edits are ancestors of one another — not concurrent.
     expect(log.conflicts('main')).toHaveLength(0);
   });
+
+  test('the conflict set excludes an ancestor superseded by a concurrent descendant', async () => {
+    const store = new MemoryStore();
+    const author = Identity.create();
+    // Chain a1→a2 on one path; a concurrent op d on the same path; converge.
+    const l1 = new OpLog(store);
+    const a1 = await l1.write('main', 'p.ts', enc('a1'), author);
+    const a2 = await l1.write('main', 'p.ts', enc('a2'), author);
+    const l2 = new OpLog(store);
+    const d = await l2.write('main', 'p.ts', enc('d'), author);
+
+    const log = new OpLog(store);
+    for (const op of [a1, a2, d]) {
+      log.append(op);
+    }
+    const c = log.conflicts();
+    expect(c).toHaveLength(1);
+    // a1 (ancestor of a2) must NOT appear — only the frontier {a2, d}.
+    expect([...c[0].ops].sort()).toEqual([a2.id, d.id].sort());
+    expect(log.materialize().get('p.ts')?.op.id).toBe(c[0].winner);
+  });
 });
 
 describe('OpLog named views (branches dissolve)', () => {
@@ -240,5 +261,22 @@ describe('OpLog embargo seam (P02 metadata-gating)', () => {
       const meta = await store.get(sealed, publicIdentity(), T);
       expect(new TextDecoder().decode(meta).length).toBeGreaterThan(0);
     }
+  });
+
+  test('an embargoed write with an invalid timestamp is rejected and places nothing', async () => {
+    const log = new OpLog(new MemoryStore());
+    const author = Identity.create();
+    let threw = false;
+    try {
+      await log.write('main', 'x.ts', enc('y'), author, {
+        embargoUntil: 'not-a-date',
+      });
+    } catch {
+      threw = true;
+    }
+    expect(threw).toBe(true);
+    // Fail-closed: the op never entered the log, so nothing is publicly placeable.
+    expect(log.ops()).toHaveLength(0);
+    expect(log.materialize('main').size).toBe(0);
   });
 });

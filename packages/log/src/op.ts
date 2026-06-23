@@ -26,15 +26,50 @@ export interface OpFields {
   readonly payload: Ref | null;
 }
 
+// Domain tag prefixed into the signed tuple so an op signature can never be
+// confused with another protocol's payload that happens to serialize the same.
+const OP_DOMAIN = 'thaddeus.log.op.v1';
+
+// Reject non-canonical field values before they are hashed/signed. JSON.stringify
+// silently coerces NaN/Infinity/undefined to `null` inside arrays, so without this
+// a peer could sign over a coerced canonical form while the op carries a poisoning
+// value (e.g. lamport = NaN, which breaks ordering). Throwing here makes verifyOp
+// (which is try/catch) reject such ops and makes signOp fail fast on bad input.
+function assertCanonical(fields: OpFields, author: string): void {
+  if (typeof fields.path !== 'string' || fields.path.length === 0) {
+    throw new TypeError('op.path must be a non-empty string');
+  }
+  if (typeof author !== 'string' || author.length === 0) {
+    throw new TypeError('op.author must be a non-empty string');
+  }
+  if (!Number.isSafeInteger(fields.lamport) || fields.lamport < 0) {
+    throw new TypeError('op.lamport must be a non-negative safe integer');
+  }
+  for (const p of fields.parents) {
+    if (typeof p !== 'string' || p.length === 0) {
+      throw new TypeError('op.parents must be non-empty strings');
+    }
+  }
+  if (
+    fields.payload !== null &&
+    (typeof fields.payload.id !== 'string' ||
+      typeof fields.payload.plaintext_id !== 'string')
+  ) {
+    throw new TypeError('op.payload must have string id and plaintext_id');
+  }
+}
+
 // Deterministic bytes for id + signature. `parents` is sorted so the id does
 // not depend on head-enumeration order; payload encodes as its Ref pair or null.
 export function canonicalOp(fields: OpFields, author: string): Uint8Array {
+  assertCanonical(fields, author);
   const payload =
     fields.payload === null
       ? null
       : [fields.payload.id, fields.payload.plaintext_id];
   return new TextEncoder().encode(
     JSON.stringify([
+      OP_DOMAIN,
       fields.path,
       [...fields.parents].sort(),
       fields.lamport,
