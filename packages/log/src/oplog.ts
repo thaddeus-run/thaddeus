@@ -1,7 +1,7 @@
 import type { Identity } from '@thaddeus.run/identity';
 import type { Ref, Store } from '@thaddeus.run/store';
 
-import { type Op, signOp } from './op';
+import { type Op, signOp, verifyOp } from './op';
 
 // In-memory operation log. The source of truth is the signed-op DAG; file
 // snapshots are derived by materialize(). Spike — not durable, not concurrency
@@ -25,6 +25,18 @@ export class OpLog {
   ): Promise<Op> {
     const ref = await this.#store.put(bytes, author);
     return this.#appendLocal(view, path, ref, author);
+  }
+
+  // Ingest a signed op from a peer — the convergence entry point. Verifies the
+  // signature/id, links it into the DAG, idempotent on op id. Views are NOT
+  // moved: peer ops land in the graph; a view advances only on write/re-point.
+  append(op: Op): void {
+    if (!verifyOp(op)) {
+      throw new Error(`refusing unverifiable op ${op.id}`);
+    }
+    if (!this.#ops.has(op.id)) {
+      this.#ops.set(op.id, op);
+    }
   }
 
   // The shared builder for write/remove: compute lamport from the view's heads,

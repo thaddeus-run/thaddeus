@@ -62,6 +62,42 @@ describe('OpLog materialize (LWW per path, cleartext only)', () => {
   });
 });
 
+describe('OpLog append (convergence)', () => {
+  const store = new MemoryStore();
+
+  test('order-independent: same ops in any ingest order → identical projection', async () => {
+    const author = Identity.create();
+
+    // Author three ops in one log over the global frontier.
+    const src = new OpLog(store);
+    await src.write('main', 'a.ts', enc('a1'), author);
+    await src.write('main', 'b.ts', enc('b1'), author);
+    await src.write('main', 'a.ts', enc('a2'), author);
+    const all = src.ops();
+
+    const project = (log: OpLog): string[] =>
+      [...log.materialize().entries()]
+        .map(([path, { op }]) => `${path}=${op.id}`)
+        .sort();
+
+    // Ingest forwards and reversed into two fresh logs; projections must match.
+    const fwd = new OpLog(store);
+    for (const op of all) fwd.append(op);
+    const rev = new OpLog(store);
+    for (const op of [...all].reverse()) rev.append(op);
+
+    expect(project(fwd)).toEqual(project(rev));
+    expect(project(fwd)).toEqual(project(src));
+  });
+
+  test('append rejects an op whose signature does not verify', async () => {
+    const log = new OpLog(store);
+    const author = Identity.create();
+    const op = await new OpLog(store).write('main', 'a.ts', enc('x'), author);
+    expect(() => log.append({ ...op, path: 'tampered.ts' })).toThrow();
+  });
+});
+
 describe('OpLog named views (branches dissolve)', () => {
   test('fork is zero-copy; views diverge; an op is shared across views', async () => {
     const store = new MemoryStore();
