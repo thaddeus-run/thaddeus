@@ -256,12 +256,8 @@ class OpLog {
   ): Promise<Op>;
 
   // Record a delete (payload: null tombstone) extending `view`'s heads.
-  remove(
-    view: string,
-    path: string,
-    author: Identity,
-    opts?: { embargoUntil?: string }
-  ): Promise<Op>;
+  // (Embargoed deletes are out of scope for this spike — only `write` embargoes.)
+  remove(view: string, path: string, author: Identity): Promise<Op>;
 
   // Ingest a signed op from a peer (the convergence entry point). Verifies the
   // signature and id, recomputes nothing about lamport (trusts the signed value),
