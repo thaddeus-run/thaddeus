@@ -11,6 +11,10 @@ All notable changes to Thaddeus. Format follows
   anonymous seal/unseal.
 - `@thaddeus.run/store` — encrypted, content-addressed objects with per-object
   capabilities (grant/revoke = key rotation). Pillar 01.
+- `@thaddeus.run/store` — scheduled timed reveal ("the membrane", Pillar 02):
+  `scheduleReveal`/`reveal` release an object's payload to a well-known public
+  identity at time T via a withheld key-release. Payload only; metadata-gating
+  deferred (see below). `@thaddeus.run/identity` gains `Identity.fromSeed`.
 
 ### Changed
 
@@ -19,11 +23,11 @@ All notable changes to Thaddeus. Format follows
 
 ## Deferred — known gaps we owe (tracking note, not shipped)
 
-> A side ledger of everything intentionally left out, so nothing gets lost. Three
-> buckets: **scope-cut** (a later pillar/release, no unknowns), **research**
-> (blocked on an open/hard problem — the things we must eventually do _well_, not
-> just at all), and **honest limitations** of what currently ships. Items move up
-> into a release section above when they land.
+> A side ledger of everything intentionally left out, so nothing gets lost.
+> Three buckets: **scope-cut** (a later pillar/release, no unknowns),
+> **research** (blocked on an open/hard problem — the things we must eventually
+> do _well_, not just at all), and **honest limitations** of what currently
+> ships. Items move up into a release section above when they land.
 
 ### Research — open/hard problems (the "do it great" list)
 
@@ -38,20 +42,23 @@ All notable changes to Thaddeus. Format follows
   cleartext metadata, a real embargo wants it sealed (brief, Part VI frontier).
 - **Convergence over unreadable metadata (P03/P08).** How nodes order and merge
   operations whose metadata they cannot read. Named as a frontier, not solved.
-- **Key recovery / escrow / threshold / device-subkeys (P01).** The brief's named
-  landmine. v1 is single-keypair, no recovery: lose the key, lose the data.
+- **Key recovery / escrow / threshold / device-subkeys (P01).** The brief's
+  named landmine. v1 is single-keypair, no recovery: lose the key, lose the
+  data.
 - **Rust hot-path reimplementation.** Move an interior to Rust (→ WASM/NAPI)
-  behind the wire-format seam only when a _measured_ hot path demands it — likely
-  P03 (op-log/CRDT) and P08 (semantic graph). Never pre-optimize the spike.
+  behind the wire-format seam only when a _measured_ hot path demands it —
+  likely P03 (op-log/CRDT) and P08 (semantic graph). Never pre-optimize the
+  spike.
 
 ### Scope-cut — planned for a later pillar/release (no open unknowns)
 
-- **P02 membrane** — time-varying visibility / scheduled reveal. _(In design.)_
-- **P03 operation log** — signed, CRDT-ordered `Op` records (the source of truth).
-- **P04 provenance**, **P05 virtual FS + COW views**, **P06 platform**,
-  **P07 federation/reputation**, **P08 semantic graph**, **P09 agents**,
-  **P10 review-as-policy**, **P11 live database** — Tiers 1–4.
-- **Git gateway** — emit a Git history (commits/blobs/branches) for compatibility.
+- **P03 operation log** — signed, CRDT-ordered `Op` records (the source of
+  truth).
+- **P04 provenance**, **P05 virtual FS + COW views**, **P06 platform**, **P07
+  federation/reputation**, **P08 semantic graph**, **P09 agents**, **P10
+  review-as-policy**, **P11 live database** — Tiers 1–4.
+- **Git gateway** — emit a Git history (commits/blobs/branches) for
+  compatibility.
 - **Release / event triggers for reveal** — only `timestamp` + `manual` planned
   for the P02 spike; `release(tag)` and `event` triggers come later.
 - **Persistence backends, federation, agent reputation/economy** — beyond the
@@ -60,9 +67,9 @@ All notable changes to Thaddeus. Format follows
 ### Honest limitations of what currently ships (P01)
 
 - **Revocation cannot un-read.** Rotation stops _future_ decryption of the
-  re-keyed object; it cannot recall plaintext already read, and an offline grantee
-  keeps the old key until re-sync.
+  re-keyed object; it cannot recall plaintext already read, and an offline
+  grantee keeps the old key until re-sync.
 - **No key recovery.** Single keypair by design for v1.
 - **In-memory only**, single process — not durable, not concurrency-safe.
-- **Third-party crypto/throughput claims** in the brief are targets to reproduce,
-  not independently verified here.
+- **Third-party crypto/throughput claims** in the brief are targets to
+  reproduce, not independently verified here.
