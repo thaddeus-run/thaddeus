@@ -77,11 +77,24 @@
         "@types/bun": "catalog:",
       },
     },
+    "examples/oplog": {
+      "name": "@thaddeus.run/example-oplog",
+      "version": "0.0.0",
+      "dependencies": {
+        "@thaddeus.run/identity": "workspace:*",
+        "@thaddeus.run/log": "workspace:*",
+        "@thaddeus.run/store": "workspace:*",
+      },
+      "devDependencies": {
+        "@types/bun": "catalog:",
+      },
+    },
     "integration": {
       "name": "@thaddeus.run/integration",
       "version": "0.0.0",
       "dependencies": {
         "@thaddeus.run/identity": "workspace:*",
+        "@thaddeus.run/log": "workspace:*",
         "@thaddeus.run/store": "workspace:*",
       },
       "devDependencies": {
@@ -98,6 +111,21 @@
       "devDependencies": {
         "@types/bun": "catalog:",
         "@types/libsodium-wrappers-sumo": "catalog:",
+        "@typescript/native-preview": "catalog:",
+        "tsdown": "catalog:",
+        "typescript": "catalog:",
+      },
+    },
+    "packages/log": {
+      "name": "@thaddeus.run/log",
+      "version": "0.0.0",
+      "dependencies": {
+        "@noble/hashes": "catalog:",
+        "@thaddeus.run/identity": "workspace:*",
+        "@thaddeus.run/store": "workspace:*",
+      },
+      "devDependencies": {
+        "@types/bun": "catalog:",
         "@typescript/native-preview": "catalog:",
         "tsdown": "catalog:",
         "typescript": "catalog:",
@@ -509,11 +537,15 @@
 
     "@thaddeus.run/example-offboarding": ["@thaddeus.run/example-offboarding@workspace:examples/offboarding"],
 
+    "@thaddeus.run/example-oplog": ["@thaddeus.run/example-oplog@workspace:examples/oplog"],
+
     "@thaddeus.run/identity": ["@thaddeus.run/identity@workspace:packages/identity"],
 
     "@thaddeus.run/integration": ["@thaddeus.run/integration@workspace:integration"],
 
     "@thaddeus.run/landing": ["@thaddeus.run/landing@workspace:apps/landing"],
+
+    "@thaddeus.run/log": ["@thaddeus.run/log@workspace:packages/log"],
 
     "@thaddeus.run/store": ["@thaddeus.run/store@workspace:packages/store"],
 

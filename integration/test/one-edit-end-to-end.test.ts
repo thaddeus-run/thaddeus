@@ -1,4 +1,5 @@
 import { Identity, ready } from '@thaddeus.run/identity';
+import { OpLog } from '@thaddeus.run/log';
 import { MemoryStore, publicIdentity } from '@thaddeus.run/store';
 import { beforeAll, describe, expect, test } from 'bun:test';
 
@@ -35,8 +36,31 @@ describe('north-star: one edit, end to end', () => {
     );
   });
 
-  // @ts-expect-error bun-types@1.3.12 requires a fn arg, but the runtime supports label-only todo
-  test.todo('P03: the edit is recorded as a signed Op in the operation log');
+  test('P03: the edit is recorded as a signed Op in the operation log', async () => {
+    const store = new MemoryStore();
+    const log = new OpLog(store);
+    const author = Identity.create();
+
+    const op = await log.write(
+      'main',
+      'src/auth.rs',
+      new TextEncoder().encode('fn refresh() {}'),
+      author
+    );
+
+    // The edit is a signed op in the log, and materialize places it at its path
+    // using cleartext metadata only.
+    expect(op.author).toBe(author.did);
+    expect(log.materialize('main').get('src/auth.rs')?.op.id).toBe(op.id);
+
+    // Content reads back through the capability-checked store (payload is the Ref).
+    expect(op.payload).not.toBeNull();
+    if (op.payload !== null) {
+      expect(
+        new TextDecoder().decode(await store.get(op.payload, author))
+      ).toBe('fn refresh() {}');
+    }
+  });
   // @ts-expect-error bun-types@1.3.12 requires a fn arg, but the runtime supports label-only todo
   test.todo('P04: a signed Provenance record attaches the why to the Op');
   test('P02: a scheduled reveal re-wraps the content key to public at T', async () => {
