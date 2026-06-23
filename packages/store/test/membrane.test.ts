@@ -67,6 +67,50 @@ describe('scheduled reveal (timestamp trigger, lazy on get)', () => {
   });
 });
 
+describe('scheduled reveal (partial release)', () => {
+  const T1 = '2030-01-01T00:00:00.000Z';
+  const T2 = '2040-01-01T00:00:00.000Z';
+  const between = '2035-01-01T00:00:00.000Z';
+
+  test('releasing at T1<=now<T2 reveals once and retains the later reveal', async () => {
+    const store = new MemoryStore();
+    const author = Identity.create();
+    const ref = await store.put(new TextEncoder().encode('fix'), author);
+    await store.scheduleReveal(ref, T1, author);
+    await store.scheduleReveal(ref, T2, author);
+
+    // At `between`: the T1 reveal fires, public can read.
+    expect(
+      new TextDecoder().decode(await store.get(ref, publicIdentity(), between))
+    ).toBe('fix');
+    // Exactly one served public cap now (the T1 reveal); the T2 reveal is still withheld.
+    expect(
+      store.caps(ref.plaintext_id).filter((c) => c.grantee === publicDid())
+        .length
+    ).toBe(1);
+    // Releasing again at `between` finds nothing new due (T2 not yet due).
+    expect(await store.reveal(ref, between)).toBe(false);
+  });
+});
+
+describe('malformed now timestamp', () => {
+  test('get throws RangeError on a malformed now string', async () => {
+    const store = new MemoryStore();
+    const author = Identity.create();
+    const ref = await store.put(new TextEncoder().encode('hi'), author);
+    expect(store.get(ref, author, 'not-a-date')).rejects.toBeInstanceOf(
+      RangeError
+    );
+  });
+
+  test('reveal throws RangeError on a malformed now string', async () => {
+    const store = new MemoryStore();
+    const author = Identity.create();
+    const ref = await store.put(new TextEncoder().encode('hi'), author);
+    expect(store.reveal(ref, 'not-a-date')).rejects.toBeInstanceOf(RangeError);
+  });
+});
+
 describe('reveal interaction with revoke', () => {
   const T = '2030-01-01T00:00:00.000Z';
 

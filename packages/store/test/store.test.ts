@@ -95,7 +95,7 @@ describe('MemoryStore', () => {
     expect(after?.id).not.toBe(ref.id);
   });
 
-  test('get honors an injected now against a future not_before', async () => {
+  test('get honors an injected now (early read of an always-valid grant)', async () => {
     const store = new MemoryStore();
     const alice = Identity.create();
     const bob = Identity.create();

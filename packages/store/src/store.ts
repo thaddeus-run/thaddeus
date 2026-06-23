@@ -34,6 +34,9 @@ export interface Store {
   revoke(ref: Ref, grantee: PublicIdentity, by: Identity): Promise<void>;
   scheduleReveal(ref: Ref, at: string, by: Identity): Promise<void>;
   reveal(ref: Ref, now?: string): Promise<boolean>;
+  // Returns ONLY the served (mirror-visible) capabilities. Pending reveals are
+  // withheld here until released; never route a wrapped_key capability through
+  // this return type before it has been promoted to the served set.
   caps(plaintextId: string): readonly Capability[];
   rawObject(id: string): EncryptedObject | undefined;
   current(plaintextId: string): EncryptedObject | undefined;
@@ -66,7 +69,7 @@ export class MemoryStore implements Store {
   }
 
   async get(ref: Ref, reader: Identity, now?: string): Promise<Uint8Array> {
-    const nowMs = now === undefined ? Date.now() : Date.parse(now);
+    const nowMs = this.#resolveNow(now);
     this.#releaseDue(ref.plaintext_id, nowMs);
     return decrypt(
       this.#currentObject(ref.plaintext_id),
@@ -118,6 +121,8 @@ export class MemoryStore implements Store {
       ref.plaintext_id,
       rewrap(this.#caps.get(ref.plaintext_id) ?? [])
     );
+    // Intentional: re-key pending reveals too. A scheduled reveal must survive
+    // a key rotation so it can still fire at its not_before time.
     this.#pending.set(
       ref.plaintext_id,
       rewrap(this.#pending.get(ref.plaintext_id) ?? [])
@@ -143,7 +148,7 @@ export class MemoryStore implements Store {
 
   // Manual trigger: promote due pending reveals into the served set.
   async reveal(ref: Ref, now?: string): Promise<boolean> {
-    const nowMs = now === undefined ? Date.now() : Date.parse(now);
+    const nowMs = this.#resolveNow(now);
     return this.#releaseDue(ref.plaintext_id, nowMs);
   }
 
@@ -167,6 +172,19 @@ export class MemoryStore implements Store {
   verify(id: string): boolean {
     const object = this.#objects.get(id);
     return object !== undefined && address(object.ciphertext) === id;
+  }
+
+  // Resolve an optional ISO-8601 clock to epoch ms; default = now. A
+  // defined-but-unparseable timestamp is a caller error, not a silent denial.
+  #resolveNow(now?: string): number {
+    if (now === undefined) {
+      return Date.now();
+    }
+    const ms = Date.parse(now);
+    if (Number.isNaN(ms)) {
+      throw new RangeError(`invalid now timestamp: ${now}`);
+    }
+    return ms;
   }
 
   // The key-release event: move pending reveals whose not_before <= nowMs into
