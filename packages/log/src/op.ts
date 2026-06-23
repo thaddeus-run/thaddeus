@@ -64,11 +64,17 @@ export function signOp(fields: OpFields, author: Identity): Op {
 }
 
 // Valid iff the id matches the canonical bytes AND the signature verifies under
-// the author's did:key. Either mismatch ⇒ false (no throw).
+// the author's did:key. Fails closed: any mismatch OR malformed input (an
+// undecodable did:key, a wrong-length sig) returns false rather than throwing,
+// so an adversarial peer op can never crash the append path that gates on it.
 export function verifyOp(op: Op): boolean {
-  const bytes = canonicalOp(op, op.author);
-  if (bytesToHex(blake3(bytes)) !== op.id) {
+  try {
+    const bytes = canonicalOp(op, op.author);
+    if (bytesToHex(blake3(bytes)) !== op.id) {
+      return false;
+    }
+    return PublicIdentity.fromDid(op.author).verify(bytes, op.sig);
+  } catch {
     return false;
   }
-  return PublicIdentity.fromDid(op.author).verify(bytes, op.sig);
 }

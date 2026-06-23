@@ -30,4 +30,14 @@ describe('Op record', () => {
     expect(verifyOp({ ...op, lamport: 1 })).toBe(false);
     expect(verifyOp({ ...op, id: `${op.id}0` })).toBe(false);
   });
+
+  test('verifyOp returns false (never throws) on malformed input', () => {
+    const author = Identity.create();
+    const op = signOp(
+      { path: 'a.ts', parents: [], lamport: 0, payload: null },
+      author
+    );
+    expect(verifyOp({ ...op, author: 'did:key:not-a-real-key' })).toBe(false);
+    expect(verifyOp({ ...op, sig: new Uint8Array([1, 2, 3]) })).toBe(false);
+  });
 });
