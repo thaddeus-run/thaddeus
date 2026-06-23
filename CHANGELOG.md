@@ -23,6 +23,16 @@ All notable changes to Thaddeus. Format follows
   tombstones. Wires the **P02 metadata-gating seam**: an embargoed op publishes
   only an opaque ordering token; its metadata is sealed and released at T via
   the membrane.
+- `@thaddeus.run/provenance` — the signed "why" layer (Pillar 04): a
+  `Provenance` record bound to an `Op.id` carrying actor, actor_kind, intent,
+  reasoning, task, and an optional **capability-gated prompt** (stored by
+  reference — `prompt_ref = blake3(prompt)` plus a store `Ref` — so prompts with
+  secrets never enter readable history). The signature covers the **full
+  record** (hardening the brief's narrower `op‖intent‖task‖prompt_ref` subset),
+  so `actor_kind`/`reasoning` cannot be forged on relay. `ProvenanceLog` renders
+  each record `verified`/`unverified` and **keeps** invalid records (labelled,
+  not rejected). Completes **P12** and closes the seeded north-star one-edit
+  flow (5 pass / 0 todo).
 
 ### Changed
 
@@ -60,8 +70,9 @@ All notable changes to Thaddeus. Format follows
   fields are `readonly` but the array is not deep-frozen, so a same-process
   caller holding a locally-created op could mutate its `sig` after it is stored.
   Real peer ingestion deserializes a fresh array (and `append` re-verifies), so
-  the wire path is safe; when hardening beyond the in-memory spike, defensive-copy
-  or use an immutable wire encoding for `sig` at the store boundary.
+  the wire path is safe; when hardening beyond the in-memory spike,
+  defensive-copy or use an immutable wire encoding for `sig` at the store
+  boundary.
 
 ### Scope-cut — planned for a later pillar/release (no open unknowns)
 
@@ -72,9 +83,25 @@ All notable changes to Thaddeus. Format follows
 - **Repository-as-capability-scoped-slice (P05)** — the repo dissolution half of
   Pillar 03's "branches and the repository dissolve."
 - **Vector/interval clocks** — Lamport + DAG suffice for the spike's ordering.
-- **P04 provenance**, **P05 virtual FS + COW views**, **P06 platform**, **P07
+- **P05 virtual FS + COW views**, **P06 platform**, **P07
   federation/reputation**, **P08 semantic graph**, **P09 agents**, **P10
-  review-as-policy**, **P11 live database** — Tiers 1–4.
+  review-as-policy**, **P11 live database** — Tiers 2–4.
+- **Reputation accrual / outcomes (P04→P09).** The trust rule's second clause —
+  invalid provenance "never counts toward an agent's reputation" — needs the
+  reputation/outcomes machinery that does not yet exist. P04 ships the
+  `verified`/`unverified` label only; accrual is Pillar 09.
+- **Delegation / attestation (P04→P09).** P04 verifies that _some_ did:key
+  signed and bound an op id (actor may differ from op.author), but not that an
+  agent was authorized to act _for_ a principal. Authorization semantics are
+  Pillar 09.
+- **`--why` query surface (P04→P06/P11).** Querying provenance across history is
+  a later pillar; P04 renders the why only in its demo.
+- **Prompt-cap grant/revoke wiring (P04).** Storing the prompt capability-gated
+  is built; granting it to reviewers and revoking a "why" reuse
+  `store.grant`/`revoke` but are not wired in this release.
+- **Unverified-record spam control (P04).** Keep-and-label lets a peer attach
+  unlimited unsigned claims to an op id; rate-limiting/scoping is out of spike
+  scope.
 - **Git gateway** — emit a Git history (commits/blobs/branches) for
   compatibility.
 - **Release / event triggers for reveal** — only `timestamp` + `manual` planned
