@@ -54,7 +54,14 @@ rule();
 
 try {
   await store.get(ref, publicIdentity(), beforeT);
+  // Should be unreachable: a successful pre-T read means the embargo broke.
+  throw new Error(
+    'EMBARGO BROKEN: public read succeeded before the reveal time'
+  );
 } catch (err) {
+  if ((err as Error).message.startsWith('EMBARGO BROKEN')) {
+    throw err;
+  }
   console.log('4. Public reads before T:', (err as Error).name);
 }
 

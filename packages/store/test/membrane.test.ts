@@ -3,6 +3,7 @@ import { beforeAll, describe, expect, test } from 'bun:test';
 
 import { publicDid, publicIdentity } from '../src/membrane';
 import { MemoryStore } from '../src/store';
+import { expectRejects } from './reject';
 
 beforeAll(async () => {
   await ready();
@@ -32,7 +33,7 @@ describe('scheduled reveal (manual trigger)', () => {
       store.caps(ref.plaintext_id).some((c) => c.grantee === publicDid())
     ).toBe(false);
     // And the public identity cannot read before T, even with a read attempt.
-    expect(store.get(ref, publicIdentity(), beforeT)).rejects.toThrow();
+    await expectRejects(store.get(ref, publicIdentity(), beforeT));
 
     // Releasing before T does nothing.
     expect(await store.reveal(ref, beforeT)).toBe(false);
@@ -59,7 +60,7 @@ describe('scheduled reveal (timestamp trigger, lazy on get)', () => {
     await store.scheduleReveal(ref, T, author);
 
     // Before T: still denied (the read attempt releases nothing).
-    expect(store.get(ref, publicIdentity(), beforeT)).rejects.toThrow();
+    await expectRejects(store.get(ref, publicIdentity(), beforeT));
     // At/after T: the get itself triggers the key-release.
     expect(
       new TextDecoder().decode(await store.get(ref, publicIdentity(), T))
@@ -98,25 +99,24 @@ describe('malformed now timestamp', () => {
     const store = new MemoryStore();
     const author = Identity.create();
     const ref = await store.put(new TextEncoder().encode('hi'), author);
-    expect(store.get(ref, author, 'not-a-date')).rejects.toBeInstanceOf(
-      RangeError
-    );
+    await expectRejects(store.get(ref, author, 'not-a-date'), RangeError);
   });
 
   test('reveal throws RangeError on a malformed now string', async () => {
     const store = new MemoryStore();
     const author = Identity.create();
     const ref = await store.put(new TextEncoder().encode('hi'), author);
-    expect(store.reveal(ref, 'not-a-date')).rejects.toBeInstanceOf(RangeError);
+    await expectRejects(store.reveal(ref, 'not-a-date'), RangeError);
   });
 
   test('scheduleReveal throws RangeError on a malformed at string', async () => {
     const store = new MemoryStore();
     const author = Identity.create();
     const ref = await store.put(new TextEncoder().encode('hi'), author);
-    expect(
-      store.scheduleReveal(ref, 'not-a-date', author)
-    ).rejects.toBeInstanceOf(RangeError);
+    await expectRejects(
+      store.scheduleReveal(ref, 'not-a-date', author),
+      RangeError
+    );
   });
 });
 
@@ -145,6 +145,6 @@ describe('reveal interaction with revoke', () => {
     await store.scheduleReveal(ref, T, author);
     await store.revoke(ref, publicIdentity().toPublic(), author); // cancel
 
-    expect(store.get(ref, publicIdentity(), T)).rejects.toThrow();
+    await expectRejects(store.get(ref, publicIdentity(), T));
   });
 });

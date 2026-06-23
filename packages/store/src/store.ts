@@ -29,10 +29,15 @@ export class AccessDenied extends Error {
 
 export interface Store {
   put(plaintext: Uint8Array, owner: Identity): Promise<Ref>;
+  // `now` is a deterministic-clock injection for tests and trusted callers; it
+  // gates `not_before` and can promote a due reveal. It is NOT a request input
+  // — never wire it to untrusted callers, who could supply a future time to
+  // read an embargoed object early. Omit it in production to use wall-clock.
   get(ref: Ref, reader: Identity, now?: string): Promise<Uint8Array>;
   grant(ref: Ref, grantee: PublicIdentity, by: Identity): Promise<void>;
   revoke(ref: Ref, grantee: PublicIdentity, by: Identity): Promise<void>;
   scheduleReveal(ref: Ref, at: string, by: Identity): Promise<void>;
+  // `now`: same trusted/test-only clock injection as `get` (see above).
   reveal(ref: Ref, now?: string): Promise<boolean>;
   // Returns ONLY the served (mirror-visible) capabilities. Pending reveals are
   // withheld here until released; never route a wrapped_key capability through

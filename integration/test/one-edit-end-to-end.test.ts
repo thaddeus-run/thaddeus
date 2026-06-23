@@ -52,9 +52,13 @@ describe('north-star: one edit, end to end', () => {
 
     // Embargo: ciphertext is mirror-verifiable; the public cannot read before T.
     expect(store.verify(ref.id)).toBe(true);
-    expect(
-      store.get(ref, publicIdentity(), '2026-06-23T00:00:00.000Z')
-    ).rejects.toThrow();
+    let deniedBeforeT = false;
+    try {
+      await store.get(ref, publicIdentity(), '2026-06-23T00:00:00.000Z');
+    } catch {
+      deniedBeforeT = true;
+    }
+    expect(deniedBeforeT).toBe(true);
 
     // At T the content key re-wraps to public and the world can read.
     expect(
