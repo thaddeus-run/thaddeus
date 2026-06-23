@@ -40,3 +40,24 @@ describe('OpLog write + clock', () => {
     expect(log.ops().map((o) => o.id)).toEqual([a.id, b.id].sort());
   });
 });
+
+describe('OpLog materialize (LWW per path, cleartext only)', () => {
+  test('latest write per path wins; content reads back via the store', async () => {
+    const store = new MemoryStore();
+    const log = new OpLog(store);
+    const author = Identity.create();
+
+    await log.write('main', 'a.ts', enc('a1'), author);
+    await log.write('main', 'b.ts', enc('b1'), author);
+    const a2 = await log.write('main', 'a.ts', enc('a2'), author);
+
+    const tree = log.materialize('main');
+    // Structure resolved from metadata alone — no decryption in materialize.
+    expect([...tree.keys()].sort()).toEqual(['a.ts', 'b.ts']);
+    expect(tree.get('a.ts')?.op.id).toBe(a2.id); // latest write wins
+
+    // Content comes from a separate, capability-checked store.get.
+    const ref = tree.get('a.ts')!.ref!;
+    expect(new TextDecoder().decode(await store.get(ref, author))).toBe('a2');
+  });
+});

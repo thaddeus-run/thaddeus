@@ -79,4 +79,39 @@ export class OpLog {
       return x.id < y.id ? -1 : x.id > y.id ? 1 : 0;
     });
   }
+
+  // Project the log to a path → { ref, op } tree by LWW over the ancestor-
+  // closure of the view's heads. Cleartext metadata only — the map holds Refs,
+  // never plaintext, so it cannot leak a payload; read content via store.get.
+  materialize(view?: string): Map<string, { ref: Ref | null; op: Op }> {
+    const reachable = this.#ancestorClosure(this.heads(view));
+    const ordered = this.ops().filter((o) => reachable.has(o.id));
+    const tree = new Map<string, { ref: Ref | null; op: Op }>();
+    for (const op of ordered) {
+      if (op.payload === null) {
+        tree.delete(op.path); // tombstone
+      } else {
+        tree.set(op.path, { ref: op.payload, op });
+      }
+    }
+    return tree;
+  }
+
+  // Every op reachable from `heads` by walking parents (inclusive of heads).
+  #ancestorClosure(heads: readonly string[]): Set<string> {
+    const seen = new Set<string>();
+    const stack = [...heads];
+    while (stack.length > 0) {
+      const id = stack.pop();
+      if (id === undefined || seen.has(id)) {
+        continue;
+      }
+      seen.add(id);
+      const op = this.#ops.get(id);
+      if (op !== undefined) {
+        stack.push(...op.parents);
+      }
+    }
+    return seen;
+  }
 }
