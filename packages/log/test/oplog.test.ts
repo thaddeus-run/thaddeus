@@ -28,4 +28,15 @@ describe('OpLog write + clock', () => {
     // ops() is sorted by (lamport, id): a (0) before b (1).
     expect(log.ops().map((o) => o.id)).toEqual([a.id, b.id]);
   });
+
+  test('ops() breaks lamport ties by id (deterministic total order)', async () => {
+    const log = new OpLog(new MemoryStore());
+    const author = Identity.create();
+    // Two root ops in different views → both lamport 0, concurrent.
+    const a = await log.write('main', 'a.ts', enc('a'), author);
+    const b = await log.write('feature', 'b.ts', enc('b'), author);
+    expect(a.lamport).toBe(0);
+    expect(b.lamport).toBe(0);
+    expect(log.ops().map((o) => o.id)).toEqual([a.id, b.id].sort());
+  });
 });
