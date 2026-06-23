@@ -67,6 +67,7 @@ export class MemoryStore implements Store {
 
   async get(ref: Ref, reader: Identity, now?: string): Promise<Uint8Array> {
     const nowMs = now === undefined ? Date.now() : Date.parse(now);
+    this.#releaseDue(ref.plaintext_id, nowMs);
     return decrypt(
       this.#currentObject(ref.plaintext_id),
       this.#contentKeyVia(ref.plaintext_id, reader, nowMs)

@@ -31,8 +31,8 @@ describe('scheduled reveal (manual trigger)', () => {
     expect(
       store.caps(ref.plaintext_id).some((c) => c.grantee === publicDid())
     ).toBe(false);
-    // And the public identity cannot read before release, even at a far-future now.
-    expect(store.get(ref, publicIdentity(), T)).rejects.toThrow();
+    // And the public identity cannot read before T, even with a read attempt.
+    expect(store.get(ref, publicIdentity(), beforeT)).rejects.toThrow();
 
     // Releasing before T does nothing.
     expect(await store.reveal(ref, beforeT)).toBe(false);
@@ -42,6 +42,25 @@ describe('scheduled reveal (manual trigger)', () => {
     expect(
       store.caps(ref.plaintext_id).some((c) => c.grantee === publicDid())
     ).toBe(true);
+    expect(
+      new TextDecoder().decode(await store.get(ref, publicIdentity(), T))
+    ).toBe('fix');
+  });
+});
+
+describe('scheduled reveal (timestamp trigger, lazy on get)', () => {
+  const T = '2030-01-01T00:00:00.000Z';
+  const beforeT = '2026-06-23T00:00:00.000Z';
+
+  test('public read fires the reveal at or after T without a manual call', async () => {
+    const store = new MemoryStore();
+    const author = Identity.create();
+    const ref = await store.put(new TextEncoder().encode('fix'), author);
+    await store.scheduleReveal(ref, T, author);
+
+    // Before T: still denied (the read attempt releases nothing).
+    expect(store.get(ref, publicIdentity(), beforeT)).rejects.toThrow();
+    // At/after T: the get itself triggers the key-release.
     expect(
       new TextDecoder().decode(await store.get(ref, publicIdentity(), T))
     ).toBe('fix');
