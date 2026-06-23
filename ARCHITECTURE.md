@@ -36,7 +36,7 @@ becomes a real assertion. When the last stub is gone, the substrate is whole.
 | Pillar                                | Package              | Status  | Resolves         |
 | ------------------------------------- | -------------------- | ------- | ---------------- |
 | 01 Encrypted objects + capabilities   | `identity` + `store` | built   | P1 P2 P4 P18 P21 |
-| 02 Membrane (time-varying visibility) | _(planned)_          | planned | P2 P3 P4         |
+| 02 Membrane (time-varying visibility) | `store`              | built   | P2 P4            |
 | 03 Operation log                      | _(planned)_          | planned | P5 P6 P12        |
 | 04 Provenance ("why")                 | _(planned)_          | planned | P12              |
 | 05 Virtual FS                         | _(planned)_          | planned | P6 P7 P8 P11     |

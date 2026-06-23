@@ -72,6 +72,16 @@ export class Identity {
     return new Identity(ed.publicKey, ed.privateKey, xPk, xSk);
   }
 
+  // Deterministic identity from a 32-byte seed (crypto_sign_SEEDBYTES). Same
+  // seed ⇒ same keys — for reproducible/well-known identities and tests.
+  static fromSeed(seed: Uint8Array): Identity {
+    assertReady();
+    const ed = sodium.crypto_sign_seed_keypair(seed);
+    const xPk = sodium.crypto_sign_ed25519_pk_to_curve25519(ed.publicKey);
+    const xSk = sodium.crypto_sign_ed25519_sk_to_curve25519(ed.privateKey);
+    return new Identity(ed.publicKey, ed.privateKey, xPk, xSk);
+  }
+
   get did(): string {
     return this.#public.did;
   }

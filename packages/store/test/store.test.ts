@@ -94,4 +94,22 @@ describe('MemoryStore', () => {
     expect(after?.plaintext_id).toBe(ref.plaintext_id);
     expect(after?.id).not.toBe(ref.id);
   });
+
+  test('get accepts an injected now without breaking an always-valid grant (clock smoke test)', async () => {
+    // Smoke test that get tolerates an injected `now` for an EPOCH grant. This
+    // does NOT prove `now` gates access (an always-valid grant reads at any
+    // now). The real proof — denial before T, success at/after T against a
+    // future not_before — lives in membrane.test.ts via scheduleReveal, the
+    // only public path that produces a future-dated capability.
+    const store = new MemoryStore();
+    const alice = Identity.create();
+    const bob = Identity.create();
+    const ref = await store.put(new TextEncoder().encode('hi'), alice);
+
+    await store.grant(ref, bob.toPublic(), alice);
+    const early = '2000-01-01T00:00:00.000Z';
+    expect(new TextDecoder().decode(await store.get(ref, bob, early))).toBe(
+      'hi'
+    );
+  });
 });

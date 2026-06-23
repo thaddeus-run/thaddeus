@@ -4,3 +4,4 @@ export { issueCapability, unwrapKey, verifyCapability } from './capability';
 export type { Capability, IssueParams } from './capability';
 export { AccessDenied, MemoryStore } from './store';
 export type { Ref, Store } from './store';
+export { PUBLIC_SEED, publicDid, publicIdentity } from './membrane';

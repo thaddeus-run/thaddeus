@@ -36,4 +36,14 @@ describe('Identity', () => {
     const sig = id.sign(msg);
     expect(PublicIdentity.fromDid(id.did).verify(msg, sig)).toBe(true);
   });
+
+  test('fromSeed is deterministic and signs verifiably', () => {
+    const seed = new Uint8Array(32).fill(1);
+    const a = Identity.fromSeed(seed);
+    const b = Identity.fromSeed(seed);
+    expect(a.did).toBe(b.did);
+    const msg = new TextEncoder().encode('x');
+    // b's signature verifies under a's public half ⇒ identical keypair.
+    expect(a.toPublic().verify(msg, b.sign(msg))).toBe(true);
+  });
 });

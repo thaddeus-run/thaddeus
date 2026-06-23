@@ -1,0 +1,18 @@
+$schema: 'https://moonrepo.dev/schemas/project.json'
+
+language: 'typescript'
+layer: 'application'
+
+tasks:
+  # No test suite yet; keep `moon run :test` green repo-wide.
+  test:
+    args: '--pass-with-no-tests'
+
+  # Build-graph-connected, so CI-skipped; run in agent shells with a CI= prefix.
+  demo:
+    command: 'bun src/disclosure.ts'
+    deps:
+      - '^:build'
+    options:
+      cache: false
+      runInCI: 'skip'
