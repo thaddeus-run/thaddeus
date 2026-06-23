@@ -135,6 +135,35 @@ describe('ProvenanceLog', () => {
     expect(prov.status(prov.forOp(op.id)[0])).toBe('unverified');
   });
 
+  test('a same-sig tampered copy cannot evict the valid record it duplicates', async () => {
+    const store = new MemoryStore();
+    const actor = Identity.create();
+    const op = await anOp(store, actor);
+    const prov = new ProvenanceLog(store);
+
+    const good = signProvenance(
+      {
+        op: op.id,
+        actor_kind: 'human',
+        intent: 'i',
+        reasoning: 'the real reasoning',
+        task: null,
+        prompt_ref: null,
+        prompt: null,
+      },
+      actor
+    );
+    prov.append(good);
+    // Same actor + same sig, mutated body: #insert dedups on (actor, sig), so
+    // this is treated as a duplicate and dropped — the valid record stays and
+    // the tampered body never shadows it.
+    prov.append({ ...good, reasoning: 'forged' });
+
+    expect(prov.forOp(op.id)).toHaveLength(1);
+    expect(prov.forOp(op.id)[0].reasoning).toBe('the real reasoning');
+    expect(prov.status(prov.forOp(op.id)[0])).toBe('verified');
+  });
+
   test('append is idempotent on (op, actor, sig); forOp order is deterministic', async () => {
     const store = new MemoryStore();
     const actor = Identity.create();

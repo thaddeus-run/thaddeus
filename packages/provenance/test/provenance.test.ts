@@ -40,6 +40,10 @@ describe('Provenance record', () => {
     expect(verifyProvenance({ ...p, reasoning: 'lie' })).toBe(false);
     expect(verifyProvenance({ ...p, task: 'STRATA-000' })).toBe(false);
     expect(verifyProvenance({ ...p, prompt_ref: 'deadbeef' })).toBe(false);
+    // The prompt Ref is in the signed tuple too: swapping null → a Ref breaks it.
+    expect(
+      verifyProvenance({ ...p, prompt: { id: 'x', plaintext_id: 'y' } })
+    ).toBe(false);
   });
 
   test('verifyProvenance returns false (never throws) on malformed input', () => {
