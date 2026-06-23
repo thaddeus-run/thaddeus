@@ -94,6 +94,7 @@
       "version": "0.0.0",
       "dependencies": {
         "@thaddeus.run/identity": "workspace:*",
+        "@thaddeus.run/log": "workspace:*",
         "@thaddeus.run/store": "workspace:*",
       },
       "devDependencies": {
