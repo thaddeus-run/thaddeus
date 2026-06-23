@@ -80,4 +80,18 @@ describe('MemoryStore', () => {
     await store.revoke(ref, bob.toPublic(), alice);
     expect(performance.now() - t0).toBeLessThan(1000);
   });
+
+  test('current() follows rotation to the latest object', async () => {
+    const store = new MemoryStore();
+    const alice = Identity.create();
+    const bob = Identity.create();
+    const ref = await store.put(enc('s3cret'), alice);
+    expect(store.current(ref.plaintext_id)?.id).toBe(ref.id);
+    await store.grant(ref, bob.toPublic(), alice);
+    await store.revoke(ref, bob.toPublic(), alice);
+    const after = store.current(ref.plaintext_id);
+    expect(after).toBeDefined();
+    expect(after?.plaintext_id).toBe(ref.plaintext_id);
+    expect(after?.id).not.toBe(ref.id);
+  });
 });

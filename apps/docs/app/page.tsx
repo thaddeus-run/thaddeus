@@ -1,30 +1,44 @@
-import { address } from '@thaddeus.run/store';
+'use client';
+
+import dynamic from 'next/dynamic';
 import type { ReactNode } from 'react';
 
-// Touch the workspace package so the build/typecheck graph exercises the
-// cross-package resolution (docs -> @thaddeus.run/store) end to end.
-const sample = address(new TextEncoder().encode('Strata'));
+import PackageFlows from './package-flows';
+
+// The demo runs the real @thaddeus.run/identity + store (libsodium WASM) in the
+// browser, so it must never render on the server — ssr:false keeps the crypto
+// module graph out of the build's prerender entirely.
+const PermissionModelDemo = dynamic(() => import('./permission-model-demo'), {
+  ssr: false,
+  loading: () => (
+    <p className="pm-loading">starting the substrate in your browser…</p>
+  ),
+});
 
 export default function HomePage(): ReactNode {
   return (
-    <main
-      style={{ maxWidth: '42rem', margin: '0 auto', padding: '6rem 1.5rem' }}
-    >
-      <h1
-        style={{
-          fontSize: '2.5rem',
-          fontWeight: 700,
-          letterSpacing: '-0.02em',
-        }}
-      >
-        Strata Docs
-      </h1>
-      <p style={{ color: 'var(--thaddeus-muted)', fontSize: '1.125rem' }}>
-        Documentation for Strata — the live, permissioned, agent-native code
-        substrate from Thaddeus.
+    <main className="pm-shell">
+      <p className="pm-eyebrow">Strata · permission model</p>
+      <h1 className="pm-h1">Permission lives on the secret, not the repo.</h1>
+      <p className="pm-lede">
+        One encrypted object, two people. The bytes stay sealed at rest — a
+        mirror can verify them without ever reading them. Grant Bob a capability
+        and his view resolves to plaintext; revoke it and the key rotates in
+        front of you. Nothing here is faked: it&rsquo;s the real{' '}
+        <code>@thaddeus.run/identity</code> and <code>@thaddeus.run/store</code>{' '}
+        running in your browser.
       </p>
-      <p style={{ marginTop: '2rem', fontFamily: 'ui-monospace, monospace' }}>
-        content address of &ldquo;Strata&rdquo;: {sample.slice(0, 16)}…
+
+      <PermissionModelDemo />
+
+      <PackageFlows />
+
+      <p className="pm-foot">
+        Built on Pillar 01 — encrypted objects with per-object capabilities.
+        Access is a content key <code>seal</code>ed to an identity; revoke
+        rotates that key and re-issues it to whoever is left. Revocation is
+        forward-only: it closes the door going forward — it can&rsquo;t un-read
+        what was already read.
       </p>
     </main>
   );
