@@ -1,32 +1,65 @@
 # Pillar 04 — Provenance (the signed "why") Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use
+> superpowers:subagent-driven-development (recommended) or
+> superpowers:executing-plans to implement this plan task-by-task. Steps use
+> checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Build `@thaddeus.run/provenance` — a signed `Provenance` record bound to an `Op.id`, with capability-gated prompt storage and a `verified`/`unverified` trust label — completing P12 and turning the north-star one-edit flow 5 pass / 0 todo.
+**Goal:** Build `@thaddeus.run/provenance` — a signed `Provenance` record bound
+to an `Op.id`, with capability-gated prompt storage and a
+`verified`/`unverified` trust label — completing P12 and turning the north-star
+one-edit flow 5 pass / 0 todo.
 
-**Architecture:** A new package mirroring `@thaddeus.run/log`'s shape. Two source modules: `provenance.ts` (the record type + pure `canonicalProvenance`/`signProvenance`/`verifyProvenance`, modelled exactly on `log/src/op.ts`) and `provenancelog.ts` (an in-memory `ProvenanceLog` registry keyed by op id, consuming `store.put` for the optional prompt). It imports `Op` from `@thaddeus.run/log` as a type only and consumes `identity`/`store` across their public APIs.
+**Architecture:** A new package mirroring `@thaddeus.run/log`'s shape. Two
+source modules: `provenance.ts` (the record type + pure
+`canonicalProvenance`/`signProvenance`/`verifyProvenance`, modelled exactly on
+`log/src/op.ts`) and `provenancelog.ts` (an in-memory `ProvenanceLog` registry
+keyed by op id, consuming `store.put` for the optional prompt). It imports `Op`
+from `@thaddeus.run/log` as a type only and consumes `identity`/`store` across
+their public APIs.
 
-**Tech Stack:** TypeScript (ESM, `type: module`), Bun test runner, moon task runner, tsdown bundler, `@noble/hashes/blake3`, ed25519 via `@thaddeus.run/identity` (libsodium). No new dependencies beyond what `log` already uses.
+**Tech Stack:** TypeScript (ESM, `type: module`), Bun test runner, moon task
+runner, tsdown bundler, `@noble/hashes/blake3`, ed25519 via
+`@thaddeus.run/identity` (libsodium). No new dependencies beyond what `log`
+already uses.
 
 ## Global Constraints
 
-- **Spec:** `docs/specs/2026-06-23-thaddeus-pillar-04-provenance-design.md` is the source of truth for this plan.
-- **Sign the FULL record.** `canonical` covers all semantic fields (`op`, `actor`, `actor_kind`, `intent`, `reasoning`, `task`, `prompt_ref`, `prompt`) — deliberately wider than the brief's `op‖intent‖task‖prompt_ref`. Domain tag `thaddeus.provenance.v1` is the first element of the signed tuple.
-- **Fail-closed verify.** `verifyProvenance` returns `false` (never throws) on any malformed input.
-- **Keep-and-label, do not reject.** `ProvenanceLog.append` retains invalid records (rendered `unverified`) — the opposite of `OpLog.append`, which throws.
-- **`actor` need not equal `op.author`.** Verification binds to `op.id` + signature, not authorship.
-- **Spike discipline:** in-memory, single process, no persistence/network. Reputation accrual, delegation, and the `--why` query surface are out of scope (deferred to P09 / P06-P11).
-- **Tooling:** use `bun` (never npm/pnpm/npx). Run tasks through moon: `moon run <project>:<task>`. Export `AGENT=1` for AI-friendly test output. Preserve trailing newlines. Commit messages follow Conventional Commits 1.0.0.
-- **Naming:** package is `@thaddeus.run/provenance` (neutral, product-agnostic). Source of truth vision file uses "Strata"; package names never use `strata-`.
-- **Verification baseline after code changes:** `moon run root:format root:lint` plus the affected `moonx provenance:typecheck` and `moonx provenance:test`.
+- **Spec:** `docs/specs/2026-06-23-thaddeus-pillar-04-provenance-design.md` is
+  the source of truth for this plan.
+- **Sign the FULL record.** `canonical` covers all semantic fields (`op`,
+  `actor`, `actor_kind`, `intent`, `reasoning`, `task`, `prompt_ref`, `prompt`)
+  — deliberately wider than the brief's `op‖intent‖task‖prompt_ref`. Domain tag
+  `thaddeus.provenance.v1` is the first element of the signed tuple.
+- **Fail-closed verify.** `verifyProvenance` returns `false` (never throws) on
+  any malformed input.
+- **Keep-and-label, do not reject.** `ProvenanceLog.append` retains invalid
+  records (rendered `unverified`) — the opposite of `OpLog.append`, which
+  throws.
+- **`actor` need not equal `op.author`.** Verification binds to `op.id` +
+  signature, not authorship.
+- **Spike discipline:** in-memory, single process, no persistence/network.
+  Reputation accrual, delegation, and the `--why` query surface are out of scope
+  (deferred to P09 / P06-P11).
+- **Tooling:** use `bun` (never npm/pnpm/npx). Run tasks through moon:
+  `moon run <project>:<task>`. Export `AGENT=1` for AI-friendly test output.
+  Preserve trailing newlines. Commit messages follow Conventional Commits 1.0.0.
+- **Naming:** package is `@thaddeus.run/provenance` (neutral, product-agnostic).
+  Source of truth vision file uses "Strata"; package names never use `strata-`.
+- **Verification baseline after code changes:** `moon run root:format root:lint`
+  plus the affected `moonx provenance:typecheck` and `moonx provenance:test`.
 
 ---
 
 ### Task 1: Scaffold `@thaddeus.run/provenance` and build the `Provenance` record
 
-Create the package skeleton (copying `packages/log`'s exact config shape) and the pure record module: the `Provenance` type and `canonicalProvenance`/`signProvenance`/`verifyProvenance`, modelled on `packages/log/src/op.ts`.
+Create the package skeleton (copying `packages/log`'s exact config shape) and
+the pure record module: the `Provenance` type and
+`canonicalProvenance`/`signProvenance`/`verifyProvenance`, modelled on
+`packages/log/src/op.ts`.
 
 **Files:**
+
 - Create: `packages/provenance/package.json`
 - Create: `packages/provenance/moon.yml`
 - Create: `packages/provenance/tsconfig.json`
@@ -38,7 +71,10 @@ Create the package skeleton (copying `packages/log`'s exact config shape) and th
 - Test: `packages/provenance/test/provenance.test.ts`
 
 **Interfaces:**
-- Consumes: `Identity`, `PublicIdentity`, `ready` from `@thaddeus.run/identity`; `Ref` from `@thaddeus.run/store`; `blake3` from `@noble/hashes/blake3`; `bytesToHex` from `@noble/hashes/utils`.
+
+- Consumes: `Identity`, `PublicIdentity`, `ready` from `@thaddeus.run/identity`;
+  `Ref` from `@thaddeus.run/store`; `blake3` from `@noble/hashes/blake3`;
+  `bytesToHex` from `@noble/hashes/utils`.
 - Produces (later tasks rely on these exact signatures):
   - `interface Provenance { readonly op: string; readonly actor: string; readonly actor_kind: string; readonly intent: string; readonly reasoning: string; readonly task: string | null; readonly prompt_ref: string | null; readonly prompt: Ref | null; readonly sig: Uint8Array; }`
   - `interface ProvenanceFields { readonly op: string; readonly actor_kind: string; readonly intent: string; readonly reasoning: string; readonly task: string | null; readonly prompt_ref: string | null; readonly prompt: Ref | null; }`
@@ -55,13 +91,7 @@ Create the package skeleton (copying `packages/log`'s exact config shape) and th
   "name": "@thaddeus.run/provenance",
   "version": "0.0.0",
   "description": "A signed \"why\" layer — Provenance records (actor, intent, reasoning, task, capability-gated prompt) bound to an Op.id and verifiable by anyone. Pillar 04.",
-  "keywords": [
-    "provenance",
-    "did",
-    "operation-log",
-    "strata",
-    "substrate"
-  ],
+  "keywords": ["provenance", "did", "operation-log", "strata", "substrate"],
   "homepage": "https://thaddeus.run",
   "bugs": {
     "url": "https://github.com/thaddeus-run/thaddeus/issues"
@@ -76,11 +106,7 @@ Create the package skeleton (copying `packages/log`'s exact config shape) and th
     "url": "git+https://github.com/thaddeus-run/thaddeus.git",
     "directory": "packages/provenance"
   },
-  "files": [
-    "dist",
-    "LICENSE.md",
-    "README.md"
-  ],
+  "files": ["dist", "LICENSE.md", "README.md"],
   "type": "module",
   "exports": {
     ".": {
@@ -204,8 +230,8 @@ cp packages/log/LICENSE.md packages/provenance/LICENSE.md
 
 - [ ] **Step 3: Install so workspace symlinks resolve**
 
-Run: `bun install`
-Expected: completes without error; `node_modules/@thaddeus.run/provenance` symlink is created.
+Run: `bun install` Expected: completes without error;
+`node_modules/@thaddeus.run/provenance` symlink is created.
 
 - [ ] **Step 4: Write the failing test**
 
@@ -287,8 +313,8 @@ describe('Provenance record', () => {
 
 - [ ] **Step 5: Run the test to verify it fails**
 
-Run: `AGENT=1 moon run provenance:test`
-Expected: FAIL — cannot resolve `../src/provenance` (module not yet created).
+Run: `AGENT=1 moon run provenance:test` Expected: FAIL — cannot resolve
+`../src/provenance` (module not yet created).
 
 - [ ] **Step 6: Write the record module**
 
@@ -367,7 +393,9 @@ function assertCanonical(fields: ProvenanceFields, actor: string): void {
     (typeof fields.prompt.id !== 'string' ||
       typeof fields.prompt.plaintext_id !== 'string')
   ) {
-    throw new TypeError('provenance.prompt must have string id and plaintext_id');
+    throw new TypeError(
+      'provenance.prompt must have string id and plaintext_id'
+    );
   }
 }
 
@@ -443,13 +471,12 @@ export type { Provenance, ProvenanceFields } from './provenance';
 
 - [ ] **Step 7: Run the test to verify it passes**
 
-Run: `AGENT=1 moon run provenance:test`
-Expected: PASS — all four tests green.
+Run: `AGENT=1 moon run provenance:test` Expected: PASS — all four tests green.
 
 - [ ] **Step 8: Typecheck and build**
 
-Run: `moon run provenance:typecheck && moon run provenance:build`
-Expected: both succeed; `packages/provenance/dist/index.js` and `index.d.ts` exist.
+Run: `moon run provenance:typecheck && moon run provenance:build` Expected: both
+succeed; `packages/provenance/dist/index.js` and `index.d.ts` exist.
 
 - [ ] **Step 9: Commit**
 
@@ -469,15 +496,22 @@ Claude-Session: https://claude.ai/code/session_01Ltrk2Wto4o6XNPcGkUZ6X5"
 
 ### Task 2: The `ProvenanceLog` registry (record, prompt storage, trust label)
 
-Add the in-memory registry that builds + signs provenance for an `Op`, stores an optional prompt capability-gated, keeps records keyed by op id, and renders the `verified`/`unverified` label.
+Add the in-memory registry that builds + signs provenance for an `Op`, stores an
+optional prompt capability-gated, keeps records keyed by op id, and renders the
+`verified`/`unverified` label.
 
 **Files:**
+
 - Create: `packages/provenance/src/provenancelog.ts`
 - Modify: `packages/provenance/src/index.ts` (add exports)
 - Test: `packages/provenance/test/provenancelog.test.ts`
 
 **Interfaces:**
-- Consumes: `Provenance`, `signProvenance`, `verifyProvenance` from `./provenance`; `Identity` from `@thaddeus.run/identity`; `Op` from `@thaddeus.run/log`; `Ref`, `Store` from `@thaddeus.run/store`; `blake3`, `bytesToHex` from `@noble/hashes`.
+
+- Consumes: `Provenance`, `signProvenance`, `verifyProvenance` from
+  `./provenance`; `Identity` from `@thaddeus.run/identity`; `Op` from
+  `@thaddeus.run/log`; `Ref`, `Store` from `@thaddeus.run/store`; `blake3`,
+  `bytesToHex` from `@noble/hashes`.
 - Produces:
   - `type ProvenanceStatus = 'verified' | 'unverified'`
   - `class ProvenanceLog { constructor(store: Store); record(op: Op, fields: { intent: string; reasoning: string; actorKind: string; task?: string; prompt?: Uint8Array }, actor: Identity): Promise<Provenance>; append(p: Provenance): void; forOp(opId: string): readonly Provenance[]; verify(p: Provenance): boolean; status(p: Provenance): ProvenanceStatus; }`
@@ -671,8 +705,8 @@ describe('ProvenanceLog', () => {
 
 - [ ] **Step 2: Run the test to verify it fails**
 
-Run: `AGENT=1 moon run provenance:test`
-Expected: FAIL — cannot resolve `../src/provenancelog`.
+Run: `AGENT=1 moon run provenance:test` Expected: FAIL — cannot resolve
+`../src/provenancelog`.
 
 - [ ] **Step 3: Write the registry**
 
@@ -685,7 +719,11 @@ import type { Identity } from '@thaddeus.run/identity';
 import type { Op } from '@thaddeus.run/log';
 import type { Ref, Store } from '@thaddeus.run/store';
 
-import { type Provenance, signProvenance, verifyProvenance } from './provenance';
+import {
+  type Provenance,
+  signProvenance,
+  verifyProvenance,
+} from './provenance';
 
 // The render-time trust label. `unverified` covers both unsigned and
 // signature-invalid records (the brief's trust rule).
@@ -809,13 +847,13 @@ export type { ProvenanceStatus } from './provenancelog';
 
 - [ ] **Step 5: Run the test to verify it passes**
 
-Run: `AGENT=1 moon run provenance:test`
-Expected: PASS — all `ProvenanceLog` tests green (plus Task 1's record tests).
+Run: `AGENT=1 moon run provenance:test` Expected: PASS — all `ProvenanceLog`
+tests green (plus Task 1's record tests).
 
 - [ ] **Step 6: Typecheck and build**
 
-Run: `moon run provenance:typecheck && moon run provenance:build`
-Expected: both succeed.
+Run: `moon run provenance:typecheck && moon run provenance:build` Expected: both
+succeed.
 
 - [ ] **Step 7: Commit**
 
@@ -836,18 +874,25 @@ Claude-Session: https://claude.ai/code/session_01Ltrk2Wto4o6XNPcGkUZ6X5"
 
 ### Task 3: Close the north-star — swap the P04 `test.todo` for a real assertion
 
-Replace the P04 stub in the integration test with a real composition test, making the seeded one-edit flow 5 pass / 0 todo.
+Replace the P04 stub in the integration test with a real composition test,
+making the seeded one-edit flow 5 pass / 0 todo.
 
 **Files:**
-- Modify: `integration/package.json` (add the `@thaddeus.run/provenance` dependency)
-- Modify: `integration/test/one-edit-end-to-end.test.ts:1-3` (add import) and `:64-65` (replace the `test.todo`)
+
+- Modify: `integration/package.json` (add the `@thaddeus.run/provenance`
+  dependency)
+- Modify: `integration/test/one-edit-end-to-end.test.ts:1-3` (add import) and
+  `:64-65` (replace the `test.todo`)
 
 **Interfaces:**
-- Consumes: `ProvenanceLog` from `@thaddeus.run/provenance`; existing `Identity`, `OpLog`, `MemoryStore` already imported in the test.
+
+- Consumes: `ProvenanceLog` from `@thaddeus.run/provenance`; existing
+  `Identity`, `OpLog`, `MemoryStore` already imported in the test.
 
 - [ ] **Step 1: Add the dependency**
 
-Edit `integration/package.json` `dependencies` to include the provenance package (keep alphabetical order):
+Edit `integration/package.json` `dependencies` to include the provenance package
+(keep alphabetical order):
 
 ```json
   "dependencies": {
@@ -860,12 +905,12 @@ Edit `integration/package.json` `dependencies` to include the provenance package
 
 - [ ] **Step 2: Install so the new workspace dep resolves**
 
-Run: `bun install`
-Expected: completes without error.
+Run: `bun install` Expected: completes without error.
 
 - [ ] **Step 3: Add the import**
 
-Edit the top of `integration/test/one-edit-end-to-end.test.ts`. After the existing `import { OpLog } from '@thaddeus.run/log';` line, add:
+Edit the top of `integration/test/one-edit-end-to-end.test.ts`. After the
+existing `import { OpLog } from '@thaddeus.run/log';` line, add:
 
 ```ts
 import { ProvenanceLog } from '@thaddeus.run/provenance';
@@ -885,56 +930,56 @@ import { MemoryStore, publicIdentity } from '@thaddeus.run/store';
 In `integration/test/one-edit-end-to-end.test.ts`, replace these two lines:
 
 ```ts
-  // @ts-expect-error bun-types@1.3.12 requires a fn arg, but the runtime supports label-only todo
-  test.todo('P04: a signed Provenance record attaches the why to the Op');
+// @ts-expect-error bun-types@1.3.12 requires a fn arg, but the runtime supports label-only todo
+test.todo('P04: a signed Provenance record attaches the why to the Op');
 ```
 
 with:
 
 ```ts
-  test('P04: a signed Provenance record attaches the why to the Op', async () => {
-    const store = new MemoryStore();
-    const log = new OpLog(store);
-    const author = Identity.create();
-    const prov = new ProvenanceLog(store);
+test('P04: a signed Provenance record attaches the why to the Op', async () => {
+  const store = new MemoryStore();
+  const log = new OpLog(store);
+  const author = Identity.create();
+  const prov = new ProvenanceLog(store);
 
-    const op = await log.write(
-      'main',
-      'src/auth.rs',
-      new TextEncoder().encode('fn refresh() {}'),
-      author
-    );
+  const op = await log.write(
+    'main',
+    'src/auth.rs',
+    new TextEncoder().encode('fn refresh() {}'),
+    author
+  );
 
-    const why = await prov.record(
-      op,
-      {
-        intent: 'fix race in token refresh',
-        reasoning: 'refresh() re-entered before lock; added a mutex',
-        actorKind: 'agent:claude-code@1.2',
-        task: 'STRATA-417',
-      },
-      author
-    );
+  const why = await prov.record(
+    op,
+    {
+      intent: 'fix race in token refresh',
+      reasoning: 'refresh() re-entered before lock; added a mutex',
+      actorKind: 'agent:claude-code@1.2',
+      task: 'STRATA-417',
+    },
+    author
+  );
 
-    // The why is bound to the op's id and verifies.
-    expect(why.op).toBe(op.id);
-    expect(prov.status(why)).toBe('verified');
-    expect(prov.forOp(op.id).map((p) => p.intent)).toContain(
-      'fix race in token refresh'
-    );
+  // The why is bound to the op's id and verifies.
+  expect(why.op).toBe(op.id);
+  expect(prov.status(why)).toBe('verified');
+  expect(prov.forOp(op.id).map((p) => p.intent)).toContain(
+    'fix race in token refresh'
+  );
 
-    // The trust rule: tampering any signed field renders it unverified.
-    expect(prov.status({ ...why, reasoning: 'a plausible lie' })).toBe(
-      'unverified'
-    );
-    expect(prov.status({ ...why, actor_kind: 'human' })).toBe('unverified');
-  });
+  // The trust rule: tampering any signed field renders it unverified.
+  expect(prov.status({ ...why, reasoning: 'a plausible lie' })).toBe(
+    'unverified'
+  );
+  expect(prov.status({ ...why, actor_kind: 'human' })).toBe('unverified');
+});
 ```
 
 - [ ] **Step 5: Run the north-star suite to verify it passes**
 
-Run: `AGENT=1 moon run integration:test`
-Expected: PASS — 5 tests pass, 0 todo (the P04 test now runs).
+Run: `AGENT=1 moon run integration:test` Expected: PASS — 5 tests pass, 0 todo
+(the P04 test now runs).
 
 - [ ] **Step 6: Commit**
 
@@ -954,16 +999,22 @@ Claude-Session: https://claude.ai/code/session_01Ltrk2Wto4o6XNPcGkUZ6X5"
 
 ### Task 4: The provenance demo (`examples/provenance/`)
 
-Add a runnable CLI demo (sibling to `examples/oplog/`) enacting the three acts from spec §9: a signed why on a real op, tamper → `unverified`, and a gated prompt that does not leak.
+Add a runnable CLI demo (sibling to `examples/oplog/`) enacting the three acts
+from spec §9: a signed why on a real op, tamper → `unverified`, and a gated
+prompt that does not leak.
 
 **Files:**
+
 - Create: `examples/provenance/package.json`
 - Create: `examples/provenance/moon.yml`
 - Create: `examples/provenance/tsconfig.json`
 - Create: `examples/provenance/src/provenance.ts`
 
 **Interfaces:**
-- Consumes: `Identity`, `ready` from `@thaddeus.run/identity`; `OpLog` from `@thaddeus.run/log`; `ProvenanceLog` from `@thaddeus.run/provenance`; `MemoryStore` from `@thaddeus.run/store`.
+
+- Consumes: `Identity`, `ready` from `@thaddeus.run/identity`; `OpLog` from
+  `@thaddeus.run/log`; `ProvenanceLog` from `@thaddeus.run/provenance`;
+  `MemoryStore` from `@thaddeus.run/store`.
 
 - [ ] **Step 1: Create the example config files**
 
@@ -1059,7 +1110,12 @@ const operator = Identity.create();
 const agent = Identity.create();
 
 // Act 1 — a signed why on a real op.
-const op = await log.write('main', 'src/auth.rs', enc('fn refresh() {}'), operator);
+const op = await log.write(
+  'main',
+  'src/auth.rs',
+  enc('fn refresh() {}'),
+  operator
+);
 const why = await prov.record(
   op,
   {
@@ -1067,14 +1123,18 @@ const why = await prov.record(
     reasoning: 'refresh() re-entered before lock; added a mutex',
     actorKind: 'agent:claude-code@1.2',
     task: 'STRATA-417',
-    prompt: enc('PROMPT: patch the token refresh race. context: <secret repo map>'),
+    prompt: enc(
+      'PROMPT: patch the token refresh race. context: <secret repo map>'
+    ),
   },
   agent
 );
 
 rule();
 console.log(`$ strata log src/auth.rs --why`);
-console.log(`  @@ refresh() … (Op ${op.id.slice(0, 4)}, lamport ${op.lamport})`);
+console.log(
+  `  @@ refresh() … (Op ${op.id.slice(0, 4)}, lamport ${op.lamport})`
+);
 console.log(
   `  actor   ${why.actor_kind}  (operator: ${operator.did.slice(0, 16)}…)   ${
     prov.status(why) === 'verified' ? '✓ verified' : '✗ unverified'
@@ -1096,10 +1156,17 @@ console.log(
 rule();
 console.log('3. public record carries only a hash + address for the prompt:');
 console.log('   prompt_ref:', why.prompt_ref?.slice(0, 16), '…');
-console.log('   prompt Ref:', why.prompt?.id.slice(0, 16), '… (ciphertext address)');
+console.log(
+  '   prompt Ref:',
+  why.prompt?.id.slice(0, 16),
+  '… (ciphertext address)'
+);
 if (why.prompt !== null) {
   // The agent (grantee) can read it back.
-  console.log('   agent reads prompt:', JSON.stringify(dec(await store.get(why.prompt, agent))));
+  console.log(
+    '   agent reads prompt:',
+    JSON.stringify(dec(await store.get(why.prompt, agent)))
+  );
   // A stranger cannot.
   const stranger = Identity.create();
   let denied = false;
@@ -1113,18 +1180,21 @@ if (why.prompt !== null) {
 
 rule();
 console.log('Acceptance: signed why bound to Op.id; tamper → unverified;');
-console.log('prompt stored capability-gated — its bytes never enter readable history.');
+console.log(
+  'prompt stored capability-gated — its bytes never enter readable history.'
+);
 ```
 
 - [ ] **Step 3: Install and run the demo**
 
-Run: `bun install && CI= moon run example-provenance:demo`
-Expected: prints the three acts; Act 1 shows `✓ verified`; Act 2 shows `unverified` and `[ 'verified', 'unverified' ]`; Act 3 shows the agent reading the prompt and `stranger denied the prompt: true`.
+Run: `bun install && CI= moon run example-provenance:demo` Expected: prints the
+three acts; Act 1 shows `✓ verified`; Act 2 shows `unverified` and
+`[ 'verified', 'unverified' ]`; Act 3 shows the agent reading the prompt and
+`stranger denied the prompt: true`.
 
 - [ ] **Step 4: Typecheck the example**
 
-Run: `moon run example-provenance:typecheck`
-Expected: PASS.
+Run: `moon run example-provenance:typecheck` Expected: PASS.
 
 - [ ] **Step 5: Commit**
 
@@ -1144,9 +1214,11 @@ Claude-Session: https://claude.ai/code/session_01Ltrk2Wto4o6XNPcGkUZ6X5"
 
 ### Task 5: Update the convergence docs (ARCHITECTURE + CHANGELOG)
 
-Flip the Pillar 04 row to built and record the release + deferred ledger entries, per spec §12.
+Flip the Pillar 04 row to built and record the release + deferred ledger
+entries, per spec §12.
 
 **Files:**
+
 - Modify: `ARCHITECTURE.md` (Pillar 04 status row; shared-primitives note)
 - Modify: `CHANGELOG.md` (`[Unreleased] → Added`; Deferred ledger)
 
@@ -1166,17 +1238,21 @@ to:
 | 04 Provenance ("why")                 | `provenance`         | built   | P12              |
 ```
 
-In the **Shared primitives** table, update the `Op (operation log entry)` row's "Reused by" cell so the P04 reference is concrete (it already lists `P04`; no change needed if it reads "P03 · P04 · P08 · P10"). Verify the row reads:
+In the **Shared primitives** table, update the `Op (operation log entry)` row's
+"Reused by" cell so the P04 reference is concrete (it already lists `P04`; no
+change needed if it reads "P03 · P04 · P08 · P10"). Verify the row reads:
 
 ```
 | Op (operation log entry)              | `@thaddeus.run/log`      | P03 · P04 · P08 · P10                                   |
 ```
 
-(If the `@thaddeus.run/log` cell currently shows `log` without the scope, leave it as-is — match the existing cell formatting.)
+(If the `@thaddeus.run/log` cell currently shows `log` without the scope, leave
+it as-is — match the existing cell formatting.)
 
 - [ ] **Step 2: Update `CHANGELOG.md` — Added**
 
-Under `## [Unreleased]` → `### Added`, after the existing `@thaddeus.run/log` bullet, add:
+Under `## [Unreleased]` → `### Added`, after the existing `@thaddeus.run/log`
+bullet, add:
 
 ```markdown
 - `@thaddeus.run/provenance` — the signed "why" layer (Pillar 04): a
@@ -1187,27 +1263,31 @@ Under `## [Unreleased]` → `### Added`, after the existing `@thaddeus.run/log` 
   record** (hardening the brief's narrower `op‖intent‖task‖prompt_ref` subset),
   so `actor_kind`/`reasoning` cannot be forged on relay. `ProvenanceLog` renders
   each record `verified`/`unverified` and **keeps** invalid records (labelled,
-  not rejected). Completes **P12** and closes the seeded north-star one-edit flow
-  (5 pass / 0 todo).
+  not rejected). Completes **P12** and closes the seeded north-star one-edit
+  flow (5 pass / 0 todo).
 ```
 
 - [ ] **Step 3: Update `CHANGELOG.md` — Deferred ledger**
 
-In the **Deferred** section, add these entries under the **scope-cut** bucket (create the lines near the other scope-cut items; if the section uses a sub-heading like "### Scope-cut", place them there, else append to the Research/limitations lists as fits the existing structure):
+In the **Deferred** section, add these entries under the **scope-cut** bucket
+(create the lines near the other scope-cut items; if the section uses a
+sub-heading like "### Scope-cut", place them there, else append to the
+Research/limitations lists as fits the existing structure):
 
 ```markdown
 - **Reputation accrual / outcomes (P04→P09).** The trust rule's second clause —
   invalid provenance "never counts toward an agent's reputation" — needs the
   reputation/outcomes machinery that does not yet exist. P04 ships the
   `verified`/`unverified` label only; accrual is Pillar 09.
-- **Delegation / attestation (P04→P09).** P04 verifies that _some_ did:key signed
-  and bound an op id (actor may differ from op.author), but not that an agent was
-  authorized to act _for_ a principal. Authorization semantics are Pillar 09.
-- **`--why` query surface (P04→P06/P11).** Querying provenance across history is a
-  later pillar; P04 renders the why only in its demo.
-- **Prompt-cap grant/revoke wiring (P04).** Storing the prompt capability-gated is
-  built; granting it to reviewers and revoking a "why" reuse `store.grant`/`revoke`
-  but are not wired in this release.
+- **Delegation / attestation (P04→P09).** P04 verifies that _some_ did:key
+  signed and bound an op id (actor may differ from op.author), but not that an
+  agent was authorized to act _for_ a principal. Authorization semantics are
+  Pillar 09.
+- **`--why` query surface (P04→P06/P11).** Querying provenance across history is
+  a later pillar; P04 renders the why only in its demo.
+- **Prompt-cap grant/revoke wiring (P04).** Storing the prompt capability-gated
+  is built; granting it to reviewers and revoking a "why" reuse
+  `store.grant`/`revoke` but are not wired in this release.
 - **Unverified-record spam control (P04).** Keep-and-label lets a peer attach
   unlimited unsigned claims to an op id; rate-limiting/scoping is out of spike
   scope.
@@ -1215,8 +1295,8 @@ In the **Deferred** section, add these entries under the **scope-cut** bucket (c
 
 - [ ] **Step 4: Sanity-check the docs render**
 
-Run: `moon run root:format`
-Expected: succeeds; the Markdown tables and lists are reflowed consistently (oxfmt may adjust spacing — that is fine).
+Run: `moon run root:format` Expected: succeeds; the Markdown tables and lists
+are reflowed consistently (oxfmt may adjust spacing — that is fine).
 
 - [ ] **Step 5: Commit**
 
@@ -1237,34 +1317,35 @@ Claude-Session: https://claude.ai/code/session_01Ltrk2Wto4o6XNPcGkUZ6X5"
 
 ### Task 6: Full-workspace verification
 
-Run the repo-wide baseline so the new package, the integration swap, and the docs all land green together.
+Run the repo-wide baseline so the new package, the integration swap, and the
+docs all land green together.
 
 **Files:** none (verification only).
 
 - [ ] **Step 1: Build the whole workspace**
 
-Run: `moon run :build`
-Expected: every package builds, including `@thaddeus.run/provenance`. (This ensures type-aware lint can resolve the new package through its `dist`.)
+Run: `moon run :build` Expected: every package builds, including
+`@thaddeus.run/provenance`. (This ensures type-aware lint can resolve the new
+package through its `dist`.)
 
 - [ ] **Step 2: Format and lint the repo**
 
-Run: `moon run root:format root:lint`
-Expected: both succeed with no errors.
+Run: `moon run root:format root:lint` Expected: both succeed with no errors.
 
 - [ ] **Step 3: Typecheck the affected projects**
 
-Run: `moon run provenance:typecheck integration:typecheck example-provenance:typecheck`
+Run:
+`moon run provenance:typecheck integration:typecheck example-provenance:typecheck`
 Expected: all PASS.
 
 - [ ] **Step 4: Run the affected tests**
 
-Run: `AGENT=1 moon run provenance:test integration:test`
-Expected: all PASS — provenance suite green; integration is 5 pass / 0 todo.
+Run: `AGENT=1 moon run provenance:test integration:test` Expected: all PASS —
+provenance suite green; integration is 5 pass / 0 todo.
 
 - [ ] **Step 5: Confirm nothing else regressed**
 
-Run: `AGENT=1 moon run :test`
-Expected: the full repo test run is green.
+Run: `AGENT=1 moon run :test` Expected: the full repo test run is green.
 
 - [ ] **Step 6: Final commit (only if formatting/lint produced changes)**
 
@@ -1282,8 +1363,19 @@ Claude-Session: https://claude.ai/code/session_01Ltrk2Wto4o6XNPcGkUZ6X5"
 
 ## Notes for the implementer
 
-- **Why a new package, not an extension of `log`:** provenance is a distinct primitive that imports `Op` as a _type only_ and consumes `identity`/`store` across their public APIs — no internals cross the seam. This mirrors how P03 earned its own package.
-- **The one deliberate deviation from the brief:** the brief's `sig` formula signs only `op‖intent‖task‖prompt_ref`. We sign the full record so `actor_kind` and `reasoning` cannot be forged on relay. Acceptance test "tampering with ANY signed field breaks verification" (Task 1) is what pins this.
-- **`bun install` after every `package.json` change** (Tasks 1, 3, 4) so workspace symlinks resolve before you build or test.
-- **If `moon run :test` ever runs every suite slowly**, you can target a single package: `moon run provenance:test`.
-- **Determinism:** tests use `Identity.create()` (fresh keys) but assert only on structural facts (bound op id, verified/unverified, ordering stability), never on specific key bytes — so they are reproducible.
+- **Why a new package, not an extension of `log`:** provenance is a distinct
+  primitive that imports `Op` as a _type only_ and consumes `identity`/`store`
+  across their public APIs — no internals cross the seam. This mirrors how P03
+  earned its own package.
+- **The one deliberate deviation from the brief:** the brief's `sig` formula
+  signs only `op‖intent‖task‖prompt_ref`. We sign the full record so
+  `actor_kind` and `reasoning` cannot be forged on relay. Acceptance test
+  "tampering with ANY signed field breaks verification" (Task 1) is what pins
+  this.
+- **`bun install` after every `package.json` change** (Tasks 1, 3, 4) so
+  workspace symlinks resolve before you build or test.
+- **If `moon run :test` ever runs every suite slowly**, you can target a single
+  package: `moon run provenance:test`.
+- **Determinism:** tests use `Identity.create()` (fresh keys) but assert only on
+  structural facts (bound op id, verified/unverified, ordering stability), never
+  on specific key bytes — so they are reproducible.

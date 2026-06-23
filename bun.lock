@@ -89,12 +89,26 @@
         "@types/bun": "catalog:",
       },
     },
+    "examples/provenance": {
+      "name": "@thaddeus.run/example-provenance",
+      "version": "0.0.0",
+      "dependencies": {
+        "@thaddeus.run/identity": "workspace:*",
+        "@thaddeus.run/log": "workspace:*",
+        "@thaddeus.run/provenance": "workspace:*",
+        "@thaddeus.run/store": "workspace:*",
+      },
+      "devDependencies": {
+        "@types/bun": "catalog:",
+      },
+    },
     "integration": {
       "name": "@thaddeus.run/integration",
       "version": "0.0.0",
       "dependencies": {
         "@thaddeus.run/identity": "workspace:*",
         "@thaddeus.run/log": "workspace:*",
+        "@thaddeus.run/provenance": "workspace:*",
         "@thaddeus.run/store": "workspace:*",
       },
       "devDependencies": {
@@ -554,6 +568,8 @@
     "@thaddeus.run/example-offboarding": ["@thaddeus.run/example-offboarding@workspace:examples/offboarding"],
 
     "@thaddeus.run/example-oplog": ["@thaddeus.run/example-oplog@workspace:examples/oplog"],
+
+    "@thaddeus.run/example-provenance": ["@thaddeus.run/example-provenance@workspace:examples/provenance"],
 
     "@thaddeus.run/identity": ["@thaddeus.run/identity@workspace:packages/identity"],
 

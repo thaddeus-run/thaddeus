@@ -41,16 +41,17 @@ the first Tier-2 primitive, and it is chosen now because:
 
 It resolves complaint **P12** (change provenance records _what_ changed but
 never a verified _who_ or _why_). The reputation half of the brief's trust rule
-("never counts toward an agent's reputation") is forward-looking to **Pillar 09**
-and is named-and-deferred, not claimed (§4.4, §11).
+("never counts toward an agent's reputation") is forward-looking to **Pillar
+09** and is named-and-deferred, not claimed (§4.4, §11).
 
 ## 2. Governing principle — _stable seams, playground interiors_
 
 Unchanged from Pillars 01–03 (§2): **rigid** = the new package's public API, the
-`Provenance` record shape in `ARCHITECTURE.md`, and the north-star flow; **loose**
-= everything behind those seams. Consequences here: in-memory only, single
-process, no persistence, no network transport, no production hardening. Tests
-pin the contract and the acceptance facts (§10), not the throwaway internals.
+`Provenance` record shape in `ARCHITECTURE.md`, and the north-star flow;
+**loose** = everything behind those seams. Consequences here: in-memory only,
+single process, no persistence, no network transport, no production hardening.
+Tests pin the contract and the acceptance facts (§10), not the throwaway
+internals.
 
 The genuinely rigid, expensive-to-reverse calls in this release are the
 **signature scope** (what bytes the actor signs) and the **trust surface** (that
@@ -72,8 +73,8 @@ each:
    never enters world-readable history.
 3. **Unsigned or invalid provenance renders as `unverified` and never counts
    toward reputation** (half now). The `verified` / `unverified` _label_ is
-   built and pinned by tests now; the _reputation accrual_ it gates is Pillar
-   09 territory and is deferred (§4.4, §11).
+   built and pinned by tests now; the _reputation accrual_ it gates is Pillar 09
+   territory and is deferred (§4.4, §11).
 
 ## 3. The release's job
 
@@ -98,11 +99,11 @@ capability-gated, attaches records to op ids, and renders each as `verified` or
   real op, the `--why` render, a tamper → `unverified` transition, and a gated
   prompt that is unreadable without the capability (§9).
 - The north-star integration test's **P04 `test.todo` swapped** for a real
-  assertion; `ARCHITECTURE.md` Pillar 04 row flipped `planned → built`; the
-  flow reaches **5 pass / 0 todo** (§12).
+  assertion; `ARCHITECTURE.md` Pillar 04 row flipped `planned → built`; the flow
+  reaches **5 pass / 0 todo** (§12).
 
-Not the job: reputation accrual/outcomes, delegation/attestation, a real
-`--why` query surface, prompt-cap granting/revocation flows, persistence,
+Not the job: reputation accrual/outcomes, delegation/attestation, a real `--why`
+query surface, prompt-cap granting/revocation flows, persistence,
 network/federation (§5, §11).
 
 ## 4. Decisions taken (brainstorm outcomes)
@@ -135,8 +136,8 @@ network/federation (§5, §11).
 4. **Actor need not equal op.author; trust rule keeps-and-labels.** `verify`
    checks the signature under whatever `actor` signed and that the record binds
    an `Op.id`; it does **not** require `actor == op.author`. This admits the
-   agent-acting-for-a-human model the brief's `actor_kind` anticipates;
-   full delegation/attestation semantics are deferred to P09. Separately, an
+   agent-acting-for-a-human model the brief's `actor_kind` anticipates; full
+   delegation/attestation semantics are deferred to P09. Separately, an
    _invalid_ provenance record is **kept and rendered `unverified`**, not
    rejected — because the brief's rule is "renders as `unverified`," i.e. the
    unsigned claim is still shown (so a reader sees it _as untrustworthy_), it
@@ -185,17 +186,16 @@ scoring — it delivers only the label that the later machinery will read.
   `canonicalProvenance` / `signProvenance` / `verifyProvenance` functions, and
   the `ProvenanceLog` class (§6).
 - `record` (build + sign + store prompt + attach), `append` (peer ingest,
-  keep-and-label), `forOp` (records for an op id, deterministic order),
-  `verify` (signature integrity over the bound op), `status`
-  (`verified`/`unverified`).
+  keep-and-label), `forOp` (records for an op id, deterministic order), `verify`
+  (signature integrity over the bound op), `status` (`verified`/`unverified`).
 - Capability-gated optional prompt storage with hash + `Ref` binding.
 - `examples/provenance/` demo; north-star P04 swap; `ARCHITECTURE.md` +
   `CHANGELOG.md`.
 
 **Out (deferred, named so scope stays honest):**
 
-- **Reputation accrual / outcomes** (the trust rule's second clause) → Pillar
-  09 (§4.4, §11).
+- **Reputation accrual / outcomes** (the trust rule's second clause) → Pillar 09
+  (§4.4, §11).
 - **Delegation / attestation** (proving an agent acts _for_ a principal, not
   merely that some key signed) → Pillar 09.
 - **A real `--why` query surface** across history → Pillars 06/11; here the
@@ -250,7 +250,10 @@ type ProvenanceStatus = 'verified' | 'unverified';
 // Deterministic bytes for the signature — domain-tagged 'thaddeus.provenance.v1'
 // so a provenance signature can never be confused with an op signature or any
 // other protocol's payload (§8). Rejects non-canonical field values (§8).
-function canonicalProvenance(fields: ProvenanceFields, actor: string): Uint8Array;
+function canonicalProvenance(
+  fields: ProvenanceFields,
+  actor: string
+): Uint8Array;
 
 // Build the full signed record. sig = actor over the canonical bytes.
 function signProvenance(fields: ProvenanceFields, actor: Identity): Provenance;
@@ -307,8 +310,8 @@ class ProvenanceLog {
    `promptRef = await store.put(fields.prompt, actor)` (capability-gated,
    granted to `actor`); `prompt_ref = bytesToHex(blake3(fields.prompt))`.
    Otherwise both are `null`.
-2. Assemble `ProvenanceFields { op: op.id, actor_kind, intent, reasoning,
-   task ?? null, prompt_ref, prompt: promptRef }`.
+2. Assemble
+   `ProvenanceFields { op: op.id, actor_kind, intent, reasoning, task ?? null, prompt_ref, prompt: promptRef }`.
 3. `p = signProvenance(fields, actor)` — `sig = actor.sign(canonical(...))`,
    `actor = actor.did`.
 4. Store `p` under `op.id` in the registry. Return `p`.
@@ -408,8 +411,7 @@ deterministic via injected identities/seeds. Three acts:
 
 1. Reuse `@thaddeus.run/log`: `write('main', 'src/auth.rs', fixBytes, author)`
    to produce a real `Op`.
-2. `record(op, { intent, reasoning, task, actorKind: 'agent:claude-code@1.2',
-   prompt }, actor)`.
+2. `record(op, { intent, reasoning, task, actorKind: 'agent:claude-code@1.2', prompt }, actor)`.
 3. Render a `strata log src/auth.rs --why`-style block: the op id + lamport, the
    actor/actor_kind/operator, intent and task, and `✓ verified`.
 
@@ -439,7 +441,8 @@ deterministic via injected identities/seeds. Three acts:
    for; `forOp(op.id)` returns it.
 4. **Prompt stored capability-gated** — with a prompt supplied,
    `prompt_ref = blake3(prompt)` and `store.get(prompt, actor)` returns the
-   bytes whose hash equals `prompt_ref`; `store.get(prompt, stranger)` is denied.
+   bytes whose hash equals `prompt_ref`; `store.get(prompt, stranger)` is
+   denied.
 5. **No prompt** — with no prompt, `prompt_ref` and `prompt` are both `null` and
    the record still verifies.
 6. **Actor need not be author** — a record signed by an `actor` distinct from
@@ -453,13 +456,13 @@ deterministic via injected identities/seeds. Three acts:
    throwing.
 9. **Deterministic `forOp` order** — multiple records for one op id return in a
    stable order independent of insertion order.
-10. **Domain separation** — a provenance signature does not verify as, and is not
-    confused with, an op signature over structurally similar bytes (domain tag
-    `thaddeus.provenance.v1`).
+10. **Domain separation** — a provenance signature does not verify as, and is
+    not confused with, an op signature over structurally similar bytes (domain
+    tag `thaddeus.provenance.v1`).
 11. **Composition (north-star)** — the P04 `test.todo` becomes a real assertion:
     a signed `Provenance` attaches the why to the seeded edit's `Op`, `verify`
-    passes, and tampering flips it to `unverified`. The flow reaches 5 pass /
-    0 todo.
+    passes, and tampering flips it to `unverified`. The flow reaches 5 pass / 0
+    todo.
 
 ## 11. Honest limitations (stated, not hidden)
 
@@ -504,8 +507,8 @@ deterministic via injected identities/seeds. Three acts:
   package.
 - **North-star** —
   `test.todo('P04: a signed Provenance record attaches the why to the Op')`
-  becomes a real assertion. After this swap the seeded one-edit flow is **5
-  pass / 0 todo**.
+  becomes a real assertion. After this swap the seeded one-edit flow is **5 pass
+  / 0 todo**.
 
 ## 13. Open items / next primitives
 
