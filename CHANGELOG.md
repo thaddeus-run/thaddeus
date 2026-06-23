@@ -15,6 +15,14 @@ All notable changes to Thaddeus. Format follows
   `scheduleReveal`/`reveal` release an object's payload to a well-known public
   identity at time T via a withheld key-release. Payload only; metadata-gating
   deferred (see below). `@thaddeus.run/identity` gains `Identity.fromSeed`.
+- `@thaddeus.run/log` — the operation log (Pillar 03): signed, CRDT-ordered `Op`
+  records on a DAG; deterministic `(lamport, id)` ordering; `materialize`
+  projects to a path→Ref tree by LWW per path using cleartext metadata only;
+  zero-copy named views (`fork`/`view`); `append` peer-ingest converges
+  order-independently; `conflicts` surfaces concurrent same-path ops; delete
+  tombstones. Wires the **P02 metadata-gating seam**: an embargoed op publishes
+  only an opaque ordering token; its metadata is sealed and released at T via
+  the membrane.
 
 ### Changed
 
@@ -35,13 +43,12 @@ All notable changes to Thaddeus. Format follows
   holder pre-computing the key-release and withholding it until T; a dishonest
   store could release early. A genuinely trustless unattended embargo needs
   time-lock crypto (VDF / time-lock puzzle). Deferred — out of spike scope.
-- **Metadata-gating for embargoed changes (P02).** Sealing the payload is not
-  enough: path, symbol, author, and timing leak the vulnerability. True gating
-  publishes only an opaque, capability-gated ordering token until T. Blocked on
-  P03's `Op` record, and on the core tension — fast CRDT convergence wants
-  cleartext metadata, a real embargo wants it sealed (brief, Part VI frontier).
-- **Convergence over unreadable metadata (P03/P08).** How nodes order and merge
-  operations whose metadata they cannot read. Named as a frontier, not solved.
+- **Convergence over sealed metadata (P02/P03).** The metadata-gating _seam_
+  shipped: an embargoed op publishes only an opaque ordering token and seals its
+  metadata until T (`@thaddeus.run/log`). Still open: how peers who cannot read
+  an embargoed op's metadata do content-aware placement during the embargo —
+  fast CRDT convergence wants cleartext metadata, a real embargo wants it sealed
+  (brief, Part VI frontier).
 - **Key recovery / escrow / threshold / device-subkeys (P01).** The brief's
   named landmine. v1 is single-keypair, no recovery: lose the key, lose the
   data.
@@ -52,8 +59,13 @@ All notable changes to Thaddeus. Format follows
 
 ### Scope-cut — planned for a later pillar/release (no open unknowns)
 
-- **P03 operation log** — signed, CRDT-ordered `Op` records (the source of
-  truth).
+- **P03 content merge** — 3-way text/content merge for concurrent same-path ops;
+  today LWW picks a deterministic winner and `conflicts()` surfaces the rest.
+- **Rename/move as a first-class op (P08)** — currently two unlinked path-ops.
+- **Symbol-level addressing (P08)** — `Op.path` generalizes to a symbol id.
+- **Repository-as-capability-scoped-slice (P05)** — the repo dissolution half of
+  Pillar 03's "branches and the repository dissolve."
+- **Vector/interval clocks** — Lamport + DAG suffice for the spike's ordering.
 - **P04 provenance**, **P05 virtual FS + COW views**, **P06 platform**, **P07
   federation/reputation**, **P08 semantic graph**, **P09 agents**, **P10
   review-as-policy**, **P11 live database** — Tiers 1–4.
