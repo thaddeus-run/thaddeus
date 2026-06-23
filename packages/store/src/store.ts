@@ -28,7 +28,7 @@ export class AccessDenied extends Error {
 
 export interface Store {
   put(plaintext: Uint8Array, owner: Identity): Promise<Ref>;
-  get(ref: Ref, reader: Identity): Promise<Uint8Array>;
+  get(ref: Ref, reader: Identity, now?: string): Promise<Uint8Array>;
   grant(ref: Ref, grantee: PublicIdentity, by: Identity): Promise<void>;
   revoke(ref: Ref, grantee: PublicIdentity, by: Identity): Promise<void>;
   rawObject(id: string): EncryptedObject | undefined;
@@ -60,15 +60,16 @@ export class MemoryStore implements Store {
     return { id: object.id, plaintext_id: object.plaintext_id };
   }
 
-  async get(ref: Ref, reader: Identity): Promise<Uint8Array> {
+  async get(ref: Ref, reader: Identity, now?: string): Promise<Uint8Array> {
+    const nowMs = now === undefined ? Date.now() : Date.parse(now);
     return decrypt(
       this.#currentObject(ref.plaintext_id),
-      this.#contentKeyVia(ref.plaintext_id, reader)
+      this.#contentKeyVia(ref.plaintext_id, reader, nowMs)
     );
   }
 
   async grant(ref: Ref, grantee: PublicIdentity, by: Identity): Promise<void> {
-    const contentKey = this.#contentKeyVia(ref.plaintext_id, by);
+    const contentKey = this.#contentKeyVia(ref.plaintext_id, by, Date.now());
     const caps = this.#caps.get(ref.plaintext_id) ?? [];
     caps.push(
       issueCapability({
@@ -82,7 +83,7 @@ export class MemoryStore implements Store {
   }
 
   async revoke(ref: Ref, grantee: PublicIdentity, by: Identity): Promise<void> {
-    const oldKey = this.#contentKeyVia(ref.plaintext_id, by);
+    const oldKey = this.#contentKeyVia(ref.plaintext_id, by, Date.now());
     const plaintext = decrypt(this.#currentObject(ref.plaintext_id), oldKey);
 
     // Rotate: new key, re-encrypt, supersede the current object.
@@ -124,21 +125,28 @@ export class MemoryStore implements Store {
     return object !== undefined && address(object.ciphertext) === id;
   }
 
-  // Returns the capability for did within the plaintext object, if valid.
-  #capabilityFor(plaintextId: string, did: string): Capability | undefined {
-    const now = Date.now();
+  // Returns the capability for did within the plaintext object, if valid at nowMs.
+  #capabilityFor(
+    plaintextId: string,
+    did: string,
+    nowMs: number
+  ): Capability | undefined {
     return (this.#caps.get(plaintextId) ?? []).find(
       (c) =>
         c.grantee === did &&
         verifyCapability(c) &&
-        Date.parse(c.not_before) <= now
+        Date.parse(c.not_before) <= nowMs
     );
   }
 
   // Resolves the content key for who by locating and unwrapping their capability.
-  // Throws AccessDenied if who has no valid capability.
-  #contentKeyVia(plaintextId: string, who: Identity): Uint8Array {
-    const cap = this.#capabilityFor(plaintextId, who.did);
+  // Throws AccessDenied if who has no valid capability at nowMs.
+  #contentKeyVia(
+    plaintextId: string,
+    who: Identity,
+    nowMs: number
+  ): Uint8Array {
+    const cap = this.#capabilityFor(plaintextId, who.did, nowMs);
     if (cap === undefined) {
       throw new AccessDenied(who.did);
     }

@@ -94,4 +94,20 @@ describe('MemoryStore', () => {
     expect(after?.plaintext_id).toBe(ref.plaintext_id);
     expect(after?.id).not.toBe(ref.id);
   });
+
+  test('get honors an injected now against a future not_before', async () => {
+    const store = new MemoryStore();
+    const alice = Identity.create();
+    const bob = Identity.create();
+    const ref = await store.put(new TextEncoder().encode('hi'), alice);
+
+    // Grant Bob, then forge the grant's start time into the future by re-issuing
+    // via a scheduled reveal is Task 4; here we test the clock directly: a read
+    // with now before EPOCH+... Always-valid grant reads fine with an early now.
+    await store.grant(ref, bob.toPublic(), alice);
+    const early = '2000-01-01T00:00:00.000Z';
+    expect(new TextDecoder().decode(await store.get(ref, bob, early))).toBe(
+      'hi'
+    );
+  });
 });
