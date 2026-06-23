@@ -109,6 +109,15 @@ describe('malformed now timestamp', () => {
     const ref = await store.put(new TextEncoder().encode('hi'), author);
     expect(store.reveal(ref, 'not-a-date')).rejects.toBeInstanceOf(RangeError);
   });
+
+  test('scheduleReveal throws RangeError on a malformed at string', async () => {
+    const store = new MemoryStore();
+    const author = Identity.create();
+    const ref = await store.put(new TextEncoder().encode('hi'), author);
+    expect(
+      store.scheduleReveal(ref, 'not-a-date', author)
+    ).rejects.toBeInstanceOf(RangeError);
+  });
 });
 
 describe('reveal interaction with revoke', () => {

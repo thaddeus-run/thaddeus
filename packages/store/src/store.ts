@@ -133,6 +133,10 @@ export class MemoryStore implements Store {
   // the well-known public identity with not_before = at, parked in #pending.
   // Nothing is served or mirror-visible until a trigger fires (#releaseDue).
   async scheduleReveal(ref: Ref, at: string, by: Identity): Promise<void> {
+    // Validate `at` the same way get/reveal validate `now`: a malformed
+    // timestamp fails fast here instead of silently parking a reveal whose
+    // NaN not_before can never become due.
+    this.#resolveNow(at);
     const contentKey = this.#contentKeyVia(ref.plaintext_id, by, Date.now());
     const cap = issueCapability({
       object: ref.plaintext_id,
