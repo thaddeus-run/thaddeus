@@ -1,5 +1,5 @@
 import { Identity, ready } from '@thaddeus.run/identity';
-import { MemoryStore } from '@thaddeus.run/store';
+import { MemoryStore, publicIdentity } from '@thaddeus.run/store';
 import { beforeAll, describe, expect, test } from 'bun:test';
 
 // The brief's "one edit, end to end" flow. Tier 0 (identity + store) is real
@@ -39,6 +39,26 @@ describe('north-star: one edit, end to end', () => {
   test.todo('P03: the edit is recorded as a signed Op in the operation log');
   // @ts-expect-error bun-types@1.3.12 requires a fn arg, but the runtime supports label-only todo
   test.todo('P04: a signed Provenance record attaches the why to the Op');
-  // @ts-expect-error bun-types@1.3.12 requires a fn arg, but the runtime supports label-only todo
-  test.todo('P02: a scheduled reveal re-wraps the content key to public at T');
+  test('P02: a scheduled reveal re-wraps the content key to public at T', async () => {
+    const store = new MemoryStore();
+    const author = Identity.create();
+    const ref = await store.put(
+      new TextEncoder().encode('fn refresh() {}'),
+      author
+    );
+
+    const T = '2030-01-01T00:00:00.000Z';
+    await store.scheduleReveal(ref, T, author);
+
+    // Embargo: ciphertext is mirror-verifiable; the public cannot read before T.
+    expect(store.verify(ref.id)).toBe(true);
+    expect(
+      store.get(ref, publicIdentity(), '2026-06-23T00:00:00.000Z')
+    ).rejects.toThrow();
+
+    // At T the content key re-wraps to public and the world can read.
+    expect(
+      new TextDecoder().decode(await store.get(ref, publicIdentity(), T))
+    ).toBe('fn refresh() {}');
+  });
 });
