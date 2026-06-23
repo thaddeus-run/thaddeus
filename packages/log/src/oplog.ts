@@ -53,6 +53,19 @@ export class OpLog {
     );
   }
 
+  // Create or re-point a named view. A view is just a name over a head-set —
+  // not a copy of the tree.
+  view(name: string, heads: readonly string[] = []): void {
+    this.#views.set(name, [...heads]);
+  }
+
+  // Zero-copy branch: a new view whose heads start equal to fromView's heads.
+  // Copies a handful of ids, never ops — so every agent can have its own view
+  // for free (P6).
+  fork(name: string, fromView: string): void {
+    this.#views.set(name, [...this.heads(fromView)]);
+  }
+
   // A view's heads, or — with no view — the global frontier: every op that is
   // no other known op's parent (the DAG's sink nodes), deterministic given the
   // op set.

@@ -61,3 +61,25 @@ describe('OpLog materialize (LWW per path, cleartext only)', () => {
     expect(new TextDecoder().decode(await store.get(ref, author))).toBe('a2');
   });
 });
+
+describe('OpLog named views (branches dissolve)', () => {
+  test('fork is zero-copy; views diverge; an op is shared across views', async () => {
+    const store = new MemoryStore();
+    const log = new OpLog(store);
+    const author = Identity.create();
+
+    const base = await log.write('main', 'a.ts', enc('a1'), author);
+    log.fork('feature', 'main'); // copies only the head-set
+    expect(log.heads('feature')).toEqual([base.id]);
+
+    // Advancing feature does not touch main.
+    await log.write('feature', 'a.ts', enc('a2'), author);
+    expect(log.heads('main')).toEqual([base.id]);
+
+    // The base op is shared: both views materialize it at the same path,
+    // and there is no `view` field on the op influencing the projection.
+    expect('view' in base).toBe(false);
+    expect(log.materialize('main').get('a.ts')?.op.id).toBe(base.id);
+    expect(log.materialize('feature').get('a.ts')?.op.id).not.toBe(base.id);
+  });
+});
