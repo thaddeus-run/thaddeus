@@ -6,6 +6,7 @@
   "dependencies": {
     "@thaddeus.run/identity": "workspace:*",
     "@thaddeus.run/log": "workspace:*",
+    "@thaddeus.run/provenance": "workspace:*",
     "@thaddeus.run/store": "workspace:*"
   },
   "devDependencies": {
