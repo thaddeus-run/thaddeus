@@ -3,6 +3,14 @@ import type { Ref, Store } from '@thaddeus.run/store';
 
 import { type Op, signOp, verifyOp } from './op';
 
+// Two concurrent ops on the same path — neither is the other's ancestor. LWW
+// still yields a deterministic winner; content merge is deferred (spec §11).
+export interface Conflict {
+  readonly path: string;
+  readonly ops: readonly string[];
+  readonly winner: string;
+}
+
 // In-memory operation log. The source of truth is the signed-op DAG; file
 // snapshots are derived by materialize(). Spike — not durable, not concurrency
 // safe, single process.
@@ -120,6 +128,46 @@ export class OpLog {
       }
     }
     return tree;
+  }
+
+  // Record a delete: a payload:null tombstone op extending the view's heads.
+  async remove(view: string, path: string, author: Identity): Promise<Op> {
+    return this.#appendLocal(view, path, null, author);
+  }
+
+  // Surface same-path collisions among concurrent ops in a view's reachable set.
+  // Two ops conflict when they share a path and neither is the other's ancestor.
+  conflicts(view?: string): readonly Conflict[] {
+    const reachable = this.#ancestorClosure(this.heads(view));
+    const ordered = this.ops().filter((o) => reachable.has(o.id));
+    const byPath = new Map<string, Op[]>();
+    for (const op of ordered) {
+      byPath.set(op.path, [...(byPath.get(op.path) ?? []), op]);
+    }
+    const out: Conflict[] = [];
+    for (const [path, ops] of byPath) {
+      const concurrent = ops.filter((a) =>
+        ops.some((b) => a.id !== b.id && !this.#isAncestor(a.id, b.id))
+      );
+      if (concurrent.length > 1) {
+        // The LWW winner is the last in (lamport, id) order — `ordered` already
+        // sorts that way, so the max-index concurrent op wins.
+        const winner = concurrent.at(-1);
+        if (winner !== undefined) {
+          out.push({
+            path,
+            ops: concurrent.map((o) => o.id),
+            winner: winner.id,
+          });
+        }
+      }
+    }
+    return out;
+  }
+
+  // True if `ancestor` is in the ancestor-closure of `of` (or equal).
+  #isAncestor(ancestor: string, of: string): boolean {
+    return this.#ancestorClosure([of]).has(ancestor);
   }
 
   // Every op reachable from `heads` by walking parents (inclusive of heads).

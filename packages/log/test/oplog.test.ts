@@ -4,6 +4,7 @@ import { beforeAll, describe, expect, test } from 'bun:test';
 
 import { verifyOp } from '../src/op';
 import { OpLog } from '../src/oplog';
+import type { Conflict } from '../src/oplog';
 
 beforeAll(async () => {
   await ready();
@@ -95,6 +96,43 @@ describe('OpLog append (convergence)', () => {
     const author = Identity.create();
     const op = await new OpLog(store).write('main', 'a.ts', enc('x'), author);
     expect(() => log.append({ ...op, path: 'tampered.ts' })).toThrow();
+  });
+});
+
+describe('OpLog conflicts + tombstones', () => {
+  test('concurrent same-path writes are surfaced; LWW picks the winner', async () => {
+    const store = new MemoryStore();
+    const author = Identity.create();
+
+    // Two independent logs author concurrent ops on the same path (both root,
+    // no shared parent), then we converge them.
+    const l1 = new OpLog(store);
+    const x = await l1.write('main', 'a.ts', enc('x'), author);
+    const l2 = new OpLog(store);
+    const y = await l2.write('main', 'a.ts', enc('y'), author);
+
+    const log = new OpLog(store);
+    log.append(x);
+    log.append(y);
+
+    const c: readonly Conflict[] = log.conflicts();
+    expect(c).toHaveLength(1);
+    const conflict = c[0];
+    expect(conflict.path).toBe('a.ts');
+    expect([...conflict.ops].sort()).toEqual([x.id, y.id].sort());
+    // Deterministic winner = higher (lamport, id); both lamport 0 so max id.
+    const expectedWinner = x.id > y.id ? x.id : y.id;
+    expect(conflict.winner).toBe(expectedWinner);
+    expect(log.materialize().get('a.ts')?.op.id).toBe(expectedWinner);
+  });
+
+  test('remove writes a tombstone that drops the path', async () => {
+    const store = new MemoryStore();
+    const log = new OpLog(store);
+    const author = Identity.create();
+    await log.write('main', 'a.ts', enc('a1'), author);
+    await log.remove('main', 'a.ts', author);
+    expect(log.materialize('main').has('a.ts')).toBe(false);
   });
 });
 
