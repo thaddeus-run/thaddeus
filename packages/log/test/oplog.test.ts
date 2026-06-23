@@ -1,5 +1,5 @@
 import { Identity, ready } from '@thaddeus.run/identity';
-import { MemoryStore } from '@thaddeus.run/store';
+import { MemoryStore, publicIdentity } from '@thaddeus.run/store';
 import { beforeAll, describe, expect, test } from 'bun:test';
 
 import { verifyOp } from '../src/op';
@@ -134,6 +134,16 @@ describe('OpLog conflicts + tombstones', () => {
     await log.remove('main', 'a.ts', author);
     expect(log.materialize('main').has('a.ts')).toBe(false);
   });
+
+  test('a linear chain on one path is NOT a conflict', async () => {
+    const log = new OpLog(new MemoryStore());
+    const author = Identity.create();
+    await log.write('main', 'a.ts', enc('v1'), author);
+    await log.write('main', 'a.ts', enc('v2'), author);
+    await log.write('main', 'a.ts', enc('v3'), author);
+    // Sequential edits are ancestors of one another — not concurrent.
+    expect(log.conflicts('main')).toHaveLength(0);
+  });
 });
 
 describe('OpLog named views (branches dissolve)', () => {
@@ -156,6 +166,36 @@ describe('OpLog named views (branches dissolve)', () => {
     expect(log.materialize('main').get('a.ts')?.op.id).toBe(base.id);
     expect(log.materialize('feature').get('a.ts')?.op.id).not.toBe(base.id);
   });
+
+  test('a merge op (parents = both view heads) converges divergent views', async () => {
+    const log = new OpLog(new MemoryStore());
+    const author = Identity.create();
+    await log.write('main', 'a.ts', enc('a1'), author);
+    log.fork('feature', 'main');
+    const m = await log.write('main', 'm.ts', enc('m'), author);
+    const f = await log.write('feature', 'f.ts', enc('f'), author);
+
+    // "Merging" is just an op whose parents union both views' heads.
+    log.view('merged', [...log.heads('main'), ...log.heads('feature')]);
+    const merge = await log.write('merged', 'merged.ts', enc('z'), author);
+    expect([...merge.parents].sort()).toEqual([m.id, f.id].sort());
+    expect([...log.materialize('merged').keys()].sort()).toEqual([
+      'a.ts',
+      'f.ts',
+      'm.ts',
+      'merged.ts',
+    ]);
+  });
+});
+
+describe('OpLog.verify', () => {
+  test('verifies a stored op; false for an unknown id', async () => {
+    const log = new OpLog(new MemoryStore());
+    const author = Identity.create();
+    const op = await log.write('main', 'a.ts', enc('x'), author);
+    expect(log.verify(op.id)).toBe(true);
+    expect(log.verify('deadbeef')).toBe(false);
+  });
 });
 
 describe('OpLog embargo seam (P02 metadata-gating)', () => {
@@ -174,10 +214,12 @@ describe('OpLog embargo seam (P02 metadata-gating)', () => {
     // Public mirror view: opaque token only — no path/author/timing.
     const pv: PublicOp = log.publicView(op.id);
     expect(pv.kind).toBe('embargoed');
+    const sealed = pv.kind === 'embargoed' ? pv.sealed_meta : undefined;
     if (pv.kind === 'embargoed') {
       expect(pv.ordering_token.length).toBeGreaterThan(0);
       expect(JSON.stringify(pv)).not.toContain('src/auth.ts');
     }
+    expect(sealed).toBeDefined();
 
     // Public materialize (no reader) does NOT place the embargoed op...
     expect(log.materialize('main').has('src/auth.ts')).toBe(false);
@@ -192,5 +234,11 @@ describe('OpLog embargo seam (P02 metadata-gating)', () => {
     expect(await log.reveal(op.id, T)).toBe(true);
     expect(log.publicView(op.id).kind).toBe('open');
     expect(log.materialize('main').get('src/auth.ts')?.op.id).toBe(op.id);
+
+    // And the sealed metadata is now world-readable via the membrane.
+    if (sealed !== undefined) {
+      const meta = await store.get(sealed, publicIdentity(), T);
+      expect(new TextDecoder().decode(meta).length).toBeGreaterThan(0);
+    }
   });
 });

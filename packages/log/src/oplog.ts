@@ -204,7 +204,12 @@ export class OpLog {
     const out: Conflict[] = [];
     for (const [path, ops] of byPath) {
       const concurrent = ops.filter((a) =>
-        ops.some((b) => a.id !== b.id && !this.#isAncestor(a.id, b.id))
+        ops.some(
+          (b) =>
+            a.id !== b.id &&
+            !this.#isAncestor(a.id, b.id) &&
+            !this.#isAncestor(b.id, a.id)
+        )
       );
       if (concurrent.length > 1) {
         // The LWW winner is the last in (lamport, id) order — `ordered` already
@@ -220,6 +225,12 @@ export class OpLog {
       }
     }
     return out;
+  }
+
+  // Verify a stored op's signature + id integrity. False if the id is unknown.
+  verify(opId: string): boolean {
+    const op = this.#ops.get(opId);
+    return op !== undefined && verifyOp(op);
   }
 
   // The mirror's view of an op: the full op once open, else an opaque token.
