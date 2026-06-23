@@ -275,8 +275,10 @@ describe('OpLog embargo seam (P02 metadata-gating)', () => {
       threw = true;
     }
     expect(threw).toBe(true);
-    // Fail-closed: the op never entered the log, so nothing is publicly placeable.
+    // Fail-closed by construction: the op was never committed, so it is not in
+    // the log, the view was never advanced, and nothing is publicly placeable.
     expect(log.ops()).toHaveLength(0);
+    expect(log.heads('main')).toHaveLength(0);
     expect(log.materialize('main').size).toBe(0);
   });
 });

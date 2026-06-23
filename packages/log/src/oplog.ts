@@ -41,8 +41,11 @@ export class OpLog {
     this.#store = store;
   }
 
-  // Record an edit: store the bytes as a capability-gated object, then append a
-  // signed op extending `view`'s heads and advance the view to the new op.
+  // Record an edit. Build → seal → commit: the op is signed but NOT placed in
+  // the log until any embargo registration succeeds. So if #embargoOp throws —
+  // a bad timestamp, or any future fallible store op — the op never enters the
+  // log and can never be served as an open, public op. Fail-closed by
+  // construction (no rollback to get wrong).
   async write(
     view: string,
     path: string,
@@ -50,21 +53,12 @@ export class OpLog {
     author: Identity,
     opts?: { embargoUntil?: string }
   ): Promise<Op> {
-    // Validate the embargo trigger BEFORE the op is placed. Otherwise a bad
-    // timestamp (e.g. "" or "next tuesday") would throw only after #appendLocal
-    // committed the op, leaving it in the log with no embargo guard — i.e.
-    // publicly placeable. Fail before any state changes.
-    if (
-      opts?.embargoUntil !== undefined &&
-      Number.isNaN(Date.parse(opts.embargoUntil))
-    ) {
-      throw new RangeError(`invalid embargoUntil: ${opts.embargoUntil}`);
-    }
     const ref = await this.#store.put(bytes, author);
-    const op = this.#appendLocal(view, path, ref, author);
+    const op = this.#sign(view, path, ref, author);
     if (opts?.embargoUntil !== undefined) {
       await this.#embargoOp(op, opts.embargoUntil, author);
     }
+    this.#commit(view, op);
     return op;
   }
 
@@ -94,19 +88,29 @@ export class OpLog {
     }
   }
 
-  // The shared builder for write/remove: compute lamport from the view's heads,
-  // sign, store, advance the view.
+  // Build + sign an op extending `view`'s heads — no mutation, not yet placed.
+  #sign(view: string, path: string, payload: Ref | null, author: Identity): Op {
+    const parents = this.heads(view);
+    const lamport = this.#nextLamport(parents);
+    return signOp({ path, parents, lamport, payload }, author);
+  }
+
+  // Place a built op into the DAG and advance its view. The commit step that
+  // write() defers until after a successful embargo registration.
+  #commit(view: string, op: Op): void {
+    this.#ops.set(op.id, op);
+    this.#views.set(view, [op.id]);
+  }
+
+  // The shared builder for write/remove: build then immediately place.
   #appendLocal(
     view: string,
     path: string,
     payload: Ref | null,
     author: Identity
   ): Op {
-    const parents = this.heads(view);
-    const lamport = this.#nextLamport(parents);
-    const op = signOp({ path, parents, lamport, payload }, author);
-    this.#ops.set(op.id, op);
-    this.#views.set(view, [op.id]);
+    const op = this.#sign(view, path, payload, author);
+    this.#commit(view, op);
     return op;
   }
 
