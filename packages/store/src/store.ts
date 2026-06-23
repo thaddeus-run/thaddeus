@@ -98,20 +98,29 @@ export class MemoryStore implements Store {
     this.#objects.set(rotated.id, rotated);
     this.#current.set(ref.plaintext_id, rotated.id);
 
-    // Re-issue capabilities for everyone except the revoked grantee.
-    const remaining = (this.#caps.get(ref.plaintext_id) ?? []).filter(
-      (c) => c.grantee !== grantee.did
-    );
+    // Re-wrap each remaining capability (served and pending) to the new key,
+    // preserving its original start time. The revoked grantee is dropped from
+    // both sets — so revoking the public identity cancels a pending reveal.
+    const rewrap = (caps: Capability[]): Capability[] =>
+      caps
+        .filter((c) => c.grantee !== grantee.did)
+        .map((c) =>
+          issueCapability({
+            object: ref.plaintext_id,
+            contentKey: newKey,
+            grantee: PublicIdentity.fromDid(c.grantee),
+            grantedBy: by,
+            notBefore: c.not_before,
+          })
+        );
+
     this.#caps.set(
       ref.plaintext_id,
-      remaining.map((c) =>
-        issueCapability({
-          object: ref.plaintext_id,
-          contentKey: newKey,
-          grantee: PublicIdentity.fromDid(c.grantee),
-          grantedBy: by,
-        })
-      )
+      rewrap(this.#caps.get(ref.plaintext_id) ?? [])
+    );
+    this.#pending.set(
+      ref.plaintext_id,
+      rewrap(this.#pending.get(ref.plaintext_id) ?? [])
     );
   }
 

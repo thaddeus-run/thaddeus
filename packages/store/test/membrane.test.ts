@@ -66,3 +66,32 @@ describe('scheduled reveal (timestamp trigger, lazy on get)', () => {
     ).toBe('fix');
   });
 });
+
+describe('reveal interaction with revoke', () => {
+  const T = '2030-01-01T00:00:00.000Z';
+
+  test('a scheduled reveal survives a key rotation', async () => {
+    const store = new MemoryStore();
+    const author = Identity.create();
+    const bob = Identity.create();
+    const ref = await store.put(new TextEncoder().encode('fix'), author);
+    await store.scheduleReveal(ref, T, author);
+    await store.grant(ref, bob.toPublic(), author);
+    await store.revoke(ref, bob.toPublic(), author); // rotates the content key
+
+    // The pending reveal was re-keyed; at T the public reads the live object.
+    expect(
+      new TextDecoder().decode(await store.get(ref, publicIdentity(), T))
+    ).toBe('fix');
+  });
+
+  test('revoking the public identity cancels a pending reveal', async () => {
+    const store = new MemoryStore();
+    const author = Identity.create();
+    const ref = await store.put(new TextEncoder().encode('fix'), author);
+    await store.scheduleReveal(ref, T, author);
+    await store.revoke(ref, publicIdentity().toPublic(), author); // cancel
+
+    expect(store.get(ref, publicIdentity(), T)).rejects.toThrow();
+  });
+});
