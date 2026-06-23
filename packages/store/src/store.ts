@@ -6,6 +6,7 @@ import {
   unwrapKey,
   verifyCapability,
 } from './capability';
+import { publicIdentity } from './membrane';
 import {
   address,
   decrypt,
@@ -31,6 +32,9 @@ export interface Store {
   get(ref: Ref, reader: Identity, now?: string): Promise<Uint8Array>;
   grant(ref: Ref, grantee: PublicIdentity, by: Identity): Promise<void>;
   revoke(ref: Ref, grantee: PublicIdentity, by: Identity): Promise<void>;
+  scheduleReveal(ref: Ref, at: string, by: Identity): Promise<void>;
+  reveal(ref: Ref, now?: string): Promise<boolean>;
+  caps(plaintextId: string): readonly Capability[];
   rawObject(id: string): EncryptedObject | undefined;
   current(plaintextId: string): EncryptedObject | undefined;
   verify(id: string): boolean;
@@ -43,6 +47,7 @@ export class MemoryStore implements Store {
   readonly #objects: Map<string, EncryptedObject> = new Map();
   readonly #current: Map<string, string> = new Map();
   readonly #caps: Map<string, Capability[]> = new Map();
+  readonly #pending: Map<string, Capability[]> = new Map();
 
   async put(plaintext: Uint8Array, owner: Identity): Promise<Ref> {
     const contentKey = newContentKey();
@@ -109,6 +114,35 @@ export class MemoryStore implements Store {
     );
   }
 
+  // Schedule a withheld reveal: `by` (who must hold the content key) seals it to
+  // the well-known public identity with not_before = at, parked in #pending.
+  // Nothing is served or mirror-visible until a trigger fires (#releaseDue).
+  async scheduleReveal(ref: Ref, at: string, by: Identity): Promise<void> {
+    const contentKey = this.#contentKeyVia(ref.plaintext_id, by, Date.now());
+    const cap = issueCapability({
+      object: ref.plaintext_id,
+      contentKey,
+      grantee: publicIdentity().toPublic(),
+      grantedBy: by,
+      notBefore: at,
+    });
+    const pend = this.#pending.get(ref.plaintext_id) ?? [];
+    pend.push(cap);
+    this.#pending.set(ref.plaintext_id, pend);
+  }
+
+  // Manual trigger: promote due pending reveals into the served set.
+  async reveal(ref: Ref, now?: string): Promise<boolean> {
+    const nowMs = now === undefined ? Date.now() : Date.parse(now);
+    return this.#releaseDue(ref.plaintext_id, nowMs);
+  }
+
+  // The served (mirror-visible) capabilities for an object. Pending reveals are
+  // withheld and never appear here until released.
+  caps(plaintextId: string): readonly Capability[] {
+    return this.#caps.get(plaintextId) ?? [];
+  }
+
   rawObject(id: string): EncryptedObject | undefined {
     return this.#objects.get(id);
   }
@@ -123,6 +157,27 @@ export class MemoryStore implements Store {
   verify(id: string): boolean {
     const object = this.#objects.get(id);
     return object !== undefined && address(object.ciphertext) === id;
+  }
+
+  // The key-release event: move pending reveals whose not_before <= nowMs into
+  // the served #caps set. Returns true if anything was released.
+  #releaseDue(plaintextId: string, nowMs: number): boolean {
+    const pend = this.#pending.get(plaintextId);
+    if (pend === undefined || pend.length === 0) {
+      return false;
+    }
+    const due = pend.filter((c) => Date.parse(c.not_before) <= nowMs);
+    if (due.length === 0) {
+      return false;
+    }
+    this.#pending.set(
+      plaintextId,
+      pend.filter((c) => Date.parse(c.not_before) > nowMs)
+    );
+    const served = this.#caps.get(plaintextId) ?? [];
+    served.push(...due);
+    this.#caps.set(plaintextId, served);
+    return true;
   }
 
   // Returns the capability for did within the plaintext object, if valid at nowMs.
