@@ -1,3 +1,5 @@
+import { blake3 } from '@noble/hashes/blake3';
+import { bytesToHex } from '@noble/hashes/utils';
 import type { Identity } from '@thaddeus.run/identity';
 import type { Ref, Store } from '@thaddeus.run/store';
 
@@ -11,6 +13,18 @@ export interface Conflict {
   readonly winner: string;
 }
 
+// What a public mirror sees for an op. An embargoed op exposes only an opaque
+// ordering token (enough to place it in sequence, naming nothing) plus a pointer
+// to its capability-gated metadata, released at T via the membrane.
+export type PublicOp =
+  | { readonly kind: 'open'; readonly op: Op }
+  | {
+      readonly kind: 'embargoed';
+      readonly id: string;
+      readonly ordering_token: string;
+      readonly sealed_meta: Ref;
+    };
+
 // In-memory operation log. The source of truth is the signed-op DAG; file
 // snapshots are derived by materialize(). Spike — not durable, not concurrency
 // safe, single process.
@@ -18,6 +32,10 @@ export class OpLog {
   readonly #store: Store;
   readonly #ops: Map<string, Op> = new Map();
   readonly #views: Map<string, string[]> = new Map();
+  readonly #embargo: Map<
+    string,
+    { metaRef: Ref; token: string; revealed: boolean }
+  > = new Map();
 
   constructor(store: Store) {
     this.#store = store;
@@ -29,10 +47,29 @@ export class OpLog {
     view: string,
     path: string,
     bytes: Uint8Array,
-    author: Identity
+    author: Identity,
+    opts?: { embargoUntil?: string }
   ): Promise<Op> {
     const ref = await this.#store.put(bytes, author);
-    return this.#appendLocal(view, path, ref, author);
+    const op = this.#appendLocal(view, path, ref, author);
+    if (opts?.embargoUntil !== undefined) {
+      await this.#embargoOp(op, opts.embargoUntil, author);
+    }
+    return op;
+  }
+
+  // Seal an op's metadata as a second capability-gated object and schedule its
+  // reveal at T. Only an opaque token + the sealed-meta pointer go public.
+  async #embargoOp(op: Op, at: string, by: Identity): Promise<void> {
+    const meta = new TextEncoder().encode(
+      JSON.stringify({ ...op, sig: bytesToHex(op.sig) })
+    );
+    const metaRef = await this.#store.put(meta, by);
+    await this.#store.scheduleReveal(metaRef, at, by);
+    const token = bytesToHex(
+      blake3(new TextEncoder().encode(`token:${op.id}`))
+    );
+    this.#embargo.set(op.id, { metaRef, token, revealed: false });
   }
 
   // Ingest a signed op from a peer — the convergence entry point. Verifies the
@@ -116,9 +153,14 @@ export class OpLog {
   // Project the log to a path → { ref, op } tree by LWW over the ancestor-
   // closure of the view's heads. Cleartext metadata only — the map holds Refs,
   // never plaintext, so it cannot leak a payload; read content via store.get.
-  materialize(view?: string): Map<string, { ref: Ref | null; op: Op }> {
+  materialize(
+    view?: string,
+    as?: Identity
+  ): Map<string, { ref: Ref | null; op: Op }> {
     const reachable = this.#ancestorClosure(this.heads(view));
-    const ordered = this.ops().filter((o) => reachable.has(o.id));
+    const ordered = this.ops().filter(
+      (o) => reachable.has(o.id) && this.#placeable(o, as)
+    );
     const tree = new Map<string, { ref: Ref | null; op: Op }>();
     for (const op of ordered) {
       if (op.payload === null) {
@@ -128,6 +170,21 @@ export class OpLog {
       }
     }
     return tree;
+  }
+
+  // An op is placeable if it is not embargoed/unrevealed, or if `as` holds a
+  // served capability for its sealed metadata (checked synchronously via caps).
+  #placeable(op: Op, as?: Identity): boolean {
+    const e = this.#embargo.get(op.id);
+    if (e === undefined || e.revealed) {
+      return true;
+    }
+    if (as === undefined) {
+      return false;
+    }
+    return this.#store
+      .caps(e.metaRef.plaintext_id)
+      .some((c) => c.grantee === as.did);
   }
 
   // Record a delete: a payload:null tombstone op extending the view's heads.
@@ -163,6 +220,38 @@ export class OpLog {
       }
     }
     return out;
+  }
+
+  // The mirror's view of an op: the full op once open, else an opaque token.
+  publicView(opId: string): PublicOp {
+    const op = this.#ops.get(opId);
+    if (op === undefined) {
+      throw new Error(`unknown op ${opId}`);
+    }
+    const e = this.#embargo.get(opId);
+    if (e === undefined || e.revealed) {
+      return { kind: 'open', op };
+    }
+    return {
+      kind: 'embargoed',
+      id: op.id,
+      ordering_token: e.token,
+      sealed_meta: e.metaRef,
+    };
+  }
+
+  // Fire the membrane key-release for an embargoed op at/after T. Returns true
+  // if the metadata was released — after which public materialize places the op.
+  async reveal(opId: string, now?: string): Promise<boolean> {
+    const e = this.#embargo.get(opId);
+    if (e === undefined) {
+      return false;
+    }
+    const released = await this.#store.reveal(e.metaRef, now);
+    if (released) {
+      e.revealed = true;
+    }
+    return released;
   }
 
   // True if `ancestor` is in the ancestor-closure of `of` (or equal).

@@ -4,7 +4,7 @@ import { beforeAll, describe, expect, test } from 'bun:test';
 
 import { verifyOp } from '../src/op';
 import { OpLog } from '../src/oplog';
-import type { Conflict } from '../src/oplog';
+import type { Conflict, PublicOp } from '../src/oplog';
 
 beforeAll(async () => {
   await ready();
@@ -155,5 +155,42 @@ describe('OpLog named views (branches dissolve)', () => {
     expect('view' in base).toBe(false);
     expect(log.materialize('main').get('a.ts')?.op.id).toBe(base.id);
     expect(log.materialize('feature').get('a.ts')?.op.id).not.toBe(base.id);
+  });
+});
+
+describe('OpLog embargo seam (P02 metadata-gating)', () => {
+  const T = '2030-01-01T00:00:00.000Z';
+  const beforeT = '2026-06-23T00:00:00.000Z';
+
+  test('public sees only an opaque token; reveal at T places the op', async () => {
+    const store = new MemoryStore();
+    const log = new OpLog(store);
+    const maintainer = Identity.create();
+
+    const op = await log.write('main', 'src/auth.ts', enc('fix'), maintainer, {
+      embargoUntil: T,
+    });
+
+    // Public mirror view: opaque token only — no path/author/timing.
+    const pv: PublicOp = log.publicView(op.id);
+    expect(pv.kind).toBe('embargoed');
+    if (pv.kind === 'embargoed') {
+      expect(pv.ordering_token.length).toBeGreaterThan(0);
+      expect(JSON.stringify(pv)).not.toContain('src/auth.ts');
+    }
+
+    // Public materialize (no reader) does NOT place the embargoed op...
+    expect(log.materialize('main').has('src/auth.ts')).toBe(false);
+    // ...but the maintainer, who holds the metadata cap, does see it placed.
+    expect(log.materialize('main', maintainer).has('src/auth.ts')).toBe(true);
+
+    // Before T the sealed metadata is unreadable by the public reveal trigger.
+    expect(await log.reveal(op.id, beforeT)).toBe(false);
+    expect(log.materialize('main').has('src/auth.ts')).toBe(false);
+
+    // At T the key-release fires; the op lands publicly.
+    expect(await log.reveal(op.id, T)).toBe(true);
+    expect(log.publicView(op.id).kind).toBe('open');
+    expect(log.materialize('main').get('src/auth.ts')?.op.id).toBe(op.id);
   });
 });
