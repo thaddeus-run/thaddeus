@@ -24,6 +24,11 @@ export interface Match {
 // filesystem and no global registry, so a monotonic integer suffices.
 let workspaceSeq = 0;
 
+// Escape a literal string so it can be used as a RegExp source.
+function escapeRegExp(s: string): string {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
 // A copy-on-write working copy over a P03 op-log. Reads project a private,
 // pinned forked view; edits stage in an in-memory overlay; commit folds the
 // overlay into signed ops on that view. Spike — in-memory, single process, not
@@ -138,6 +143,33 @@ export class Workspace {
     }
     this.#overlay.clear();
     return ops;
+  }
+
+  // Lines matching `pattern` across every readable path: base objects the reader
+  // can decrypt plus staged overlay writes (as plaintext). Objects that cannot
+  // be decrypted are silently skipped (read() returns null). Deterministic order
+  // (by path via list(), then line). Linear scan, no index — a spike.
+  async grep(pattern: string | RegExp): Promise<readonly Match[]> {
+    // Build a non-global matcher so per-line test() carries no lastIndex state.
+    const re =
+      typeof pattern === 'string'
+        ? new RegExp(escapeRegExp(pattern))
+        : new RegExp(pattern.source, pattern.flags.replace(/[gy]/g, ''));
+    const matches: Match[] = [];
+    for (const path of await this.list()) {
+      const bytes = await this.read(path);
+      if (bytes === null) {
+        continue; // undecryptable or absent — skip, never error
+      }
+      const lines = new TextDecoder().decode(bytes).split('\n');
+      for (let i = 0; i < lines.length; i++) {
+        const text = lines[i];
+        if (text !== undefined && re.test(text)) {
+          matches.push({ path, line: i + 1, text });
+        }
+      }
+    }
+    return matches;
   }
 
   // Uncommitted edits vs the base, in deterministic path order.
