@@ -84,6 +84,12 @@ All notable changes to Thaddeus. Format follows
   boundary) rather than piecemeal per package. (Provenance `verify` is
   signature-checked on read, so a mutated record renders `unverified` rather
   than silently trusted.)
+- **Throughput envelope at scale (P06).** The brief's platform numbers —
+  code.store's ~9M repos/30d, ~15K repos/min for 3h, zero downtime on an
+  in-memory, horizontally-scaled, API-first engine — are an existence proof to
+  _reproduce_, not load the spike generates or tests. P06 builds the API _shape_
+  that envelope proves (one-call `createRepo`, bare-push scope creation);
+  matching the load is a real "do it great" target, deferred.
 
 ### Scope-cut — planned for a later pillar/release (no open unknowns)
 
@@ -102,6 +108,20 @@ All notable changes to Thaddeus. Format follows
 - **`sync()` of the pinned base (P05).** A workspace's base does not advance to
   absorb newer source-view heads; the lifecycle this release is open → edit →
   commit → discard.
+- **Discoverability-as-query (P06→P03/P08/P11).** Date-range history
+  (`log --since/--until`), release-to-release `diff`, and `next <tag>` need a
+  wall-clock timestamp on `Op` (today it carries only a Lamport clock) or the
+  semantic graph of P08. The query _surface_ is platform/live-DB territory; the
+  missing field is a P03 change. Deferred until one of those lands.
+- **Typed Release objects (P06).** A signed
+  `Release { tag, at, signed_by, commits, artifacts }` record and its rendered
+  page — a clean follow-on slice. Landing-as-policy already delivers "a release
+  is a policy event" in miniature; the typed record is deferred.
+- **Mirror / peer transport & federation (P06→P07).** This release asserts the
+  _mirror property_ — a landed op is ciphertext a mirror can serve via
+  `OpLog.publicView` — but ships no network transport, peer pull/push, or
+  instance federation. Serving views/ops between instances is
+  platform/federation territory, deferred.
 - **3-way content merge (P03/P05).** Concurrent same-path edits resolve by LWW
   and surface via `OpLog.conflicts()`; the FS adds no content merge.
 - **`mv` / rename (P05→P08).** Path-level move is `rm` + `write`; semantic
