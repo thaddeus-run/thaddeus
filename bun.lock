@@ -115,6 +115,21 @@
         "@types/bun": "catalog:",
       },
     },
+    "packages/fs": {
+      "name": "@thaddeus.run/fs",
+      "version": "0.0.0",
+      "dependencies": {
+        "@thaddeus.run/store": "workspace:*",
+      },
+      "devDependencies": {
+        "@thaddeus.run/identity": "workspace:*",
+        "@thaddeus.run/log": "workspace:*",
+        "@types/bun": "catalog:",
+        "@typescript/native-preview": "catalog:",
+        "tsdown": "catalog:",
+        "typescript": "catalog:",
+      },
+    },
     "packages/identity": {
       "name": "@thaddeus.run/identity",
       "version": "0.0.0",
@@ -570,6 +585,8 @@
     "@thaddeus.run/example-oplog": ["@thaddeus.run/example-oplog@workspace:examples/oplog"],
 
     "@thaddeus.run/example-provenance": ["@thaddeus.run/example-provenance@workspace:examples/provenance"],
+
+    "@thaddeus.run/fs": ["@thaddeus.run/fs@workspace:packages/fs"],
 
     "@thaddeus.run/identity": ["@thaddeus.run/identity@workspace:packages/identity"],
 

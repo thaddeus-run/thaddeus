@@ -1,0 +1,55 @@
+{
+  "name": "@thaddeus.run/fs",
+  "version": "0.0.0",
+  "description": "A virtual, API-first filesystem — a copy-on-write Workspace over the operation log, with pinned forked-view reads, overlay staging, commit, and decryption-bounded grep. Pillar 05.",
+  "keywords": [
+    "filesystem",
+    "operation-log",
+    "strata",
+    "substrate",
+    "workspace"
+  ],
+  "homepage": "https://thaddeus.run",
+  "bugs": {
+    "url": "https://github.com/thaddeus-run/thaddeus/issues"
+  },
+  "license": "Apache-2.0",
+  "author": {
+    "name": "thaddeus.run",
+    "url": "https://thaddeus.run"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/thaddeus-run/thaddeus.git",
+    "directory": "packages/fs"
+  },
+  "files": [
+    "dist",
+    "LICENSE.md",
+    "README.md"
+  ],
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "scripts": {
+    "prepublishOnly": "moon run fs:prepublish"
+  },
+  "dependencies": {
+    "@thaddeus.run/store": "workspace:*"
+  },
+  "devDependencies": {
+    "@thaddeus.run/identity": "workspace:*",
+    "@thaddeus.run/log": "workspace:*",
+    "@types/bun": "catalog:",
+    "@typescript/native-preview": "catalog:",
+    "tsdown": "catalog:",
+    "typescript": "catalog:"
+  }
+}
