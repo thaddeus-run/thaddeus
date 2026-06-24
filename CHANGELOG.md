@@ -41,6 +41,16 @@ All notable changes to Thaddeus. Format follows
   working copy in O(1). `read`/`grep` are **decryption-bounded** — you can only
   search what your identity can decrypt. The north-star's seeded edit now
   originates in a `Workspace` (5 pass / 0 todo).
+- `@thaddeus.run/platform` — the platform (Pillar 06): named repos (scopes) with
+  one-call `createRepo` and bare-push `open` (auto-vivify), each owning its own
+  op-log + store so the `Workspace` opens over it unchanged. `Repo.land` is
+  **landing-as-policy**: it dry-runs a merge on a throwaway view, runs a
+  pluggable `LandPolicy`, and re-points the shared view **only on allow**
+  (fail-closed). Ships `allowAll`, `blockOnConflict` (default), and
+  `requireVerifiedProvenance` — the seam Pillar 10 fills. The north-star's
+  seeded edit now lands into `main` under policy and is asserted mirror-servable
+  (`store.verify` + `log.publicView`), closing the spine's `policy` and `mirror`
+  stages (5 pass / 0 todo).
 
 ### Changed
 
@@ -102,9 +112,11 @@ All notable changes to Thaddeus. Format follows
 - **Vector/interval clocks** — Lamport + DAG suffice for the spike's ordering.
 - **P06 platform**, **P07 federation/reputation**, **P08 semantic graph**, **P09
   agents**, **P10 review-as-policy**, **P11 live database** — Tiers 2–4.
-- **Landing / merge onto a shared view (P05→P06/P10).** `commit` lands ops on
-  the workspace's private view; re-pointing a shared view like `main` to include
-  them (and the conflict resolution that implies) is platform/review territory.
+- **Rich review/reputation merge policy (P06→P10).** P06 ships landing as a
+  re-point gated by a pluggable `LandPolicy` (`allowAll`, `blockOnConflict`,
+  `requireVerifiedProvenance`); the semantic/behavioral-diff, test/proof, and
+  reputation-tier gates — and the standing human veto — are Pillar 10 over the
+  same `LandProposal → LandDecision` seam.
 - **`sync()` of the pinned base (P05).** A workspace's base does not advance to
   absorb newer source-view heads; the lifecycle this release is open → edit →
   commit → discard.
