@@ -145,6 +145,22 @@ export class Workspace {
     return ops;
   }
 
+  // Branch this workspace: a fresh private view forked at this workspace's
+  // current (committed) heads, plus a shallow copy of the overlay so in-flight
+  // staged edits carry over. Staged entries are immutable, so the shallow copy
+  // is safe. O(head-set + overlay) — never copies the tree.
+  fork(opts?: { reader?: Identity; name?: string }): Workspace {
+    const view = opts?.name ?? `ws/${this.#view}/${workspaceSeq++}`;
+    this.#log.fork(view, this.#view);
+    return new Workspace(
+      this.#log,
+      this.#store,
+      opts?.reader ?? this.#reader,
+      view,
+      new Map(this.#overlay)
+    );
+  }
+
   // Lines matching `pattern` across every readable path: base objects the reader
   // can decrypt plus staged overlay writes (as plaintext). Objects that cannot
   // be decrypted are silently skipped (read() returns null). Deterministic order
