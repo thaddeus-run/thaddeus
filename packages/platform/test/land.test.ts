@@ -117,6 +117,21 @@ describe('Repo.land — landing as policy', () => {
       expect(repo.log.publicView(op.id).kind).toBe('open');
     }
   });
+
+  test('an unknown/empty from view lands nothing and reports it (no false success)', async () => {
+    const repo = new Platform().createRepo('acme/typo');
+    const dev = Identity.create();
+    const before = repo.heads('main');
+
+    const result = await repo.land({
+      from: 'feat/does-not-exist',
+      author: dev,
+    });
+
+    expect(result.landed).toBe(false);
+    expect(result.reason).toContain('feat/does-not-exist');
+    expect(repo.heads('main')).toEqual(before); // main untouched
+  });
 });
 
 // Read a path from main as `who`, returning null on absent/undecryptable.

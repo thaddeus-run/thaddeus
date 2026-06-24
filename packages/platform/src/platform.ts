@@ -94,6 +94,20 @@ export class Repo {
       .ops()
       .filter((o) => fromClosure.has(o.id) && !intoClosure.has(o.id));
 
+    // Nothing to land: the source view is unknown, empty, or already merged.
+    // Report it rather than re-pointing `into` to an identical head-set and
+    // claiming success — a typo'd `from`, or a land() before commit(), would
+    // otherwise return landed:true with no diagnostic.
+    if (incomingOps.length === 0) {
+      return {
+        landed: false,
+        into,
+        heads: [...intoHeads],
+        conflicts,
+        reason: `no incoming ops: source view "${opts.from}" is empty, unknown, or already landed`,
+      };
+    }
+
     const decision = await policy({
       into,
       intoHeads,
