@@ -72,4 +72,30 @@ describe('Workspace — open, edit overlay, reads', () => {
     expect(await ws.list('src/')).toEqual(['src/a.rs', 'src/b.rs']);
     expect(await ws.list()).toEqual(['docs/x.md', 'src/a.rs', 'src/b.rs']);
   });
+
+  test('write copies caller bytes: mutating the source buffer after write does not change staged content', async () => {
+    const store = new MemoryStore();
+    const log = new OpLog(store);
+    const author = Identity.create();
+    const ws = Workspace.open(log, store, { source: 'main', reader: author });
+
+    const buf = enc('original');
+    ws.write('a.rs', buf);
+    buf.fill(0); // caller reuses/zeroes its buffer after handing it off
+    expect(dec((await ws.read('a.rs'))!)).toBe('original');
+  });
+
+  test('a fork is byte-isolated when the caller mutates a buffer it wrote pre-fork', async () => {
+    const store = new MemoryStore();
+    const log = new OpLog(store);
+    const author = Identity.create();
+    const ws = Workspace.open(log, store, { source: 'main', reader: author });
+
+    const buf = enc('shared');
+    ws.write('a.rs', buf);
+    const child = ws.fork();
+    buf.fill(0);
+    expect(dec((await ws.read('a.rs'))!)).toBe('shared');
+    expect(dec((await child.read('a.rs'))!)).toBe('shared');
+  });
 });

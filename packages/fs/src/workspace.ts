@@ -112,9 +112,14 @@ export class Workspace {
     return [...paths].filter((p) => p.startsWith(prefix)).sort();
   }
 
-  // Stage a write into the overlay. Synchronous, isolated, unsigned.
+  // Stage a write into the overlay. Synchronous, isolated, unsigned. Copies the
+  // caller's bytes so the overlay OWNS them: a caller that reuses or mutates its
+  // buffer after write() cannot alter staged content (nor a fork sharing the
+  // entry). The overlay is the one place that retains raw plaintext by reference
+  // — everywhere else store.put encrypts caller bytes into a fresh buffer on the
+  // way in, so this is where that ownership has to be established.
   write(path: string, bytes: Uint8Array): void {
-    this.#overlay.set(path, { kind: 'write', bytes });
+    this.#overlay.set(path, { kind: 'write', bytes: new Uint8Array(bytes) });
   }
 
   // Stage a tombstone into the overlay. read/list/grep treat the path as absent.
@@ -126,8 +131,11 @@ export class Workspace {
   // order: each staged write → log.write, each tombstone → log.remove. Each
   // log.write/log.remove advances the private view's heads, so a batch chains
   // correctly. Ops parent at the workspace's pinned heads (never on concurrent
-  // peer ops). Returns the ops created, then clears the overlay; an empty
-  // overlay returns []. This is the only path that signs or touches the store.
+  // peer ops). Each path is cleared from the overlay the instant its op succeeds,
+  // so if a later op throws (e.g. a fallible store backend) the already-landed
+  // paths are gone and only the uncommitted ones remain staged — a retry never
+  // re-commits an already-landed path. Returns the ops created; an empty overlay
+  // returns []. This is the only path that signs or touches the store.
   async commit(author: Identity): Promise<readonly Op[]> {
     const ops: Op[] = [];
     for (const path of [...this.#overlay.keys()].sort()) {
@@ -140,8 +148,8 @@ export class Workspace {
       } else {
         ops.push(await this.#log.remove(this.#view, path, author));
       }
+      this.#overlay.delete(path);
     }
-    this.#overlay.clear();
     return ops;
   }
 
