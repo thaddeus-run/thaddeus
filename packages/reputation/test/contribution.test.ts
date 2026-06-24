@@ -54,7 +54,7 @@ describe('Contribution — sign & verify', () => {
     const other = Identity.create();
     const c = signContribution(FIELDS, subject, host);
     // Re-pointing `subject` to another did invalidates subj_sig (host_sig also
-    // covers `subject`, so attested breaks too — both cover the full core).
+    // covers subject (its six-field core includes it), so attested breaks too).
     expect(verifyContribution({ ...c, subject: other.did }).authentic).toBe(
       false
     );
