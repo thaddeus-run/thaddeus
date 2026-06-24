@@ -1,15 +1,13 @@
 {
-  "name": "@thaddeus.run/integration",
+  "name": "@thaddeus.run/example-platform",
   "version": "0.0.0",
   "private": true,
   "type": "module",
   "dependencies": {
     "@thaddeus.run/fs": "workspace:*",
     "@thaddeus.run/identity": "workspace:*",
-    "@thaddeus.run/log": "workspace:*",
     "@thaddeus.run/platform": "workspace:*",
-    "@thaddeus.run/provenance": "workspace:*",
-    "@thaddeus.run/store": "workspace:*"
+    "@thaddeus.run/provenance": "workspace:*"
   },
   "devDependencies": {
     "@types/bun": "catalog:"

@@ -89,6 +89,19 @@
         "@types/bun": "catalog:",
       },
     },
+    "examples/platform": {
+      "name": "@thaddeus.run/example-platform",
+      "version": "0.0.0",
+      "dependencies": {
+        "@thaddeus.run/fs": "workspace:*",
+        "@thaddeus.run/identity": "workspace:*",
+        "@thaddeus.run/platform": "workspace:*",
+        "@thaddeus.run/provenance": "workspace:*",
+      },
+      "devDependencies": {
+        "@types/bun": "catalog:",
+      },
+    },
     "examples/provenance": {
       "name": "@thaddeus.run/example-provenance",
       "version": "0.0.0",
@@ -122,6 +135,7 @@
         "@thaddeus.run/fs": "workspace:*",
         "@thaddeus.run/identity": "workspace:*",
         "@thaddeus.run/log": "workspace:*",
+        "@thaddeus.run/platform": "workspace:*",
         "@thaddeus.run/provenance": "workspace:*",
         "@thaddeus.run/store": "workspace:*",
       },
@@ -168,6 +182,23 @@
         "@thaddeus.run/store": "workspace:*",
       },
       "devDependencies": {
+        "@types/bun": "catalog:",
+        "@typescript/native-preview": "catalog:",
+        "tsdown": "catalog:",
+        "typescript": "catalog:",
+      },
+    },
+    "packages/platform": {
+      "name": "@thaddeus.run/platform",
+      "version": "0.0.0",
+      "dependencies": {
+        "@thaddeus.run/log": "workspace:*",
+        "@thaddeus.run/store": "workspace:*",
+      },
+      "devDependencies": {
+        "@thaddeus.run/fs": "workspace:*",
+        "@thaddeus.run/identity": "workspace:*",
+        "@thaddeus.run/provenance": "workspace:*",
         "@types/bun": "catalog:",
         "@typescript/native-preview": "catalog:",
         "tsdown": "catalog:",
@@ -598,6 +629,8 @@
 
     "@thaddeus.run/example-oplog": ["@thaddeus.run/example-oplog@workspace:examples/oplog"],
 
+    "@thaddeus.run/example-platform": ["@thaddeus.run/example-platform@workspace:examples/platform"],
+
     "@thaddeus.run/example-provenance": ["@thaddeus.run/example-provenance@workspace:examples/provenance"],
 
     "@thaddeus.run/example-workspace": ["@thaddeus.run/example-workspace@workspace:examples/workspace"],
@@ -611,6 +644,8 @@
     "@thaddeus.run/landing": ["@thaddeus.run/landing@workspace:apps/landing"],
 
     "@thaddeus.run/log": ["@thaddeus.run/log@workspace:packages/log"],
+
+    "@thaddeus.run/platform": ["@thaddeus.run/platform@workspace:packages/platform"],
 
     "@thaddeus.run/provenance": ["@thaddeus.run/provenance@workspace:packages/provenance"],
 

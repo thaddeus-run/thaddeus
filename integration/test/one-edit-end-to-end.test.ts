@@ -1,6 +1,7 @@
 import { Workspace } from '@thaddeus.run/fs';
 import { Identity, ready } from '@thaddeus.run/identity';
 import { OpLog } from '@thaddeus.run/log';
+import { blockOnConflict, Platform } from '@thaddeus.run/platform';
 import { ProvenanceLog } from '@thaddeus.run/provenance';
 import { MemoryStore, publicIdentity } from '@thaddeus.run/store';
 import { beforeAll, describe, expect, test } from 'bun:test';
@@ -13,23 +14,39 @@ beforeAll(async () => {
 });
 
 describe('north-star: one edit, end to end', () => {
-  test('P05/P01: an edit originates in a Workspace → stored as ciphertext a mirror can verify', async () => {
-    const store = new MemoryStore();
-    const log = new OpLog(store);
+  test('P05/P06/P01: an edit originates in a Workspace, lands into main under policy → a mirror serves it', async () => {
+    const repo = new Platform().createRepo('acme/web');
     const author = Identity.create();
 
-    // The edit enters Strata through the virtual filesystem, not a hand-built op:
-    // stage a write in a copy-on-write workspace, then commit it into the log.
-    const ws = Workspace.open(log, store, { source: 'main', reader: author });
+    // The edit enters Strata through the virtual filesystem on a NAMED, landable
+    // branch: stage a write in a copy-on-write workspace, then commit it.
+    const ws = Workspace.open(repo.log, repo.store, {
+      source: 'main',
+      reader: author,
+      name: 'feat/refresh',
+    });
     ws.write('src/auth.rs', new TextEncoder().encode('fn refresh() {}'));
     const [op] = await ws.commit(author);
 
-    // The commit produced a signed op whose payload is mirror-verifiable ciphertext.
+    // The policy stage: land the branch into main under blockOnConflict.
+    const result = await repo.land({
+      from: 'feat/refresh',
+      into: 'main',
+      author,
+      policy: blockOnConflict,
+    });
+    expect(result.landed).toBe(true);
+    expect(repo.log.materialize('main').has('src/auth.rs')).toBe(true);
+
+    // The mirror stage: the landed op's payload is mirror-verifiable ciphertext,
+    // and the op is fully servable to a public mirror (not embargoed).
     expect(op).toBeDefined();
     expect(op?.payload).not.toBeNull();
     if (op?.payload != null) {
-      expect(store.verify(op.payload.id)).toBe(true);
-      expect(store.rawObject(op.payload.id)).toBeDefined();
+      expect(repo.store.verify(op.payload.id)).toBe(true);
+    }
+    if (op != null) {
+      expect(repo.log.publicView(op.id).kind).toBe('open');
     }
   });
 
