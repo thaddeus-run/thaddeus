@@ -89,12 +89,26 @@
         "@types/bun": "catalog:",
       },
     },
+    "examples/provenance": {
+      "name": "@thaddeus.run/example-provenance",
+      "version": "0.0.0",
+      "dependencies": {
+        "@thaddeus.run/identity": "workspace:*",
+        "@thaddeus.run/log": "workspace:*",
+        "@thaddeus.run/provenance": "workspace:*",
+        "@thaddeus.run/store": "workspace:*",
+      },
+      "devDependencies": {
+        "@types/bun": "catalog:",
+      },
+    },
     "integration": {
       "name": "@thaddeus.run/integration",
       "version": "0.0.0",
       "dependencies": {
         "@thaddeus.run/identity": "workspace:*",
         "@thaddeus.run/log": "workspace:*",
+        "@thaddeus.run/provenance": "workspace:*",
         "@thaddeus.run/store": "workspace:*",
       },
       "devDependencies": {
@@ -125,6 +139,22 @@
         "@thaddeus.run/store": "workspace:*",
       },
       "devDependencies": {
+        "@types/bun": "catalog:",
+        "@typescript/native-preview": "catalog:",
+        "tsdown": "catalog:",
+        "typescript": "catalog:",
+      },
+    },
+    "packages/provenance": {
+      "name": "@thaddeus.run/provenance",
+      "version": "0.0.0",
+      "dependencies": {
+        "@noble/hashes": "catalog:",
+        "@thaddeus.run/identity": "workspace:*",
+        "@thaddeus.run/store": "workspace:*",
+      },
+      "devDependencies": {
+        "@thaddeus.run/log": "workspace:*",
         "@types/bun": "catalog:",
         "@typescript/native-preview": "catalog:",
         "tsdown": "catalog:",
@@ -539,6 +569,8 @@
 
     "@thaddeus.run/example-oplog": ["@thaddeus.run/example-oplog@workspace:examples/oplog"],
 
+    "@thaddeus.run/example-provenance": ["@thaddeus.run/example-provenance@workspace:examples/provenance"],
+
     "@thaddeus.run/identity": ["@thaddeus.run/identity@workspace:packages/identity"],
 
     "@thaddeus.run/integration": ["@thaddeus.run/integration@workspace:integration"],
@@ -546,6 +578,8 @@
     "@thaddeus.run/landing": ["@thaddeus.run/landing@workspace:apps/landing"],
 
     "@thaddeus.run/log": ["@thaddeus.run/log@workspace:packages/log"],
+
+    "@thaddeus.run/provenance": ["@thaddeus.run/provenance@workspace:packages/provenance"],
 
     "@thaddeus.run/store": ["@thaddeus.run/store@workspace:packages/store"],
 

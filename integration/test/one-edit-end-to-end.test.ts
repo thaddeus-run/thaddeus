@@ -1,5 +1,6 @@
 import { Identity, ready } from '@thaddeus.run/identity';
 import { OpLog } from '@thaddeus.run/log';
+import { ProvenanceLog } from '@thaddeus.run/provenance';
 import { MemoryStore, publicIdentity } from '@thaddeus.run/store';
 import { beforeAll, describe, expect, test } from 'bun:test';
 
@@ -61,8 +62,43 @@ describe('north-star: one edit, end to end', () => {
       ).toBe('fn refresh() {}');
     }
   });
-  // @ts-expect-error bun-types@1.3.12 requires a fn arg, but the runtime supports label-only todo
-  test.todo('P04: a signed Provenance record attaches the why to the Op');
+  test('P04: a signed Provenance record attaches the why to the Op', async () => {
+    const store = new MemoryStore();
+    const log = new OpLog(store);
+    const author = Identity.create();
+    const prov = new ProvenanceLog(store);
+
+    const op = await log.write(
+      'main',
+      'src/auth.rs',
+      new TextEncoder().encode('fn refresh() {}'),
+      author
+    );
+
+    const why = await prov.record(
+      op,
+      {
+        intent: 'fix race in token refresh',
+        reasoning: 'refresh() re-entered before lock; added a mutex',
+        actorKind: 'agent:claude-code@1.2',
+        task: 'STRATA-417',
+      },
+      author
+    );
+
+    // The why is bound to the op's id and verifies.
+    expect(why.op).toBe(op.id);
+    expect(prov.status(why)).toBe('verified');
+    expect(prov.forOp(op.id).map((p) => p.intent)).toContain(
+      'fix race in token refresh'
+    );
+
+    // The trust rule: tampering any signed field renders it unverified.
+    expect(prov.status({ ...why, reasoning: 'a plausible lie' })).toBe(
+      'unverified'
+    );
+    expect(prov.status({ ...why, actor_kind: 'human' })).toBe('unverified');
+  });
   test('P02: a scheduled reveal re-wraps the content key to public at T', async () => {
     const store = new MemoryStore();
     const author = Identity.create();
