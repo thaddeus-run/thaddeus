@@ -64,6 +64,31 @@ describe('Provenance record', () => {
     expect(verifyProvenance(p)).toBe(true);
   });
 
+  test('prompt and prompt_ref are a paired invariant (both or neither)', () => {
+    const actor = Identity.create();
+    // Signing a half-set pair fails fast — a hash with no pointer, or a pointer
+    // with no integrity binding, is not a canonical record.
+    expect(() =>
+      signProvenance(
+        { ...fields('opid'), prompt_ref: 'deadbeef', prompt: null },
+        actor
+      )
+    ).toThrow();
+    expect(() =>
+      signProvenance(
+        {
+          ...fields('opid'),
+          prompt_ref: null,
+          prompt: { id: 'x', plaintext_id: 'y' },
+        },
+        actor
+      )
+    ).toThrow();
+    // And a record mutated into a half-set pair fails closed in verify.
+    const p = signProvenance(fields('opid'), actor);
+    expect(verifyProvenance({ ...p, prompt_ref: 'deadbeef' })).toBe(false);
+  });
+
   test('canonical bytes are domain-tagged (cross-protocol separation)', () => {
     // The domain tag is the first element of the signed tuple, so a provenance
     // signature can never be confused with an op signature (thaddeus.log.op.v1)

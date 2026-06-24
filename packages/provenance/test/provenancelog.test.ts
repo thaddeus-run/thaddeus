@@ -185,7 +185,7 @@ describe('ProvenanceLog', () => {
     }
   });
 
-  test('append is idempotent on (op, actor, sig); forOp order is deterministic', async () => {
+  test('append is idempotent on full record content; forOp order is deterministic', async () => {
     const store = new MemoryStore();
     const actor = Identity.create();
     const op = await anOp(store, actor);

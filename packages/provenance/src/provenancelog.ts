@@ -44,8 +44,14 @@ export class ProvenanceLog {
     let prompt: Ref | null = null;
     let promptRef: string | null = null;
     if (fields.prompt !== undefined) {
-      prompt = await this.#store.put(fields.prompt, actor);
-      promptRef = bytesToHex(blake3(fields.prompt));
+      // Snapshot the caller-owned bytes once: both the stored object and the
+      // signed hash must derive from the SAME immutable data. Hashing
+      // `fields.prompt` separately after the await would let a caller mutate the
+      // buffer between store.put and blake3, diverging prompt_ref from what was
+      // actually stored and silently breaking the hash binding.
+      const bytes = fields.prompt.slice();
+      promptRef = bytesToHex(blake3(bytes));
+      prompt = await this.#store.put(bytes, actor);
     }
     const p = signProvenance(
       {

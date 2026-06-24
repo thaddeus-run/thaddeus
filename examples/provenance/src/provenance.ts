@@ -57,9 +57,10 @@ console.log(
 console.log(`  intent  ${why.intent}        task  ${why.task}`);
 
 // Act 2 — the trust rule: tamper → unverified (and the record is KEPT).
-// The forged record replaces the reasoning AND clears the sig (all-zero bytes)
-// to avoid dedup on (actor, sig) — the point is that the *content* is wrong
-// and therefore the sig no longer verifies, not that the sig bytes are reused.
+// Dedup is content-keyed, so a forged record with different reasoning is a
+// distinct entry kept alongside the genuine one. The all-zero sig just makes it
+// plainly unverifiable; the point is that the *content* is wrong, so the
+// signature no longer verifies and the forged record renders unverified.
 const forged = {
   ...why,
   reasoning: 'a plausible lie that was never signed',

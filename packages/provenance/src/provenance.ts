@@ -72,6 +72,16 @@ function assertCanonical(fields: ProvenanceFields, actor: string): void {
       'provenance.prompt must have string id and plaintext_id'
     );
   }
+  // The prompt hash and the prompt pointer are a pair: prompt_ref binds the
+  // bytes that `prompt` (the capability-gated Ref) points at. Allowing one
+  // without the other would sign a verifiable-but-inconsistent record (a hash
+  // with nothing to read, or a pointer with no integrity binding), so the
+  // pairing is enforced here rather than left to producers.
+  if ((fields.prompt === null) !== (fields.prompt_ref === null)) {
+    throw new TypeError(
+      'provenance.prompt and prompt_ref must both be set or both be null'
+    );
+  }
 }
 
 // Deterministic bytes for the signature. `prompt` encodes as its Ref pair or
