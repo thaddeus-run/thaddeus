@@ -32,11 +32,15 @@ delegated to `identity`.
 
 - **Spec:** `docs/specs/2026-06-24-thaddeus-pillar-07-reputation-design.md` is
   the source of truth for this plan.
-- **Dual-signed over a derived core (rigid).** Both `subj_sig` and `host_sig`
-  are independent ed25519 signatures over the **same** canonical bytes: domain
-  tag `thaddeus.contribution.v1` + `(subject, host, repo, ref, kind, at)`.
-  `subject`/`host` are the dids **derived from the two signing identities**,
-  never caller-supplied.
+- **Dual-signed over scoped, derived cores (rigid).** Two domain-tagged
+  (`thaddeus.contribution.v1`) encodings: `subj_sig` signs the portable
+  work-claim `(subject, repo, ref, kind, at)` — **excluding `host`**; `host_sig`
+  signs the full `(subject, host, repo, ref, kind, at)`. So tampering `host`
+  breaks only `host_sig` (authentic survives), and the subject's claim is valid
+  no matter which instance attests it. `subject`/`host` are the dids **derived
+  from the two signing identities**, never caller-supplied. (This split is the
+  user-approved resolution of the original "same core" wording, which
+  contradicted Task 1's host-tamper test.)
 - **Verification yields two booleans, fail-soft (rigid).**
   `verifyContribution(c)` returns `{ authentic, attested }`: `authentic` =
   `subj_sig` valid for `c.subject`, `attested` = `host_sig` valid for `c.host`.

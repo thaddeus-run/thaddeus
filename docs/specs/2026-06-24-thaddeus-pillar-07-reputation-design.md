@@ -51,14 +51,16 @@ those seams. Consequences here: in-memory only, single process, no persistence,
 no network transport, no production hardening.
 
 The genuinely rigid, expensive-to-reverse calls in this release are: **(a)** a
-contribution is **dual-signed** — `subj_sig` (the subject claims it) and
-`host_sig` (the instance attests it), each an independent signature over the
-same canonical core (§4, decision 2); **(b)** verification yields **two
-independent booleans** — `authentic` and `attested` — and trustworthy reputation
-counts only the _attested_ set (§4, decision 3); and **(c)** the aggregator is
-**keep-and-label** and **untrusted** — it ingests every record and the verifier
-checks signatures itself, so honoring a contribution never requires trusting the
-aggregator (§4, decision 4). All three are decided here on purpose.
+contribution is **dual-signed** with **scoped** cores — `subj_sig` (the subject
+claims it) covers the portable work-claim `(subject, repo, ref, kind, at)`, and
+`host_sig` (the instance attests it) covers all six fields including `host`; so
+the subject's claim is valid no matter which instance attests it (§4, decision
+2); **(b)** verification yields **two independent booleans** — `authentic` and
+`attested` — and trustworthy reputation counts only the _attested_ set (§4,
+decision 3); and **(c)** the aggregator is **keep-and-label** and **untrusted**
+— it ingests every record and the verifier checks signatures itself, so honoring
+a contribution never requires trusting the aggregator (§4, decision 4). All
+three are decided here on purpose.
 
 ### 2.1 What the brief asks for, and what is buildable now
 
@@ -115,14 +117,17 @@ contribution revocation, persistence, governance/stewardship (§5, §11).
    _id string_, so no `log`/`store` dependency. It mirrors the structure of
    `@thaddeus.run/provenance` (a record module + an aggregator module).
 
-2. **A contribution is dual-signed over a derived core.** The canonical core is
-   a domain-tagged tuple `(subject, host, repo, ref, kind, at)`; `subject` and
+2. **A contribution is dual-signed over scoped, derived cores.** `subject` and
    `host` are the **dids derived from the two signing identities** (mirroring
    how provenance derives `actor`), so a record can never claim a did it did not
-   sign with. `subj_sig` and `host_sig` are **independent** ed25519 signatures
-   over the _same_ canonical bytes. `signContribution(fields, subject, host)`
-   takes the non-derived fields plus both identities and returns the full
-   record.
+   sign with. The two signatures cover **different** domain-tagged tuples:
+   `subj_sig` covers the subject's **portable work-claim**
+   `(subject, repo, ref, kind, at)` — deliberately **excluding `host`**, so the
+   claim stays valid no matter which instance attests it — while `host_sig`
+   covers the **full** tuple `(subject, host, repo, ref, kind, at)`, binding the
+   host's attestation to who/what it attests.
+   `signContribution(fields, subject, host)` takes the non-derived fields plus
+   both identities and returns the full record.
 
 3. **Verification yields two booleans; reputation counts the attested set.**
    `verifyContribution(c)` recomputes the canonical core from `c`'s own fields
@@ -171,18 +176,20 @@ encoding, the dual-signature wrap/verify, and the `ReputationLog`
 partition/tally. That is the point — identity was designed for exactly this
 third use.
 
-### 4.2 The canonical core (the one subtle rule)
+### 4.2 The two canonical cores (the one subtle rule)
 
-`canonicalContribution` encodes the domain tag `thaddeus.contribution.v1`
-followed by the six core fields in a fixed order — `subject`, `host`, `repo`,
-`ref`, `kind`, `at` — with `subject`/`host` set to the signing identities' dids.
-**Both** signatures cover this exact byte string. `verifyContribution` rebuilds
-it from the record's own `subject`/`host`/`repo`/`ref`/`kind`/`at`, so any
-mutation of a covered field invalidates **both** sigs (a tampered `subject`
-breaks `subj_sig`; a tampered `host` breaks `host_sig`; a tampered shared field
-like `repo`/`ref`/`kind`/`at` breaks both). Non-canonical input
-(empty/wrong-type field) throws in `signContribution` and renders `false` in
-`verifyContribution`, mirroring `op.ts`/`provenance.ts`.
+There are **two** domain-tagged (`thaddeus.contribution.v1`) encodings, each in
+a fixed field order. The **host** core (`canonicalContribution`, the exported
+one) is the full six fields — `subject`, `host`, `repo`, `ref`, `kind`, `at`.
+The **subject** core is the five-field portable work-claim — `subject`, `repo`,
+`ref`, `kind`, `at` — deliberately **excluding `host`**. `subj_sig` signs the
+subject core; `host_sig` signs the host core. `verifyContribution` rebuilds each
+from the record's own fields, so mutation is caught per scope: a tampered
+`subject`/`repo`/`ref`/`kind`/`at` breaks **both** sigs; a tampered `host`
+breaks **only** `host_sig` (the subject never signed `host`, so `authentic`
+survives — a swapped or malformed host did cannot revoke the subject's claim).
+Non-canonical input (empty/wrong-type field) throws in `signContribution` and
+renders `false` in `verifyContribution`, mirroring `op.ts`/`provenance.ts`.
 
 ## 5. Scope
 
@@ -264,14 +271,16 @@ export interface Profile {
   readonly byKind: Readonly<Record<ContributionKind, number>>; // attested counts
 }
 
-// Canonical bytes both signatures cover: domain tag + (subject, host, repo, ref,
-// kind, at). Throws on non-canonical input.
+// The HOST canonical bytes (the exported one): domain tag + (subject, host,
+// repo, ref, kind, at), the full tuple host_sig covers. Throws on non-canonical
+// input. (subj_sig covers a separate five-field core that omits host — internal.)
 export function canonicalContribution(
   core: ContributionFields & { subject: string; host: string }
 ): Uint8Array;
 
-// Build a dual-signed contribution: subject and host each sign the canonical
-// core (their dids derived from the identities). Throws on non-canonical fields.
+// Build a dual-signed contribution: the subject signs the portable work-claim
+// (subject, repo, ref, kind, at) and the host signs the full six-field core
+// (their dids derived from the identities). Throws on non-canonical fields.
 export function signContribution(
   fields: ContributionFields,
   subject: Identity,
@@ -310,26 +319,32 @@ export class ReputationLog {
 1. `assertCanonical(fields)` — `repo`/`ref`/`at` non-empty strings, `kind` one
    of the three literals (throws otherwise, like `op.ts`).
 2. Derive `subjectDid = subject.did`, `hostDid = host.did`.
-3. `bytes = canonicalContribution({ ...fields, subject: subjectDid, host: hostDid })`.
-4. `subj_sig = subject.sign(bytes)`, `host_sig = host.sign(bytes)`.
+3. `subjBytes` = the **five-field** subject core
+   `(subject, repo, ref, kind, at)`;
+   `hostBytes = canonicalContribution({ ...fields, subject: subjectDid, host: hostDid })`
+   (the full six fields).
+4. `subj_sig = subject.sign(subjBytes)`, `host_sig = host.sign(hostBytes)`.
 5. Return
    `{ ...fields, subject: subjectDid, host: hostDid, subj_sig, host_sig }`.
 
-The two signatures are independent over identical bytes, so each verifies on its
-own — a verifier can accept authenticity while still treating attestation as
-absent (e.g. a record relayed without a trusted host).
+The two signatures cover **scoped** cores, so each verifies on its own and the
+subject's claim is portable: a verifier can accept authenticity while treating
+attestation as absent (a record relayed without a trusted host), and
+re-attesting the same work on another instance never invalidates the subject's
+signature.
 
 ### 6.2 Verifying — two booleans, fail-soft
 
 `verifyContribution(c)`:
 
-1. Recompute `bytes = canonicalContribution(c)` from the record's own fields
-   (wrapped so non-canonical content returns
-   `{ authentic: false, attested: false }` rather than throwing).
-2. `authentic = PublicIdentity.fromDid(c.subject).verify(bytes, c.subj_sig)`,
+1. Recompute both cores from the record's own fields — `subjBytes` (five-field
+   work-claim) and `hostBytes` (`canonicalContribution(c)`, six fields) —
+   wrapped so non-canonical content returns
+   `{ authentic: false, attested: false }` rather than throwing.
+2. `authentic = PublicIdentity.fromDid(c.subject).verify(subjBytes, c.subj_sig)`,
    each `fromDid`/`verify` wrapped to yield `false` on a malformed did or bad
    sig.
-3. `attested = PublicIdentity.fromDid(c.host).verify(bytes, c.host_sig)`.
+3. `attested = PublicIdentity.fromDid(c.host).verify(hostBytes, c.host_sig)`.
 4. Return `{ authentic, attested }`.
 
 This is the federation property in one function: any holder of the record and
