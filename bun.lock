@@ -221,6 +221,19 @@
         "typescript": "catalog:",
       },
     },
+    "packages/reputation": {
+      "name": "@thaddeus.run/reputation",
+      "version": "0.0.0",
+      "dependencies": {
+        "@thaddeus.run/identity": "workspace:*",
+      },
+      "devDependencies": {
+        "@types/bun": "catalog:",
+        "@typescript/native-preview": "catalog:",
+        "tsdown": "catalog:",
+        "typescript": "catalog:",
+      },
+    },
     "packages/store": {
       "name": "@thaddeus.run/store",
       "version": "0.0.0",
@@ -648,6 +661,8 @@
     "@thaddeus.run/platform": ["@thaddeus.run/platform@workspace:packages/platform"],
 
     "@thaddeus.run/provenance": ["@thaddeus.run/provenance@workspace:packages/provenance"],
+
+    "@thaddeus.run/reputation": ["@thaddeus.run/reputation@workspace:packages/reputation"],
 
     "@thaddeus.run/store": ["@thaddeus.run/store@workspace:packages/store"],
 
