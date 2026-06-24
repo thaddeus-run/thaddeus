@@ -113,7 +113,9 @@ export class Repo {
     }
     // The single re-point that IS the landing.
     this.log.view(into, mergedHeads);
-    return { landed: true, into, heads: mergedHeads, conflicts };
+    // Copy mergedHeads: log.view took its own copy, but the result must not
+    // alias whatever the caller might hold — symmetric with the reject path.
+    return { landed: true, into, heads: [...mergedHeads], conflicts };
   }
 }
 
