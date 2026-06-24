@@ -1,0 +1,13 @@
+{
+  "name": "@thaddeus.run/example-reputation",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@thaddeus.run/identity": "workspace:*",
+    "@thaddeus.run/reputation": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/bun": "catalog:"
+  }
+}
