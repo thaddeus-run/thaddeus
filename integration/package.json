@@ -7,6 +7,7 @@
     "@thaddeus.run/fs": "workspace:*",
     "@thaddeus.run/identity": "workspace:*",
     "@thaddeus.run/log": "workspace:*",
+    "@thaddeus.run/platform": "workspace:*",
     "@thaddeus.run/provenance": "workspace:*",
     "@thaddeus.run/store": "workspace:*"
   },
