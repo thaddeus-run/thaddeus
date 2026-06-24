@@ -58,7 +58,11 @@ describe('Contribution — sign & verify', () => {
     expect(verifyContribution({ ...c, subject: other.did }).authentic).toBe(
       false
     );
-    expect(verifyContribution({ ...c, host: other.did }).attested).toBe(false);
+    const hostTampered = verifyContribution({ ...c, host: other.did });
+    expect(hostTampered.attested).toBe(false);
+    // The portability guarantee: the subject's claim is independent of host, so
+    // swapping host leaves authentic intact (subj_sig omits host).
+    expect(hostTampered.authentic).toBe(true);
   });
 
   test('a host_sig from the wrong key is not attested, but stays authentic', () => {
@@ -87,6 +91,18 @@ describe('Contribution — sign & verify', () => {
     const bad = { ...c, host: 'did:key:notvalid' };
     expect(verifyContribution(bad).attested).toBe(false);
     expect(verifyContribution(bad).authentic).toBe(true); // subject side still checks
+  });
+
+  test('a non-canonical (empty) host breaks only attested, not authentic', () => {
+    const subject = Identity.create();
+    const host = Identity.create();
+    const c = signContribution(FIELDS, subject, host);
+    // An empty host makes the host core non-canonical; the subject core omits
+    // host, so the subject's claim must remain verifiable (per-side fail-soft).
+    expect(verifyContribution({ ...c, host: '' })).toEqual({
+      authentic: true,
+      attested: false,
+    });
   });
 
   test('signContribution rejects a non-canonical kind', () => {

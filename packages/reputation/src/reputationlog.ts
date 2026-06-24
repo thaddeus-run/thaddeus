@@ -61,7 +61,11 @@ export class ReputationLog {
       .sort(byOrder);
   }
 
-  // Check a record's two signatures against the dids it carries.
+  // Check a record's two signatures against the dids it carries. This is
+  // membership-agnostic BY DESIGN — it does NOT require `c` to have been
+  // appended to this log. That is the whole federation property: any holder
+  // verifies a record from the dids alone, with no trust in (or membership of)
+  // any aggregator. A convenience delegate to the exported `verifyContribution`.
   verify(c: Contribution): Verification {
     return verifyContribution(c);
   }

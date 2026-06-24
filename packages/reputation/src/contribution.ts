@@ -38,14 +38,14 @@ type ContributionCore = ContributionFields & {
   readonly host: string;
 };
 
-// Reject non-canonical field values before they are signed. Mirrors op.ts /
-// provenance.ts: a required field that is empty or the wrong type throws, so
-// verifyContribution (try/catch) rejects such records and signContribution
-// fails fast on bad input.
-function assertCanonical(core: ContributionCore): void {
+// Reject non-canonical subject-claim fields (subject, repo, ref, at, kind) —
+// the fields the subject's signature covers. Mirrors op.ts / provenance.ts: a
+// required field that is empty or the wrong type throws. `host` is NOT checked
+// here, so a bad host can never invalidate the subject's (host-independent)
+// claim during verification.
+function assertCanonicalSubject(core: ContributionCore): void {
   const required: [string, unknown][] = [
     ['subject', core.subject],
-    ['host', core.host],
     ['repo', core.repo],
     ['ref', core.ref],
     ['at', core.at],
@@ -63,6 +63,17 @@ function assertCanonical(core: ContributionCore): void {
     throw new TypeError(
       "contribution.kind must be 'merge', 'review', or 'release'"
     );
+  }
+}
+
+// The full host-core check: the subject fields plus a non-empty `host`. Used by
+// the host canonical encoding and (transitively) by signContribution, so a
+// record can never be MINTED with a bad host — only an externally-tampered host
+// is tolerated fail-soft at verify time (and then only the attested side fails).
+function assertCanonical(core: ContributionCore): void {
+  assertCanonicalSubject(core);
+  if (typeof core.host !== 'string' || core.host.length === 0) {
+    throw new TypeError('contribution.host must be a non-empty string');
   }
 }
 
@@ -91,7 +102,7 @@ export function canonicalContribution(core: ContributionCore): Uint8Array {
 // can check authentic independently of the host field — a malformed or swapped
 // host did must not zero the subject's claim.
 function canonicalSubjContribution(core: ContributionCore): Uint8Array {
-  assertCanonical(core);
+  assertCanonicalSubject(core);
   return new TextEncoder().encode(
     JSON.stringify([
       CONTRIBUTION_DOMAIN,
@@ -128,30 +139,34 @@ export function signContribution(
   };
 }
 
-// Verify one signature under a did, fail-soft: a malformed did or wrong-length
-// sig yields false rather than throwing.
-function verifyOne(did: string, bytes: Uint8Array, sig: Uint8Array): boolean {
+// Verify one side, fail-soft and fully isolated: the canonical bytes are
+// computed INSIDE the try (via a thunk), so a non-canonical core for this side —
+// or a malformed did / wrong-length sig — yields false without throwing and
+// without affecting the other side's result.
+function verifySide(
+  did: string,
+  bytes: () => Uint8Array,
+  sig: Uint8Array
+): boolean {
   try {
-    return PublicIdentity.fromDid(did).verify(bytes, sig);
+    return PublicIdentity.fromDid(did).verify(bytes(), sig);
   } catch {
     return false;
   }
 }
 
 // Verify a contribution from its own fields + dids — no trust in any server.
-// authentic and attested are checked independently so a malformed did on one
-// side does not zero the other. Non-canonical fields render both false.
+// authentic and attested are checked independently: a malformed/empty `host`
+// breaks only `attested`, never `authentic`, because the subject core omits
+// host entirely (the portability guarantee). A non-canonical subject field
+// fails authentic; either side's bad did fails only that side.
 export function verifyContribution(c: Contribution): Verification {
-  let subjBytes: Uint8Array;
-  let hostBytes: Uint8Array;
-  try {
-    subjBytes = canonicalSubjContribution(c);
-    hostBytes = canonicalContribution(c);
-  } catch {
-    return { authentic: false, attested: false };
-  }
   return {
-    authentic: verifyOne(c.subject, subjBytes, c.subj_sig),
-    attested: verifyOne(c.host, hostBytes, c.host_sig),
+    authentic: verifySide(
+      c.subject,
+      () => canonicalSubjContribution(c),
+      c.subj_sig
+    ),
+    attested: verifySide(c.host, () => canonicalContribution(c), c.host_sig),
   };
 }
