@@ -1,5 +1,5 @@
 import type { Identity } from '@thaddeus.run/identity';
-import type { OpLog } from '@thaddeus.run/log';
+import type { Op, OpLog } from '@thaddeus.run/log';
 import { AccessDenied, type Ref, type Store } from '@thaddeus.run/store';
 
 // A change staged in the copy-on-write overlay, not yet committed to the log.
@@ -115,6 +115,29 @@ export class Workspace {
   // Stage a tombstone into the overlay. read/list/grep treat the path as absent.
   rm(path: string): void {
     this.#overlay.set(path, { kind: 'tombstone' });
+  }
+
+  // Fold the overlay into signed ops on the private view, in deterministic path
+  // order: each staged write → log.write, each tombstone → log.remove. Each
+  // log.write/log.remove advances the private view's heads, so a batch chains
+  // correctly. Ops parent at the workspace's pinned heads (never on concurrent
+  // peer ops). Returns the ops created, then clears the overlay; an empty
+  // overlay returns []. This is the only path that signs or touches the store.
+  async commit(author: Identity): Promise<readonly Op[]> {
+    const ops: Op[] = [];
+    for (const path of [...this.#overlay.keys()].sort()) {
+      const staged = this.#overlay.get(path);
+      if (staged === undefined) {
+        continue;
+      }
+      if (staged.kind === 'write') {
+        ops.push(await this.#log.write(this.#view, path, staged.bytes, author));
+      } else {
+        ops.push(await this.#log.remove(this.#view, path, author));
+      }
+    }
+    this.#overlay.clear();
+    return ops;
   }
 
   // Uncommitted edits vs the base, in deterministic path order.
