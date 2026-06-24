@@ -106,7 +106,7 @@ export class Repo {
       return {
         landed: false,
         into,
-        heads: intoHeads,
+        heads: [...intoHeads],
         conflicts,
         reason: decision.reason,
       };
