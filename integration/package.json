@@ -4,6 +4,7 @@
   "private": true,
   "type": "module",
   "dependencies": {
+    "@thaddeus.run/fs": "workspace:*",
     "@thaddeus.run/identity": "workspace:*",
     "@thaddeus.run/log": "workspace:*",
     "@thaddeus.run/provenance": "workspace:*",
