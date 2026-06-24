@@ -22,8 +22,8 @@ It consumes `store` for the `AccessDenied` value and imports `OpLog`/`Op` and
 `Identity` as types only.
 
 **Tech Stack:** TypeScript (ESM, `type: module`), Bun test runner, moon task
-runner, tsdown bundler. No new runtime dependencies and **no crypto of its own** —
-all signing/encryption is delegated to `log`/`store`/`identity`.
+runner, tsdown bundler. No new runtime dependencies and **no crypto of its own**
+— all signing/encryption is delegated to `log`/`store`/`identity`.
 
 ## Global Constraints
 
@@ -45,8 +45,9 @@ all signing/encryption is delegated to `log`/`store`/`identity`.
   denied read. `list` is **not** bounded — paths (op metadata) are cleartext, so
   `list` shows a path even when its content is undecryptable.
 - **Deferred (out of scope, do not build):** landing/merge onto a shared view,
-  3-way content merge, `sync()` of the pinned base, `mv`/`mkdir`, a search index,
-  workspace-view GC, persistence/network. Spike: in-memory, single process.
+  3-way content merge, `sync()` of the pinned base, `mv`/`mkdir`, a search
+  index, workspace-view GC, persistence/network. Spike: in-memory, single
+  process.
 - **Tooling:** use `bun` (never npm/pnpm/npx). Run tasks through moon:
   `moon run <project>:<task>`. Export `AGENT=1` for AI-friendly test output.
   Preserve trailing newlines. Commit messages follow Conventional Commits 1.0.0.
@@ -105,7 +106,13 @@ Tasks 2–4.
   "name": "@thaddeus.run/fs",
   "version": "0.0.0",
   "description": "A virtual, API-first filesystem — a copy-on-write Workspace over the operation log, with pinned forked-view reads, overlay staging, commit, and decryption-bounded grep. Pillar 05.",
-  "keywords": ["filesystem", "workspace", "operation-log", "strata", "substrate"],
+  "keywords": [
+    "filesystem",
+    "workspace",
+    "operation-log",
+    "strata",
+    "substrate"
+  ],
   "homepage": "https://thaddeus.run",
   "bugs": {
     "url": "https://github.com/thaddeus-run/thaddeus/issues"
@@ -149,8 +156,8 @@ Tasks 2–4.
 ```
 
 > **Dependency note:** `@thaddeus.run/store` is a runtime dependency because the
-> code uses the `AccessDenied` **value** (`instanceof`). `log` and `identity` are
-> imported as **types only**, so they are devDependencies — the same split
+> code uses the `AccessDenied` **value** (`instanceof`). `log` and `identity`
+> are imported as **types only**, so they are devDependencies — the same split
 > `packages/provenance` uses for its type-only `@thaddeus.run/log` import.
 
 `packages/fs/moon.yml`:
@@ -460,10 +467,12 @@ export class Workspace {
   // Uncommitted edits vs the base, in deterministic path order.
   status(): readonly Change[] {
     return [...this.#overlay.entries()]
-      .map(([path, s]): Change => ({
-        path,
-        change: s.kind === 'write' ? 'write' : 'rm',
-      }))
+      .map(
+        ([path, s]): Change => ({
+          path,
+          change: s.kind === 'write' ? 'write' : 'rm',
+        })
+      )
       .sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
   }
 }
@@ -478,9 +487,9 @@ export type { Change, Match } from './workspace';
 
 > **Note:** `Op` and `Match` are imported/declared now but only used by later
 > tasks (`commit`, `grep`). The `Op` import is type-only; if the linter flags it
-> as unused before Task 2, that is expected and Task 2 resolves it. To keep
-> Task 1 self-contained and lint-clean, you may omit the `Op` import here and add
-> it in Task 2 Step 3 — both are fine.
+> as unused before Task 2, that is expected and Task 2 resolves it. To keep Task
+> 1 self-contained and lint-clean, you may omit the `Op` import here and add it
+> in Task 2 Step 3 — both are fine.
 
 - [ ] **Step 7: Run the test to verify it passes**
 
@@ -682,8 +691,8 @@ Claude-Session: https://claude.ai/code/session_01Ltrk2Wto4o6XNPcGkUZ6X5"
 
 ### Task 3: `grep` — decryption-bounded content search
 
-Add `grep`: a linear scan over every readable path (base the reader can decrypt +
-staged writes as plaintext), skipping objects it cannot decrypt.
+Add `grep`: a linear scan over every readable path (base the reader can
+decrypt + staged writes as plaintext), skipping objects it cannot decrypt.
 
 **Files:**
 
@@ -838,8 +847,8 @@ Claude-Session: https://claude.ai/code/session_01Ltrk2Wto4o6XNPcGkUZ6X5"
 
 ### Task 4: `fork` — the cheap copy-on-write branch
 
-Add `fork`: a fresh private view branched at this workspace's current heads, plus
-a shallow copy of the overlay so in-flight edits carry over.
+Add `fork`: a fresh private view branched at this workspace's current heads,
+plus a shallow copy of the overlay so in-flight edits carry over.
 
 **Files:**
 
@@ -934,8 +943,8 @@ Add this method to the `Workspace` class (after `grep`):
 
 - [ ] **Step 4: Run the test to verify it passes**
 
-Run: `AGENT=1 moon run fs:test` Expected: PASS — fork tests green (full fs suite:
-Tasks 1–4).
+Run: `AGENT=1 moon run fs:test` Expected: PASS — fork tests green (full fs
+suite: Tasks 1–4).
 
 - [ ] **Step 5: Typecheck and build**
 
@@ -960,14 +969,14 @@ Claude-Session: https://claude.ai/code/session_01Ltrk2Wto4o6XNPcGkUZ6X5"
 ### Task 5: Reroute the north-star's first step through a `Workspace`
 
 Change the seeded one-edit flow so the edit **originates in a `Workspace`**,
-producing the `Op` the rest of the flow already consumes. The flow stays 5 pass /
-0 todo.
+producing the `Op` the rest of the flow already consumes. The flow stays 5 pass
+/ 0 todo.
 
 **Files:**
 
 - Modify: `integration/package.json` (add the `@thaddeus.run/fs` dependency)
-- Modify: `integration/test/one-edit-end-to-end.test.ts` (add import; replace the
-  `P05/P01` test body)
+- Modify: `integration/test/one-edit-end-to-end.test.ts` (add import; replace
+  the `P05/P01` test body)
 
 **Interfaces:**
 
@@ -1022,40 +1031,40 @@ import { MemoryStore, publicIdentity } from '@thaddeus.run/store';
 In `integration/test/one-edit-end-to-end.test.ts`, replace this test:
 
 ```ts
-  test('P05/P01: write an object → stored as ciphertext a mirror can verify', async () => {
-    const store = new MemoryStore();
-    const author = Identity.create();
-    const ref = await store.put(
-      new TextEncoder().encode('fn refresh() {}'),
-      author
-    );
-    expect(store.verify(ref.id)).toBe(true);
-    expect(store.rawObject(ref.id)).toBeDefined();
-  });
+test('P05/P01: write an object → stored as ciphertext a mirror can verify', async () => {
+  const store = new MemoryStore();
+  const author = Identity.create();
+  const ref = await store.put(
+    new TextEncoder().encode('fn refresh() {}'),
+    author
+  );
+  expect(store.verify(ref.id)).toBe(true);
+  expect(store.rawObject(ref.id)).toBeDefined();
+});
 ```
 
 with:
 
 ```ts
-  test('P05/P01: an edit originates in a Workspace → stored as ciphertext a mirror can verify', async () => {
-    const store = new MemoryStore();
-    const log = new OpLog(store);
-    const author = Identity.create();
+test('P05/P01: an edit originates in a Workspace → stored as ciphertext a mirror can verify', async () => {
+  const store = new MemoryStore();
+  const log = new OpLog(store);
+  const author = Identity.create();
 
-    // The edit enters Strata through the virtual filesystem, not a hand-built op:
-    // stage a write in a copy-on-write workspace, then commit it into the log.
-    const ws = Workspace.open(log, store, { source: 'main', reader: author });
-    ws.write('src/auth.rs', new TextEncoder().encode('fn refresh() {}'));
-    const [op] = await ws.commit(author);
+  // The edit enters Strata through the virtual filesystem, not a hand-built op:
+  // stage a write in a copy-on-write workspace, then commit it into the log.
+  const ws = Workspace.open(log, store, { source: 'main', reader: author });
+  ws.write('src/auth.rs', new TextEncoder().encode('fn refresh() {}'));
+  const [op] = await ws.commit(author);
 
-    // The commit produced a signed op whose payload is mirror-verifiable ciphertext.
-    expect(op).toBeDefined();
-    expect(op?.payload).not.toBeNull();
-    if (op?.payload != null) {
-      expect(store.verify(op.payload.id)).toBe(true);
-      expect(store.rawObject(op.payload.id)).toBeDefined();
-    }
-  });
+  // The commit produced a signed op whose payload is mirror-verifiable ciphertext.
+  expect(op).toBeDefined();
+  expect(op?.payload).not.toBeNull();
+  if (op?.payload != null) {
+    expect(store.verify(op.payload.id)).toBe(true);
+    expect(store.rawObject(op.payload.id)).toBeDefined();
+  }
+});
 ```
 
 - [ ] **Step 5: Run the north-star suite to verify it passes**
@@ -1227,7 +1236,9 @@ console.log('   dev reads secrets.env:', await fresh.read('secrets.env'));
 console.log('   grep refresh hits:', await fresh.grep('refresh'));
 
 rule();
-console.log('Acceptance: edits enter through the API, never a disk; fork is O(1);');
+console.log(
+  'Acceptance: edits enter through the API, never a disk; fork is O(1);'
+);
 console.log('grep and read stop exactly at the capability boundary.');
 ```
 
@@ -1305,34 +1316,34 @@ to:
 
 - [ ] **Step 3: Update `CHANGELOG.md`**
 
-Under `## [Unreleased]` → `### Added`, after the existing `@thaddeus.run/provenance`
-bullet, add:
+Under `## [Unreleased]` → `### Added`, after the existing
+`@thaddeus.run/provenance` bullet, add:
 
 ```markdown
 - `@thaddeus.run/fs` — the virtual filesystem (Pillar 05): a copy-on-write
   `Workspace` over the operation log. `open` forks a **private, pinned** view
-  (peer ops never shift it); `read`/`list`/`grep` project that view layered under
-  an in-memory edit overlay; `write`/`rm` stage into the overlay; `commit` folds
-  it into signed ops via `log.write`/`log.remove`; `fork()` branches a working
-  copy in O(1). `read`/`grep` are **decryption-bounded** — you can only search
-  what your identity can decrypt. The north-star's seeded edit now originates in
-  a `Workspace` (5 pass / 0 todo).
+  (peer ops never shift it); `read`/`list`/`grep` project that view layered
+  under an in-memory edit overlay; `write`/`rm` stage into the overlay; `commit`
+  folds it into signed ops via `log.write`/`log.remove`; `fork()` branches a
+  working copy in O(1). `read`/`grep` are **decryption-bounded** — you can only
+  search what your identity can decrypt. The north-star's seeded edit now
+  originates in a `Workspace` (5 pass / 0 todo).
 ```
 
 Then, in the **Deferred** ledger (place these alongside the existing scope-cut
 entries; match the surrounding structure), add:
 
 ```markdown
-- **Landing / merge onto a shared view (P05→P06/P10).** `commit` lands ops on the
-  workspace's private view; re-pointing a shared view like `main` to include them
-  (and the conflict resolution that implies) is platform/review territory.
+- **Landing / merge onto a shared view (P05→P06/P10).** `commit` lands ops on
+  the workspace's private view; re-pointing a shared view like `main` to include
+  them (and the conflict resolution that implies) is platform/review territory.
 - **`sync()` of the pinned base (P05).** A workspace's base does not advance to
-  absorb newer source-view heads; the lifecycle this release is
-  open → edit → commit → discard.
+  absorb newer source-view heads; the lifecycle this release is open → edit →
+  commit → discard.
 - **3-way content merge (P03/P05).** Concurrent same-path edits resolve by LWW
   and surface via `OpLog.conflicts()`; the FS adds no content merge.
-- **`mv` / rename (P05→P08).** Path-level move is `rm` + `write`; semantic rename
-  is the symbol-level op of Pillar 08.
+- **`mv` / rename (P05→P08).** Path-level move is `rm` + `write`; semantic
+  rename is the symbol-level op of Pillar 08.
 - **Workspace-view GC and a grep index (P05).** Private views accumulate in the
   log's view map; `grep` is a linear scan. Both are spike non-goals.
 ```
@@ -1361,16 +1372,16 @@ Claude-Session: https://claude.ai/code/session_01Ltrk2Wto4o6XNPcGkUZ6X5"
 
 ### Task 8: Full-workspace verification
 
-Run the repo-wide baseline so the new package, the integration reroute, the demo,
-and the docs all land green together.
+Run the repo-wide baseline so the new package, the integration reroute, the
+demo, and the docs all land green together.
 
 **Files:** none (verification only).
 
 - [ ] **Step 1: Build the whole workspace**
 
 Run: `moon run :build` Expected: every package builds, including
-`@thaddeus.run/fs`. (This lets type-aware lint resolve the new package through its
-`dist`.)
+`@thaddeus.run/fs`. (This lets type-aware lint resolve the new package through
+its `dist`.)
 
 - [ ] **Step 2: Format and lint the repo**
 
@@ -1378,8 +1389,7 @@ Run: `moon run root:format root:lint` Expected: both succeed with no errors.
 
 - [ ] **Step 3: Typecheck the affected projects**
 
-Run:
-`moon run fs:typecheck integration:typecheck example-workspace:typecheck`
+Run: `moon run fs:typecheck integration:typecheck example-workspace:typecheck`
 Expected: all PASS.
 
 - [ ] **Step 4: Run the affected tests**
@@ -1423,9 +1433,9 @@ Claude-Session: https://claude.ai/code/session_01Ltrk2Wto4o6XNPcGkUZ6X5"
   "pinned base" tests (Task 2) prove the structural property, and a cache would
   only let it drift.
 - **`commit` parents at the pinned heads automatically.** `OpLog.write` parents
-  at `heads(privateView)`; since only this workspace's commits advance that view,
-  the first commit parents at the forked base. The Task 2 parents test pins this —
-  if it fails, something is moving the private view (a bug).
+  at `heads(privateView)`; since only this workspace's commits advance that
+  view, the first commit parents at the forked base. The Task 2 parents test
+  pins this — if it fails, something is moving the private view (a bug).
 - **Decryption-bounded vs. listed.** `read`/`grep` are bounded by `store.get`
   (catch `AccessDenied` → `null`/skip); `list` is **not** — paths are cleartext
   metadata, so a file you cannot read still appears in `list`. The Task 3 "skips
@@ -1438,5 +1448,7 @@ Claude-Session: https://claude.ai/code/session_01Ltrk2Wto4o6XNPcGkUZ6X5"
 - **Determinism:** tests use `Identity.create()` (fresh keys) but assert only on
   structural facts (bytes read back, parents, verified/undecryptable, sorted
   order), never on specific key bytes — so they are reproducible.
+
 ```
 
+```

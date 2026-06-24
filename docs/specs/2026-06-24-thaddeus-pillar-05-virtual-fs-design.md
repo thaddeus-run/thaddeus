@@ -74,8 +74,8 @@ each:
    in-memory edit overlay. `fork()` branches a workspace in O(head-set +
    overlay), never copying the tree.
 3. **The interface is API (read, write, list, grep), not a CLI against files**
-   (buildable now). The surface is the `Workspace` class; the CLI demo
-   (§9) only _renders_ it.
+   (buildable now). The surface is the `Workspace` class; the CLI demo (§9) only
+   _renders_ it.
 
 What the brief gestures at but this release does **not** build: landing/merging
 a working copy onto a shared view, and 3-way content merge (§5, §11). Those are
@@ -105,9 +105,9 @@ copy over a P03 op-log. Deliverables:
   `Workspace`; `ARCHITECTURE.md` Pillar 05 row flipped `planned → built`; the
   flow stays **5 pass / 0 todo** (§12).
 
-Not the job: landing/merge onto a shared view, 3-way content merge, `mv`/`mkdir`,
-`sync()` of the pinned base, a search index, persistence, network/federation
-(§5, §11).
+Not the job: landing/merge onto a shared view, 3-way content merge,
+`mv`/`mkdir`, `sync()` of the pinned base, a search index, persistence,
+network/federation (§5, §11).
 
 ## 4. Decisions taken (brainstorm outcomes)
 
@@ -129,8 +129,8 @@ Not the job: landing/merge onto a shared view, 3-way content merge, `mv`/`mkdir`
    in place — was rejected: it loses isolation the moment two actors commit.
 
 3. **Pinned base, achieved without snapshotting.** P03's `append()` (peer
-   ingest) explicitly **does not move any view** — "peer ops land in the graph; a
-   view advances only on write/re-point." Therefore a workspace's private view
+   ingest) explicitly **does not move any view** — "peer ops land in the graph;
+   a view advances only on write/re-point." Therefore a workspace's private view
    advances _only_ by that workspace's own commits; concurrent peer ops cannot
    shift its materialized base. No cached snapshot is needed:
    `materialize(privateView, reader)` is already stable against peers. Advancing
@@ -141,39 +141,39 @@ Not the job: landing/merge onto a shared view, 3-way content merge, `mv`/`mkdir`
    creates ops whose `parents` are the workspace's (pinned) heads — an honest
    record of what the author saw — signs them via `log.write`/`log.remove`, and
    appends. It never detects-and-blocks, never rebases, never rejects. If a peer
-   edited the same path concurrently, that surfaces as a P03 `conflict()` _at the
-   point a shared view is re-pointed to include both frontiers_ (landing), not at
-   commit time. P05 adds no merge logic; it inherits P03's LWW + `conflicts()`
-   and P03's deferral of 3-way content merge. This kills the "push rejected, pull
-   first" friction by construction.
+   edited the same path concurrently, that surfaces as a P03 `conflict()` _at
+   the point a shared view is re-pointed to include both frontiers_ (landing),
+   not at commit time. P05 adds no merge logic; it inherits P03's LWW +
+   `conflicts()` and P03's deferral of 3-way content merge. This kills the "push
+   rejected, pull first" friction by construction.
 
 5. **Edits stage in a COW overlay; signing is off the edit path.** `write`/`rm`
    mutate only an in-memory overlay and are synchronous and cheap (no crypto, no
-   store, no log). Signing and `store.put` happen once, in `commit`. This makes a
-   workspace a true _working copy_ (a series of cheap edits, landed as a coherent
-   change) rather than a live wire to the log, and gives a natural unit for a
-   future P04 "why" (one provenance per commit).
+   store, no log). Signing and `store.put` happen once, in `commit`. This makes
+   a workspace a true _working copy_ (a series of cheap edits, landed as a
+   coherent change) rather than a live wire to the log, and gives a natural unit
+   for a future P04 "why" (one provenance per commit).
 
 6. **`read`/`grep` are decryption-bounded and fail soft.** The workspace carries
    a `reader` identity. `read` returns the overlay bytes if staged, else
    `store.get(ref, reader)`; on `AccessDenied` or an absent path it returns
-   `null` (never throws). `grep` scans the overlay (as plaintext) plus every base
-   object the reader can decrypt, skipping any it cannot. This is honest to the
-   capability model — you can only search what you are allowed to read — and an
-   embargoed (pre-reveal) object simply does not match until its key releases
+   `null` (never throws). `grep` scans the overlay (as plaintext) plus every
+   base object the reader can decrypt, skipping any it cannot. This is honest to
+   the capability model — you can only search what you are allowed to read — and
+   an embargoed (pre-reveal) object simply does not match until its key releases
    (P02), with no special-casing in P05.
 
 ### 4.1 Why this is almost no new machinery (honest claim)
 
 The worktree-killer is mostly _composition_ of primitives P03 already shipped:
 
-| P05 capability               | Mechanism (existing)                                          |
-| ---------------------------- | ------------------------------------------------------------- |
-| cheap working copy / branch  | `OpLog.fork(privateView, source)` — zero-copy head-set        |
-| pinned base                  | `append()` never moves a view (P03 §convergence)              |
-| read projection (path→bytes) | `OpLog.materialize(view, reader)` + `store.get`               |
-| commit edits → history       | `OpLog.write` / `OpLog.remove` on the private view            |
-| embargo-aware reads          | `materialize`'s `as` gating + store reveal (P02)              |
+| P05 capability               | Mechanism (existing)                                   |
+| ---------------------------- | ------------------------------------------------------ |
+| cheap working copy / branch  | `OpLog.fork(privateView, source)` — zero-copy head-set |
+| pinned base                  | `append()` never moves a view (P03 §convergence)       |
+| read projection (path→bytes) | `OpLog.materialize(view, reader)` + `store.get`        |
+| commit edits → history       | `OpLog.write` / `OpLog.remove` on the private view     |
+| embargo-aware reads          | `materialize`'s `as` gating + store reveal (P02)       |
 
 P05's genuinely new code is small: the edit overlay, the read/grep layering over
 materialize, and the commit fold. That is the point — the substrate was designed
@@ -183,10 +183,11 @@ so the filesystem is a thin, honest surface, not a parallel source of truth.
 
 A path resolves in this order: **(1)** if the overlay has a tombstone for the
 path ⇒ `null`; **(2)** if the overlay has staged bytes ⇒ those bytes; **(3)**
-else the base — `store.get(materialize(privateView, reader).get(path).ref,
-reader)`, or `null` if the path is absent or the reader cannot decrypt it.
-`list`/`grep`/`status` use the same layering so a staged write is visible
-everywhere before commit, and a staged `rm` hides the base path everywhere.
+else the base —
+`store.get(materialize(privateView, reader).get(path).ref, reader)`, or `null`
+if the path is absent or the reader cannot decrypt it. `list`/`grep`/`status`
+use the same layering so a staged write is visible everywhere before commit, and
+a staged `rm` hides the base path everywhere.
 
 ## 5. Scope
 
@@ -309,21 +310,21 @@ export type { Change, Match };
 1. Derive `privateView = name ?? uniqueName(source)` (a process-local counter
    keeps it unique; no real filesystem, no global registry).
 2. `log.fork(privateView, source)` — zero-copy branch at `source`'s current
-   heads. (If `source` has no heads, the fork is an empty head-set; the workspace
-   starts empty.)
+   heads. (If `source` has no heads, the fork is an empty head-set; the
+   workspace starts empty.)
 3. Hold `log`, `store`, `reader`, `privateView`, and an empty
    `overlay: Map<string, Staged>`.
 
 Because peer `append()` never moves `privateView`, the base the workspace reads
-is fixed until this workspace commits. That is the pinned base; no snapshot copy.
+is fixed until this workspace commits. That is the pinned base; no snapshot
+copy.
 
 ### 6.2 Editing — the copy-on-write overlay
 
-`write(path, bytes)` sets `overlay[path] = { kind: 'write', bytes }`.
-`rm(path)` sets `overlay[path] = { kind: 'tombstone' }`. Both overwrite any
-prior staged entry for the path. Nothing is signed, stored, or logged. The
-overlay is the only mutable state a workspace owns; everything else is a
-projection.
+`write(path, bytes)` sets `overlay[path] = { kind: 'write', bytes }`. `rm(path)`
+sets `overlay[path] = { kind: 'tombstone' }`. Both overwrite any prior staged
+entry for the path. Nothing is signed, stored, or logged. The overlay is the
+only mutable state a workspace owns; everything else is a projection.
 
 ### 6.3 Committing — folding the overlay into history
 
@@ -348,16 +349,17 @@ view is re-pointed to include them (landing — deferred, §5).
 
 - `read` resolves per §4.2; a base lookup is `store.get(ref, reader)` wrapped to
   return `null` on `AccessDenied` (the store's denial error) or an absent path.
-- `grep` decrypts each base object the reader holds a capability for and scans it
-  line by line; objects that raise `AccessDenied` are skipped, not errored.
+- `grep` decrypts each base object the reader holds a capability for and scans
+  it line by line; objects that raise `AccessDenied` are skipped, not errored.
   Staged overlay writes are scanned directly as plaintext (they are already in
   hand). A staged tombstone removes the path from the scan set.
 
-`list` is **not** decryption-bounded: P03 keeps paths (op metadata) cleartext and
-gates only payloads, so `list` shows every base path that exists, including ones
-whose _content_ the reader cannot decrypt. Existence is visible; content is not.
-`read` of such a path returns `null` and `grep` skips it — so a reader can learn
-a file exists without reading it, which is the intended capability boundary.
+`list` is **not** decryption-bounded: P03 keeps paths (op metadata) cleartext
+and gates only payloads, so `list` shows every base path that exists, including
+ones whose _content_ the reader cannot decrypt. Existence is visible; content is
+not. `read` of such a path returns `null` and `grep` skips it — so a reader can
+learn a file exists without reading it, which is the intended capability
+boundary.
 
 A pre-reveal embargoed object (P02) is a different case: its op is gated out of
 `materialize` for a non-grantee, so the path is absent from `read`/`list`/`grep`
@@ -369,12 +371,14 @@ entirely until its key releases — capability semantics, not a P05 special case
 `log.fork(newPrivateView, this.privateView)` (a zero-copy branch at this
 workspace's _current committed_ heads) and whose overlay is a shallow copy of
 this workspace's overlay (`Staged` entries are immutable, so a shallow copy is
-safe). In-flight staged edits therefore carry into the fork, but subsequent edits
-and commits diverge. This is the headline copy-on-write working-copy story.
+safe). In-flight staged edits therefore carry into the fork, but subsequent
+edits and commits diverge. This is the headline copy-on-write working-copy
+story.
 
 ## 7. Data model
 
-P05 introduces no persisted record type. Its only state is the in-memory overlay:
+P05 introduces no persisted record type. Its only state is the in-memory
+overlay:
 
 ```
 Workspace (in-memory) {
@@ -388,8 +392,8 @@ Staged = { kind: 'write', bytes } | { kind: 'tombstone' }
 ```
 
 The durable artifacts of a workspace are entirely P03 `Op`s (produced by
-`commit`) and P01 store objects (produced by `log.write` → `store.put`). There is
-nothing new on the wire and nothing new to sign.
+`commit`) and P01 store objects (produced by `log.write` → `store.put`). There
+is nothing new on the wire and nothing new to sign.
 
 ## 8. Crypto choices
 
@@ -413,7 +417,8 @@ Tier 0/1).
 
 **Act 1 — a working copy with no disk.**
 
-1. Seed an op-log + store; `Workspace.open(log, store, { source: 'main', reader })`.
+1. Seed an op-log + store;
+   `Workspace.open(log, store, { source: 'main', reader })`.
 2. `ws.write('src/auth.rs', bytes)`; show `ws.list()` and a `ws.grep('refresh')`
    hit on the _staged, uncommitted_ content; `ws.status()` shows one `write`.
 3. `await ws.commit(author)`; show `status()` now empty and `log.materialize`
@@ -459,14 +464,14 @@ Tier 0/1).
 9. **Decryption-bounded grep** — an object the reader cannot decrypt
    (ungranted/embargoed) yields no `grep` hits and `read` returns `null` (no
    throw); a staged overlay write matches `grep` as plaintext.
-10. **Read fails soft** — `read` of a denied or absent path returns `null` rather
-    than throwing `AccessDenied`.
+10. **Read fails soft** — `read` of a denied or absent path returns `null`
+    rather than throwing `AccessDenied`.
 11. **Deterministic order** — `list`, `grep`, and `status` return results in a
     stable order independent of insertion/edit order.
 12. **Composition (north-star)** — the seeded one-edit flow's first step
-    originates in a `Workspace`: `ws.write(path, bytes)` + `await ws.commit(author)`
-    yields the `Op` the rest of the flow (provenance, reveal, mirror) consumes;
-    the flow stays **5 pass / 0 todo**.
+    originates in a `Workspace`: `ws.write(path, bytes)` +
+    `await ws.commit(author)` yields the `Op` the rest of the flow (provenance,
+    reveal, mirror) consumes; the flow stays **5 pass / 0 todo**.
 
 ## 11. Honest limitations (stated, not hidden)
 
@@ -477,10 +482,10 @@ Tier 0/1).
 - **No 3-way content merge.** Inherited from P03: concurrent same-path edits
   resolve by LWW and surface via `conflicts()`; P05 adds no content merge.
 - **Pinned base does not advance.** Without `sync()` (deferred), a long-lived
-  workspace drifts from `source`; the intended lifecycle this release is
-  open → edit → commit → discard.
-- **No `mv`/`mkdir`.** Path-level move is `rm` + `write`; semantic rename is P08.
-  Directories are implied by path prefixes.
+  workspace drifts from `source`; the intended lifecycle this release is open →
+  edit → commit → discard.
+- **No `mv`/`mkdir`.** Path-level move is `rm` + `write`; semantic rename is
+  P08. Directories are implied by path prefixes.
 - **`grep` is a linear scan, no index**, and decrypts every readable object on
   each call — fine for a spike, not for scale.
 - **Workspace views leak.** Each `open`/`fork` adds a private view to the log's
@@ -509,8 +514,8 @@ Tier 0/1).
   that serves views and ops at throughput, and the home where **landing/merge**
   (deferred here) gets its policy. P05's `commit` produces the ops a platform
   would land.
-- **Pillar 08 (semantic graph)** turns `path`-addressed ops into symbol-addressed
-  ones; the `Workspace` surface (`read`/`write` by path) is the projection P08
-  renders text from. First-class `mv`/rename arrives there.
+- **Pillar 08 (semantic graph)** turns `path`-addressed ops into
+  symbol-addressed ones; the `Workspace` surface (`read`/`write` by path) is the
+  projection P08 renders text from. First-class `mv`/rename arrives there.
 - Confirm whether `Workspace` grows a `sync()` and a landing helper once P06
   exists, or whether those live entirely in the platform layer.
