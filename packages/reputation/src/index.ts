@@ -9,3 +9,5 @@ export type {
   ContributionKind,
   Verification,
 } from './contribution';
+export { ReputationLog } from './reputationlog';
+export type { Profile } from './reputationlog';
