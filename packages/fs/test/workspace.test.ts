@@ -98,4 +98,20 @@ describe('Workspace — open, edit overlay, reads', () => {
     expect(dec((await ws.read('a.rs'))!)).toBe('shared');
     expect(dec((await child.read('a.rs'))!)).toBe('shared');
   });
+
+  test('mutating a read() result corrupts neither staged content nor a fork sharing the entry', async () => {
+    const store = new MemoryStore();
+    const log = new OpLog(store);
+    const author = Identity.create();
+    const ws = Workspace.open(log, store, { source: 'main', reader: author });
+
+    ws.write('a.rs', enc('secret'));
+    const child = ws.fork(); // shallow-copies the overlay → shares the Staged entry
+
+    const got = (await ws.read('a.rs'))!;
+    got.fill(0); // a caller mutating the buffer read() handed back
+
+    expect(dec((await ws.read('a.rs'))!)).toBe('secret');
+    expect(dec((await child.read('a.rs'))!)).toBe('secret');
+  });
 });

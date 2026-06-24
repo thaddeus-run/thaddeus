@@ -69,11 +69,14 @@ export class Workspace {
 
   // Decrypted bytes at `path`, or null if absent, staged-removed, or the reader
   // cannot decrypt it. Resolution order: overlay tombstone → overlay write →
-  // base (materialize + store.get). Never throws on a denied read.
+  // base (materialize + store.get). Never throws on a denied read. A staged read
+  // returns a COPY of the overlay's buffer, so a caller mutating the result can't
+  // corrupt staged content (nor a fork sharing the same entry). Base reads are
+  // already isolated — store.get decrypts into a fresh buffer per call.
   async read(path: string): Promise<Uint8Array | null> {
     const staged = this.#overlay.get(path);
     if (staged !== undefined) {
-      return staged.kind === 'write' ? staged.bytes : null;
+      return staged.kind === 'write' ? new Uint8Array(staged.bytes) : null;
     }
     const entry = this.#log.materialize(this.#view, this.#reader).get(path);
     if (entry === undefined || entry.ref === null) {
@@ -155,8 +158,10 @@ export class Workspace {
 
   // Branch this workspace: a fresh private view forked at this workspace's
   // current (committed) heads, plus a shallow copy of the overlay so in-flight
-  // staged edits carry over. Staged entries are immutable, so the shallow copy
-  // is safe. O(head-set + overlay) — never copies the tree.
+  // staged edits carry over. The shallow copy is safe because staged entries are
+  // never mutated in place: write/rm replace the entry, and read copies the
+  // buffer out — so a shared Staged object can never be corrupted by either side.
+  // O(head-set + overlay) — never copies the tree.
   fork(opts?: { reader?: Identity; name?: string }): Workspace {
     const view = opts?.name ?? `ws/${this.#view}/${workspaceSeq++}`;
     this.#log.fork(view, this.#view);
