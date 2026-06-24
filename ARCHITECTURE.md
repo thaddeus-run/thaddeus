@@ -12,7 +12,7 @@ seam: the packages compose; Strata is their composition.
 | Identity (`did:key`)                  | `@thaddeus.run/identity` | P01 caps · P04 provenance · P07 reputation · P09 agents |
 | Object (encrypted, content-addressed) | `@thaddeus.run/store`    | P01 · P02 membrane · P03 snapshots · P11 query          |
 | Capability (sealed key)               | `@thaddeus.run/store`    | P01 · P02 reveal · P09 revocation                       |
-| Op (operation log entry)              | `@thaddeus.run/log`      | P03 · P04 · P08 · P10                                   |
+| Op (operation log entry)              | `@thaddeus.run/log`      | P03 · P04 · P05 · P08 · P10                             |
 
 ## Build order (each tier depends only on tiers below)
 
@@ -39,7 +39,7 @@ becomes a real assertion. When the last stub is gone, the substrate is whole.
 | 02 Membrane (time-varying visibility) | `store`              | built   | P2 P4            |
 | 03 Operation log                      | `log`                | built   | P5 P6 P12        |
 | 04 Provenance ("why")                 | `provenance`         | built   | P12              |
-| 05 Virtual FS                         | _(planned)_          | planned | P6 P7 P8 P11     |
+| 05 Virtual FS                         | `fs`                 | built   | P6 P7 P8 P11     |
 | 06 Platform                           | _(planned)_          | planned | P9 P10 P11       |
 | 07 Identity federation / reputation   | _(planned)_          | planned | P13 P19 P20      |
 | 08 Semantic graph                     | _(planned)_          | planned | P14 P5 P18       |

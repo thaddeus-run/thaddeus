@@ -1,3 +1,4 @@
+import { Workspace } from '@thaddeus.run/fs';
 import { Identity, ready } from '@thaddeus.run/identity';
 import { OpLog } from '@thaddeus.run/log';
 import { ProvenanceLog } from '@thaddeus.run/provenance';
@@ -12,15 +13,24 @@ beforeAll(async () => {
 });
 
 describe('north-star: one edit, end to end', () => {
-  test('P05/P01: write an object → stored as ciphertext a mirror can verify', async () => {
+  test('P05/P01: an edit originates in a Workspace → stored as ciphertext a mirror can verify', async () => {
     const store = new MemoryStore();
+    const log = new OpLog(store);
     const author = Identity.create();
-    const ref = await store.put(
-      new TextEncoder().encode('fn refresh() {}'),
-      author
-    );
-    expect(store.verify(ref.id)).toBe(true);
-    expect(store.rawObject(ref.id)).toBeDefined();
+
+    // The edit enters Strata through the virtual filesystem, not a hand-built op:
+    // stage a write in a copy-on-write workspace, then commit it into the log.
+    const ws = Workspace.open(log, store, { source: 'main', reader: author });
+    ws.write('src/auth.rs', new TextEncoder().encode('fn refresh() {}'));
+    const [op] = await ws.commit(author);
+
+    // The commit produced a signed op whose payload is mirror-verifiable ciphertext.
+    expect(op).toBeDefined();
+    expect(op?.payload).not.toBeNull();
+    if (op?.payload != null) {
+      expect(store.verify(op.payload.id)).toBe(true);
+      expect(store.rawObject(op.payload.id)).toBeDefined();
+    }
   });
 
   test('P01/P02: grant releases the content key to a named grantee', async () => {

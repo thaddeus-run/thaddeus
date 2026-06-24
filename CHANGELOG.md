@@ -33,6 +33,14 @@ All notable changes to Thaddeus. Format follows
   each record `verified`/`unverified` and **keeps** invalid records (labelled,
   not rejected). Completes **P12** and closes the seeded north-star one-edit
   flow (5 pass / 0 todo).
+- `@thaddeus.run/fs` — the virtual filesystem (Pillar 05): a copy-on-write
+  `Workspace` over the operation log. `open` forks a **private, pinned** view
+  (peer ops never shift it); `read`/`list`/`grep` project that view layered
+  under an in-memory edit overlay; `write`/`rm` stage into the overlay; `commit`
+  folds it into signed ops via `log.write`/`log.remove`; `fork()` branches a
+  working copy in O(1). `read`/`grep` are **decryption-bounded** — you can only
+  search what your identity can decrypt. The north-star's seeded edit now
+  originates in a `Workspace` (5 pass / 0 todo).
 
 ### Changed
 
@@ -86,9 +94,20 @@ All notable changes to Thaddeus. Format follows
 - **Repository-as-capability-scoped-slice (P05)** — the repo dissolution half of
   Pillar 03's "branches and the repository dissolve."
 - **Vector/interval clocks** — Lamport + DAG suffice for the spike's ordering.
-- **P05 virtual FS + COW views**, **P06 platform**, **P07
-  federation/reputation**, **P08 semantic graph**, **P09 agents**, **P10
-  review-as-policy**, **P11 live database** — Tiers 2–4.
+- **P06 platform**, **P07 federation/reputation**, **P08 semantic graph**, **P09
+  agents**, **P10 review-as-policy**, **P11 live database** — Tiers 2–4.
+- **Landing / merge onto a shared view (P05→P06/P10).** `commit` lands ops on
+  the workspace's private view; re-pointing a shared view like `main` to include
+  them (and the conflict resolution that implies) is platform/review territory.
+- **`sync()` of the pinned base (P05).** A workspace's base does not advance to
+  absorb newer source-view heads; the lifecycle this release is open → edit →
+  commit → discard.
+- **3-way content merge (P03/P05).** Concurrent same-path edits resolve by LWW
+  and surface via `OpLog.conflicts()`; the FS adds no content merge.
+- **`mv` / rename (P05→P08).** Path-level move is `rm` + `write`; semantic
+  rename is the symbol-level op of Pillar 08.
+- **Workspace-view GC and a grep index (P05).** Private views accumulate in the
+  log's view map; `grep` is a linear scan. Both are spike non-goals.
 - **Reputation accrual / outcomes (P04→P09).** The trust rule's second clause —
   invalid provenance "never counts toward an agent's reputation" — needs the
   reputation/outcomes machinery that does not yet exist. P04 ships the

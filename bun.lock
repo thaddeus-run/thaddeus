@@ -102,10 +102,24 @@
         "@types/bun": "catalog:",
       },
     },
+    "examples/workspace": {
+      "name": "@thaddeus.run/example-workspace",
+      "version": "0.0.0",
+      "dependencies": {
+        "@thaddeus.run/fs": "workspace:*",
+        "@thaddeus.run/identity": "workspace:*",
+        "@thaddeus.run/log": "workspace:*",
+        "@thaddeus.run/store": "workspace:*",
+      },
+      "devDependencies": {
+        "@types/bun": "catalog:",
+      },
+    },
     "integration": {
       "name": "@thaddeus.run/integration",
       "version": "0.0.0",
       "dependencies": {
+        "@thaddeus.run/fs": "workspace:*",
         "@thaddeus.run/identity": "workspace:*",
         "@thaddeus.run/log": "workspace:*",
         "@thaddeus.run/provenance": "workspace:*",
@@ -113,6 +127,21 @@
       },
       "devDependencies": {
         "@types/bun": "catalog:",
+      },
+    },
+    "packages/fs": {
+      "name": "@thaddeus.run/fs",
+      "version": "0.0.0",
+      "dependencies": {
+        "@thaddeus.run/store": "workspace:*",
+      },
+      "devDependencies": {
+        "@thaddeus.run/identity": "workspace:*",
+        "@thaddeus.run/log": "workspace:*",
+        "@types/bun": "catalog:",
+        "@typescript/native-preview": "catalog:",
+        "tsdown": "catalog:",
+        "typescript": "catalog:",
       },
     },
     "packages/identity": {
@@ -570,6 +599,10 @@
     "@thaddeus.run/example-oplog": ["@thaddeus.run/example-oplog@workspace:examples/oplog"],
 
     "@thaddeus.run/example-provenance": ["@thaddeus.run/example-provenance@workspace:examples/provenance"],
+
+    "@thaddeus.run/example-workspace": ["@thaddeus.run/example-workspace@workspace:examples/workspace"],
+
+    "@thaddeus.run/fs": ["@thaddeus.run/fs@workspace:packages/fs"],
 
     "@thaddeus.run/identity": ["@thaddeus.run/identity@workspace:packages/identity"],
 
