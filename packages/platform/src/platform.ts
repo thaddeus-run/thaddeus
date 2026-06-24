@@ -73,6 +73,7 @@ export class Repo {
     author: Identity;
     policy?: LandPolicy;
   }): Promise<LandResult> {
+    // `author` is part of the public landing interface (Pillar 10 review gates will use it); land itself signs nothing and only re-points a view.
     const into = opts.into ?? 'main';
     const policy = opts.policy ?? blockOnConflict;
     const intoHeads = this.log.heads(into);
@@ -80,6 +81,7 @@ export class Repo {
     const mergedHeads = mergeHeads(intoHeads, incomingHeads);
 
     // Dry-run on a throwaway view; `into` is untouched until the policy allows.
+    // The tmp view is intentionally left in the log's view map (no GC — spec §11 spike non-goal).
     const tmp = `land/${into}/${landSeq++}`;
     this.log.view(tmp, mergedHeads);
     const conflicts = this.log.conflicts(tmp);
