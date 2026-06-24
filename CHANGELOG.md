@@ -51,6 +51,17 @@ All notable changes to Thaddeus. Format follows
   seeded edit now lands into `main` under policy and is asserted mirror-servable
   (`store.verify` + `log.publicView`), closing the spine's `policy` and `mirror`
   stages (5 pass / 0 todo).
+- `@thaddeus.run/reputation` — portable federated reputation (Pillar 07): the
+  dual-signed `Contribution` record (`subj_sig` = the subject claims it,
+  covering `(subject, repo, ref, kind, at)`; `host_sig` = an instance attests
+  it, covering all six fields including the subject's signature).
+  `verifyContribution` returns `{ authentic, attested }`, fail-soft — any holder
+  of the record + dids verifies it alone, with no trust in any server.
+  `ReputationLog` is an untrusted, keep-and-label aggregator whose `profile`
+  partitions a subject's records into **attested** and **claimed** and counts
+  the attested set `byKind` — reputation is the gathered, self-verifying record
+  set, not a number. The north-star's landed op now mints a `'merge'`
+  contribution honored on a second instance (6 pass / 0 todo).
 
 ### Changed
 
@@ -162,6 +173,23 @@ All notable changes to Thaddeus. Format follows
   for the P02 spike; `release(tag)` and `event` triggers come later.
 - **Persistence backends, federation, agent reputation/economy** — beyond the
   in-memory spike.
+- **Reputation network transport / federation wire (P07→later).** Cross-instance
+  honoring is demonstrated with two in-memory `ReputationLog`s; the wire that
+  ships contribution records (and P06's deferred view/op mirror) between real
+  hosts is not built.
+- **Two-party co-sign handshake (P07→later).** `signContribution` holds both the
+  subject and host keys; the protocol by which a host proposes a record and the
+  subject co-signs over the wire is deferred.
+- **Reputation scoring / tiers (P07→P09/P10).** `profile` yields the attested
+  set and per-kind counts; a derived score or trust tier a merge policy (P10) or
+  agent gate (P09) would consume is deferred.
+- **Auto-minting contributions from landings (P07).** Reputation stays decoupled
+  (depends only on `identity`); wiring a P06 landing to emit a `'merge'`
+  contribution is a platform/integration concern, shown only in the north-star
+  and demo.
+- **Contribution revocation, host allowlist / web-of-trust (P07).** No signed
+  retraction; the spike treats every valid `host_sig` as attestation rather than
+  distinguishing instances a verifier recognizes.
 
 ### Honest limitations of what currently ships (P01)
 
