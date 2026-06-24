@@ -60,7 +60,11 @@ const la = await web.land({
   author: alice,
   policy: blockOnConflict,
 });
-const lb = await web.land({ from: 'bob/signup', author: bob });
+const lb = await web.land({
+  from: 'bob/signup',
+  author: bob,
+  policy: blockOnConflict,
+});
 rule();
 console.log('2. two branches land cleanly under blockOnConflict:');
 console.log(`   alice landed: ${la.landed}, bob landed: ${lb.landed}`);
@@ -73,8 +77,16 @@ console.log(
 const api = platform.createRepo('acme/api');
 await branch(api, 'alice/rate', 'src/rate.rs', 'fn rate() { 100 }', alice);
 await branch(api, 'bob/rate', 'src/rate.rs', 'fn rate() { 200 }', bob);
-const first = await api.land({ from: 'alice/rate', author: alice });
-const second = await api.land({ from: 'bob/rate', author: bob });
+const first = await api.land({
+  from: 'alice/rate',
+  author: alice,
+  policy: blockOnConflict,
+});
+const second = await api.land({
+  from: 'bob/rate',
+  author: bob,
+  policy: blockOnConflict,
+});
 rule();
 console.log('3a. a same-path conflict is rejected (fail-closed):');
 console.log(
