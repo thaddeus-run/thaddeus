@@ -174,6 +174,23 @@
         "typescript": "catalog:",
       },
     },
+    "packages/platform": {
+      "name": "@thaddeus.run/platform",
+      "version": "0.0.0",
+      "dependencies": {
+        "@thaddeus.run/log": "workspace:*",
+        "@thaddeus.run/store": "workspace:*",
+      },
+      "devDependencies": {
+        "@thaddeus.run/fs": "workspace:*",
+        "@thaddeus.run/identity": "workspace:*",
+        "@thaddeus.run/provenance": "workspace:*",
+        "@types/bun": "catalog:",
+        "@typescript/native-preview": "catalog:",
+        "tsdown": "catalog:",
+        "typescript": "catalog:",
+      },
+    },
     "packages/provenance": {
       "name": "@thaddeus.run/provenance",
       "version": "0.0.0",
@@ -611,6 +628,8 @@
     "@thaddeus.run/landing": ["@thaddeus.run/landing@workspace:apps/landing"],
 
     "@thaddeus.run/log": ["@thaddeus.run/log@workspace:packages/log"],
+
+    "@thaddeus.run/platform": ["@thaddeus.run/platform@workspace:packages/platform"],
 
     "@thaddeus.run/provenance": ["@thaddeus.run/provenance@workspace:packages/provenance"],
 
