@@ -152,6 +152,21 @@
         "@types/bun": "catalog:",
       },
     },
+    "examples/server": {
+      "name": "@thaddeus.run/example-server",
+      "version": "0.0.0",
+      "dependencies": {
+        "@thaddeus.run/fs": "workspace:*",
+        "@thaddeus.run/identity": "workspace:*",
+        "@thaddeus.run/log": "workspace:*",
+        "@thaddeus.run/persist": "workspace:*",
+        "@thaddeus.run/server": "workspace:*",
+        "@thaddeus.run/store": "workspace:*",
+      },
+      "devDependencies": {
+        "@types/bun": "catalog:",
+      },
+    },
     "examples/workspace": {
       "name": "@thaddeus.run/example-workspace",
       "version": "0.0.0",
@@ -297,6 +312,25 @@
         "@thaddeus.run/identity": "workspace:*",
       },
       "devDependencies": {
+        "@types/bun": "catalog:",
+        "@typescript/native-preview": "catalog:",
+        "tsdown": "catalog:",
+        "typescript": "catalog:",
+      },
+    },
+    "packages/server": {
+      "name": "@thaddeus.run/server",
+      "version": "0.0.0",
+      "dependencies": {
+        "@noble/hashes": "catalog:",
+        "@thaddeus.run/identity": "workspace:*",
+        "@thaddeus.run/log": "workspace:*",
+        "@thaddeus.run/platform": "workspace:*",
+        "@thaddeus.run/store": "workspace:*",
+      },
+      "devDependencies": {
+        "@thaddeus.run/fs": "workspace:*",
+        "@thaddeus.run/persist": "workspace:*",
         "@types/bun": "catalog:",
         "@typescript/native-preview": "catalog:",
         "tsdown": "catalog:",
@@ -723,6 +757,8 @@
 
     "@thaddeus.run/example-reputation": ["@thaddeus.run/example-reputation@workspace:examples/reputation"],
 
+    "@thaddeus.run/example-server": ["@thaddeus.run/example-server@workspace:examples/server"],
+
     "@thaddeus.run/example-workspace": ["@thaddeus.run/example-workspace@workspace:examples/workspace"],
 
     "@thaddeus.run/fs": ["@thaddeus.run/fs@workspace:packages/fs"],
@@ -742,6 +778,8 @@
     "@thaddeus.run/provenance": ["@thaddeus.run/provenance@workspace:packages/provenance"],
 
     "@thaddeus.run/reputation": ["@thaddeus.run/reputation@workspace:packages/reputation"],
+
+    "@thaddeus.run/server": ["@thaddeus.run/server@workspace:packages/server"],
 
     "@thaddeus.run/store": ["@thaddeus.run/store@workspace:packages/store"],
 

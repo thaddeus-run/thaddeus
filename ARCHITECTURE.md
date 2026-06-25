@@ -58,6 +58,15 @@ backend-backed repo, so **a repo survives a process restart** — the code.store
 next steps toward runnable; signed-record-log persistence and SQLite/S3 backends
 are deferred.
 
+## Server (infrastructure, not a pillar)
+
+The durable `Platform` is reachable over HTTP via `@thaddeus.run/server` — a
+`Bun.serve` remote that is **untrusted** (no keys, verifies-don't-trust, serves
+ciphertext): reads are a public mirror, writes are owner-signed, `land` is
+key-free and policy-gated. It is stateless over the shared `Backend`, so a node
+restart serves the same repos. A client SDK/CLI, multi-node concurrency, and the
+Git gateway are the next steps.
+
 ## Per-primitive loop
 
 read `ARCHITECTURE.md` → brainstorm → spec (`docs/specs/`) → plan

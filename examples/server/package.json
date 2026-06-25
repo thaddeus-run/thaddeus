@@ -1,0 +1,17 @@
+{
+  "name": "@thaddeus.run/example-server",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@thaddeus.run/fs": "workspace:*",
+    "@thaddeus.run/identity": "workspace:*",
+    "@thaddeus.run/log": "workspace:*",
+    "@thaddeus.run/persist": "workspace:*",
+    "@thaddeus.run/server": "workspace:*",
+    "@thaddeus.run/store": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/bun": "catalog:"
+  }
+}

@@ -1,4 +1,4 @@
-import type { Identity } from '@thaddeus.run/identity';
+import type { Identity, PublicIdentity } from '@thaddeus.run/identity';
 import type { Conflict, Op, OpLog } from '@thaddeus.run/log';
 import { OpLog as OpLogClass } from '@thaddeus.run/log';
 import {
@@ -75,7 +75,7 @@ export class Repo {
   async land(opts: {
     from: string;
     into?: string;
-    author: Identity;
+    author?: Identity | PublicIdentity;
     policy?: LandPolicy;
   }): Promise<LandResult> {
     // `author` is part of the public landing interface (Pillar 10 review gates will use it); land itself signs nothing and only re-points a view.

@@ -47,6 +47,7 @@ export interface Store {
   rawObject(id: string): EncryptedObject | undefined;
   current(plaintextId: string): EncryptedObject | undefined;
   verify(id: string): boolean;
+  ingest(object: EncryptedObject, caps: readonly Capability[]): Promise<void>;
 }
 
 // In-memory hot cache; durable when constructed with a `Backend` (write-through
@@ -156,6 +157,34 @@ export class MemoryStore implements Store {
       this.#caps.get(object.plaintext_id) ?? []
     );
     return { id: object.id, plaintext_id: object.plaintext_id };
+  }
+
+  // Ingest a client-encrypted object + its caps (the untrusted-server path):
+  // verify the content-address (reject a mis-addressed blob), keep only valid
+  // caps, write through (persist-first), then update the hot maps. Persist-first
+  // so a failed backend write leaves neither map nor backend updated — no
+  // visible-but-non-durable state.
+  //
+  // Caps are AUTHORITATIVE-REPLACE: the pushed set overwrites the stored set
+  // entirely, so callers MUST push the full cap set for the object — not a
+  // delta — or previously stored caps will be silently dropped.
+  async ingest(
+    object: EncryptedObject,
+    caps: readonly Capability[]
+  ): Promise<void> {
+    if (address(object.ciphertext) !== object.id) {
+      throw new TypeError(
+        `refusing to ingest a mis-addressed object: ${object.id}`
+      );
+    }
+    const frozen = Object.freeze(object);
+    const valid = caps.filter((c) => verifyCapability(c));
+    await this.#persist(`obj/${frozen.id}`, frozen);
+    await this.#persist(`current/${frozen.plaintext_id}`, frozen.id);
+    await this.#persist(`cap/${frozen.plaintext_id}`, valid);
+    this.#objects.set(frozen.id, frozen);
+    this.#current.set(frozen.plaintext_id, frozen.id);
+    this.#caps.set(frozen.plaintext_id, valid);
   }
 
   async get(ref: Ref, reader: Identity, now?: string): Promise<Uint8Array> {
