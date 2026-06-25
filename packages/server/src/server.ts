@@ -10,16 +10,11 @@ import {
   type Backend,
   decodeRecord,
   encodeRecord,
-  MemoryStore,
   scoped,
 } from '@thaddeus.run/store';
 
 import { decodeBundle, encodeBundle } from './dto';
 import { type SignedHeaders, verifyRequest } from './sign';
-
-// Counter for unique ephemeral land source-view names; monotonic within the
-// process lifetime (not persisted — these views are throwaway, not durable).
-let landSeq = 0;
 
 // Parse a JSON request body, returning undefined on malformed input (so a handler
 // can answer 400 rather than throwing a 500). Used by every body-parsing handler.
@@ -80,6 +75,9 @@ export function createServer(config: ServerConfig): Server {
   // Per-repo promise chain: each mutation awaits the previous, so a land's
   // read-heads -> re-point can't interleave with a concurrent push.
   const locks = new Map<string, Promise<unknown>>();
+  // Counter for unique ephemeral land source-view names; per-server lifetime
+  // (not persisted — these views are throwaway, not durable).
+  let landSeq = 0;
 
   const metaBackend = (name: string): Backend =>
     scoped(config.backend, `repo/${name}/`);
@@ -262,13 +260,9 @@ export function createServer(config: ServerConfig): Server {
         list.push(cap);
         capsByPid.set(cap.object, list);
       }
-      // The platform always backs Repo.store with MemoryStore, which exposes
-      // ingest() for server-side verify-don't-trust ingestion. Cast here because
-      // the Store interface (client-side API) does not surface ingest().
-      const memStore = repo.store as MemoryStore;
       for (const object of bundle.objects) {
         try {
-          await memStore.ingest(
+          await repo.store.ingest(
             object,
             capsByPid.get(object.plaintext_id) ?? []
           );

@@ -47,6 +47,7 @@ export interface Store {
   rawObject(id: string): EncryptedObject | undefined;
   current(plaintextId: string): EncryptedObject | undefined;
   verify(id: string): boolean;
+  ingest(object: EncryptedObject, caps: readonly Capability[]): Promise<void>;
 }
 
 // In-memory hot cache; durable when constructed with a `Backend` (write-through
