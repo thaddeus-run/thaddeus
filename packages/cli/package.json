@@ -1,0 +1,60 @@
+{
+  "name": "@thaddeus.run/cli",
+  "version": "0.0.0",
+  "description": "The Thaddeus CLI (thaddeus / thad): clone, edit, and publish over the untrusted remote with a git-like working tree.",
+  "keywords": [
+    "cli",
+    "source-control",
+    "thaddeus"
+  ],
+  "homepage": "https://thaddeus.run",
+  "bugs": {
+    "url": "https://github.com/thaddeus-run/thaddeus/issues"
+  },
+  "license": "Apache-2.0",
+  "author": {
+    "name": "thaddeus.run",
+    "url": "https://thaddeus.run"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/thaddeus-run/thaddeus.git",
+    "directory": "packages/cli"
+  },
+  "bin": {
+    "thad": "./dist/bin.js",
+    "thaddeus": "./dist/bin.js"
+  },
+  "files": [
+    "dist",
+    "LICENSE.md",
+    "README.md"
+  ],
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "scripts": {
+    "prepublishOnly": "moon run cli:prepublish"
+  },
+  "dependencies": {
+    "@thaddeus.run/client": "workspace:*",
+    "@thaddeus.run/fs": "workspace:*",
+    "@thaddeus.run/identity": "workspace:*",
+    "@thaddeus.run/persist": "workspace:*",
+    "@thaddeus.run/platform": "workspace:*"
+  },
+  "devDependencies": {
+    "@thaddeus.run/server": "workspace:*",
+    "@types/bun": "catalog:",
+    "@typescript/native-preview": "catalog:",
+    "tsdown": "catalog:",
+    "typescript": "catalog:"
+  }
+}

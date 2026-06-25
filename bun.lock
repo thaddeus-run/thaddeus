@@ -214,6 +214,28 @@
         "typescript": "catalog:",
       },
     },
+    "packages/cli": {
+      "name": "@thaddeus.run/cli",
+      "version": "0.0.0",
+      "bin": {
+        "thaddeus": "./dist/bin.js",
+        "thad": "./dist/bin.js",
+      },
+      "dependencies": {
+        "@thaddeus.run/client": "workspace:*",
+        "@thaddeus.run/fs": "workspace:*",
+        "@thaddeus.run/identity": "workspace:*",
+        "@thaddeus.run/persist": "workspace:*",
+        "@thaddeus.run/platform": "workspace:*",
+      },
+      "devDependencies": {
+        "@thaddeus.run/server": "workspace:*",
+        "@types/bun": "catalog:",
+        "@typescript/native-preview": "catalog:",
+        "tsdown": "catalog:",
+        "typescript": "catalog:",
+      },
+    },
     "packages/client": {
       "name": "@thaddeus.run/client",
       "version": "0.0.0",
@@ -757,6 +779,8 @@
     "@tanstack/virtual-file-routes": ["@tanstack/virtual-file-routes@1.162.0", "", {}, "sha512-uhOeFyxLcU41HzvrxsGpiWdcMbScY1EDgbZ5K7DVRMYInbLYWAC0EA/kx9wXAoSM8q82bUG2hRl8+EAjE6XAbA=="],
 
     "@thaddeus.run/agent": ["@thaddeus.run/agent@workspace:packages/agent"],
+
+    "@thaddeus.run/cli": ["@thaddeus.run/cli@workspace:packages/cli"],
 
     "@thaddeus.run/client": ["@thaddeus.run/client@workspace:packages/client"],
 
