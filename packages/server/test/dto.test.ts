@@ -31,10 +31,18 @@ describe('wire bundle codec', () => {
     expect(back.objects[0]?.id).toBe(object.id);
     expect([...back.objects[0].ciphertext]).toEqual([...object.ciphertext]);
     expect(back.caps[0]?.object).toBe(caps[0]?.object);
+    if (
+      back.caps[0]?.wrapped_key !== undefined &&
+      caps[0]?.wrapped_key !== undefined
+    ) {
+      expect(back.caps[0].wrapped_key).toBeInstanceOf(Uint8Array);
+      expect([...back.caps[0].wrapped_key]).toEqual([...caps[0].wrapped_key]);
+    }
   });
 
   test('tolerates missing arrays (decodes to empty)', () => {
-    const back = decodeBundle({ ops: [], objects: [], caps: [] });
+    // @ts-expect-error — deliberately omit fields to exercise the ?? [] guards
+    const back = decodeBundle({});
     expect(back).toEqual({ ops: [], objects: [], caps: [] });
   });
 });
