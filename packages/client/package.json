@@ -1,0 +1,58 @@
+{
+  "name": "@thaddeus.run/client",
+  "version": "0.0.0",
+  "description": "The Thaddeus client SDK: clone/push/land over the untrusted HTTP remote, holding a self-owned identity and doing all crypto client-side.",
+  "keywords": [
+    "client",
+    "sdk",
+    "source-control",
+    "thaddeus"
+  ],
+  "homepage": "https://thaddeus.run",
+  "bugs": {
+    "url": "https://github.com/thaddeus-run/thaddeus/issues"
+  },
+  "license": "Apache-2.0",
+  "author": {
+    "name": "thaddeus.run",
+    "url": "https://thaddeus.run"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/thaddeus-run/thaddeus.git",
+    "directory": "packages/client"
+  },
+  "files": [
+    "dist",
+    "LICENSE.md",
+    "README.md"
+  ],
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "scripts": {
+    "prepublishOnly": "moon run client:prepublish"
+  },
+  "dependencies": {
+    "@thaddeus.run/fs": "workspace:*",
+    "@thaddeus.run/identity": "workspace:*",
+    "@thaddeus.run/log": "workspace:*",
+    "@thaddeus.run/platform": "workspace:*",
+    "@thaddeus.run/server": "workspace:*",
+    "@thaddeus.run/store": "workspace:*"
+  },
+  "devDependencies": {
+    "@thaddeus.run/persist": "workspace:*",
+    "@types/bun": "catalog:",
+    "@typescript/native-preview": "catalog:",
+    "tsdown": "catalog:",
+    "typescript": "catalog:"
+  }
+}
