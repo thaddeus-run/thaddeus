@@ -8,9 +8,11 @@ import {
 } from '@thaddeus.run/platform';
 import {
   type Backend,
+  type Capability,
   decodeRecord,
   encodeRecord,
   scoped,
+  verifyCapability,
 } from '@thaddeus.run/store';
 
 import { decodeBundle, encodeBundle } from './dto';
@@ -75,10 +77,6 @@ export function createServer(config: ServerConfig): Server {
   // Per-repo promise chain: each mutation awaits the previous, so a land's
   // read-heads -> re-point can't interleave with a concurrent push.
   const locks = new Map<string, Promise<unknown>>();
-  // Counter for unique ephemeral land source-view names; per-server lifetime
-  // (not persisted — these views are throwaway, not durable).
-  let landSeq = 0;
-
   const metaBackend = (name: string): Backend =>
     scoped(config.backend, `repo/${name}/`);
 
@@ -251,14 +249,28 @@ export function createServer(config: ServerConfig): Server {
       let objectsOk = 0;
       let capsOk = 0;
       let opsOk = 0;
-      // Group caps by plaintext_id so each object gets its accompanying caps in
-      // one ingest call. Objects must be ingested before their ops so content the
-      // op references is resident when the op is verified.
-      const capsByPid = new Map<string, typeof bundle.caps>();
+      // Verify each cap at the push boundary before grouping. Caps with invalid
+      // or malformed signatures are rejected immediately so they never reach
+      // store.ingest; only valid caps are grouped and counted in accepted.caps.
+      const capsByPid = new Map<string, Capability[]>();
       for (const cap of bundle.caps) {
-        const list = capsByPid.get(cap.object) ?? [];
-        list.push(cap);
-        capsByPid.set(cap.object, list);
+        let valid = false;
+        try {
+          valid = verifyCapability(cap);
+        } catch {
+          valid = false;
+        }
+        if (valid) {
+          const list = capsByPid.get(cap.object) ?? [];
+          list.push(cap);
+          capsByPid.set(cap.object, list);
+        } else {
+          rejected.push({
+            kind: 'cap',
+            id: cap.object ?? '?',
+            reason: 'invalid capability signature',
+          });
+        }
       }
       for (const object of bundle.objects) {
         try {
@@ -340,9 +352,10 @@ export function createServer(config: ServerConfig): Server {
           error: 'fromHeads references an op the server has not ingested',
         });
       }
-      // Ephemeral in-memory source view: sets the view heads without persisting,
-      // so it never leaks into the durable state even if land is rejected.
-      const src = `incoming/${landSeq++}`;
+      // Ephemeral in-memory source view: reuse a constant name so the view
+      // count stays bounded. Safe because withRepoLock serializes land calls
+      // per repo — each land overwrites the view before reading it.
+      const src = 'incoming';
       repo.log.view(src, fromHeads);
       const result = await repo.land({
         from: src,

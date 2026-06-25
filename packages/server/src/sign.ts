@@ -58,6 +58,11 @@ export function verifyRequest(
   if (headers === null) {
     return null;
   }
+  // Fail closed: a misconfigured server clock (NaN nowMs) must reject rather
+  // than silently disable the skew/replay window.
+  if (Number.isNaN(nowMs)) {
+    return null;
+  }
   const t = Date.parse(headers.timestamp);
   if (Number.isNaN(t) || Math.abs(nowMs - t) > SKEW_MS) {
     return null;

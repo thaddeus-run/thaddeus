@@ -161,6 +161,52 @@ describe('writes', () => {
     expect(second.rejected).toHaveLength(0); // re-ingest is a content-addressed no-op, not an error
   });
 
+  test('forged cap lands in rejected[], valid cap counted in accepted.caps', async () => {
+    const a = Identity.create();
+    const srv = createServer({ backend: new MemoryBackend() });
+    await srv.fetch(signed('POST', '/repos', jbody({ name: 'cap-test' }), a));
+
+    // Build a local commit to get a real bundle with a valid cap.
+    const store = new MemoryStore();
+    const log = new OpLog(store);
+    const ws = Workspace.open(log, store, {
+      source: 'main',
+      reader: a,
+      name: 'feat',
+    });
+    ws.write('hello.rs', enc('fn hi() {}'));
+    await ws.commit(a);
+    const op = log.ops()[0];
+    const pid = op.payload!.plaintext_id;
+    const validCaps = [...store.caps(pid)];
+    // Build a forged cap by zeroing its signature bytes.
+    const forgedCap = {
+      ...validCaps[0],
+      sig: new Uint8Array(validCaps[0].sig.length),
+    };
+    // Bundle: the object + both the valid cap AND the forged cap.
+    const bundle = encodeBundle(
+      [op],
+      [store.current(pid)!],
+      [...validCaps, forgedCap]
+    );
+
+    const res = await srv.fetch(
+      signed('POST', '/repos/cap-test/push', jbody(bundle), a)
+    );
+    expect(res.status).toBe(200);
+    const result = (await res.json()) as {
+      accepted: { objects: number; ops: number; caps: number };
+      rejected: { kind: string; id: string; reason: string }[];
+    };
+    // The forged cap must appear in rejected[] with kind 'cap'.
+    const rejectedCaps = result.rejected.filter((r) => r.kind === 'cap');
+    expect(rejectedCaps).toHaveLength(1);
+    expect(rejectedCaps[0].reason).toBe('invalid capability signature');
+    // Only the valid cap(s) count in accepted.caps.
+    expect(result.accepted.caps).toBe(validCaps.length);
+  });
+
   test('land with an unknown head is 400', async () => {
     const a = Identity.create();
     const srv = createServer({ backend: new MemoryBackend() });
