@@ -1,0 +1,180 @@
+import { Workspace } from '@thaddeus.run/fs';
+import { Identity, ready } from '@thaddeus.run/identity';
+import { OpLog } from '@thaddeus.run/log';
+import { FileBackend } from '@thaddeus.run/persist';
+import { AccessDenied, MemoryStore } from '@thaddeus.run/store';
+import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+
+import { type Bundle, decodeBundle, encodeBundle } from '../src/dto';
+import { createServer } from '../src/server';
+import { signRequest } from '../src/sign';
+import { expectRejects } from './reject';
+
+beforeAll(async () => {
+  await ready();
+});
+
+const enc = (s: string): Uint8Array => new TextEncoder().encode(s);
+const dec = (b: Uint8Array): string => new TextDecoder().decode(b);
+const tmp = mkdtempSync(join(tmpdir(), 'thaddeus-server-'));
+afterAll(() => rmSync(tmp, { recursive: true, force: true }));
+
+// A tiny HTTP client over a live base URL.
+function client(base: string) {
+  const post = async (
+    path: string,
+    bodyObj: unknown,
+    signer: Identity
+  ): Promise<Response> => {
+    const body = new TextEncoder().encode(JSON.stringify(bodyObj));
+    const h = signRequest('POST', path, body, signer, new Date().toISOString());
+    return fetch(`${base}${path}`, {
+      method: 'POST',
+      body,
+      headers: {
+        'x-thaddeus-did': h.did,
+        'x-thaddeus-timestamp': h.timestamp,
+        'x-thaddeus-signature': h.signature,
+      },
+    });
+  };
+  const get = (path: string): Promise<Response> => fetch(`${base}${path}`);
+  return { post, get };
+}
+
+// Locally commit `content` to `path` and return the push bundle + branch heads.
+async function commitLocally(author: Identity, path: string, content: string) {
+  const store = new MemoryStore();
+  const log = new OpLog(store);
+  const ws = Workspace.open(log, store, {
+    source: 'main',
+    reader: author,
+    name: 'feat',
+  });
+  ws.write(path, enc(content));
+  await ws.commit(author);
+  const objects = [];
+  const caps = [];
+  for (const op of log.ops()) {
+    const pid = op.payload?.plaintext_id;
+    if (pid !== undefined) {
+      const cur = store.current(pid);
+      if (cur !== undefined) {
+        objects.push(cur);
+        caps.push(...store.caps(pid));
+      }
+    }
+  }
+  return {
+    bundle: encodeBundle(log.ops(), objects, caps),
+    heads: [...log.heads('feat')],
+  };
+}
+
+describe('server e2e', () => {
+  test('clone round-trip + stateless restart over real HTTP', async () => {
+    const root = mkdtempSync(join(tmp, 'data-'));
+    const a = Identity.create();
+
+    // Boot a server.
+    const srv1 = createServer({ backend: new FileBackend(root) });
+    const http1 = Bun.serve({ port: 0, fetch: srv1.fetch });
+    const base1 = `http://localhost:${http1.port}`;
+    const c1 = client(base1);
+
+    await c1.post('/repos', { name: 'acme/web' }, a);
+    const { bundle, heads } = await commitLocally(
+      a,
+      'src/auth.rs',
+      'fn refresh() {}'
+    );
+    await c1.post('/repos/acme%2Fweb/push', bundle, a);
+    const landed = (await (
+      await c1.post(
+        '/repos/acme%2Fweb/land',
+        { fromHeads: heads, into: 'main' },
+        a
+      )
+    ).json()) as { landed: boolean };
+    expect(landed.landed).toBe(true);
+
+    // Fresh client clones via pull and decrypts the original content.
+    const pulled = decodeBundle(
+      (await (
+        await c1.get('/repos/acme%2Fweb/pull?view=main')
+      ).json()) as Bundle
+    );
+    const cstore = new MemoryStore();
+    const clog = new OpLog(cstore);
+    for (const o of pulled.objects) {
+      await cstore.ingest(
+        o,
+        pulled.caps.filter((cp) => cp.object === o.plaintext_id)
+      );
+    }
+    for (const o of pulled.ops) {
+      await clog.ingest(o);
+    }
+    // Reconstruct the 'main' view: the head(s) of the pulled op set are the
+    // tip(s) that the server's land pointed 'main' at. The global frontier
+    // (ops with no children in this set) equals the landed heads.
+    clog.view('main', clog.heads());
+    const ref = clog.materialize('main', a).get('src/auth.rs')?.ref;
+    expect(ref).toBeDefined();
+    expect(dec(await cstore.get(ref!, a))).toBe('fn refresh() {}');
+    await http1.stop(true);
+
+    // Stateless: a brand-new server over the SAME dir still serves the landed content.
+    const srv2 = createServer({ backend: new FileBackend(root) });
+    const http2 = Bun.serve({ port: 0, fetch: srv2.fetch });
+    const c2 = client(`http://localhost:${http2.port}`);
+    const repull = decodeBundle(
+      (await (
+        await c2.get('/repos/acme%2Fweb/pull?view=main')
+      ).json()) as Bundle
+    );
+    expect(repull.ops.length).toBe(pulled.ops.length);
+    await http2.stop(true);
+  });
+
+  test('decryption-bounded over the wire: B cannot read until granted', async () => {
+    const root = mkdtempSync(join(tmp, 'grant-'));
+    const a = Identity.create();
+    const b = Identity.create();
+    const srv = createServer({ backend: new FileBackend(root) });
+    const http = Bun.serve({ port: 0, fetch: srv.fetch });
+    const c = client(`http://localhost:${http.port}`);
+
+    await c.post('/repos', { name: 'r' }, a);
+    const { bundle, heads } = await commitLocally(a, 'f.rs', 'secret');
+    await c.post('/repos/r/push', bundle, a);
+    await c.post('/repos/r/land', { fromHeads: heads, into: 'main' }, a);
+
+    // B pulls the ciphertext but cannot decrypt (no cap).
+    const pulled = decodeBundle(
+      (await (await c.get('/repos/r/pull?view=main')).json()) as Bundle
+    );
+    const bstore = new MemoryStore();
+    const blog = new OpLog(bstore);
+    for (const o of pulled.objects) {
+      await bstore.ingest(
+        o,
+        pulled.caps.filter((cp) => cp.object === o.plaintext_id)
+      );
+    }
+    for (const o of pulled.ops) {
+      await blog.ingest(o);
+    }
+    // Reconstruct the 'main' view from the global frontier of pulled ops.
+    blog.view('main', blog.heads());
+    const ref = blog.materialize('main', b).get('f.rs')?.ref;
+    expect(ref).toBeDefined();
+    // AccessDenied — B has no capability for the object A encrypted
+    await expectRejects(bstore.get(ref!, b), AccessDenied);
+
+    await http.stop(true);
+  });
+});
