@@ -1,5 +1,5 @@
 import { Identity } from '@thaddeus.run/identity';
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 // Where the self-owned identity seed lives under a config home.
@@ -40,10 +40,15 @@ export function initIdentity(
   const seed = new Uint8Array(32);
   crypto.getRandomValues(seed);
   const identity = Identity.fromSeed(seed);
-  mkdirSync(join(home, '.config', 'thaddeus'), { recursive: true });
+  mkdirSync(join(home, '.config', 'thaddeus'), {
+    recursive: true,
+    mode: 0o700,
+  });
   writeFileSync(
     path,
-    `${JSON.stringify({ seed: Buffer.from(seed).toString('base64'), did: identity.did }, null, 2)}\n`
+    `${JSON.stringify({ seed: Buffer.from(seed).toString('base64'), did: identity.did }, null, 2)}\n`,
+    { mode: 0o600 }
   );
+  chmodSync(path, 0o600);
   return { did: identity.did, created: true };
 }

@@ -1,6 +1,6 @@
 import { ready } from '@thaddeus.run/identity';
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, statSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -26,6 +26,7 @@ describe('thaddeus init', () => {
     const first = lines.join('\n');
     expect(first).toContain('did:key:');
     const path = join(home, '.config', 'thaddeus', 'identity.json');
+    expect((statSync(path).mode & 0o777) === 0o600).toBe(true);
     const did1 = (JSON.parse(readFileSync(path, 'utf8')) as { did: string })
       .did;
 
