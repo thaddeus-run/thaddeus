@@ -131,7 +131,7 @@ export class MemoryStore implements Store {
     await this.#persist(`current/${object.plaintext_id}`, object.id);
     await this.#persist(
       `cap/${object.plaintext_id}`,
-      this.#caps.get(object.plaintext_id)
+      this.#caps.get(object.plaintext_id) ?? []
     );
     return { id: object.id, plaintext_id: object.plaintext_id };
   }
@@ -236,10 +236,7 @@ export class MemoryStore implements Store {
     const pend = this.#pending.get(ref.plaintext_id) ?? [];
     pend.push(cap);
     this.#pending.set(ref.plaintext_id, pend);
-    await this.#persist(
-      `pending/${ref.plaintext_id}`,
-      this.#pending.get(ref.plaintext_id) ?? []
-    );
+    await this.#persist(`pending/${ref.plaintext_id}`, pend);
   }
 
   // Manual trigger: promote due pending reveals into the served set.
