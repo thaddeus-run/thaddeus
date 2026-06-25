@@ -1,5 +1,6 @@
 import { Identity, PublicIdentity } from '@thaddeus.run/identity';
 
+import { type Backend, decodeRecord, encodeRecord } from './backend';
 import {
   type Capability,
   issueCapability,
@@ -48,18 +49,74 @@ export interface Store {
   verify(id: string): boolean;
 }
 
-// In-memory reference store. Never holds a plaintext content key: keys live
-// only inside capabilities, sealed to each grantee. Spike — not durable, not
-// concurrency-safe.
+// In-memory hot cache; durable when constructed with a `Backend` (write-through
+// + `MemoryStore.open`). Spike — single process, not concurrency-safe.
 export class MemoryStore implements Store {
   readonly #objects: Map<string, EncryptedObject> = new Map();
   readonly #current: Map<string, string> = new Map();
   readonly #caps: Map<string, Capability[]> = new Map();
   readonly #pending: Map<string, Capability[]> = new Map();
+  readonly #backend: Backend | undefined;
+
+  constructor(backend?: Backend) {
+    this.#backend = backend;
+  }
+
+  // Rebuild a hot cache from a backend. A content-addressed object whose bytes
+  // don't hash to its id is skipped (torn-write safety). Frozen on load.
+  static async open(backend: Backend): Promise<MemoryStore> {
+    const store = new MemoryStore(backend);
+    for (const key of await backend.list('obj/')) {
+      const bytes = await backend.get(key);
+      if (bytes === undefined) {
+        continue;
+      }
+      const o = decodeRecord(bytes) as EncryptedObject;
+      if (address(o.ciphertext) !== o.id) {
+        continue; // torn or tampered — never surface as truth
+      }
+      store.#objects.set(o.id, Object.freeze(o));
+    }
+    for (const key of await backend.list('current/')) {
+      const bytes = await backend.get(key);
+      if (bytes !== undefined) {
+        store.#current.set(
+          key.slice('current/'.length),
+          decodeRecord(bytes) as string
+        );
+      }
+    }
+    for (const key of await backend.list('cap/')) {
+      const bytes = await backend.get(key);
+      if (bytes !== undefined) {
+        store.#caps.set(
+          key.slice('cap/'.length),
+          decodeRecord(bytes) as Capability[]
+        );
+      }
+    }
+    for (const key of await backend.list('pending/')) {
+      const bytes = await backend.get(key);
+      if (bytes !== undefined) {
+        store.#pending.set(
+          key.slice('pending/'.length),
+          decodeRecord(bytes) as Capability[]
+        );
+      }
+    }
+    return store;
+  }
+
+  // Write-through helper: no-op without a backend.
+  async #persist(key: string, value: unknown): Promise<void> {
+    if (this.#backend !== undefined) {
+      await this.#backend.put(key, encodeRecord(value));
+    }
+  }
 
   async put(plaintext: Uint8Array, owner: Identity): Promise<Ref> {
     const contentKey = newContentKey();
-    const object = encrypt(plaintext, contentKey);
+    const object = Object.freeze(encrypt(plaintext, contentKey));
     this.#objects.set(object.id, object);
     this.#current.set(object.plaintext_id, object.id);
     this.#caps.set(object.plaintext_id, [
@@ -70,12 +127,27 @@ export class MemoryStore implements Store {
         grantedBy: owner,
       }),
     ]);
+    await this.#persist(`obj/${object.id}`, object);
+    await this.#persist(`current/${object.plaintext_id}`, object.id);
+    await this.#persist(
+      `cap/${object.plaintext_id}`,
+      this.#caps.get(object.plaintext_id)
+    );
     return { id: object.id, plaintext_id: object.plaintext_id };
   }
 
   async get(ref: Ref, reader: Identity, now?: string): Promise<Uint8Array> {
     const nowMs = this.#resolveNow(now);
-    this.#releaseDue(ref.plaintext_id, nowMs);
+    if (this.#releaseDue(ref.plaintext_id, nowMs)) {
+      await this.#persist(
+        `cap/${ref.plaintext_id}`,
+        this.#caps.get(ref.plaintext_id) ?? []
+      );
+      await this.#persist(
+        `pending/${ref.plaintext_id}`,
+        this.#pending.get(ref.plaintext_id) ?? []
+      );
+    }
     return decrypt(
       this.#currentObject(ref.plaintext_id),
       this.#contentKeyVia(ref.plaintext_id, reader, nowMs)
@@ -94,6 +166,7 @@ export class MemoryStore implements Store {
       })
     );
     this.#caps.set(ref.plaintext_id, caps);
+    await this.#persist(`cap/${ref.plaintext_id}`, caps);
   }
 
   async revoke(ref: Ref, grantee: PublicIdentity, by: Identity): Promise<void> {
@@ -102,7 +175,7 @@ export class MemoryStore implements Store {
 
     // Rotate: new key, re-encrypt, supersede the current object.
     const newKey = newContentKey();
-    const rotated = encrypt(plaintext, newKey);
+    const rotated = Object.freeze(encrypt(plaintext, newKey));
     this.#objects.set(rotated.id, rotated);
     this.#current.set(ref.plaintext_id, rotated.id);
 
@@ -132,6 +205,16 @@ export class MemoryStore implements Store {
       ref.plaintext_id,
       rewrap(this.#pending.get(ref.plaintext_id) ?? [])
     );
+    await this.#persist(`obj/${rotated.id}`, rotated);
+    await this.#persist(`current/${ref.plaintext_id}`, rotated.id);
+    await this.#persist(
+      `cap/${ref.plaintext_id}`,
+      this.#caps.get(ref.plaintext_id) ?? []
+    );
+    await this.#persist(
+      `pending/${ref.plaintext_id}`,
+      this.#pending.get(ref.plaintext_id) ?? []
+    );
   }
 
   // Schedule a withheld reveal: `by` (who must hold the content key) seals it to
@@ -153,12 +236,27 @@ export class MemoryStore implements Store {
     const pend = this.#pending.get(ref.plaintext_id) ?? [];
     pend.push(cap);
     this.#pending.set(ref.plaintext_id, pend);
+    await this.#persist(
+      `pending/${ref.plaintext_id}`,
+      this.#pending.get(ref.plaintext_id) ?? []
+    );
   }
 
   // Manual trigger: promote due pending reveals into the served set.
   async reveal(ref: Ref, now?: string): Promise<boolean> {
     const nowMs = this.#resolveNow(now);
-    return this.#releaseDue(ref.plaintext_id, nowMs);
+    const released = this.#releaseDue(ref.plaintext_id, nowMs);
+    if (released) {
+      await this.#persist(
+        `cap/${ref.plaintext_id}`,
+        this.#caps.get(ref.plaintext_id) ?? []
+      );
+      await this.#persist(
+        `pending/${ref.plaintext_id}`,
+        this.#pending.get(ref.plaintext_id) ?? []
+      );
+    }
+    return released;
   }
 
   // The served (mirror-visible) capabilities for an object. Pending reveals are
