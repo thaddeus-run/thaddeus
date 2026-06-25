@@ -98,6 +98,15 @@ All notable changes to Thaddeus. Format follows
   `fromHeads`) runs the fail-closed `LandPolicy` and re-points the view — all
   key-free. Stateless over the shared `Backend`: an HTTP clone round-trip (push
   → land → fresh-client clone + decrypt) survives a server restart.
+- `@thaddeus.run/client` + `@thaddeus.run/cli` — the client SDK and the
+  `thaddeus`/`thad` CLI. `Client` holds a self-owned `Identity` and drives the
+  remote (`createRepo`/`clone`/`push`/`land`), signing every write and doing all
+  crypto client-side; `clone` reads view heads explicitly (closing the server's
+  pull-infers-heads follow-up). The CLI is a git-like client over a `.thaddeus/`
+  durable working copy: `init` (identity seed in `~/.config/thaddeus/`),
+  `create`, `clone` (materializes files), `status`, `push` (commit → upload →
+  land into `main`), `land`. The product is now **Thaddeus** (the working name
+  "Strata" is retired; a repo-wide doc rename follows).
 
 ### Changed
 
@@ -218,8 +227,12 @@ All notable changes to Thaddeus. Format follows
   Still deferred: **multi-node concurrency** (optimistic-concurrency on the
   `land` re-point + the `scope()` delimiter-encode), a **grant list / richer
   ACLs** (owner-only writes today), **replay-proof request nonces** (a signed
-  timestamp window today), a **client SDK / CLI**, **TLS / deployment**, and
-  **incremental pull / pagination**.
+  timestamp window today), **TLS / deployment**, and **incremental pull /
+  pagination**.
+- **Client SDK + CLI — shipped** as `@thaddeus.run/client` + `@thaddeus.run/cli`
+  (single-owner, online, full-set sync). Still deferred: multi-writer /
+  agent-delegation CLI, incremental/offline sync, conflict-resolution UX,
+  `log`/`diff`/`--json`, and a published-binary install story.
 - **Git gateway** — emit a Git history (commits/blobs/branches) for
   compatibility, over the durable/served substrate. The optional on-ramp, later.
 - **Reputation network transport / federation wire (P07→later).** Cross-instance
