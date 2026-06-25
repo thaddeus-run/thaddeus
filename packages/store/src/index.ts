@@ -1,3 +1,5 @@
+export type { Backend } from './backend';
+export { decodeRecord, encodeRecord } from './backend';
 export { ALG, address, decrypt, encrypt, newContentKey } from './object';
 export type { EncryptedObject } from './object';
 export { issueCapability, unwrapKey, verifyCapability } from './capability';

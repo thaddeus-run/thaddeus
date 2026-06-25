@@ -230,6 +230,17 @@
         "typescript": "catalog:",
       },
     },
+    "packages/persist": {
+      "name": "@thaddeus.run/persist",
+      "version": "0.0.0",
+      "devDependencies": {
+        "@thaddeus.run/store": "workspace:*",
+        "@types/bun": "catalog:",
+        "@typescript/native-preview": "catalog:",
+        "tsdown": "catalog:",
+        "typescript": "catalog:",
+      },
+    },
     "packages/platform": {
       "name": "@thaddeus.run/platform",
       "version": "0.0.0",
@@ -705,6 +716,8 @@
     "@thaddeus.run/landing": ["@thaddeus.run/landing@workspace:apps/landing"],
 
     "@thaddeus.run/log": ["@thaddeus.run/log@workspace:packages/log"],
+
+    "@thaddeus.run/persist": ["@thaddeus.run/persist@workspace:packages/persist"],
 
     "@thaddeus.run/platform": ["@thaddeus.run/platform@workspace:packages/platform"],
 
