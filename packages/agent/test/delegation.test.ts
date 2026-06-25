@@ -55,6 +55,9 @@ describe('Delegation — sign & verify', () => {
       signDelegation({ ...FIELDS, maxChanges: -1 }, operator)
     ).toThrow();
     expect(() =>
+      signDelegation({ ...FIELDS, maxChanges: 2.5 }, operator)
+    ).toThrow();
+    expect(() =>
       signDelegation({ ...FIELDS, maxSpend: -1 }, operator)
     ).toThrow();
     expect(() => signDelegation({ ...FIELDS, agent: '' }, operator)).toThrow();

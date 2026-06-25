@@ -16,7 +16,8 @@ export class AgentRegistry {
   readonly #meter: Map<string, { changes: number; spend: number }> = new Map();
 
   // Verify and store a delegation (one active per agent; re-register replaces).
-  // Throws TypeError on an invalid delegation.
+  // Throws TypeError on an invalid delegation. Re-registering replaces the
+  // grant but does NOT reset the meter — the budget is a lifetime cap.
   register(d: Delegation): void {
     if (!verifyDelegation(d)) {
       throw new TypeError(

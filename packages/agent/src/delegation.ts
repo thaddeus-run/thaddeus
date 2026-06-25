@@ -44,10 +44,10 @@ function assertCanonical(core: DelegationCore): void {
   }
   if (
     typeof core.maxChanges !== 'number' ||
-    !Number.isFinite(core.maxChanges) ||
+    !Number.isInteger(core.maxChanges) ||
     core.maxChanges < 0
   ) {
-    throw new TypeError('delegation.maxChanges must be a finite number >= 0');
+    throw new TypeError('delegation.maxChanges must be a non-negative integer');
   }
   if (
     typeof core.maxSpend !== 'number' ||

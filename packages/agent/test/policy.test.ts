@@ -131,6 +131,23 @@ describe('delegationPolicy', () => {
     expect(decision.reason).toContain('revoked');
   });
 
+  test('rejects a path that escapes scope via a .. segment', async () => {
+    const operator = Identity.create();
+    const agent = Identity.create();
+    const reg = new AgentRegistry();
+    reg.register(
+      signDelegation(
+        { agent: agent.did, paths: ['src/**'], maxChanges: 5, maxSpend: 100 },
+        operator
+      )
+    );
+    const decision = await delegationPolicy(reg)(
+      proposal([await op(agent, 'src/../secrets/key.env')])
+    );
+    expect(decision.allow).toBe(false);
+    expect(decision.reason).toContain('outside');
+  });
+
   test('is read-only on the meter (dry-run safe)', async () => {
     const operator = Identity.create();
     const agent = Identity.create();

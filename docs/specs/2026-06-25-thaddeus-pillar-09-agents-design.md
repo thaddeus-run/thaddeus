@@ -441,6 +441,11 @@ its content keys (the decryption half). Print the acceptance facts.
   enter shared state via `Repo.land`; it does not police a private workspace's
   in-progress edits (which are the agent's own, unlanded).
 - **In-memory, single process.** No persistence, no concurrency safety.
+- **Gates the whole incoming closure.** `delegationPolicy` requires _every_ op
+  in `LandProposal.incomingOps` (the source-minus-target closure, across all
+  authors) to have a valid delegation — so it assumes a single-agent-authored
+  branch. A mixed human/agent closure trips "no delegation" on the human's ops;
+  compose `delegationPolicy` with policies for other authors when that arises.
 
 ## 12. Seeded/updated docs
 
