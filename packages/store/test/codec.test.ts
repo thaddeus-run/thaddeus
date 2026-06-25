@@ -15,4 +15,11 @@ describe('record codec', () => {
     expect(out.sig).toBeInstanceOf(Uint8Array);
     expect([...out.sig]).toEqual([0, 1, 254, 255]);
   });
+
+  test('throws on an unknown record version', () => {
+    const bad = new TextEncoder().encode(
+      JSON.stringify({ v: 'future', d: {} })
+    );
+    expect(() => decodeRecord(bad)).toThrow(TypeError);
+  });
 });

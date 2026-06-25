@@ -9,6 +9,11 @@ import {
 } from 'node:fs/promises';
 import { join } from 'node:path';
 
+// Process-local monotonic counter — used to make temp-file names unique within
+// a single process, preventing same-key concurrent puts from clobbering each
+// other's temp file.
+let tmpSeq = 0;
+
 // Filesystem backend: each key → one percent-encoded file under `root`. Writes
 // are temp-file + atomic rename, so a crash never yields a half-written file.
 // Zero dependencies beyond node:fs. Flat directory (dir sharding is a later
@@ -24,7 +29,7 @@ export class FileBackend implements Backend {
   async put(key: string, bytes: Uint8Array): Promise<void> {
     await mkdir(this.#root, { recursive: true });
     const path = this.#path(key);
-    const tmp = `${path}.tmp-${process.pid}`;
+    const tmp = `${path}.tmp-${process.pid}-${tmpSeq++}`;
     await writeFile(tmp, bytes);
     await rename(tmp, path);
   }
@@ -32,8 +37,11 @@ export class FileBackend implements Backend {
   async get(key: string): Promise<Uint8Array | undefined> {
     try {
       return new Uint8Array(await readFile(this.#path(key)));
-    } catch {
-      return undefined; // ENOENT (and any read error) → absent
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code === 'ENOENT') {
+        return undefined; // absent
+      }
+      throw err; // a real read error must surface, not look like "absent"
     }
   }
 
@@ -45,7 +53,7 @@ export class FileBackend implements Backend {
       return [];
     }
     return names
-      .filter((n) => !n.includes('.tmp-'))
+      .filter((n) => !/\.tmp-\d+-\d+$/.test(n))
       .map(decodeKey)
       .filter((k) => k.startsWith(prefix));
   }
@@ -63,18 +71,13 @@ export class FileBackend implements Backend {
   }
 }
 
-// Encode an arbitrary key into one safe, flat filename (percent-encode every
-// char that isn't filename-safe, including '/'). Bijective, so decodeKey
-// recovers the original key exactly.
+// Encode an arbitrary key into one safe, flat filename. Uses encodeURIComponent
+// which is bijective for all Unicode (including non-ASCII and '/'), and leaves
+// common safe chars readable. decodeURIComponent is the exact inverse.
 function encodeKey(key: string): string {
-  return key.replace(/[^a-zA-Z0-9._-]/g, (c) => {
-    const hex = c.charCodeAt(0).toString(16).toUpperCase().padStart(2, '0');
-    return `%${hex}`;
-  });
+  return encodeURIComponent(key);
 }
 
 function decodeKey(name: string): string {
-  return name.replace(/%([0-9A-F]{2})/g, (_m, h: string) =>
-    String.fromCharCode(Number.parseInt(h, 16))
-  );
+  return decodeURIComponent(name);
 }
