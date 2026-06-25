@@ -74,6 +74,16 @@ All notable changes to Thaddeus. Format follows
   read-only on the meter. Revocation = `registry.revoke` (quarantine) +
   `store.revoke` (key rotation, P01). The north-star now lands an agent's change
   under its delegation and quarantines it on revoke (7 pass / 0 todo).
+- `@thaddeus.run/persist` + durable `Store`/`OpLog` — persistence: a pluggable
+  `Backend` (key→bytes; `FileBackend` atomic temp+rename, `MemoryBackend`,
+  `scoped`) defined in `@thaddeus.run/store`. `Store` and `OpLog` take an
+  optional backend — every mutation write-throughs (content-addressed `obj`/`op`
+  write-once; `view`/`cap`/`current`/`pending`/`embargo` pointers),
+  `MemoryStore.open` / `OpLog.load` rebuild the hot cache (torn blobs skipped),
+  records are frozen on store, and **synchronous reads are unchanged** (no async
+  ripple). `Platform.createDurable`/`openDurable` make a repo **survive a
+  restart** (8 pass / 0 todo). Realizes the code.store hot/cold split and the
+  deferred freeze-on-store immutability fix.
 
 ### Changed
 
@@ -116,7 +126,10 @@ All notable changes to Thaddeus. Format follows
   be addressed uniformly (freeze-on-store / immutable wire encoding at the store
   boundary) rather than piecemeal per package. (Provenance `verify` is
   signature-checked on read, so a mutated record renders `unverified` rather
-  than silently trusted.)
+  than silently trusted.) Freeze-on-store now ships at the persistence boundary
+  (EncryptedObject/Op frozen on store + decoded fresh on load); the
+  `Uint8Array`-index caveat remains, and a fully immutable wire encoding is
+  still the end state.
 - **Throughput envelope at scale (P06).** The brief's platform numbers —
   code.store's ~9M repos/30d, ~15K repos/min for 3h, zero downtime on an
   in-memory, horizontally-scaled, API-first engine — are an existence proof to
@@ -183,8 +196,13 @@ All notable changes to Thaddeus. Format follows
   compatibility.
 - **Release / event triggers for reveal** — only `timestamp` + `manual` planned
   for the P02 spike; `release(tag)` and `event` triggers come later.
-- **Persistence backends, federation, agent reputation/economy** — beyond the
-  in-memory spike.
+- **Persistence backends (Store + OpLog) — shipped** as `@thaddeus.run/persist`
+  (filesystem + in-memory). Still deferred: **signed-record-log persistence**
+  (provenance/reputation/agent), **SQLite/S3 backends**, **compaction/GC**, and
+  **multi-process concurrency/locking/WAL** (durable, not concurrent).
+- **Server / network API and Git gateway (persistence→runnable).** Persistence
+  is in-process durability; serving it over a wire (the API-first remote) and a
+  Git-compatible gateway are the next steps toward a runnable system.
 - **Reputation network transport / federation wire (P07→later).** Cross-instance
   honoring is demonstrated with two in-memory `ReputationLog`s; the wire that
   ships contribution records (and P06's deferred view/op mirror) between real
