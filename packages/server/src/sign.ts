@@ -62,17 +62,15 @@ export function verifyRequest(
   if (Number.isNaN(t) || Math.abs(nowMs - t) > SKEW_MS) {
     return null;
   }
-  let pub: PublicIdentity;
-  let sig: Uint8Array;
   try {
-    pub = PublicIdentity.fromDid(headers.did);
-    sig = new Uint8Array(Buffer.from(headers.signature, 'base64'));
+    const pub = PublicIdentity.fromDid(headers.did);
+    const sig = new Uint8Array(Buffer.from(headers.signature, 'base64'));
+    const ok = pub.verify(
+      canonicalRequest(method, pathWithQuery, body, headers.timestamp),
+      sig
+    );
+    return ok ? headers.did : null;
   } catch {
     return null;
   }
-  const ok = pub.verify(
-    canonicalRequest(method, pathWithQuery, body, headers.timestamp),
-    sig
-  );
-  return ok ? headers.did : null;
 }

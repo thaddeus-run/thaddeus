@@ -13,6 +13,16 @@ import {
 
 import { type SignedHeaders, verifyRequest } from './sign';
 
+// Parse a JSON request body, returning undefined on malformed input (so a handler
+// can answer 400 rather than throwing a 500). Used by every body-parsing handler.
+function safeParseJson(body: Uint8Array): unknown {
+  try {
+    return JSON.parse(new TextDecoder().decode(body));
+  } catch {
+    return undefined;
+  }
+}
+
 export interface ServerConfig {
   backend: Backend;
   policy?: LandPolicy;
@@ -101,9 +111,11 @@ export function createServer(config: ServerConfig): Server {
     if (signer === null) {
       return json(401, { error: 'unsigned or invalid request' });
     }
-    const { name } = JSON.parse(new TextDecoder().decode(body)) as {
-      name: string;
-    };
+    const parsed = safeParseJson(body);
+    if (parsed === undefined || typeof parsed !== 'object') {
+      return json(400, { error: 'invalid JSON body' });
+    }
+    const { name } = parsed as { name: string };
     if (typeof name !== 'string' || name.length === 0) {
       return json(400, { error: 'missing repo name' });
     }

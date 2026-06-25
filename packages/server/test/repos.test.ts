@@ -56,4 +56,23 @@ describe('repos', () => {
     const again = await srv.fetch(signedPost('/repos', { name: 'dup' }, a));
     expect(again.status).toBe(409);
   });
+
+  test('a signed but non-JSON body is 400', async () => {
+    const a = Identity.create();
+    const srv = createServer({ backend: new MemoryBackend() });
+    const raw = new TextEncoder().encode('this is not json');
+    const h = signRequest('POST', '/repos', raw, a, new Date().toISOString());
+    const res = await srv.fetch(
+      new Request('http://t/repos', {
+        method: 'POST',
+        body: raw,
+        headers: {
+          'x-thaddeus-did': h.did,
+          'x-thaddeus-timestamp': h.timestamp,
+          'x-thaddeus-signature': h.signature,
+        },
+      })
+    );
+    expect(res.status).toBe(400);
+  });
 });
