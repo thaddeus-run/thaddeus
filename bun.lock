@@ -68,6 +68,19 @@
         "@types/bun": "catalog:",
       },
     },
+    "examples/cli": {
+      "name": "@thaddeus.run/example-cli",
+      "version": "0.0.0",
+      "dependencies": {
+        "@thaddeus.run/cli": "workspace:*",
+        "@thaddeus.run/identity": "workspace:*",
+        "@thaddeus.run/persist": "workspace:*",
+        "@thaddeus.run/server": "workspace:*",
+      },
+      "devDependencies": {
+        "@types/bun": "catalog:",
+      },
+    },
     "examples/disclosure": {
       "name": "@thaddeus.run/example-disclosure",
       "version": "0.0.0",
@@ -208,6 +221,47 @@
         "@thaddeus.run/log": "workspace:*",
         "@thaddeus.run/platform": "workspace:*",
         "@thaddeus.run/store": "workspace:*",
+        "@types/bun": "catalog:",
+        "@typescript/native-preview": "catalog:",
+        "tsdown": "catalog:",
+        "typescript": "catalog:",
+      },
+    },
+    "packages/cli": {
+      "name": "@thaddeus.run/cli",
+      "version": "0.0.0",
+      "bin": {
+        "thad": "./dist/bin.js",
+        "thaddeus": "./dist/bin.js",
+      },
+      "dependencies": {
+        "@thaddeus.run/client": "workspace:*",
+        "@thaddeus.run/fs": "workspace:*",
+        "@thaddeus.run/identity": "workspace:*",
+        "@thaddeus.run/persist": "workspace:*",
+        "@thaddeus.run/platform": "workspace:*",
+      },
+      "devDependencies": {
+        "@thaddeus.run/server": "workspace:*",
+        "@types/bun": "catalog:",
+        "@typescript/native-preview": "catalog:",
+        "tsdown": "catalog:",
+        "typescript": "catalog:",
+      },
+    },
+    "packages/client": {
+      "name": "@thaddeus.run/client",
+      "version": "0.0.0",
+      "dependencies": {
+        "@thaddeus.run/identity": "workspace:*",
+        "@thaddeus.run/log": "workspace:*",
+        "@thaddeus.run/platform": "workspace:*",
+        "@thaddeus.run/server": "workspace:*",
+        "@thaddeus.run/store": "workspace:*",
+      },
+      "devDependencies": {
+        "@thaddeus.run/fs": "workspace:*",
+        "@thaddeus.run/persist": "workspace:*",
         "@types/bun": "catalog:",
         "@typescript/native-preview": "catalog:",
         "tsdown": "catalog:",
@@ -739,9 +793,15 @@
 
     "@thaddeus.run/agent": ["@thaddeus.run/agent@workspace:packages/agent"],
 
+    "@thaddeus.run/cli": ["@thaddeus.run/cli@workspace:packages/cli"],
+
+    "@thaddeus.run/client": ["@thaddeus.run/client@workspace:packages/client"],
+
     "@thaddeus.run/docs": ["@thaddeus.run/docs@workspace:apps/docs"],
 
     "@thaddeus.run/example-agent": ["@thaddeus.run/example-agent@workspace:examples/agent"],
+
+    "@thaddeus.run/example-cli": ["@thaddeus.run/example-cli@workspace:examples/cli"],
 
     "@thaddeus.run/example-disclosure": ["@thaddeus.run/example-disclosure@workspace:examples/disclosure"],
 

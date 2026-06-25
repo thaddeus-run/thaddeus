@@ -64,8 +64,17 @@ The durable `Platform` is reachable over HTTP via `@thaddeus.run/server` — a
 `Bun.serve` remote that is **untrusted** (no keys, verifies-don't-trust, serves
 ciphertext): reads are a public mirror, writes are owner-signed, `land` is
 key-free and policy-gated. It is stateless over the shared `Backend`, so a node
-restart serves the same repos. A client SDK/CLI, multi-node concurrency, and the
-Git gateway are the next steps.
+restart serves the same repos. Multi-node concurrency and the Git gateway are
+the next steps.
+
+## Client & CLI (infrastructure, not a pillar)
+
+The remote is driven by a reusable `@thaddeus.run/client` SDK (a `Client`
+holding a self-owned identity: `createRepo`/`clone`/`push`/`land`, all crypto
+client-side) and the **`thaddeus`** CLI (`@thaddeus.run/cli`, alias `thad`) — a
+git-like client with a `.thaddeus/` durable working tree: `init` → `create` →
+`clone` → edit files → `push` (publish to `main`). Multi-writer/agent CLI,
+offline sync, and conflict UX are next.
 
 ## Per-primitive loop
 

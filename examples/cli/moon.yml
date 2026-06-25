@@ -1,0 +1,16 @@
+$schema: 'https://moonrepo.dev/schemas/project.json'
+
+id: 'example-cli'
+language: 'typescript'
+layer: 'application'
+
+tasks:
+  test:
+    args: '--pass-with-no-tests'
+  demo:
+    command: 'bun src/cli-demo.ts'
+    deps:
+      - '^:build'
+    options:
+      cache: false
+      runInCI: 'skip'
