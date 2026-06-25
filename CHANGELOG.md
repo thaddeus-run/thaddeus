@@ -86,6 +86,18 @@ All notable changes to Thaddeus. Format follows
   (no async ripple). `Platform.createDurable`/`openDurable` make a repo
   **survive a restart** (8 pass / 0 todo). Realizes the code.store hot/cold
   split and the deferred freeze-on-store immutability fix.
+- `@thaddeus.run/server` — the untrusted API-first remote (Part VI): a
+  `Bun.serve` HTTP server over the durable `Platform` that holds **no keys**,
+  **verifies** what it ingests (`verifyOp`, content-address, `verifyCapability`)
+  and **serves ciphertext**. Reads are a public mirror (`GET /repos`,
+  `…/views/:view`, `…/pull`); writes are gated by a signed-request envelope
+  (DID + timestamp + signature over `method‖path‖blake3(body)‖timestamp`)
+  checked against the persisted repo **owner**. `push` ingests
+  `{ops, objects, caps}` verify-don't-trust via new `Store.ingest` /
+  `OpLog.ingest` (the durable peer-ingest seam); `land` (by explicit
+  `fromHeads`) runs the fail-closed `LandPolicy` and re-points the view — all
+  key-free. Stateless over the shared `Backend`: an HTTP clone round-trip (push
+  → land → fresh-client clone + decrypt) survives a server restart.
 
 ### Changed
 
@@ -202,9 +214,14 @@ All notable changes to Thaddeus. Format follows
   (filesystem + in-memory). Still deferred: **signed-record-log persistence**
   (provenance/reputation/agent), **SQLite/S3 backends**, **compaction/GC**, and
   **multi-process concurrency/locking/WAL** (durable, not concurrent).
-- **Server / network API and Git gateway (persistence→runnable).** Persistence
-  is in-process durability; serving it over a wire (the API-first remote) and a
-  Git-compatible gateway are the next steps toward a runnable system.
+- **Server / network API — shipped** as `@thaddeus.run/server` (single node).
+  Still deferred: **multi-node concurrency** (optimistic-concurrency on the
+  `land` re-point + the `scope()` delimiter-encode), a **grant list / richer
+  ACLs** (owner-only writes today), **replay-proof request nonces** (a signed
+  timestamp window today), a **client SDK / CLI**, **TLS / deployment**, and
+  **incremental pull / pagination**.
+- **Git gateway** — emit a Git history (commits/blobs/branches) for
+  compatibility, over the durable/served substrate. The optional on-ramp, later.
 - **Reputation network transport / federation wire (P07→later).** Cross-instance
   honoring is demonstrated with two in-memory `ReputationLog`s; the wire that
   ships contribution records (and P06's deferred view/op mirror) between real
