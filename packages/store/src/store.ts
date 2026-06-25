@@ -158,6 +158,32 @@ export class MemoryStore implements Store {
     return { id: object.id, plaintext_id: object.plaintext_id };
   }
 
+  // Ingest a client-encrypted object + its caps (the untrusted-server path):
+  // verify the content-address (reject a mis-addressed blob), keep only valid
+  // caps, store frozen, advance `current`, and write through. The server uses
+  // this to persist content it cannot itself read.
+  async ingest(
+    object: EncryptedObject,
+    caps: readonly Capability[]
+  ): Promise<void> {
+    if (address(object.ciphertext) !== object.id) {
+      throw new TypeError(
+        `refusing to ingest a mis-addressed object: ${object.id}`
+      );
+    }
+    const frozen = Object.freeze(object);
+    this.#objects.set(frozen.id, frozen);
+    this.#current.set(frozen.plaintext_id, frozen.id);
+    const valid = caps.filter((c) => verifyCapability(c));
+    this.#caps.set(frozen.plaintext_id, valid);
+    await this.#persist(`obj/${frozen.id}`, frozen);
+    await this.#persist(`current/${frozen.plaintext_id}`, frozen.id);
+    await this.#persist(
+      `cap/${frozen.plaintext_id}`,
+      this.#caps.get(frozen.plaintext_id) ?? []
+    );
+  }
+
   async get(ref: Ref, reader: Identity, now?: string): Promise<Uint8Array> {
     const nowMs = this.#resolveNow(now);
     if (this.#releaseDue(ref.plaintext_id, nowMs)) {
