@@ -43,7 +43,7 @@ becomes a real assertion. When the last stub is gone, the substrate is whole.
 | 06 Platform                           | `platform`           | built   | P9 P10 P11       |
 | 07 Identity federation / reputation   | `reputation`         | built   | P13 P19 P20      |
 | 08 Semantic graph                     | _(planned)_          | planned | P14 P5 P18       |
-| 09 Agents as principals               | _(planned)_          | planned | P16 P3 P21       |
+| 09 Agents as principals               | `agent`              | built   | P16 P3 P21       |
 | 10 Review as policy                   | _(planned)_          | planned | P15 P12          |
 | 11 Live database                      | _(planned)_          | planned | P17 P10          |
 
