@@ -218,7 +218,6 @@
       "name": "@thaddeus.run/client",
       "version": "0.0.0",
       "dependencies": {
-        "@thaddeus.run/fs": "workspace:*",
         "@thaddeus.run/identity": "workspace:*",
         "@thaddeus.run/log": "workspace:*",
         "@thaddeus.run/platform": "workspace:*",
