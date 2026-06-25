@@ -1,7 +1,13 @@
 import { blake3 } from '@noble/hashes/blake3';
 import { bytesToHex } from '@noble/hashes/utils';
 import type { Identity } from '@thaddeus.run/identity';
-import type { Ref, Store } from '@thaddeus.run/store';
+import {
+  type Backend,
+  decodeRecord,
+  encodeRecord,
+  type Ref,
+  type Store,
+} from '@thaddeus.run/store';
 
 import { type Op, signOp, verifyOp } from './op';
 
@@ -26,8 +32,9 @@ export type PublicOp =
     };
 
 // In-memory operation log. The source of truth is the signed-op DAG; file
-// snapshots are derived by materialize(). Spike — not durable, not concurrency
-// safe, single process.
+// snapshots are derived by materialize(). Durable when constructed with a
+// Backend (write-through + static load). Spike — not concurrency-safe,
+// single process.
 export class OpLog {
   readonly #store: Store;
   readonly #ops: Map<string, Op> = new Map();
@@ -36,9 +43,72 @@ export class OpLog {
     string,
     { metaRef: Ref; token: string; revealed: boolean }
   > = new Map();
+  readonly #backend: Backend | undefined;
 
-  constructor(store: Store) {
+  constructor(store: Store, backend?: Backend) {
     this.#store = store;
+    this.#backend = backend;
+  }
+
+  // Rebuild the op-DAG + views + embargo from a backend. Call AFTER
+  // MemoryStore.open over the same scope (ops reference content the store holds).
+  static async load(store: Store, backend: Backend): Promise<OpLog> {
+    const log = new OpLog(store, backend);
+    for (const key of await backend.list('op/')) {
+      const bytes = await backend.get(key);
+      if (bytes === undefined) {
+        continue;
+      }
+      const op = decodeRecord(bytes) as Op;
+      if (!verifyOp(op)) {
+        continue; // torn or tampered — never surface as truth
+      }
+      log.#ops.set(op.id, Object.freeze(op));
+    }
+    for (const key of await backend.list('view/')) {
+      const bytes = await backend.get(key);
+      if (bytes !== undefined) {
+        log.#views.set(
+          key.slice('view/'.length),
+          decodeRecord(bytes) as string[]
+        );
+      }
+    }
+    for (const key of await backend.list('embargo/')) {
+      const bytes = await backend.get(key);
+      if (bytes !== undefined) {
+        log.#embargo.set(
+          key.slice('embargo/'.length),
+          decodeRecord(bytes) as {
+            metaRef: Ref;
+            token: string;
+            revealed: boolean;
+          }
+        );
+      }
+    }
+    return log;
+  }
+
+  // Durable view re-point: in-memory set + write-through. Use this (not view())
+  // for re-points that must survive a restart (e.g. landing onto `main`).
+  // Without a backend it is exactly view().
+  async repoint(name: string, heads: readonly string[]): Promise<void> {
+    this.#views.set(name, [...heads]);
+    if (this.#backend !== undefined) {
+      await this.#backend.put(`view/${name}`, encodeRecord([...heads]));
+    }
+  }
+
+  // Write-through for an op + its view (no-op without a backend).
+  async #persistCommit(view: string, op: Op): Promise<void> {
+    if (this.#backend !== undefined) {
+      await this.#backend.put(`op/${op.id}`, encodeRecord(op));
+      await this.#backend.put(
+        `view/${view}`,
+        encodeRecord(this.#views.get(view) ?? [])
+      );
+    }
   }
 
   // Record an edit. Build → seal → commit: the op is signed but NOT placed in
@@ -59,6 +129,7 @@ export class OpLog {
       await this.#embargoOp(op, opts.embargoUntil, author);
     }
     this.#commit(view, op);
+    await this.#persistCommit(view, op);
     return op;
   }
 
@@ -74,11 +145,20 @@ export class OpLog {
       blake3(new TextEncoder().encode(`token:${op.id}`))
     );
     this.#embargo.set(op.id, { metaRef, token, revealed: false });
+    if (this.#backend !== undefined) {
+      await this.#backend.put(
+        `embargo/${op.id}`,
+        encodeRecord({ metaRef, token, revealed: false })
+      );
+    }
   }
 
   // Ingest a signed op from a peer — the convergence entry point. Verifies the
   // signature/id, links it into the DAG, idempotent on op id. Views are NOT
   // moved: peer ops land in the graph; a view advances only on write/re-point.
+  // NOTE: append (peer ingest) is in-memory only; durably persisting
+  // peer-delivered ops lands with the federation wire (deferred). Local writes
+  // (write/remove) and re-points (repoint) are the persisted paths.
   append(op: Op): void {
     if (!verifyOp(op)) {
       throw new Error(`refusing unverifiable op ${op.id}`);
@@ -98,7 +178,7 @@ export class OpLog {
   // Place a built op into the DAG and advance its view. The commit step that
   // write() defers until after a successful embargo registration.
   #commit(view: string, op: Op): void {
-    this.#ops.set(op.id, op);
+    this.#ops.set(op.id, Object.freeze(op));
     this.#views.set(view, [op.id]);
   }
 
@@ -203,7 +283,9 @@ export class OpLog {
 
   // Record a delete: a payload:null tombstone op extending the view's heads.
   async remove(view: string, path: string, author: Identity): Promise<Op> {
-    return this.#appendLocal(view, path, null, author);
+    const op = this.#appendLocal(view, path, null, author);
+    await this.#persistCommit(view, op);
+    return op;
   }
 
   // Surface same-path collisions among concurrent ops in a view's reachable set.
@@ -284,6 +366,9 @@ export class OpLog {
     const released = await this.#store.reveal(e.metaRef, now);
     if (released) {
       e.revealed = true;
+      if (this.#backend !== undefined) {
+        await this.#backend.put(`embargo/${opId}`, encodeRecord(e));
+      }
     }
     return released;
   }
