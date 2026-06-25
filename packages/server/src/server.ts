@@ -324,6 +324,9 @@ export function createServer(config: ServerConfig): Server {
       fromHeads: string[];
       into?: string;
     };
+    if (into !== undefined && typeof into !== 'string') {
+      return json(400, { error: 'into must be a string' });
+    }
     return withRepoLock(name, async () => {
       const repo = await getRepo(name);
       if (repo === undefined) {

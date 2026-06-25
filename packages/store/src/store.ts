@@ -163,6 +163,10 @@ export class MemoryStore implements Store {
   // verify the content-address (reject a mis-addressed blob), keep only valid
   // caps, store frozen, advance `current`, and write through. The server uses
   // this to persist content it cannot itself read.
+  //
+  // Caps are AUTHORITATIVE-REPLACE: the pushed set overwrites the stored set
+  // entirely, so callers MUST push the full cap set for the object — not a
+  // delta — or previously stored caps will be silently dropped.
   async ingest(
     object: EncryptedObject,
     caps: readonly Capability[]

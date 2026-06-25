@@ -45,7 +45,9 @@ function client(base: string) {
   return { post, get };
 }
 
-// Locally commit `content` to `path` and return the push bundle + branch heads.
+// Locally commit `content` to `path` and return the push bundle, branch heads,
+// the local store (for post-commit operations like grant), and the Ref for the
+// committed file (so callers can grant/revoke without re-deriving it).
 async function commitLocally(author: Identity, path: string, content: string) {
   const store = new MemoryStore();
   const log = new OpLog(store);
@@ -68,9 +70,16 @@ async function commitLocally(author: Identity, path: string, content: string) {
       }
     }
   }
+  // Derive the Ref for the committed file from the materialized main view so
+  // callers can pass it directly to store.grant / store.caps.
+  log.view('feat', log.heads('feat'));
+  const ref = log.materialize('feat', author).get(path)?.ref;
   return {
     bundle: encodeBundle(log.ops(), objects, caps),
     heads: [...log.heads('feat')],
+    store,
+    log,
+    ref,
   };
 }
 
@@ -174,7 +183,13 @@ describe('server e2e', () => {
 
     try {
       await c.post('/repos', { name: 'r' }, a);
-      const { bundle, heads } = await commitLocally(a, 'f.rs', 'secret');
+      // Keep aStore and aRef in scope: needed for the grant step below.
+      const {
+        bundle,
+        heads,
+        store: aStore,
+        ref: aRef,
+      } = await commitLocally(a, 'f.rs', 'secret');
       await c.post('/repos/r/push', bundle, a);
       await c.post('/repos/r/land', { fromHeads: heads, into: 'main' }, a);
 
@@ -199,6 +214,39 @@ describe('server e2e', () => {
       expect(ref).toBeDefined();
       // AccessDenied — B has no capability for the object A encrypted
       await expectRejects(bstore.get(ref!, b), AccessDenied);
+
+      // --- Acceptance #8 positive half: after A grants B, B pulls and decrypts ---
+      // Grant B on A's LOCAL store (appends a cap; no key rotation, object id
+      // unchanged), then re-push the object with the FULL cap set [A, B] so the
+      // server's ingest replaces the stored caps with the complete set.
+      await aStore.grant(aRef!, b.toPublic(), a);
+      const aObj = aStore.current(aRef!.plaintext_id)!;
+      const fullCaps = [...aStore.caps(aRef!.plaintext_id)];
+      // Re-push: ops are already landed (idempotent), objects+caps carry the
+      // new B cap so the server's store.ingest will replace the cap set.
+      const rePushBundle = encodeBundle([], [aObj], fullCaps);
+      await c.post('/repos/r/push', rePushBundle, a);
+
+      // B builds a fresh local store/log from a new pull and now decrypts.
+      const pulled2 = decodeBundle(
+        (await (await c.get('/repos/r/pull?view=main')).json()) as Bundle
+      );
+      const bstore2 = new MemoryStore();
+      const blog2 = new OpLog(bstore2);
+      for (const o of pulled2.objects) {
+        await bstore2.ingest(
+          o,
+          pulled2.caps.filter((cp) => cp.object === o.plaintext_id)
+        );
+      }
+      for (const o of pulled2.ops) {
+        await blog2.ingest(o);
+      }
+      blog2.view('main', blog2.heads());
+      const ref2 = blog2.materialize('main', b).get('f.rs')?.ref;
+      expect(ref2).toBeDefined();
+      // B can now unwrap its cap and decrypt the content.
+      expect(dec(await bstore2.get(ref2!, b))).toBe('secret');
     } finally {
       await http.stop(true);
     }
