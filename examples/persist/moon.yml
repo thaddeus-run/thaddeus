@@ -1,0 +1,16 @@
+$schema: 'https://moonrepo.dev/schemas/project.json'
+
+id: 'example-persist'
+language: 'typescript'
+layer: 'application'
+
+tasks:
+  test:
+    args: '--pass-with-no-tests'
+  demo:
+    command: 'bun src/persist.ts'
+    deps:
+      - '^:build'
+    options:
+      cache: false
+      runInCI: 'skip'

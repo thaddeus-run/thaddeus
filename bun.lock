@@ -102,6 +102,19 @@
         "@types/bun": "catalog:",
       },
     },
+    "examples/persist": {
+      "name": "@thaddeus.run/example-persist",
+      "version": "0.0.0",
+      "dependencies": {
+        "@thaddeus.run/fs": "workspace:*",
+        "@thaddeus.run/identity": "workspace:*",
+        "@thaddeus.run/persist": "workspace:*",
+        "@thaddeus.run/platform": "workspace:*",
+      },
+      "devDependencies": {
+        "@types/bun": "catalog:",
+      },
+    },
     "examples/platform": {
       "name": "@thaddeus.run/example-platform",
       "version": "0.0.0",
@@ -701,6 +714,8 @@
     "@thaddeus.run/example-offboarding": ["@thaddeus.run/example-offboarding@workspace:examples/offboarding"],
 
     "@thaddeus.run/example-oplog": ["@thaddeus.run/example-oplog@workspace:examples/oplog"],
+
+    "@thaddeus.run/example-persist": ["@thaddeus.run/example-persist@workspace:examples/persist"],
 
     "@thaddeus.run/example-platform": ["@thaddeus.run/example-platform@workspace:examples/platform"],
 
