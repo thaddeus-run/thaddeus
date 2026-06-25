@@ -42,6 +42,8 @@
     "prepublishOnly": "moon run persist:prepublish"
   },
   "devDependencies": {
+    "@thaddeus.run/identity": "workspace:*",
+    "@thaddeus.run/log": "workspace:*",
     "@thaddeus.run/store": "workspace:*",
     "@types/bun": "catalog:",
     "@typescript/native-preview": "catalog:",
