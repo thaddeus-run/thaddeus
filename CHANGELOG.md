@@ -62,6 +62,18 @@ All notable changes to Thaddeus. Format follows
   the attested set `byKind` — reputation is the gathered, self-verifying record
   set, not a number. The north-star's landed op now mints a `'merge'`
   contribution honored on a second instance (6 pass / 0 todo).
+- `@thaddeus.run/agent` — agents as first-class principals (Pillar 09): an
+  operator-signed `Delegation` grants an agent `did:key` scoped, budgeted
+  authority (`paths` globs, `maxChanges`, `maxSpend`), with the operator did
+  derived from the signer so a change by the agent is verifiably attributed to
+  its operator. `AgentRegistry` is an enforcement authority — it rejects forged
+  grants (unlike the keep-and-label reputation log), holds a quarantine set, and
+  meters each agent's changes/spend. `delegationPolicy(registry)` is a
+  fail-closed `LandPolicy`: at `Repo.land` it rejects an op whose author is
+  revoked, undelegated, out of path-scope, or over budget — substrate-enforced,
+  read-only on the meter. Revocation = `registry.revoke` (quarantine) +
+  `store.revoke` (key rotation, P01). The north-star now lands an agent's change
+  under its delegation and quarantines it on revoke (7 pass / 0 todo).
 
 ### Changed
 
@@ -190,6 +202,17 @@ All notable changes to Thaddeus. Format follows
 - **Contribution revocation, host allowlist / web-of-trust (P07).** No signed
   retraction; the spike treats every valid `host_sig` as attestation rather than
   distinguishing instances a verifier recognizes.
+- **Agent reputation score / tiers (P09→P10).** P07 supplies the attested
+  contribution records; the derived score that grants autonomy ("a
+  high-reputation agent's change merges under policy") is Pillar 10's
+  merge-policy input.
+- **Agent economy / paid attestation (P09→later).** A priced third-party
+  verification verdict that travels with a change, and any payment rail.
+- **Per-symbol capability scope (P09→P08).** `Delegation.paths` is path-glob
+  only; per-symbol scope needs the semantic graph.
+- **Per-hour rate windowing & time-expiry (P09→later).** `maxChanges` is a
+  lifetime count cap; per-hour rate and `not_after` delegation expiry need
+  wall-clock. Sub-delegation chains are also deferred.
 
 ### Honest limitations of what currently ships (P01)
 
