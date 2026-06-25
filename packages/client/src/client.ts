@@ -1,7 +1,21 @@
 import type { Identity } from '@thaddeus.run/identity';
 import { Platform, type Repo } from '@thaddeus.run/platform';
-import { decodeBundle, signRequest } from '@thaddeus.run/server';
+import { decodeBundle, encodeBundle, signRequest } from '@thaddeus.run/server';
 import type { Backend } from '@thaddeus.run/store';
+
+import { bundleFor } from './bundle';
+
+export interface PushResult {
+  accepted: { objects: number; ops: number; caps: number };
+  rejected: { kind: string; id: string; reason: string }[];
+}
+
+export interface LandOutcome {
+  landed: boolean;
+  into: string;
+  heads: string[];
+  reason?: string;
+}
 
 // FetchLike matches the server's fetch(req: Request) shape. The client always
 // constructs a Request before calling fetchImpl, so the narrower signature is
@@ -76,6 +90,37 @@ export class Client {
     const res = await this.#fetch(new Request(`${this.#server}/repos`));
     const body = (await this.#ok(res)) as { repos: string[] };
     return body.repos;
+  }
+
+  // Upload the ops/objects/caps reachable from `heads`. Idempotent — the server
+  // re-ingest of existing content is a no-op.
+  async push(
+    name: string,
+    repo: Repo,
+    heads: readonly string[]
+  ): Promise<PushResult> {
+    const { ops, objects, caps } = bundleFor(repo, heads);
+    const res = await this.#signed(
+      'POST',
+      `/repos/${encodeURIComponent(name)}/push`,
+      encodeBundle(ops, objects, caps)
+    );
+    return (await this.#ok(res)) as PushResult;
+  }
+
+  // Land uploaded heads into a target view under the server's policy. A blocked
+  // land returns { landed: false, reason } — it is NOT thrown.
+  async land(
+    name: string,
+    fromHeads: readonly string[],
+    into = 'main'
+  ): Promise<LandOutcome> {
+    const res = await this.#signed(
+      'POST',
+      `/repos/${encodeURIComponent(name)}/land`,
+      { fromHeads: [...fromHeads], into }
+    );
+    return (await this.#ok(res)) as LandOutcome;
   }
 
   // POST a JSON body with the signed-request envelope.
