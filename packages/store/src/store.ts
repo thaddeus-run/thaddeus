@@ -63,7 +63,9 @@ export class MemoryStore implements Store {
   }
 
   // Rebuild a hot cache from a backend. A content-addressed object whose bytes
-  // don't hash to its id is skipped (torn-write safety). Frozen on load.
+  // don't hash to its id is skipped (torn-write safety). A torn/old-version/
+  // corrupt record that fails to decode is also skipped, never surfaced as truth.
+  // Frozen on load.
   static async open(backend: Backend): Promise<MemoryStore> {
     const store = new MemoryStore(backend);
     for (const key of await backend.list('obj/')) {
@@ -71,7 +73,12 @@ export class MemoryStore implements Store {
       if (bytes === undefined) {
         continue;
       }
-      const o = decodeRecord(bytes) as EncryptedObject;
+      let o: EncryptedObject;
+      try {
+        o = decodeRecord(bytes) as EncryptedObject;
+      } catch {
+        continue; // torn/old-version/corrupt record — skip, never surface as truth
+      }
       if (address(o.ciphertext) !== o.id) {
         continue; // torn or tampered — never surface as truth
       }
@@ -79,29 +86,44 @@ export class MemoryStore implements Store {
     }
     for (const key of await backend.list('current/')) {
       const bytes = await backend.get(key);
-      if (bytes !== undefined) {
+      if (bytes === undefined) {
+        continue;
+      }
+      try {
         store.#current.set(
           key.slice('current/'.length),
           decodeRecord(bytes) as string
         );
+      } catch {
+        continue; // torn/old-version/corrupt record — skip, never surface as truth
       }
     }
     for (const key of await backend.list('cap/')) {
       const bytes = await backend.get(key);
-      if (bytes !== undefined) {
+      if (bytes === undefined) {
+        continue;
+      }
+      try {
         store.#caps.set(
           key.slice('cap/'.length),
           decodeRecord(bytes) as Capability[]
         );
+      } catch {
+        continue; // torn/old-version/corrupt record — skip, never surface as truth
       }
     }
     for (const key of await backend.list('pending/')) {
       const bytes = await backend.get(key);
-      if (bytes !== undefined) {
+      if (bytes === undefined) {
+        continue;
+      }
+      try {
         store.#pending.set(
           key.slice('pending/'.length),
           decodeRecord(bytes) as Capability[]
         );
+      } catch {
+        continue; // torn/old-version/corrupt record — skip, never surface as truth
       }
     }
     return store;

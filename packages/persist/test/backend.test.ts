@@ -1,3 +1,4 @@
+import { scoped } from '@thaddeus.run/store';
 import { afterAll, describe, expect, test } from 'bun:test';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -5,7 +6,6 @@ import { join } from 'node:path';
 
 import { FileBackend } from '../src/file';
 import { MemoryBackend } from '../src/memory';
-import { scoped } from '../src/scoped';
 
 const enc = (s: string): Uint8Array => new TextEncoder().encode(s);
 const dec = (b: Uint8Array): string => new TextDecoder().decode(b);

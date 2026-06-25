@@ -78,4 +78,23 @@ describe('MemoryStore — durable mode', () => {
     const ref = await s.put(enc('y'), owner);
     expect(dec(await s.get(ref, owner))).toBe('y');
   });
+
+  test('a garbage/undecodable blob under obj/ is skipped — reload does not abort', async () => {
+    const backend = memoryBackend();
+    const owner = Identity.create();
+
+    // Write a valid object so we have something to verify survives.
+    const a = new MemoryStore(backend);
+    const ref = await a.put(enc('valid payload'), owner);
+
+    // Inject a garbage blob under the same namespace but a different key.
+    await backend.put('obj/zzz', new TextEncoder().encode('not json'));
+
+    // Reload must not throw — the garbage key is skipped and the valid object
+    // is still present.
+    const b = await MemoryStore.open(backend);
+    expect(b.rawObject('zzz' as string)).toBeUndefined();
+    expect(b.rawObject(ref.id)).toBeDefined();
+    expect(dec(await b.get(ref, owner))).toBe('valid payload');
+  });
 });

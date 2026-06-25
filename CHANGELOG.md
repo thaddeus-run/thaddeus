@@ -77,13 +77,15 @@ All notable changes to Thaddeus. Format follows
 - `@thaddeus.run/persist` + durable `Store`/`OpLog` — persistence: a pluggable
   `Backend` (key→bytes; `FileBackend` atomic temp+rename, `MemoryBackend`,
   `scoped`) defined in `@thaddeus.run/store`. `Store` and `OpLog` take an
-  optional backend — every mutation write-throughs (content-addressed `obj`/`op`
-  write-once; `view`/`cap`/`current`/`pending`/`embargo` pointers),
-  `MemoryStore.open` / `OpLog.load` rebuild the hot cache (torn blobs skipped),
-  records are frozen on store, and **synchronous reads are unchanged** (no async
-  ripple). `Platform.createDurable`/`openDurable` make a repo **survive a
-  restart** (8 pass / 0 todo). Realizes the code.store hot/cold split and the
-  deferred freeze-on-store immutability fix.
+  optional backend — durable mutations write-through (content-addressed
+  `obj`/`op` write-once; `view`/`cap`/`current`/`pending`/`embargo` pointers);
+  peer-ingest `append()` remains in-memory only until federation persistence
+  lands (so the durable path covers local writes and re-points, not peer
+  delivery). `MemoryStore.open` / `OpLog.load` rebuild the hot cache (torn blobs
+  skipped), records are frozen on store, and **synchronous reads are unchanged**
+  (no async ripple). `Platform.createDurable`/`openDurable` make a repo
+  **survive a restart** (8 pass / 0 todo). Realizes the code.store hot/cold
+  split and the deferred freeze-on-store immutability fix.
 
 ### Changed
 

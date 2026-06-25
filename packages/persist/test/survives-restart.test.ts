@@ -1,13 +1,12 @@
 import { Identity, ready } from '@thaddeus.run/identity';
 import { OpLog } from '@thaddeus.run/log';
-import { MemoryStore } from '@thaddeus.run/store';
+import { MemoryStore, scoped } from '@thaddeus.run/store';
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import { FileBackend } from '../src/file';
-import { scoped } from '../src/scoped';
 
 beforeAll(async () => {
   await ready();
@@ -35,6 +34,7 @@ describe('FileBackend — survives a restart on real fs', () => {
     const l2 = await OpLog.load(s2, b2);
     expect(l2.heads('main')).toEqual([op.id]);
     const ref = l2.materialize('main', dev).get('src/a.rs')?.ref;
+    expect(ref).toBeDefined();
     expect(ref).not.toBeNull();
     if (ref != null) {
       expect(dec(await s2.get(ref, dev))).toBe('fn a() {}');

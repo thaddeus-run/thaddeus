@@ -186,6 +186,7 @@ describe('north-star: one edit, end to end', () => {
     const b = await new Platform().openDurable('acme/web', backend);
     expect(b.log.materialize('main').has('src/auth.rs')).toBe(true);
     const ref = b.log.materialize('main', dev).get('src/auth.rs')?.ref;
+    expect(ref).toBeDefined();
     expect(ref).not.toBeNull();
     if (ref != null) {
       expect(new TextDecoder().decode(await b.store.get(ref, dev))).toBe(

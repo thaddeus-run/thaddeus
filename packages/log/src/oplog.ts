@@ -52,6 +52,8 @@ export class OpLog {
 
   // Rebuild the op-DAG + views + embargo from a backend. Call AFTER
   // MemoryStore.open over the same scope (ops reference content the store holds).
+  // A torn/old-version/corrupt record that fails to decode is skipped, never
+  // surfaced as truth.
   static async load(store: Store, backend: Backend): Promise<OpLog> {
     const log = new OpLog(store, backend);
     for (const key of await backend.list('op/')) {
@@ -59,7 +61,12 @@ export class OpLog {
       if (bytes === undefined) {
         continue;
       }
-      const op = decodeRecord(bytes) as Op;
+      let op: Op;
+      try {
+        op = decodeRecord(bytes) as Op;
+      } catch {
+        continue; // torn/old-version/corrupt record — skip, never surface as truth
+      }
       if (!verifyOp(op)) {
         continue; // torn or tampered — never surface as truth
       }
@@ -67,16 +74,24 @@ export class OpLog {
     }
     for (const key of await backend.list('view/')) {
       const bytes = await backend.get(key);
-      if (bytes !== undefined) {
+      if (bytes === undefined) {
+        continue;
+      }
+      try {
         log.#views.set(
           key.slice('view/'.length),
           decodeRecord(bytes) as string[]
         );
+      } catch {
+        continue; // torn/old-version/corrupt record — skip, never surface as truth
       }
     }
     for (const key of await backend.list('embargo/')) {
       const bytes = await backend.get(key);
-      if (bytes !== undefined) {
+      if (bytes === undefined) {
+        continue;
+      }
+      try {
         log.#embargo.set(
           key.slice('embargo/'.length),
           decodeRecord(bytes) as {
@@ -85,6 +100,8 @@ export class OpLog {
             revealed: boolean;
           }
         );
+      } catch {
+        continue; // torn/old-version/corrupt record — skip, never surface as truth
       }
     }
     return log;

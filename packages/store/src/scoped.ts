@@ -1,7 +1,7 @@
-import type { Backend } from '@thaddeus.run/store';
+import type { Backend } from './backend';
 
-// Namespace a backend so one store can hold many repos: every key is prefixed on
-// the way in and stripped on the way out. `list(prefix)` lists within the scope.
+// Namespace a backend so one store can hold many scopes: every key is prefixed
+// on the way in and stripped on the way out; list() queries within the scope.
 export function scoped(backend: Backend, prefix: string): Backend {
   return {
     put: (key, bytes) => backend.put(prefix + key, bytes),

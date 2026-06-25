@@ -303,8 +303,15 @@ the touched entries:
 - `Store.scheduleReveal` → `pending/<plaintextId>`; `reveal` → promote `pending`
   → `cap`, re-persist both.
 - `OpLog.write`/`remove` → `op/<id>` (write-once) + `view/<view>` (the advanced
-  head). `view`/`fork` → `view/<name>`. `append` → `op/<id>`. `#embargoOp` →
-  `embargo/<id>`; `reveal` → update it.
+  head). `#embargoOp` → `embargo/<id>`; `reveal` → update it.
+- `OpLog.repoint` (the async durable shared-view re-point used by `Repo.land`) →
+  `view/<name>` (persists the shared view pointer so a landing survives a
+  restart).
+- `view()`/`fork()` are **in-memory only** — throwaway/seed views; not persisted
+  (they are cheap O(id) copies, not durable state).
+- `append()` (peer ingest) is **in-memory only** until federation persistence
+  lands; peer-delivered ops are not durably written, only locally written ops
+  (`write`/`remove`) and re-points (`repoint`) persist.
 
 Write-through is `await`ed inside the already-async mutation, so failures
 surface to the caller and the hot cache and durable tier do not diverge

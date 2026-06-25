@@ -15,10 +15,11 @@ import { join } from 'node:path';
 let tmpSeq = 0;
 
 // Filesystem backend: each key → one percent-encoded file under `root`. Writes
-// are temp-file + atomic rename, so a crash never yields a half-written file.
-// Zero dependencies beyond node:fs. Flat directory (dir sharding is a later
-// optimization); keys never contain a literal '%' collision because encodeKey is
-// a bijection.
+// go through a `.staging/` subdir (same filesystem → atomic rename), so a
+// crash never yields a half-written file and staging files never appear in
+// `list`. Zero dependencies beyond node:fs. Flat directory (dir sharding is a
+// later optimization); keys never contain a literal '%' collision because
+// encodeKey is a bijection.
 export class FileBackend implements Backend {
   readonly #root: string;
 
@@ -28,10 +29,11 @@ export class FileBackend implements Backend {
 
   async put(key: string, bytes: Uint8Array): Promise<void> {
     await mkdir(this.#root, { recursive: true });
-    const path = this.#path(key);
-    const tmp = `${path}.tmp-${process.pid}-${tmpSeq++}`;
+    const staging = join(this.#root, '.staging');
+    await mkdir(staging, { recursive: true });
+    const tmp = join(staging, `${process.pid}-${tmpSeq++}`);
     await writeFile(tmp, bytes);
-    await rename(tmp, path);
+    await rename(tmp, this.#path(key));
   }
 
   async get(key: string): Promise<Uint8Array | undefined> {
@@ -45,24 +47,30 @@ export class FileBackend implements Backend {
     }
   }
 
+  // Returns only regular files in root, auto-excluding the .staging subdir and
+  // any other directories. No regex filter needed — directories simply don't
+  // pass isFile().
   async list(prefix: string): Promise<readonly string[]> {
     let names: string[];
     try {
-      names = await readdir(this.#root);
+      const entries = await readdir(this.#root, { withFileTypes: true });
+      // String(d.name) is the cast-free way to obtain a string regardless of
+      // whether the runtime Dirent carries a Buffer or a string for d.name.
+      names = entries.filter((d) => d.isFile()).map((d) => String(d.name));
     } catch {
       return [];
     }
-    return names
-      .filter((n) => !/\.tmp-\d+-\d+$/.test(n))
-      .map(decodeKey)
-      .filter((k) => k.startsWith(prefix));
+    return names.map(decodeKey).filter((k) => k.startsWith(prefix));
   }
 
   async delete(key: string): Promise<void> {
     try {
       await unlink(this.#path(key));
-    } catch {
-      // already absent — idempotent
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code === 'ENOENT') {
+        return; // already absent — idempotent
+      }
+      throw err; // a real error must surface, not look like success
     }
   }
 

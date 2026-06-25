@@ -1,7 +1,12 @@
 import type { Identity } from '@thaddeus.run/identity';
 import type { Conflict, Op, OpLog } from '@thaddeus.run/log';
 import { OpLog as OpLogClass } from '@thaddeus.run/log';
-import { type Backend, MemoryStore, type Store } from '@thaddeus.run/store';
+import {
+  type Backend,
+  MemoryStore,
+  scoped,
+  type Store,
+} from '@thaddeus.run/store';
 
 import { blockOnConflict, type LandPolicy, type LandResult } from './policy';
 
@@ -131,18 +136,6 @@ export class Repo {
   }
 }
 
-// Namespace a backend so each scope's keys live under `repo/<name>/`. Inlined so
-// platform need not depend on @thaddeus.run/persist (any Backend works).
-function scope(backend: Backend, prefix: string): Backend {
-  return {
-    put: (key, bytes) => backend.put(prefix + key, bytes),
-    get: (key) => backend.get(prefix + key),
-    delete: (key) => backend.delete(prefix + key),
-    list: async (p) =>
-      (await backend.list(prefix + p)).map((k) => k.slice(prefix.length)),
-  };
-}
-
 // The platform: scopes come into being in one call (P11). A scope is a Repo.
 export class Platform {
   readonly #repos: Map<string, Repo> = new Map();
@@ -180,9 +173,9 @@ export class Platform {
     if (existing !== undefined) {
       return existing;
     }
-    const scoped = scope(backend, `repo/${name}/`);
-    const store = new MemoryStore(scoped);
-    const log = new OpLogClass(store, scoped);
+    const scopedBackend = scoped(backend, `repo/${name}/`);
+    const store = new MemoryStore(scopedBackend);
+    const log = new OpLogClass(store, scopedBackend);
     log.view('main', []); // empty seed; absence on reload also reads as empty
     const repo = new Repo(name, log, store);
     this.#repos.set(name, repo);
@@ -191,9 +184,9 @@ export class Platform {
 
   // Re-open a durable scope: Store.open then OpLog.load (order matters), rebuilt.
   async openDurable(name: string, backend: Backend): Promise<Repo> {
-    const scoped = scope(backend, `repo/${name}/`);
-    const store = await MemoryStore.open(scoped);
-    const log = await OpLogClass.load(store, scoped);
+    const scopedBackend = scoped(backend, `repo/${name}/`);
+    const store = await MemoryStore.open(scopedBackend);
+    const log = await OpLogClass.load(store, scopedBackend);
     const repo = new Repo(name, log, store);
     this.#repos.set(name, repo);
     return repo;

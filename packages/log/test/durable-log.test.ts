@@ -110,4 +110,26 @@ describe('OpLog — durable mode', () => {
       expect(new TextDecoder().decode(meta).length).toBeGreaterThan(0);
     }
   });
+
+  test('a garbage/undecodable blob under op/ is skipped — load does not abort', async () => {
+    const backend = memoryBackend();
+    const author = Identity.create();
+
+    // Write a valid op so we have something to verify survives.
+    const store = new MemoryStore(backend);
+    const log = new OpLog(store, backend);
+    const op = await log.write('main', 'src/a.rs', enc('fn a() {}'), author);
+
+    // Inject a garbage blob under the same namespace but a different key.
+    await backend.put('op/zzz', new TextEncoder().encode('not json'));
+
+    // Reload must not throw — the garbage key is skipped and the valid op is
+    // still present.
+    const store2 = await MemoryStore.open(backend);
+    const log2 = await OpLog.load(store2, backend);
+    expect(log2.heads('main')).toEqual([op.id]);
+    expect(log2.verify(op.id)).toBe(true);
+    // The garbage key does not appear in materialize or ops().
+    expect(log2.ops().find((o) => o.id === 'zzz')).toBeUndefined();
+  });
 });
