@@ -1,5 +1,7 @@
 import type { Identity } from '@thaddeus.run/identity';
-import { signRequest } from '@thaddeus.run/server';
+import { Platform, type Repo } from '@thaddeus.run/platform';
+import { decodeBundle, signRequest } from '@thaddeus.run/server';
+import type { Backend } from '@thaddeus.run/store';
 
 // FetchLike matches the server's fetch(req: Request) shape. The client always
 // constructs a Request before calling fetchImpl, so the narrower signature is
@@ -28,6 +30,44 @@ export class Client {
   async createRepo(name: string): Promise<{ name: string; owner: string }> {
     const res = await this.#signed('POST', '/repos', { name });
     return (await this.#ok(res)) as { name: string; owner: string };
+  }
+
+  // Pull a view's reachable bundle, ingest it into `backend` as a local durable
+  // repo, and set the local view to the server's reported heads (read from
+  // /views/<view> — not inferred from the bundle frontier). Returns the opened
+  // local Repo and those heads.
+  async clone(
+    name: string,
+    backend: Backend,
+    view = 'main'
+  ): Promise<{ repo: Repo; heads: readonly string[] }> {
+    const enc = encodeURIComponent;
+    const viewRes = await this.#fetch(
+      new Request(`${this.#server}/repos/${enc(name)}/views/${enc(view)}`)
+    );
+    const viewBody = (await this.#ok(viewRes)) as {
+      view: string;
+      heads: string[];
+    };
+    const pullRes = await this.#fetch(
+      new Request(`${this.#server}/repos/${enc(name)}/pull?view=${enc(view)}`)
+    );
+    const bundle = decodeBundle(
+      (await this.#ok(pullRes)) as Parameters<typeof decodeBundle>[0]
+    );
+
+    const repo = await new Platform().openDurable(name, backend);
+    for (const object of bundle.objects) {
+      await repo.store.ingest(
+        object,
+        bundle.caps.filter((c) => c.object === object.plaintext_id)
+      );
+    }
+    for (const op of bundle.ops) {
+      await repo.log.ingest(op);
+    }
+    await repo.log.repoint(view, viewBody.heads);
+    return { repo, heads: viewBody.heads };
   }
 
   async listRepos(): Promise<readonly string[]> {
