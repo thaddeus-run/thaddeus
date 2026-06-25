@@ -41,7 +41,7 @@ becomes a real assertion. When the last stub is gone, the substrate is whole.
 | 04 Provenance ("why")                 | `provenance`         | built   | P12              |
 | 05 Virtual FS                         | `fs`                 | built   | P6 P7 P8 P11     |
 | 06 Platform                           | `platform`           | built   | P9 P10 P11       |
-| 07 Identity federation / reputation   | _(planned)_          | planned | P13 P19 P20      |
+| 07 Identity federation / reputation   | `reputation`         | built   | P13 P19 P20      |
 | 08 Semantic graph                     | _(planned)_          | planned | P14 P5 P18       |
 | 09 Agents as principals               | _(planned)_          | planned | P16 P3 P21       |
 | 10 Review as policy                   | _(planned)_          | planned | P15 P12          |

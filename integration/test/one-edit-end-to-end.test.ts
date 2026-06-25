@@ -3,6 +3,7 @@ import { Identity, ready } from '@thaddeus.run/identity';
 import { OpLog } from '@thaddeus.run/log';
 import { blockOnConflict, Platform } from '@thaddeus.run/platform';
 import { ProvenanceLog } from '@thaddeus.run/provenance';
+import { ReputationLog, signContribution } from '@thaddeus.run/reputation';
 import { MemoryStore, publicIdentity } from '@thaddeus.run/store';
 import { beforeAll, describe, expect, test } from 'bun:test';
 
@@ -47,6 +48,57 @@ describe('north-star: one edit, end to end', () => {
     }
     if (op != null) {
       expect(repo.log.publicView(op.id).kind).toBe('open');
+    }
+  });
+
+  test('P06/P07: a landed op mints a merge Contribution verifiable on another instance', async () => {
+    const repo = new Platform().createRepo('acme/web');
+    const author = Identity.create();
+    const instance = Identity.create(); // the host that attests the landing
+
+    // Land an edit (P05/P06), exactly as the canonical flow does.
+    const ws = Workspace.open(repo.log, repo.store, {
+      source: 'main',
+      reader: author,
+      name: 'feat/refresh',
+    });
+    ws.write('src/auth.rs', new TextEncoder().encode('fn refresh() {}'));
+    const [op] = await ws.commit(author);
+    const result = await repo.land({
+      from: 'feat/refresh',
+      into: 'main',
+      author,
+      policy: blockOnConflict,
+    });
+    expect(result.landed).toBe(true);
+    expect(op).toBeDefined();
+
+    // P07: mint a 'merge' contribution for the landed op — the author claims it,
+    // the instance attests it. Then honor it on a SECOND instance with no shared
+    // state: reputation travels as signed records, verified from the dids alone.
+    if (op != null) {
+      const contribution = signContribution(
+        {
+          repo: repo.name,
+          ref: op.id,
+          kind: 'merge',
+          at: '2026-06-24T00:00:00.000Z',
+        },
+        author,
+        instance
+      );
+
+      const elsewhere = new ReputationLog();
+      elsewhere.append(contribution);
+      expect(elsewhere.verify(contribution)).toEqual({
+        authentic: true,
+        attested: true,
+      });
+
+      const profile = elsewhere.profile(author.did);
+      expect(profile.attested).toHaveLength(1);
+      expect(profile.attested[0]?.ref).toBe(op.id);
+      expect(profile.byKind.merge).toBe(1);
     }
   });
 
