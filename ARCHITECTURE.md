@@ -47,6 +47,17 @@ becomes a real assertion. When the last stub is gone, the substrate is whole.
 | 10 Review as policy                   | _(planned)_          | planned | P15 P12          |
 | 11 Live database                      | _(planned)_          | planned | P17 P10          |
 
+## Persistence (infrastructure, not a pillar)
+
+The substrate is now optionally **durable** behind a pluggable `Backend`
+(`@thaddeus.run/persist`: `FileBackend`, `MemoryBackend`). `Store` and `OpLog`
+take an optional backend (hot-cache write-through + static `open`/`load`); with
+none, behavior is unchanged. `Platform.createDurable`/`openDurable` compose a
+backend-backed repo, so **a repo survives a process restart** — the code.store
+"in-memory writes, cold storage" split. Server/network and a Git gateway are the
+next steps toward runnable; signed-record-log persistence and SQLite/S3 backends
+are deferred.
+
 ## Per-primitive loop
 
 read `ARCHITECTURE.md` → brainstorm → spec (`docs/specs/`) → plan

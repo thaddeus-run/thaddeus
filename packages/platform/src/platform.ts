@@ -1,7 +1,12 @@
 import type { Identity } from '@thaddeus.run/identity';
 import type { Conflict, Op, OpLog } from '@thaddeus.run/log';
 import { OpLog as OpLogClass } from '@thaddeus.run/log';
-import { MemoryStore, type Store } from '@thaddeus.run/store';
+import {
+  type Backend,
+  MemoryStore,
+  scoped,
+  type Store,
+} from '@thaddeus.run/store';
 
 import { blockOnConflict, type LandPolicy, type LandResult } from './policy';
 
@@ -125,10 +130,8 @@ export class Repo {
         reason: decision.reason,
       };
     }
-    // The single re-point that IS the landing.
-    this.log.view(into, mergedHeads);
-    // Copy mergedHeads: log.view took its own copy, but the result must not
-    // alias whatever the caller might hold — symmetric with the reject path.
+    // The single re-point that IS the landing (durable when the log is backed).
+    await this.log.repoint(into, mergedHeads);
     return { landed: true, into, heads: [...mergedHeads], conflicts };
   }
 }
@@ -162,5 +165,30 @@ export class Platform {
   // The scope registry, in deterministic (sorted) order.
   repos(): readonly string[] {
     return [...this.#repos.keys()].sort();
+  }
+
+  // Fresh durable scope: a backend-backed Store+OpLog, seeds `main`, registers.
+  async createDurable(name: string, backend: Backend): Promise<Repo> {
+    const existing = this.#repos.get(name);
+    if (existing !== undefined) {
+      return existing;
+    }
+    const scopedBackend = scoped(backend, `repo/${name}/`);
+    const store = new MemoryStore(scopedBackend);
+    const log = new OpLogClass(store, scopedBackend);
+    log.view('main', []); // empty seed; absence on reload also reads as empty
+    const repo = new Repo(name, log, store);
+    this.#repos.set(name, repo);
+    return repo;
+  }
+
+  // Re-open a durable scope: Store.open then OpLog.load (order matters), rebuilt.
+  async openDurable(name: string, backend: Backend): Promise<Repo> {
+    const scopedBackend = scoped(backend, `repo/${name}/`);
+    const store = await MemoryStore.open(scopedBackend);
+    const log = await OpLogClass.load(store, scopedBackend);
+    const repo = new Repo(name, log, store);
+    this.#repos.set(name, repo);
+    return repo;
   }
 }

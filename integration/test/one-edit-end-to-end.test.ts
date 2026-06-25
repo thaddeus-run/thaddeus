@@ -6,6 +6,7 @@ import {
 import { Workspace } from '@thaddeus.run/fs';
 import { Identity, ready } from '@thaddeus.run/identity';
 import { OpLog } from '@thaddeus.run/log';
+import { MemoryBackend } from '@thaddeus.run/persist';
 import { blockOnConflict, Platform } from '@thaddeus.run/platform';
 import { ProvenanceLog } from '@thaddeus.run/provenance';
 import { ReputationLog, signContribution } from '@thaddeus.run/reputation';
@@ -156,6 +157,42 @@ describe('north-star: one edit, end to end', () => {
     });
     expect(blocked.landed).toBe(false);
     expect(blocked.reason).toContain('revoked');
+  });
+
+  test('persistence: a landed edit survives an openDurable reopen', async () => {
+    const backend = new MemoryBackend();
+    const dev = Identity.create();
+
+    const a = await new Platform().createDurable('acme/web', backend);
+    const ws = Workspace.open(a.log, a.store, {
+      source: 'main',
+      reader: dev,
+      name: 'feat',
+    });
+    ws.write('src/auth.rs', new TextEncoder().encode('fn refresh() {}'));
+    await ws.commit(dev);
+    expect(
+      (
+        await a.land({
+          from: 'feat',
+          into: 'main',
+          author: dev,
+          policy: blockOnConflict,
+        })
+      ).landed
+    ).toBe(true);
+
+    // Reopen from the same backend — history + content survive.
+    const b = await new Platform().openDurable('acme/web', backend);
+    expect(b.log.materialize('main').has('src/auth.rs')).toBe(true);
+    const ref = b.log.materialize('main', dev).get('src/auth.rs')?.ref;
+    expect(ref).toBeDefined();
+    expect(ref).not.toBeNull();
+    if (ref != null) {
+      expect(new TextDecoder().decode(await b.store.get(ref, dev))).toBe(
+        'fn refresh() {}'
+      );
+    }
   });
 
   test('P01/P02: grant releases the content key to a named grantee', async () => {
