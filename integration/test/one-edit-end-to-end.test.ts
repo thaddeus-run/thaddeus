@@ -1,3 +1,8 @@
+import {
+  AgentRegistry,
+  delegationPolicy,
+  signDelegation,
+} from '@thaddeus.run/agent';
 import { Workspace } from '@thaddeus.run/fs';
 import { Identity, ready } from '@thaddeus.run/identity';
 import { OpLog } from '@thaddeus.run/log';
@@ -100,6 +105,57 @@ describe('north-star: one edit, end to end', () => {
       expect(profile.attested[0]?.ref).toBe(op.id);
       expect(profile.byKind.merge).toBe(1);
     }
+  });
+
+  test('P09: an agent lands under its operator delegation; revocation quarantines it', async () => {
+    const repo = new Platform().createRepo('acme/web');
+    const operator = Identity.create();
+    const agent = Identity.create();
+    const registry = new AgentRegistry();
+    registry.register(
+      signDelegation(
+        { agent: agent.did, paths: ['src/**'], maxChanges: 5, maxSpend: 100 },
+        operator
+      )
+    );
+
+    // Attribution: the change will be signed by the agent, attributed to operator.
+    expect(registry.operatorOf(agent.did)).toBe(operator.did);
+
+    // The agent lands a change within its delegated scope, under the policy.
+    const ws = Workspace.open(repo.log, repo.store, {
+      source: 'main',
+      reader: agent,
+      name: 'agent/feat',
+    });
+    ws.write('src/auth.rs', new TextEncoder().encode('fn refresh() {}'));
+    await ws.commit(agent);
+    const ok = await repo.land({
+      from: 'agent/feat',
+      into: 'main',
+      author: agent,
+      policy: delegationPolicy(registry),
+    });
+    expect(ok.landed).toBe(true);
+    registry.record(agent.did); // meter the successful land
+
+    // Revocation quarantines the agent: a further landing is rejected.
+    registry.revoke(agent.did);
+    const ws2 = Workspace.open(repo.log, repo.store, {
+      source: 'main',
+      reader: agent,
+      name: 'agent/feat2',
+    });
+    ws2.write('src/extra.rs', new TextEncoder().encode('fn x() {}'));
+    await ws2.commit(agent);
+    const blocked = await repo.land({
+      from: 'agent/feat2',
+      into: 'main',
+      author: agent,
+      policy: delegationPolicy(registry),
+    });
+    expect(blocked.landed).toBe(false);
+    expect(blocked.reason).toContain('revoked');
   });
 
   test('P01/P02: grant releases the content key to a named grantee', async () => {

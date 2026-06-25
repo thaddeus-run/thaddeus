@@ -143,6 +143,7 @@
       "name": "@thaddeus.run/integration",
       "version": "0.0.0",
       "dependencies": {
+        "@thaddeus.run/agent": "workspace:*",
         "@thaddeus.run/fs": "workspace:*",
         "@thaddeus.run/identity": "workspace:*",
         "@thaddeus.run/log": "workspace:*",
