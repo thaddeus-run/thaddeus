@@ -12,6 +12,7 @@ import {
   baseSnapshot,
   type Config,
   diffWorkingTree,
+  equalBytes,
   findRoot,
   listWorkingFiles,
   loadConfig,
@@ -71,13 +72,6 @@ function headsAhead(repo: Repo, base: readonly string[]): number {
   return n;
 }
 
-// Byte-for-byte equality check for two Uint8Array buffers.
-function sameBytes(a: Uint8Array, b: Uint8Array): boolean {
-  if (a.length !== b.length) return false;
-  for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) return false;
-  return true;
-}
-
 // Stage the working-tree diff into a workspace over local main and commit it,
 // advancing local main. Returns the new local main heads and whether anything
 // was committed.
@@ -96,7 +90,7 @@ async function commitDiff(
   for (const path of disk) {
     const bytes = new Uint8Array(readFileSync(join(root, path)));
     const current = await ws.read(path);
-    if (current === null || !sameBytes(current, bytes)) {
+    if (current === null || !equalBytes(current, bytes)) {
       ws.write(path, bytes);
     }
   }
@@ -241,9 +235,17 @@ export async function run(
           );
           return 1;
         }
-        await local.log.repoint('main', landed.heads);
-        saveConfig(root, { ...cfg, base: [...landed.heads] });
-        out(`published to main (${landed.heads.length} head(s))`);
+        const localOps = new Set(local.log.ops().map((o) => o.id));
+        const allPresent = landed.heads.every((h) => localOps.has(h));
+        if (allPresent) {
+          await local.log.repoint('main', landed.heads);
+          saveConfig(root, { ...cfg, base: [...landed.heads] });
+          out(`published to main (${landed.heads.length} head(s))`);
+        } else {
+          out(
+            'published, but the remote has changes not in your clone — re-clone to sync'
+          );
+        }
         return 0;
       }
       case 'land': {
@@ -260,11 +262,19 @@ export async function run(
         const landed = await client.land(cfg.repo, heads, 'main');
         if (!landed.landed) {
           out(`not landed: ${landed.reason ?? 'nothing to land'}`);
-          return landed.reason === undefined ? 0 : 1;
+          return 1;
         }
-        await local.log.repoint('main', landed.heads);
-        saveConfig(root, { ...cfg, base: [...landed.heads] });
-        out(`landed to main (${landed.heads.length} head(s))`);
+        const localOps = new Set(local.log.ops().map((o) => o.id));
+        const allPresent = landed.heads.every((h) => localOps.has(h));
+        if (allPresent) {
+          await local.log.repoint('main', landed.heads);
+          saveConfig(root, { ...cfg, base: [...landed.heads] });
+          out(`landed to main (${landed.heads.length} head(s))`);
+        } else {
+          out(
+            'published, but the remote has changes not in your clone — re-clone to sync'
+          );
+        }
         return 0;
       }
       case undefined:
@@ -277,7 +287,8 @@ export async function run(
         return 2;
     }
   } catch (e) {
-    out(`error: ${(e as Error).message}`);
+    const msg = e instanceof Error ? e.message : String(e);
+    out(`error: ${msg}`);
     return 1;
   }
 }

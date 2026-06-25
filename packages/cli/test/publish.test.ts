@@ -72,7 +72,8 @@ describe('thaddeus push (publish)', () => {
     const a = mkdtempSync(join(tmp, 'a2-'));
     await run(['clone', 'http://t', 'p2', a], e(a));
     out.length = 0;
-    await run(['push'], e(a));
+    const code = await run(['push'], e(a));
+    expect(code).toBe(0);
     expect(out.join('\n').toLowerCase()).toContain('nothing to publish');
   });
 

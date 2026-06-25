@@ -12,6 +12,12 @@ export function bundleFor(
 ): { ops: Op[]; objects: EncryptedObject[]; caps: Capability[] } {
   const all = repo.log.ops();
   const byId = new Map(all.map((o) => [o.id, o]));
+  // Validate that every requested head exists locally — a missing head is a
+  // caller bug (e.g. passing a server-side head that was never fetched).
+  const known = new Set(all.map((o) => o.id));
+  for (const h of heads) {
+    if (!known.has(h)) throw new TypeError(`unknown head: ${h}`);
+  }
   const seen = new Set<string>();
   const stack = [...heads];
   while (stack.length > 0) {

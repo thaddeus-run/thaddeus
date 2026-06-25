@@ -21,36 +21,46 @@ const home = join(root, 'home');
 const out = (l: string): void => console.log('  ' + l);
 const env = (cwd: string) => ({ cwd, home, out });
 
-rule();
-console.log('$ thaddeus init');
-await run(['init'], env(root));
+try {
+  rule();
+  console.log('$ thaddeus init');
+  let code = await run(['init'], env(root));
+  if (code !== 0) throw new Error(`init failed: ${code}`);
 
-console.log(`$ thaddeus create ${base} proj`);
-await run(['create', base, 'proj'], env(root));
+  console.log(`$ thaddeus create ${base} proj`);
+  code = await run(['create', base, 'proj'], env(root));
+  if (code !== 0) throw new Error(`create failed: ${code}`);
 
-const a = join(root, 'a');
-console.log(`$ thaddeus clone ${base} proj a`);
-await run(['clone', base, 'proj', a], env(root));
+  const a = join(root, 'a');
+  console.log(`$ thaddeus clone ${base} proj a`);
+  code = await run(['clone', base, 'proj', a], env(root));
+  if (code !== 0) throw new Error(`clone failed: ${code}`);
 
-writeFileSync(join(a, 'readme.md'), '# Thaddeus\n');
-console.log('$ echo "# Thaddeus" > a/readme.md');
-console.log('$ thaddeus status');
-await run(['status'], env(a));
+  writeFileSync(join(a, 'readme.md'), '# Thaddeus\n');
+  console.log('$ echo "# Thaddeus" > a/readme.md');
+  console.log('$ thaddeus status');
+  code = await run(['status'], env(a));
+  if (code !== 0) throw new Error(`status failed: ${code}`);
 
-console.log('$ thaddeus push');
-await run(['push'], env(a));
+  console.log('$ thaddeus push');
+  code = await run(['push'], env(a));
+  if (code !== 0) throw new Error(`push failed: ${code}`);
 
-const b = join(root, 'b');
-console.log(`$ thaddeus clone ${base} proj b`);
-await run(['clone', base, 'proj', b], env(root));
-rule();
-console.log(
-  'b/readme.md after a fresh clone:',
-  JSON.stringify(readFileSync(join(b, 'readme.md'), 'utf8'))
-);
+  const b = join(root, 'b');
+  console.log(`$ thaddeus clone ${base} proj b`);
+  code = await run(['clone', base, 'proj', b], env(root));
+  if (code !== 0) throw new Error(`clone b failed: ${code}`);
 
-await http.stop(true);
-rule();
-console.log(
-  'Acceptance: edit on disk, push, and a fresh clone reads it back — over HTTP.'
-);
+  rule();
+  console.log(
+    'b/readme.md after a fresh clone:',
+    JSON.stringify(readFileSync(join(b, 'readme.md'), 'utf8'))
+  );
+
+  rule();
+  console.log(
+    'Acceptance: edit on disk, push, and a fresh clone reads it back — over HTTP.'
+  );
+} finally {
+  await http.stop(true);
+}

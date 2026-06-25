@@ -7,7 +7,7 @@ import {
   readFileSync,
   writeFileSync,
 } from 'node:fs';
-import { dirname, join, relative, sep } from 'node:path';
+import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 
 export interface Config {
   server: string;
@@ -79,6 +79,26 @@ export async function baseSnapshot(
   return snap;
 }
 
+// Resolve `path` under `root`, or return null if it escapes the worktree /
+// is absolute / targets the .thaddeus metadata dir. A repo path is untrusted
+// input and must be validated before being written to disk.
+function safeTarget(root: string, path: string): string | null {
+  if (isAbsolute(path)) return null;
+  const target = resolve(root, path);
+  const rel = relative(resolve(root), target);
+  if (rel === '' || rel.startsWith('..') || isAbsolute(rel)) return null;
+  if (
+    rel === '.thaddeus' ||
+    rel.startsWith('.thaddeus/') ||
+    rel.split('/')[0] === '.thaddeus'
+  )
+    return null;
+  return target;
+}
+
+// Export safeTarget for tests.
+export { safeTarget };
+
 // Write a view's materialized snapshot to disk under `root`.
 export async function materializeToDisk(
   repo: Repo,
@@ -88,13 +108,16 @@ export async function materializeToDisk(
 ): Promise<void> {
   const snap = await baseSnapshot(repo, view, reader);
   for (const [path, bytes] of snap) {
-    const full = join(root, path);
+    const full = safeTarget(root, path);
+    if (full === null) {
+      continue;
+    }
     mkdirSync(dirname(full), { recursive: true });
     writeFileSync(full, bytes);
   }
 }
 
-function equalBytes(a: Uint8Array, b: Uint8Array): boolean {
+export function equalBytes(a: Uint8Array, b: Uint8Array): boolean {
   if (a.length !== b.length) {
     return false;
   }

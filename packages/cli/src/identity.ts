@@ -33,7 +33,10 @@ export function initIdentity(
         did: string;
       };
       return { did: existing.did, created: false };
-    } catch {
+    } catch (err) {
+      // Only create a new identity when the file is absent. Any other error
+      // (corrupt JSON, permissions) surfaces rather than silently rotating.
+      if ((err as NodeJS.ErrnoException).code !== 'ENOENT') throw err;
       // fall through to create
     }
   }

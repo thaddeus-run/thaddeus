@@ -154,16 +154,28 @@ export class Client {
   }
 
   // Parse a JSON response; throw a useful Error on a non-2xx status.
+  // JSON.parse is attempted first (in a try/catch) so a plain-text/HTML error
+  // body does not throw SyntaxError and hide the real failure.
   async #ok(res: Response): Promise<unknown> {
     const text = await res.text();
-    const body: unknown = text.length > 0 ? JSON.parse(text) : {};
+    let parsed: unknown;
+    try {
+      parsed = text.length > 0 ? JSON.parse(text) : {};
+    } catch {
+      parsed = undefined;
+    }
     if (!res.ok) {
       const msg =
-        body !== null && typeof body === 'object' && 'error' in body
-          ? String((body as { error: unknown }).error)
-          : `request failed: ${res.status}`;
+        parsed !== null &&
+        parsed !== undefined &&
+        typeof parsed === 'object' &&
+        'error' in parsed
+          ? String((parsed as { error: unknown }).error)
+          : text.length > 0
+            ? text.slice(0, 200)
+            : `request failed: ${res.status}`;
       throw new Error(msg);
     }
-    return body;
+    return parsed ?? {};
   }
 }
