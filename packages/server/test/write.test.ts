@@ -221,4 +221,56 @@ describe('writes', () => {
     );
     expect(res.status).toBe(400);
   });
+
+  test('a null JSON body to POST push is 400 not 500', async () => {
+    const a = Identity.create();
+    const srv = createServer({ backend: new MemoryBackend() });
+    await srv.fetch(signed('POST', '/repos', jbody({ name: 'null-push' }), a));
+    const nullBody = new TextEncoder().encode('null');
+    const h = signRequest(
+      'POST',
+      '/repos/null-push/push',
+      nullBody,
+      a,
+      new Date().toISOString()
+    );
+    const res = await srv.fetch(
+      new Request('http://t/repos/null-push/push', {
+        method: 'POST',
+        body: nullBody,
+        headers: {
+          'x-thaddeus-did': h.did,
+          'x-thaddeus-timestamp': h.timestamp,
+          'x-thaddeus-signature': h.signature,
+        },
+      })
+    );
+    expect(res.status).toBe(400);
+  });
+
+  test('a null JSON body to POST land is 400 not 500', async () => {
+    const a = Identity.create();
+    const srv = createServer({ backend: new MemoryBackend() });
+    await srv.fetch(signed('POST', '/repos', jbody({ name: 'null-land' }), a));
+    const nullBody = new TextEncoder().encode('null');
+    const h = signRequest(
+      'POST',
+      '/repos/null-land/land',
+      nullBody,
+      a,
+      new Date().toISOString()
+    );
+    const res = await srv.fetch(
+      new Request('http://t/repos/null-land/land', {
+        method: 'POST',
+        body: nullBody,
+        headers: {
+          'x-thaddeus-did': h.did,
+          'x-thaddeus-timestamp': h.timestamp,
+          'x-thaddeus-signature': h.signature,
+        },
+      })
+    );
+    expect(res.status).toBe(400);
+  });
 });

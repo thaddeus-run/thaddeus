@@ -240,7 +240,8 @@ interface ServerConfig {
   policy?: LandPolicy; // default blockOnConflict; fail-closed, key-free
   now?: () => string; // injectable clock for the timestamp window (tests)
 }
-// Returns a Bun.serve-compatible fetch handler (and a helper to start/stop it).
+// Returns a Bun.serve-compatible fetch handler. Bind it with
+// `Bun.serve({ fetch })` — there is no built-in start/stop helper.
 function createServer(config: ServerConfig): {
   fetch: (req: Request) => Promise<Response>;
 };

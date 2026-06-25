@@ -161,8 +161,9 @@ export class MemoryStore implements Store {
 
   // Ingest a client-encrypted object + its caps (the untrusted-server path):
   // verify the content-address (reject a mis-addressed blob), keep only valid
-  // caps, store frozen, advance `current`, and write through. The server uses
-  // this to persist content it cannot itself read.
+  // caps, write through (persist-first), then update the hot maps. Persist-first
+  // so a failed backend write leaves neither map nor backend updated — no
+  // visible-but-non-durable state.
   //
   // Caps are AUTHORITATIVE-REPLACE: the pushed set overwrites the stored set
   // entirely, so callers MUST push the full cap set for the object — not a
@@ -177,16 +178,13 @@ export class MemoryStore implements Store {
       );
     }
     const frozen = Object.freeze(object);
-    this.#objects.set(frozen.id, frozen);
-    this.#current.set(frozen.plaintext_id, frozen.id);
     const valid = caps.filter((c) => verifyCapability(c));
-    this.#caps.set(frozen.plaintext_id, valid);
     await this.#persist(`obj/${frozen.id}`, frozen);
     await this.#persist(`current/${frozen.plaintext_id}`, frozen.id);
-    await this.#persist(
-      `cap/${frozen.plaintext_id}`,
-      this.#caps.get(frozen.plaintext_id) ?? []
-    );
+    await this.#persist(`cap/${frozen.plaintext_id}`, valid);
+    this.#objects.set(frozen.id, frozen);
+    this.#current.set(frozen.plaintext_id, frozen.id);
+    this.#caps.set(frozen.plaintext_id, valid);
   }
 
   async get(ref: Ref, reader: Identity, now?: string): Promise<Uint8Array> {

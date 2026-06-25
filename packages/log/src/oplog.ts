@@ -175,17 +175,18 @@ export class OpLog {
   }
 
   // Durably ingest a peer/pushed op (the server's verify-don't-trust path):
-  // verifyOp (reject on failure), append frozen, write through op/<id>. Touches
-  // no view — views move only via repoint/land. The persisting counterpart to
-  // the in-memory append().
+  // verifyOp (reject on failure), write through op/<id>, then append frozen.
+  // Persist-first so a failed backend write leaves the op absent from the hot
+  // map — no visible-but-non-durable state. Touches no view — views move only
+  // via repoint/land.
   async ingest(op: Op): Promise<void> {
     if (!verifyOp(op)) {
       throw new TypeError(`refusing to ingest an unverifiable op: ${op.id}`);
     }
-    this.#ops.set(op.id, Object.freeze(op));
     if (this.#backend !== undefined) {
       await this.#backend.put(`op/${op.id}`, encodeRecord(op));
     }
+    this.#ops.set(op.id, Object.freeze(op));
   }
 
   // Ingest a signed op from a peer — the convergence entry point. Verifies the

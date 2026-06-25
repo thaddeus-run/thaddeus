@@ -75,4 +75,34 @@ describe('repos', () => {
     );
     expect(res.status).toBe(400);
   });
+
+  test('a null JSON body to POST /repos is 400 not 500', async () => {
+    // typeof null === 'object', so a guard of `typeof parsed !== 'object'`
+    // alone would pass null through and throw at destructuring → 500.
+    const a = Identity.create();
+    const srv = createServer({ backend: new MemoryBackend() });
+    const raw = new TextEncoder().encode('null');
+    const h = signRequest('POST', '/repos', raw, a, new Date().toISOString());
+    const res = await srv.fetch(
+      new Request('http://t/repos', {
+        method: 'POST',
+        body: raw,
+        headers: {
+          'x-thaddeus-did': h.did,
+          'x-thaddeus-timestamp': h.timestamp,
+          'x-thaddeus-signature': h.signature,
+        },
+      })
+    );
+    expect(res.status).toBe(400);
+  });
+
+  test('a malformed percent-escape path to GET /repos/.../pull is 400 not 500', async () => {
+    // decodeURIComponent('%E0%A4%A') throws — must be caught and returned as 400.
+    const srv = createServer({ backend: new MemoryBackend() });
+    const res = await srv.fetch(
+      new Request('http://t/repos/%E0%A4%A/pull', { method: 'GET' })
+    );
+    expect(res.status).toBe(400);
+  });
 });

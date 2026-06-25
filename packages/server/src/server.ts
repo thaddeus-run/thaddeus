@@ -28,6 +28,16 @@ function safeParseJson(body: Uint8Array): unknown {
   }
 }
 
+// Decode a percent-encoded path segment, returning undefined on a malformed
+// escape sequence (e.g. %E0%A4%A) rather than throwing. Callers respond 400.
+function safeDecode(segment: string): string | undefined {
+  try {
+    return decodeURIComponent(segment);
+  } catch {
+    return undefined;
+  }
+}
+
 export interface ServerConfig {
   backend: Backend;
   policy?: LandPolicy;
@@ -139,21 +149,27 @@ export function createServer(config: ServerConfig): Server {
     if (signer === null) {
       return json(401, { error: 'unsigned or invalid request' });
     }
+    // Signature verification is read-only and can stay outside the lock.
     const parsed = safeParseJson(body);
-    if (parsed === undefined || typeof parsed !== 'object') {
+    if (parsed === undefined || parsed === null || typeof parsed !== 'object') {
       return json(400, { error: 'invalid JSON body' });
     }
     const { name } = parsed as { name: string };
     if (typeof name !== 'string' || name.length === 0) {
       return json(400, { error: 'missing repo name' });
     }
-    if ((await readMeta(name)) !== undefined) {
-      return json(409, { error: `repo ${name} already exists` });
-    }
-    await metaBackend(name).put('meta/repo', encodeRecord({ owner: signer }));
-    const repo = await platform.createDurable(name, config.backend);
-    repoCache.set(name, repo);
-    return json(201, { name, owner: signer });
+    // Wrap the existence-check-through-write in the per-repo lock so two
+    // concurrent creates for the same name cannot both pass the existence check
+    // (TOCTOU). The second request sees the meta written by the first → 409.
+    return withRepoLock(name, async () => {
+      if ((await readMeta(name)) !== undefined) {
+        return json(409, { error: `repo ${name} already exists` });
+      }
+      await metaBackend(name).put('meta/repo', encodeRecord({ owner: signer }));
+      const repo = await platform.createDurable(name, config.backend);
+      repoCache.set(name, repo);
+      return json(201, { name, owner: signer });
+    });
   }
 
   async function listRepos(): Promise<Response> {
@@ -386,27 +402,38 @@ export function createServer(config: ServerConfig): Server {
       // Names can contain '/' (e.g. "acme/web"); split on the fixed suffixes.
       const viewMatch = path.match(/^\/repos\/(.+)\/views\/([^/]+)$/);
       if (viewMatch !== null && req.method === 'GET') {
-        return getView(
-          decodeURIComponent(viewMatch[1]),
-          decodeURIComponent(viewMatch[2])
-        );
+        const repoName = safeDecode(viewMatch[1]);
+        const viewName = safeDecode(viewMatch[2]);
+        if (repoName === undefined || viewName === undefined) {
+          return json(400, { error: 'malformed path' });
+        }
+        return getView(repoName, viewName);
       }
       const pullMatch = path.match(/^\/repos\/(.+)\/pull$/);
       if (pullMatch !== null && req.method === 'GET') {
-        return pull(
-          decodeURIComponent(pullMatch[1]),
-          url.searchParams.get('view') ?? 'main'
-        );
+        const repoName = safeDecode(pullMatch[1]);
+        if (repoName === undefined) {
+          return json(400, { error: 'malformed path' });
+        }
+        return pull(repoName, url.searchParams.get('view') ?? 'main');
       }
       // push / land: POST /repos/:name/push and POST /repos/:name/land
       // Match before the generic catch-all; names can contain '/'.
       const pushMatch = path.match(/^\/repos\/(.+)\/push$/);
       if (pushMatch !== null && req.method === 'POST') {
-        return push(decodeURIComponent(pushMatch[1]), req, body);
+        const repoName = safeDecode(pushMatch[1]);
+        if (repoName === undefined) {
+          return json(400, { error: 'malformed path' });
+        }
+        return push(repoName, req, body);
       }
       const landMatch = path.match(/^\/repos\/(.+)\/land$/);
       if (landMatch !== null && req.method === 'POST') {
-        return land(decodeURIComponent(landMatch[1]), req, body);
+        const repoName = safeDecode(landMatch[1]);
+        if (repoName === undefined) {
+          return json(400, { error: 'malformed path' });
+        }
+        return land(repoName, req, body);
       }
       return json(404, { error: 'not found' });
     },
