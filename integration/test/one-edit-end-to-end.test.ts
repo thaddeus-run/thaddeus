@@ -137,7 +137,7 @@ describe('north-star: one edit, end to end', () => {
       policy: delegationPolicy(registry),
     });
     expect(ok.landed).toBe(true);
-    registry.record(agent.did); // meter the successful land
+    registry.record(agent.did, 1); // meter the successful land
 
     // Revocation quarantines the agent: a further landing is rejected.
     registry.revoke(agent.did);

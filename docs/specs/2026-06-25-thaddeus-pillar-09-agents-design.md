@@ -290,9 +290,10 @@ export class AgentRegistry {
   // Metered totals (default { changes: 0, spend: 0 }).
   usage(agent: string): Usage;
 
-  // After a successful land: +1 change and += spend for the agent. The policy
-  // never calls this — recording is the caller's post-land step.
-  record(agent: string, spend?: number): void;
+  // After a successful land: += changes (# ops landed) and += spend. The policy
+  // never calls this — recording is the caller's post-land step. Throws on an
+  // unregistered agent or non-finite/negative values.
+  record(agent: string, changes: number, spend?: number): void;
 }
 
 // Enforcement as a LandPolicy — pass to Repo.land({ policy }). Fail-closed:
@@ -319,12 +320,21 @@ fail-soft convention of P04/P07).
 ### 6.2 The registry
 
 `register(d)` throws unless `verifyDelegation(d)` — the registry never confers
-authority from an unverified grant. It stores `d` keyed by `d.agent`. `revoke`
-adds the agent to a quarantine `Set`. `delegationFor` returns the stored grant
-(or `undefined`); `operatorOf` returns `delegationFor(agent)?.operator`. `usage`
-returns the agent's meter (default zeros). `record(agent, spend = 0)` increments
-`changes` by 1 and `spend` by the argument. The meter is the registry's only
-mutable state besides the grant map and quarantine set.
+authority from an unverified grant. It stores a FROZEN DEEP COPY of `d` keyed by
+`d.agent`, so a caller mutating `paths`/caps after registration cannot widen an
+already-verified grant (the policy enforces these fields without re-checking the
+signature). `revoke` adds the agent to a quarantine `Set`; revocation is
+TERMINAL — `register` does NOT clear quarantine, so a revoked agent stays
+blocked even if re-registered; replace a compromised agent with a new identity
+(there is no unrevoke). `delegationFor` returns the stored grant (or
+`undefined`); `operatorOf` returns `delegationFor(agent)?.operator`. `usage`
+returns the agent's meter (default zeros). `record(agent, changes, spend = 0)`
+increments `changes` by the explicit count (matching `delegationPolicy`'s
+`incomingOps` count, so multi-op lands meter correctly) and `spend` by the
+argument; it throws on an unregistered agent or non-finite/negative values;
+re-registering does NOT reset the meter (the budget is a lifetime cap). The
+meter is the registry's only mutable state besides the grant map and quarantine
+set.
 
 ### 6.3 The policy
 
@@ -339,7 +349,11 @@ mutable state besides the grant map and quarantine set.
    `{ allow: false, reason: '<path> is outside <author>'s delegated scope' }`.
 4. budget: `usage(author).changes + (this author's op count) > maxChanges`, or
    `usage(author).spend >= maxSpend` →
-   `{ allow: false, reason: 'agent <author> is over budget' }`.
+   `{ allow: false, reason: 'agent <author> is over budget' }`. Note: `maxSpend`
+   is enforced RETROSPECTIVELY — because a change's spend is only known after
+   the land (caller-reported via `record`), the landing that first
+   reaches/exceeds the cap still completes and the NEXT land is blocked; the
+   effective ceiling is `maxSpend + (last land's spend)`.
 
 Otherwise `{ allow: true }`. The policy reads `registry` but never mutates it;
 it composes with other policies by simple conjunction (a caller can land under
@@ -414,6 +428,8 @@ its content keys (the decryption half). Print the acceptance facts.
 6. **Over `maxChanges` rejected** — with `usage.changes` at the cap, a further
    op → reject.
 7. **Over `maxSpend` rejected** — with recorded `spend` ≥ `maxSpend` → reject.
+   (`maxSpend` is a retrospective/soft cap: the land that first records spend
+   reaching the cap still succeeds; only the next land is blocked.)
 8. **Quarantine** — after `registry.revoke(agent)`, `delegationPolicy` rejects
    every op by that agent. _(Pins decision 5.)_
 9. **Attribution** — `operatorOf(agent)` returns the operator did; `undefined`
@@ -433,8 +449,11 @@ its content keys (the decryption half). Print the acceptance facts.
   `prefix/**`, bare `**`, and exact paths only.
 - **Total-count rate, not per-hour.** `maxChanges` is a lifetime cap on the
   in-memory meter; per-hour windowing needs wall-clock.
-- **Spend is caller-reported.** The substrate cannot know a change's cost;
-  `maxSpend` enforces only what the caller `record`s.
+- **Spend is caller-reported and `maxSpend` is a retrospective (soft) cap.** The
+  substrate cannot know a change's cost; `maxSpend` enforces only what the
+  caller `record`s. Because spend is known only after a land, the landing that
+  first reaches/exceeds `maxSpend` still completes — only the NEXT land is
+  blocked. The effective ceiling is `maxSpend + (last land's spend)`.
 - **Flat, non-expiring delegations.** No sub-delegation chains, no `not_after`
   time-expiry. Revocation is the only way to end a delegation.
 - **Enforcement is at land only.** A `delegationPolicy` gate runs when changes

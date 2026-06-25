@@ -62,7 +62,9 @@ const ok = await repo.land({
   author: agent,
   policy: delegationPolicy(registry),
 });
-registry.record(agent.did, 4);
+if (ok.landed) {
+  registry.record(agent.did, 1, 4);
+}
 rule();
 console.log('2. the agent lands within scope, attributed to its operator:');
 console.log(
@@ -74,9 +76,27 @@ console.log(
 console.log('   usage:', registry.usage(agent.did));
 
 // Act 3 — scope + budget enforced.
+// First show an out-of-scope rejection.
 await branch(repo, agent, 'agent/secret', 'secrets/key.env');
 const outOfScope = await repo.land({
   from: 'agent/secret',
+  author: agent,
+  policy: delegationPolicy(registry),
+});
+// Then land a second in-scope change (changes → 2 = cap), then a third which
+// the policy must reject for budget (usage.changes 2 + 1 > maxChanges 2).
+await branch(repo, agent, 'agent/two', 'src/two.rs');
+const second = await repo.land({
+  from: 'agent/two',
+  author: agent,
+  policy: delegationPolicy(registry),
+});
+if (second.landed) {
+  registry.record(agent.did, 1);
+}
+await branch(repo, agent, 'agent/three', 'src/three.rs');
+const overBudget = await repo.land({
+  from: 'agent/three',
   author: agent,
   policy: delegationPolicy(registry),
 });
@@ -87,6 +107,12 @@ console.log(
   outOfScope.landed,
   '|',
   outOfScope.reason
+);
+console.log(
+  '   over-budget landed:',
+  overBudget.landed,
+  '|',
+  overBudget.reason
 );
 
 // Act 4 — kill switch.

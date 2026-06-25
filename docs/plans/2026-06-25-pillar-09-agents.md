@@ -56,9 +56,9 @@ of its own** — signing/verifying delegate to `identity`.
   path under `prefix/`; otherwise exact equality. An op is in scope iff ANY glob
   matches its `path`.
 - **Budget is a total count cap + caller-reported spend.** `maxChanges` caps the
-  agent's lifetime op count on the in-memory meter; `maxSpend` caps caller-
-  reported `spend`. No per-hour windowing (needs wall-clock), no `Date`/
-  `Math.random`.
+  agent's lifetime op count on the in-memory meter (must be a non-negative
+  integer); `maxSpend` caps caller-reported `spend`. No per-hour windowing
+  (needs wall-clock), no `Date`/`Math.random`.
 - **Deferred (out of scope, do not build):** reputation score/tiers (→P10),
   economy/paid attestation, per-symbol scope (→P08), per-hour rate windowing,
   sub-delegation chains, time-expiry (`not_after`), persistence, network. Spike:

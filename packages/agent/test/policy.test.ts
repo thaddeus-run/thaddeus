@@ -88,7 +88,7 @@ describe('delegationPolicy', () => {
         operator
       )
     );
-    reg.record(agent.did); // usage.changes = 1, already at cap
+    reg.record(agent.did, 1); // usage.changes = 1, already at cap
     const decision = await delegationPolicy(reg)(
       proposal([await op(agent, 'src/a.rs')])
     );
@@ -106,7 +106,7 @@ describe('delegationPolicy', () => {
         operator
       )
     );
-    reg.record(agent.did, 5); // usage.spend = 5 >= maxSpend
+    reg.record(agent.did, 1, 5); // usage.spend = 5 >= maxSpend
     const decision = await delegationPolicy(reg)(
       proposal([await op(agent, 'src/a.rs')])
     );

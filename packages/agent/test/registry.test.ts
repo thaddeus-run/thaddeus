@@ -51,10 +51,42 @@ describe('AgentRegistry', () => {
   });
 
   test('usage starts at zero; record increments changes and spend', () => {
+    const operator = Identity.create();
+    const agent = Identity.create();
     const reg = new AgentRegistry();
-    expect(reg.usage('did:key:zA')).toEqual({ changes: 0, spend: 0 });
-    reg.record('did:key:zA', 4);
-    reg.record('did:key:zA');
-    expect(reg.usage('did:key:zA')).toEqual({ changes: 2, spend: 4 });
+    reg.register(grant(operator, agent)); // uses the existing `grant` helper
+    expect(reg.usage(agent.did)).toEqual({ changes: 0, spend: 0 });
+    reg.record(agent.did, 2, 4);
+    reg.record(agent.did, 1);
+    expect(reg.usage(agent.did)).toEqual({ changes: 3, spend: 4 });
+  });
+
+  test('register stores a frozen copy — mutating the input cannot widen the grant', () => {
+    const operator = Identity.create();
+    const agent = Identity.create();
+    const reg = new AgentRegistry();
+    const d = signDelegation(
+      { agent: agent.did, paths: ['src/**'], maxChanges: 5, maxSpend: 100 },
+      operator
+    );
+    reg.register(d);
+    // Mutating the caller's original array must not affect the stored grant.
+    (d.paths as string[]).push('**');
+    expect(reg.delegationFor(agent.did)?.paths).toEqual(['src/**']);
+    // The stored grant is frozen: attempting to mutate it throws or is a no-op.
+    const stored = reg.delegationFor(agent.did);
+    expect(Object.isFrozen(stored)).toBe(true);
+    expect(Object.isFrozen(stored?.paths)).toBe(true);
+  });
+
+  test('record rejects an unregistered agent and poison values', () => {
+    const operator = Identity.create();
+    const agent = Identity.create();
+    const reg = new AgentRegistry();
+    expect(() => reg.record('did:key:zNope', 1)).toThrow();
+    reg.register(grant(operator, agent));
+    expect(() => reg.record(agent.did, -1)).toThrow();
+    expect(() => reg.record(agent.did, 1.5)).toThrow();
+    expect(() => reg.record(agent.did, 1, -5)).toThrow();
   });
 });

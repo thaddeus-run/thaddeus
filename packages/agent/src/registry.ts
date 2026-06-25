@@ -18,16 +18,31 @@ export class AgentRegistry {
   // Verify and store a delegation (one active per agent; re-register replaces).
   // Throws TypeError on an invalid delegation. Re-registering replaces the
   // grant but does NOT reset the meter — the budget is a lifetime cap.
+  //
+  // Revocation is TERMINAL: register does NOT clear quarantine, so a revoked
+  // agent stays blocked even if re-registered. Replace a compromised agent
+  // with a new identity rather than un-revoking (there is no unrevoke).
   register(d: Delegation): void {
     if (!verifyDelegation(d)) {
       throw new TypeError(
         `refusing to register an invalid delegation for ${d.agent}`
       );
     }
-    this.#grants.set(d.agent, d);
+    // Store a FROZEN DEEP COPY: the policy enforces on these fields WITHOUT
+    // re-checking the signature, so a caller mutating paths/caps (on the original
+    // or on the object delegationFor returns) must not be able to widen an
+    // already-verified grant.
+    const copy: Delegation = Object.freeze({
+      ...d,
+      paths: Object.freeze([...d.paths]),
+      sig: d.sig.slice(),
+    });
+    this.#grants.set(d.agent, copy);
   }
 
   // Quarantine an agent: delegationPolicy then rejects all its ops at land.
+  // Revocation is terminal — there is no unrevoke. Replace a compromised agent
+  // with a new identity.
   revoke(agent: string): void {
     this.#quarantine.add(agent);
   }
@@ -54,10 +69,26 @@ export class AgentRegistry {
       : { changes: u.changes, spend: u.spend };
   }
 
-  // After a successful land: +1 change and += spend for the agent. The policy
-  // never calls this — recording is the caller's post-land step.
-  record(agent: string, spend = 0): void {
+  // After a successful land: += `changes` (the number of ops landed, matching
+  // what delegationPolicy counts) and += spend for the agent. The policy never
+  // calls this — recording is the caller's post-land step. Re-registering a
+  // delegation does NOT reset the meter (the budget is a lifetime cap).
+  record(agent: string, changes: number, spend = 0): void {
+    if (!this.#grants.has(agent)) {
+      throw new TypeError(
+        `cannot record usage for unregistered agent ${agent}`
+      );
+    }
+    if (!Number.isInteger(changes) || changes < 0) {
+      throw new TypeError('changes must be a non-negative integer');
+    }
+    if (!Number.isFinite(spend) || spend < 0) {
+      throw new TypeError('spend must be a finite number >= 0');
+    }
     const u = this.#meter.get(agent) ?? { changes: 0, spend: 0 };
-    this.#meter.set(agent, { changes: u.changes + 1, spend: u.spend + spend });
+    this.#meter.set(agent, {
+      changes: u.changes + changes,
+      spend: u.spend + spend,
+    });
   }
 }
