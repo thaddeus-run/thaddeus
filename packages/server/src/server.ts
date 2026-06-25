@@ -1,3 +1,4 @@
+import { PublicIdentity } from '@thaddeus.run/identity';
 import type { Op } from '@thaddeus.run/log';
 import {
   blockOnConflict,
@@ -9,11 +10,16 @@ import {
   type Backend,
   decodeRecord,
   encodeRecord,
+  MemoryStore,
   scoped,
 } from '@thaddeus.run/store';
 
-import { encodeBundle } from './dto';
+import { decodeBundle, encodeBundle } from './dto';
 import { type SignedHeaders, verifyRequest } from './sign';
+
+// Counter for unique ephemeral land source-view names; monotonic within the
+// process lifetime (not persisted — these views are throwaway, not durable).
+let landSeq = 0;
 
 // Parse a JSON request body, returning undefined on malformed input (so a handler
 // can answer 400 rather than throwing a 500). Used by every body-parsing handler.
@@ -202,9 +208,154 @@ export function createServer(config: ServerConfig): Server {
     return json(200, encodeBundle(ops, objects, caps));
   }
 
-  // Suppress unused-variable warnings for helpers used in later tasks.
-  void withRepoLock;
-  void policy;
+  // Verify signature + owner, then ingest each object (with its caps) and each
+  // op under the repo lock. Per-item failures go to rejected[] — a single bad
+  // item does not abort the whole request. Views are never advanced here; only
+  // land moves views.
+  async function push(
+    name: string,
+    req: Request,
+    body: Uint8Array
+  ): Promise<Response> {
+    const signer = verifyRequest(
+      'POST',
+      new URL(req.url).pathname,
+      body,
+      headers(req),
+      Date.parse(now())
+    );
+    if (signer === null) {
+      return json(401, { error: 'unsigned or invalid request' });
+    }
+    const meta = await readMeta(name);
+    if (meta === undefined) {
+      return json(404, { error: `no repo ${name}` });
+    }
+    if (signer !== meta.owner) {
+      return json(403, { error: 'not the repo owner' });
+    }
+    const parsed = safeParseJson(body);
+    if (parsed === undefined || parsed === null || typeof parsed !== 'object') {
+      return json(400, { error: 'invalid JSON body' });
+    }
+    let bundle: ReturnType<typeof decodeBundle>;
+    try {
+      bundle = decodeBundle(parsed as Parameters<typeof decodeBundle>[0]);
+    } catch {
+      return json(400, { error: 'malformed bundle' });
+    }
+    return withRepoLock(name, async () => {
+      const repo = await getRepo(name);
+      if (repo === undefined) {
+        return json(404, { error: `no repo ${name}` });
+      }
+      const rejected: { kind: string; id: string; reason: string }[] = [];
+      let objectsOk = 0;
+      let capsOk = 0;
+      let opsOk = 0;
+      // Group caps by plaintext_id so each object gets its accompanying caps in
+      // one ingest call. Objects must be ingested before their ops so content the
+      // op references is resident when the op is verified.
+      const capsByPid = new Map<string, typeof bundle.caps>();
+      for (const cap of bundle.caps) {
+        const list = capsByPid.get(cap.object) ?? [];
+        list.push(cap);
+        capsByPid.set(cap.object, list);
+      }
+      // The platform always backs Repo.store with MemoryStore, which exposes
+      // ingest() for server-side verify-don't-trust ingestion. Cast here because
+      // the Store interface (client-side API) does not surface ingest().
+      const memStore = repo.store as MemoryStore;
+      for (const object of bundle.objects) {
+        try {
+          await memStore.ingest(
+            object,
+            capsByPid.get(object.plaintext_id) ?? []
+          );
+          objectsOk += 1;
+          capsOk += (capsByPid.get(object.plaintext_id) ?? []).length;
+        } catch (err) {
+          rejected.push({
+            kind: 'object',
+            id: object.id ?? '?',
+            reason: String(err),
+          });
+        }
+      }
+      for (const op of bundle.ops) {
+        try {
+          await repo.log.ingest(op);
+          opsOk += 1;
+        } catch (err) {
+          rejected.push({ kind: 'op', id: op.id ?? '?', reason: String(err) });
+        }
+      }
+      return json(200, {
+        accepted: { objects: objectsOk, ops: opsOk, caps: capsOk },
+        rejected,
+      });
+    });
+  }
+
+  // Verify signature + owner, validate that every fromHead is a known ingested
+  // op, build an ephemeral in-memory source view (not persisted), and run
+  // policy-gated Repo.land with the signer as a key-less author.
+  async function land(
+    name: string,
+    req: Request,
+    body: Uint8Array
+  ): Promise<Response> {
+    const signer = verifyRequest(
+      'POST',
+      new URL(req.url).pathname,
+      body,
+      headers(req),
+      Date.parse(now())
+    );
+    if (signer === null) {
+      return json(401, { error: 'unsigned or invalid request' });
+    }
+    const meta = await readMeta(name);
+    if (meta === undefined) {
+      return json(404, { error: `no repo ${name}` });
+    }
+    if (signer !== meta.owner) {
+      return json(403, { error: 'not the repo owner' });
+    }
+    const parsed = safeParseJson(body);
+    if (parsed === undefined || parsed === null || typeof parsed !== 'object') {
+      return json(400, { error: 'invalid JSON body' });
+    }
+    const { fromHeads, into } = parsed as {
+      fromHeads: string[];
+      into?: string;
+    };
+    return withRepoLock(name, async () => {
+      const repo = await getRepo(name);
+      if (repo === undefined) {
+        return json(404, { error: `no repo ${name}` });
+      }
+      // Every head must be an op the server has already ingested; a reference to
+      // unknown history means the closure is partial and land would be wrong.
+      const known = new Set(repo.log.ops().map((o) => o.id));
+      if (!Array.isArray(fromHeads) || fromHeads.some((h) => !known.has(h))) {
+        return json(400, {
+          error: 'fromHeads references an op the server has not ingested',
+        });
+      }
+      // Ephemeral in-memory source view: sets the view heads without persisting,
+      // so it never leaks into the durable state even if land is rejected.
+      const src = `incoming/${landSeq++}`;
+      repo.log.view(src, fromHeads);
+      const result = await repo.land({
+        from: src,
+        into: into ?? 'main',
+        author: PublicIdentity.fromDid(signer),
+        policy,
+      });
+      return json(200, result);
+    });
+  }
 
   return {
     async fetch(req: Request): Promise<Response> {
@@ -237,7 +388,16 @@ export function createServer(config: ServerConfig): Server {
           url.searchParams.get('view') ?? 'main'
         );
       }
-      // push / land are added in later tasks.
+      // push / land: POST /repos/:name/push and POST /repos/:name/land
+      // Match before the generic catch-all; names can contain '/'.
+      const pushMatch = path.match(/^\/repos\/(.+)\/push$/);
+      if (pushMatch !== null && req.method === 'POST') {
+        return push(decodeURIComponent(pushMatch[1]), req, body);
+      }
+      const landMatch = path.match(/^\/repos\/(.+)\/land$/);
+      if (landMatch !== null && req.method === 'POST') {
+        return land(decodeURIComponent(landMatch[1]), req, body);
+      }
       return json(404, { error: 'not found' });
     },
   };
