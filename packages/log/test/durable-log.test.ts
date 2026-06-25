@@ -1,6 +1,6 @@
 import { Identity, ready } from '@thaddeus.run/identity';
 import type { Backend } from '@thaddeus.run/store';
-import { MemoryStore } from '@thaddeus.run/store';
+import { MemoryStore, publicIdentity } from '@thaddeus.run/store';
 import { beforeAll, describe, expect, test } from 'bun:test';
 
 import { OpLog } from '../src/oplog';
@@ -58,5 +58,56 @@ describe('OpLog — durable mode', () => {
     const log = new OpLog(new MemoryStore());
     const op = await log.write('main', 'a', enc('a'), author);
     expect(log.heads('main')).toEqual([op.id]);
+  });
+
+  test('embargo write-through + reveal survive a reload', async () => {
+    const T = '2030-01-01T00:00:00.000Z';
+    const beforeT = '2026-06-24T00:00:00.000Z';
+    const backend = memoryBackend();
+    const maintainer = Identity.create();
+
+    // Write an embargoed op into a backend-backed log.
+    const store = new MemoryStore(backend);
+    const log = new OpLog(store, backend);
+    const op = await log.write('main', 'src/auth.ts', enc('fix'), maintainer, {
+      embargoUntil: T,
+    });
+
+    // Discard log+store; rebuild from the backend (store first, then log).
+    const store2 = await MemoryStore.open(backend);
+    const log2 = await OpLog.load(store2, backend);
+
+    // The op survived the reload and the view head is intact.
+    expect(log2.heads('main')).toEqual([op.id]);
+
+    // The embargo state survived: public materialize hides the op, but the
+    // maintainer (capability holder) still sees it placed.
+    expect(log2.materialize('main').has('src/auth.ts')).toBe(false);
+    expect(log2.materialize('main', maintainer).has('src/auth.ts')).toBe(true);
+
+    // publicView still returns the opaque embargoed token, not the open op.
+    const pv = log2.publicView(op.id);
+    expect(pv.kind).toBe('embargoed');
+    if (pv.kind === 'embargoed') {
+      expect(pv.ordering_token.length).toBeGreaterThan(0);
+      expect(JSON.stringify(pv)).not.toContain('src/auth.ts');
+    }
+
+    // Before T the reveal still fails.
+    expect(await log2.reveal(op.id, beforeT)).toBe(false);
+    expect(log2.materialize('main').has('src/auth.ts')).toBe(false);
+
+    // At T the key-release fires; the op lands publicly and the backend is
+    // updated so a further reload would also see revealed: true.
+    expect(await log2.reveal(op.id, T)).toBe(true);
+    expect(log2.publicView(op.id).kind).toBe('open');
+    expect(log2.materialize('main').get('src/auth.ts')?.op.id).toBe(op.id);
+
+    // The sealed metadata is now world-readable via the membrane.
+    const sealed = pv.kind === 'embargoed' ? pv.sealed_meta : undefined;
+    if (sealed !== undefined) {
+      const meta = await store2.get(sealed, publicIdentity(), T);
+      expect(new TextDecoder().decode(meta).length).toBeGreaterThan(0);
+    }
   });
 });

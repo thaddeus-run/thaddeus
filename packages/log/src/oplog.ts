@@ -101,6 +101,10 @@ export class OpLog {
   }
 
   // Write-through for an op + its view (no-op without a backend).
+  // NOTE: the two writes (op then view) are NOT atomic — a crash between them
+  // leaves the op present in the backend but the view not yet advanced, which
+  // load() surfaces as a recoverable trailing view (non-corrupting), per the
+  // persistence spec's best-effort crash-consistency guarantee.
   async #persistCommit(view: string, op: Op): Promise<void> {
     if (this.#backend !== undefined) {
       await this.#backend.put(`op/${op.id}`, encodeRecord(op));
