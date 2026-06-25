@@ -1,6 +1,9 @@
 import { Client } from '@thaddeus.run/client';
+import { Workspace } from '@thaddeus.run/fs';
+import type { Identity } from '@thaddeus.run/identity';
 import { FileBackend } from '@thaddeus.run/persist';
 import { Platform, type Repo } from '@thaddeus.run/platform';
+import { readFileSync } from 'node:fs';
 import { isAbsolute, join } from 'node:path';
 import { parseArgs } from 'node:util';
 
@@ -10,6 +13,7 @@ import {
   type Config,
   diffWorkingTree,
   findRoot,
+  listWorkingFiles,
   loadConfig,
   materializeToDisk,
   saveConfig,
@@ -65,6 +69,49 @@ function headsAhead(repo: Repo, base: readonly string[]): number {
     if (!baseClosure.has(id)) n += 1;
   }
   return n;
+}
+
+// Byte-for-byte equality check for two Uint8Array buffers.
+function sameBytes(a: Uint8Array, b: Uint8Array): boolean {
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) return false;
+  return true;
+}
+
+// Stage the working-tree diff into a workspace over local main and commit it,
+// advancing local main. Returns the new local main heads and whether anything
+// was committed.
+async function commitDiff(
+  root: string,
+  repo: Repo,
+  identity: Identity
+): Promise<{ heads: string[]; committed: boolean }> {
+  const ws = Workspace.open(repo.log, repo.store, {
+    source: 'main',
+    reader: identity,
+    name: 'staging',
+  });
+  const disk = listWorkingFiles(root);
+  const diskSet = new Set(disk);
+  for (const path of disk) {
+    const bytes = new Uint8Array(readFileSync(join(root, path)));
+    const current = await ws.read(path);
+    if (current === null || !sameBytes(current, bytes)) {
+      ws.write(path, bytes);
+    }
+  }
+  for (const path of await ws.list()) {
+    if (!diskSet.has(path)) {
+      ws.rm(path);
+    }
+  }
+  const ops = await ws.commit(identity);
+  if (ops.length === 0) {
+    return { heads: [...repo.log.heads('main')], committed: false };
+  }
+  const heads = [...repo.log.heads('staging')];
+  await repo.log.repoint('main', heads);
+  return { heads, committed: true };
 }
 
 // The injectable entry point. Returns a process exit code.
@@ -153,7 +200,73 @@ export async function run(
           );
         return 0;
       }
-      // push / land are added in Task 6.
+      case 'push': {
+        const { values } = parseArgs({
+          args: [...rest],
+          options: { 'no-land': { type: 'boolean' } },
+          allowPositionals: true,
+        });
+        const root = findRoot(env.cwd);
+        if (root === undefined) {
+          out("not a thaddeus working copy — run 'thaddeus clone' first");
+          return 2;
+        }
+        const cfg = loadConfig(root);
+        const identity = loadIdentity(env.home);
+        const local = await openLocal(root, cfg.repo);
+        const { heads, committed } = await commitDiff(root, local, identity);
+        const ahead = headsAhead(local, cfg.base);
+        if (!committed && ahead === 0) {
+          out('nothing to publish');
+          return 0;
+        }
+        const client = new Client(cfg.server, identity, env.fetchImpl);
+        const pushed = await client.push(cfg.repo, local, heads);
+        out(
+          `uploaded ${pushed.accepted.ops} op(s), ${pushed.accepted.objects} object(s)`
+        );
+        if (pushed.rejected.length > 0) {
+          out(
+            `rejected ${pushed.rejected.length} item(s): ${pushed.rejected.map((r) => r.reason).join('; ')}`
+          );
+        }
+        if (values['no-land'] === true) {
+          out("uploaded (not landed — run 'thaddeus land' to publish)");
+          return 0;
+        }
+        const landed = await client.land(cfg.repo, heads, 'main');
+        if (!landed.landed) {
+          out(
+            `not landed: ${landed.reason ?? 'blocked by policy'} (content uploaded)`
+          );
+          return 1;
+        }
+        await local.log.repoint('main', landed.heads);
+        saveConfig(root, { ...cfg, base: [...landed.heads] });
+        out(`published to main (${landed.heads.length} head(s))`);
+        return 0;
+      }
+      case 'land': {
+        const root = findRoot(env.cwd);
+        if (root === undefined) {
+          out("not a thaddeus working copy — run 'thaddeus clone' first");
+          return 2;
+        }
+        const cfg = loadConfig(root);
+        const identity = loadIdentity(env.home);
+        const local = await openLocal(root, cfg.repo);
+        const heads = [...local.log.heads('main')];
+        const client = new Client(cfg.server, identity, env.fetchImpl);
+        const landed = await client.land(cfg.repo, heads, 'main');
+        if (!landed.landed) {
+          out(`not landed: ${landed.reason ?? 'nothing to land'}`);
+          return landed.reason === undefined ? 0 : 1;
+        }
+        await local.log.repoint('main', landed.heads);
+        saveConfig(root, { ...cfg, base: [...landed.heads] });
+        out(`landed to main (${landed.heads.length} head(s))`);
+        return 0;
+      }
       case undefined:
       case 'help':
       case '--help':
