@@ -1,6 +1,6 @@
 import { scoped } from '@thaddeus.run/store';
 import { afterAll, describe, expect, test } from 'bun:test';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -48,6 +48,18 @@ for (const [name, make] of [
     });
   });
 }
+
+describe('FileBackend — malformed filenames', () => {
+  test('list skips an undecodable filename instead of throwing', async () => {
+    const root = mkdtempSync(join(tmp, 'malformed-'));
+    const b = new FileBackend(root);
+    await b.put('op/abc', enc('o'));
+    // A stray file whose name is not valid percent-encoding (decodeURIComponent
+    // would throw URIError). list() must skip it, not abort the whole load.
+    writeFileSync(join(root, '%GG'), enc('garbage'));
+    expect([...(await b.list(''))]).toEqual(['op/abc']);
+  });
+});
 
 describe('scoped', () => {
   test('prefixes keys and isolates namespaces', async () => {

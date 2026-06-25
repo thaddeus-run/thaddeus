@@ -60,7 +60,22 @@ export class FileBackend implements Backend {
     } catch {
       return [];
     }
-    return names.map(decodeKey).filter((k) => k.startsWith(prefix));
+    const keys: string[] = [];
+    for (const name of names) {
+      let key: string;
+      try {
+        // decodeURIComponent throws URIError on a malformed name (e.g. `%GG`);
+        // a stray/undecodable file is skipped, not fatal — matching the
+        // defensive per-record decode in MemoryStore.open / OpLog.load.
+        key = decodeKey(name);
+      } catch {
+        continue;
+      }
+      if (key.startsWith(prefix)) {
+        keys.push(key);
+      }
+    }
+    return keys;
   }
 
   async delete(key: string): Promise<void> {
