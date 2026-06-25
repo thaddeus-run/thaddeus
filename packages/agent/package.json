@@ -1,0 +1,57 @@
+{
+  "name": "@thaddeus.run/agent",
+  "version": "0.0.0",
+  "description": "Agents as first-class principals: operator-signed Delegations (scoped, budgeted authority) and a fail-closed LandPolicy enforcing scope, budget, and quarantine. Pillar 09.",
+  "keywords": [
+    "agent",
+    "capability",
+    "delegation",
+    "identity",
+    "strata",
+    "substrate"
+  ],
+  "homepage": "https://thaddeus.run",
+  "bugs": {
+    "url": "https://github.com/thaddeus-run/thaddeus/issues"
+  },
+  "license": "Apache-2.0",
+  "author": {
+    "name": "thaddeus.run",
+    "url": "https://thaddeus.run"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/thaddeus-run/thaddeus.git",
+    "directory": "packages/agent"
+  },
+  "files": [
+    "dist",
+    "LICENSE.md",
+    "README.md"
+  ],
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "scripts": {
+    "prepublishOnly": "moon run agent:prepublish"
+  },
+  "dependencies": {
+    "@thaddeus.run/identity": "workspace:*"
+  },
+  "devDependencies": {
+    "@thaddeus.run/log": "workspace:*",
+    "@thaddeus.run/platform": "workspace:*",
+    "@thaddeus.run/store": "workspace:*",
+    "@types/bun": "catalog:",
+    "@typescript/native-preview": "catalog:",
+    "tsdown": "catalog:",
+    "typescript": "catalog:"
+  }
+}
