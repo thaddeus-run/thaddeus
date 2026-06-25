@@ -85,59 +85,83 @@ describe('server e2e', () => {
     const base1 = `http://localhost:${http1.port}`;
     const c1 = client(base1);
 
-    await c1.post('/repos', { name: 'acme/web' }, a);
-    const { bundle, heads } = await commitLocally(
-      a,
-      'src/auth.rs',
-      'fn refresh() {}'
-    );
-    await c1.post('/repos/acme%2Fweb/push', bundle, a);
-    const landed = (await (
-      await c1.post(
-        '/repos/acme%2Fweb/land',
-        { fromHeads: heads, into: 'main' },
-        a
-      )
-    ).json()) as { landed: boolean };
-    expect(landed.landed).toBe(true);
-
-    // Fresh client clones via pull and decrypts the original content.
-    const pulled = decodeBundle(
-      (await (
-        await c1.get('/repos/acme%2Fweb/pull?view=main')
-      ).json()) as Bundle
-    );
-    const cstore = new MemoryStore();
-    const clog = new OpLog(cstore);
-    for (const o of pulled.objects) {
-      await cstore.ingest(
-        o,
-        pulled.caps.filter((cp) => cp.object === o.plaintext_id)
+    let pulled: ReturnType<typeof decodeBundle>;
+    try {
+      await c1.post('/repos', { name: 'acme/web' }, a);
+      const { bundle, heads } = await commitLocally(
+        a,
+        'src/auth.rs',
+        'fn refresh() {}'
       );
+      await c1.post('/repos/acme%2Fweb/push', bundle, a);
+      const landed = (await (
+        await c1.post(
+          '/repos/acme%2Fweb/land',
+          { fromHeads: heads, into: 'main' },
+          a
+        )
+      ).json()) as { landed: boolean };
+      expect(landed.landed).toBe(true);
+
+      // Fresh client clones via pull and decrypts the original content.
+      pulled = decodeBundle(
+        (await (
+          await c1.get('/repos/acme%2Fweb/pull?view=main')
+        ).json()) as Bundle
+      );
+      const cstore = new MemoryStore();
+      const clog = new OpLog(cstore);
+      for (const o of pulled.objects) {
+        await cstore.ingest(
+          o,
+          pulled.caps.filter((cp) => cp.object === o.plaintext_id)
+        );
+      }
+      for (const o of pulled.ops) {
+        await clog.ingest(o);
+      }
+      // Reconstruct the 'main' view: the head(s) of the pulled op set are the
+      // tip(s) that the server's land pointed 'main' at. The global frontier
+      // (ops with no children in this set) equals the landed heads.
+      clog.view('main', clog.heads());
+      const ref = clog.materialize('main', a).get('src/auth.rs')?.ref;
+      expect(ref).toBeDefined();
+      expect(dec(await cstore.get(ref!, a))).toBe('fn refresh() {}');
+    } finally {
+      await http1.stop(true);
     }
-    for (const o of pulled.ops) {
-      await clog.ingest(o);
-    }
-    // Reconstruct the 'main' view: the head(s) of the pulled op set are the
-    // tip(s) that the server's land pointed 'main' at. The global frontier
-    // (ops with no children in this set) equals the landed heads.
-    clog.view('main', clog.heads());
-    const ref = clog.materialize('main', a).get('src/auth.rs')?.ref;
-    expect(ref).toBeDefined();
-    expect(dec(await cstore.get(ref!, a))).toBe('fn refresh() {}');
-    await http1.stop(true);
 
     // Stateless: a brand-new server over the SAME dir still serves the landed content.
     const srv2 = createServer({ backend: new FileBackend(root) });
     const http2 = Bun.serve({ port: 0, fetch: srv2.fetch });
     const c2 = client(`http://localhost:${http2.port}`);
-    const repull = decodeBundle(
-      (await (
-        await c2.get('/repos/acme%2Fweb/pull?view=main')
-      ).json()) as Bundle
-    );
-    expect(repull.ops.length).toBe(pulled.ops.length);
-    await http2.stop(true);
+    try {
+      const repull = decodeBundle(
+        (await (
+          await c2.get('/repos/acme%2Fweb/pull?view=main')
+        ).json()) as Bundle
+      );
+      expect(repull.ops.length).toBe(pulled!.ops.length);
+
+      // Rebuild a fresh client from the RESTARTED server and decrypt the content.
+      const cstore2 = new MemoryStore();
+      const clog2 = new OpLog(cstore2);
+      for (const o of repull.objects) {
+        await cstore2.ingest(
+          o,
+          repull.caps.filter((cp) => cp.object === o.plaintext_id)
+        );
+      }
+      for (const o of repull.ops) {
+        await clog2.ingest(o);
+      }
+      clog2.view('main', clog2.heads()); // reconstruct main from the pulled closure's frontier
+      const ref2 = clog2.materialize('main', a).get('src/auth.rs')?.ref;
+      expect(ref2).toBeDefined();
+      expect(dec(await cstore2.get(ref2!, a))).toBe('fn refresh() {}');
+    } finally {
+      await http2.stop(true);
+    }
   });
 
   test('decryption-bounded over the wire: B cannot read until granted', async () => {
@@ -148,33 +172,35 @@ describe('server e2e', () => {
     const http = Bun.serve({ port: 0, fetch: srv.fetch });
     const c = client(`http://localhost:${http.port}`);
 
-    await c.post('/repos', { name: 'r' }, a);
-    const { bundle, heads } = await commitLocally(a, 'f.rs', 'secret');
-    await c.post('/repos/r/push', bundle, a);
-    await c.post('/repos/r/land', { fromHeads: heads, into: 'main' }, a);
+    try {
+      await c.post('/repos', { name: 'r' }, a);
+      const { bundle, heads } = await commitLocally(a, 'f.rs', 'secret');
+      await c.post('/repos/r/push', bundle, a);
+      await c.post('/repos/r/land', { fromHeads: heads, into: 'main' }, a);
 
-    // B pulls the ciphertext but cannot decrypt (no cap).
-    const pulled = decodeBundle(
-      (await (await c.get('/repos/r/pull?view=main')).json()) as Bundle
-    );
-    const bstore = new MemoryStore();
-    const blog = new OpLog(bstore);
-    for (const o of pulled.objects) {
-      await bstore.ingest(
-        o,
-        pulled.caps.filter((cp) => cp.object === o.plaintext_id)
+      // B pulls the ciphertext but cannot decrypt (no cap).
+      const pulled = decodeBundle(
+        (await (await c.get('/repos/r/pull?view=main')).json()) as Bundle
       );
+      const bstore = new MemoryStore();
+      const blog = new OpLog(bstore);
+      for (const o of pulled.objects) {
+        await bstore.ingest(
+          o,
+          pulled.caps.filter((cp) => cp.object === o.plaintext_id)
+        );
+      }
+      for (const o of pulled.ops) {
+        await blog.ingest(o);
+      }
+      // Reconstruct the 'main' view from the global frontier of pulled ops.
+      blog.view('main', blog.heads());
+      const ref = blog.materialize('main', b).get('f.rs')?.ref;
+      expect(ref).toBeDefined();
+      // AccessDenied — B has no capability for the object A encrypted
+      await expectRejects(bstore.get(ref!, b), AccessDenied);
+    } finally {
+      await http.stop(true);
     }
-    for (const o of pulled.ops) {
-      await blog.ingest(o);
-    }
-    // Reconstruct the 'main' view from the global frontier of pulled ops.
-    blog.view('main', blog.heads());
-    const ref = blog.materialize('main', b).get('f.rs')?.ref;
-    expect(ref).toBeDefined();
-    // AccessDenied — B has no capability for the object A encrypted
-    await expectRejects(bstore.get(ref!, b), AccessDenied);
-
-    await http.stop(true);
   });
 });
