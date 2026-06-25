@@ -152,6 +152,21 @@
         "@types/bun": "catalog:",
       },
     },
+    "examples/server": {
+      "name": "@thaddeus.run/example-server",
+      "version": "0.0.0",
+      "dependencies": {
+        "@thaddeus.run/fs": "workspace:*",
+        "@thaddeus.run/identity": "workspace:*",
+        "@thaddeus.run/log": "workspace:*",
+        "@thaddeus.run/persist": "workspace:*",
+        "@thaddeus.run/server": "workspace:*",
+        "@thaddeus.run/store": "workspace:*",
+      },
+      "devDependencies": {
+        "@types/bun": "catalog:",
+      },
+    },
     "examples/workspace": {
       "name": "@thaddeus.run/example-workspace",
       "version": "0.0.0",
@@ -741,6 +756,8 @@
     "@thaddeus.run/example-provenance": ["@thaddeus.run/example-provenance@workspace:examples/provenance"],
 
     "@thaddeus.run/example-reputation": ["@thaddeus.run/example-reputation@workspace:examples/reputation"],
+
+    "@thaddeus.run/example-server": ["@thaddeus.run/example-server@workspace:examples/server"],
 
     "@thaddeus.run/example-workspace": ["@thaddeus.run/example-workspace@workspace:examples/workspace"],
 

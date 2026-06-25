@@ -1,0 +1,13 @@
+{
+  "extends": "../../tsconfig.options.json",
+  "include": ["src/**/*.ts"],
+  "exclude": ["node_modules"],
+  "compilerOptions": {
+    "noEmit": true,
+    "lib": ["ES2023"],
+    "types": ["@types/bun"],
+    "target": "esnext",
+    "module": "esnext",
+    "moduleResolution": "bundler"
+  }
+}
