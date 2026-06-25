@@ -1,3 +1,4 @@
+import type { Op } from '@thaddeus.run/log';
 import {
   blockOnConflict,
   type LandPolicy,
@@ -11,6 +12,7 @@ import {
   scoped,
 } from '@thaddeus.run/store';
 
+import { encodeBundle } from './dto';
 import { type SignedHeaders, verifyRequest } from './sign';
 
 // Parse a JSON request body, returning undefined on malformed input (so a handler
@@ -35,6 +37,30 @@ export interface Server {
 
 interface RepoMeta {
   owner: string;
+}
+
+// Every op reachable from `heads` by walking parents (inclusive), in
+// (lamport, id) order.
+function reachableOps(all: readonly Op[], heads: readonly string[]): Op[] {
+  const byId = new Map(all.map((o) => [o.id, o]));
+  const seen = new Set<string>();
+  const stack = [...heads];
+  while (stack.length > 0) {
+    const id = stack.pop();
+    if (id === undefined || seen.has(id)) {
+      continue;
+    }
+    seen.add(id);
+    const op = byId.get(id);
+    if (op !== undefined) {
+      stack.push(...op.parents);
+    }
+  }
+  return all
+    .filter((o) => seen.has(o.id))
+    .sort((x, y) =>
+      x.lamport !== y.lamport ? x.lamport - y.lamport : x.id < y.id ? -1 : 1
+    );
 }
 
 // A Bun.serve-compatible handler over a durable Platform. No keys; verifies and
@@ -137,8 +163,46 @@ export function createServer(config: ServerConfig): Server {
     return json(200, { repos: names.sort() });
   }
 
+  // Returns the heads of a named view for a repo; 404 if the repo doesn't exist.
+  async function getView(name: string, view: string): Promise<Response> {
+    const repo = await getRepo(name);
+    if (repo === undefined) {
+      return json(404, { error: `no repo ${name}` });
+    }
+    return json(200, { view, heads: [...repo.log.heads(view)] });
+  }
+
+  // Returns the reachable bundle for a view: ops in lamport order, plus the
+  // CURRENT ciphertext object and its served caps for each plaintext_id an
+  // op's payload references. Use this for clone (pull main).
+  async function pull(name: string, view: string): Promise<Response> {
+    const repo = await getRepo(name);
+    if (repo === undefined) {
+      return json(404, { error: `no repo ${name}` });
+    }
+    const ops = reachableOps(repo.log.ops(), repo.log.heads(view));
+    // For every plaintext_id an op's payload references, the CURRENT ciphertext
+    // object + its served caps (store.get decrypts the current object, so the
+    // client needs current — not a historical version — to read after rotation).
+    const objects = [];
+    const caps = [];
+    const seen = new Set<string>();
+    for (const op of ops) {
+      const pid = op.payload?.plaintext_id;
+      if (pid === undefined || seen.has(pid)) {
+        continue;
+      }
+      seen.add(pid);
+      const current = repo.store.current(pid);
+      if (current !== undefined) {
+        objects.push(current);
+        caps.push(...repo.store.caps(pid));
+      }
+    }
+    return json(200, encodeBundle(ops, objects, caps));
+  }
+
   // Suppress unused-variable warnings for helpers used in later tasks.
-  void getRepo;
   void withRepoLock;
   void policy;
 
@@ -157,7 +221,23 @@ export function createServer(config: ServerConfig): Server {
       if (path === '/repos' && req.method === 'POST') {
         return createRepo(req, body);
       }
-      // push / land / pull / views are added in later tasks.
+      // /repos/:name/views/:view  and  /repos/:name/pull
+      // Names can contain '/' (e.g. "acme/web"); split on the fixed suffixes.
+      const viewMatch = path.match(/^\/repos\/(.+)\/views\/([^/]+)$/);
+      if (viewMatch !== null && req.method === 'GET') {
+        return getView(
+          decodeURIComponent(viewMatch[1]),
+          decodeURIComponent(viewMatch[2])
+        );
+      }
+      const pullMatch = path.match(/^\/repos\/(.+)\/pull$/);
+      if (pullMatch !== null && req.method === 'GET') {
+        return pull(
+          decodeURIComponent(pullMatch[1]),
+          url.searchParams.get('view') ?? 'main'
+        );
+      }
+      // push / land are added in later tasks.
       return json(404, { error: 'not found' });
     },
   };
