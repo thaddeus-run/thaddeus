@@ -55,6 +55,19 @@
         "vite": "catalog:",
       },
     },
+    "examples/agent": {
+      "name": "@thaddeus.run/example-agent",
+      "version": "0.0.0",
+      "dependencies": {
+        "@thaddeus.run/agent": "workspace:*",
+        "@thaddeus.run/fs": "workspace:*",
+        "@thaddeus.run/identity": "workspace:*",
+        "@thaddeus.run/platform": "workspace:*",
+      },
+      "devDependencies": {
+        "@types/bun": "catalog:",
+      },
+    },
     "examples/disclosure": {
       "name": "@thaddeus.run/example-disclosure",
       "version": "0.0.0",
@@ -666,6 +679,8 @@
     "@thaddeus.run/agent": ["@thaddeus.run/agent@workspace:packages/agent"],
 
     "@thaddeus.run/docs": ["@thaddeus.run/docs@workspace:apps/docs"],
+
+    "@thaddeus.run/example-agent": ["@thaddeus.run/example-agent@workspace:examples/agent"],
 
     "@thaddeus.run/example-disclosure": ["@thaddeus.run/example-disclosure@workspace:examples/disclosure"],
 
