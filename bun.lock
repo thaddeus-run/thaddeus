@@ -377,6 +377,7 @@
       "version": "0.0.0",
       "dependencies": {
         "@noble/hashes": "catalog:",
+        "@thaddeus.run/agent": "workspace:*",
         "@thaddeus.run/identity": "workspace:*",
         "@thaddeus.run/log": "workspace:*",
         "@thaddeus.run/platform": "workspace:*",

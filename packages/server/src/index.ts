@@ -6,4 +6,10 @@ export {
   verifyRequest,
   type SignedHeaders,
 } from './sign';
-export { type Bundle, decodeBundle, encodeBundle } from './dto';
+export {
+  type Bundle,
+  decodeBundle,
+  decodeDelegation,
+  encodeBundle,
+  encodeDelegation,
+} from './dto';

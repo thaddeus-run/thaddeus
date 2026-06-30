@@ -1,3 +1,8 @@
+import {
+  AgentRegistry,
+  type Delegation,
+  verifyDelegation,
+} from '@thaddeus.run/agent';
 import { PublicIdentity } from '@thaddeus.run/identity';
 import type { Op } from '@thaddeus.run/log';
 import {
@@ -15,7 +20,12 @@ import {
   verifyCapability,
 } from '@thaddeus.run/store';
 
-import { decodeBundle, encodeBundle } from './dto';
+import {
+  decodeBundle,
+  decodeDelegation,
+  encodeBundle,
+  encodeDelegation,
+} from './dto';
 import { type SignedHeaders, verifyRequest } from './sign';
 
 // Parse a JSON request body, returning undefined on malformed input (so a handler
@@ -93,6 +103,49 @@ export function createServer(config: ServerConfig): Server {
   async function readMeta(name: string): Promise<RepoMeta | undefined> {
     const bytes = await metaBackend(name).get('meta/repo');
     return bytes === undefined ? undefined : (decodeRecord(bytes) as RepoMeta);
+  }
+
+  // Durable per-repo AgentRegistry cache, rebuilt from the scoped backend.
+  const registries = new Map<string, AgentRegistry>();
+
+  // Build (or fetch the cached) durable AgentRegistry for a repo: register every
+  // persisted grant, replay the persisted meters, then apply revocations. Load
+  // order matters — record() throws for an unregistered agent, so grants must be
+  // registered before their meters replay; revocations apply last.
+  async function registryFor(name: string): Promise<AgentRegistry> {
+    const cached = registries.get(name);
+    if (cached !== undefined) {
+      return cached;
+    }
+    const reg = new AgentRegistry();
+    const b = metaBackend(name);
+    for (const key of await b.list('grant/')) {
+      const bytes = await b.get(key);
+      if (bytes !== undefined) {
+        try {
+          reg.register(decodeRecord(bytes) as Delegation);
+        } catch {
+          // skip a corrupt/invalid persisted grant
+        }
+      }
+    }
+    for (const key of await b.list('meter/')) {
+      const bytes = await b.get(key);
+      if (bytes !== undefined) {
+        const agent = key.slice('meter/'.length);
+        const m = decodeRecord(bytes) as { changes: number; spend: number };
+        try {
+          reg.record(agent, m.changes, m.spend);
+        } catch {
+          // a meter for an agent with no grant — skip
+        }
+      }
+    }
+    for (const key of await b.list('revoked/')) {
+      reg.revoke(key.slice('revoked/'.length));
+    }
+    registries.set(name, reg);
+    return reg;
   }
 
   async function getRepo(name: string): Promise<Repo | undefined> {
@@ -387,6 +440,124 @@ export function createServer(config: ServerConfig): Server {
     });
   }
 
+  // Owner-signed grant: register + persist a P09 Delegation for the repo. The
+  // delegation's operator must be the repo owner too, so an owner cannot launder
+  // a third-party-issued grant through their own signed request.
+  async function grant(
+    name: string,
+    req: Request,
+    body: Uint8Array
+  ): Promise<Response> {
+    const signer = verifyRequest(
+      'POST',
+      new URL(req.url).pathname,
+      body,
+      headers(req),
+      Date.parse(now())
+    );
+    if (signer === null) {
+      return json(401, { error: 'unsigned or invalid request' });
+    }
+    const meta = await readMeta(name);
+    if (meta === undefined) {
+      return json(404, { error: `no repo ${name}` });
+    }
+    if (signer !== meta.owner) {
+      return json(403, { error: 'not the repo owner' });
+    }
+    const parsed = safeParseJson(body);
+    if (parsed === undefined || parsed === null || typeof parsed !== 'object') {
+      return json(400, { error: 'invalid JSON body' });
+    }
+    const { delegation } = parsed as { delegation?: string };
+    if (typeof delegation !== 'string') {
+      return json(400, { error: 'missing delegation' });
+    }
+    let d: Delegation;
+    try {
+      d = decodeDelegation(delegation);
+    } catch {
+      return json(400, { error: 'malformed delegation' });
+    }
+    if (d.operator !== meta.owner) {
+      return json(403, { error: 'delegation operator is not the repo owner' });
+    }
+    if (!verifyDelegation(d)) {
+      return json(400, { error: 'invalid delegation signature' });
+    }
+    return withRepoLock(name, async () => {
+      const reg = await registryFor(name);
+      reg.register(d);
+      await metaBackend(name).put(`grant/${d.agent}`, encodeRecord(d));
+      return json(200, {
+        agent: d.agent,
+        paths: [...d.paths],
+        maxChanges: d.maxChanges,
+        maxSpend: d.maxSpend,
+      });
+    });
+  }
+
+  // Owner-signed revoke: quarantine + persist (terminal). A revoked agent stays
+  // blocked across reloads.
+  async function revoke(
+    name: string,
+    req: Request,
+    body: Uint8Array
+  ): Promise<Response> {
+    const signer = verifyRequest(
+      'POST',
+      new URL(req.url).pathname,
+      body,
+      headers(req),
+      Date.parse(now())
+    );
+    if (signer === null) {
+      return json(401, { error: 'unsigned or invalid request' });
+    }
+    const meta = await readMeta(name);
+    if (meta === undefined) {
+      return json(404, { error: `no repo ${name}` });
+    }
+    if (signer !== meta.owner) {
+      return json(403, { error: 'not the repo owner' });
+    }
+    const parsed = safeParseJson(body);
+    if (parsed === undefined || parsed === null || typeof parsed !== 'object') {
+      return json(400, { error: 'invalid JSON body' });
+    }
+    const { agent } = parsed as { agent?: string };
+    if (typeof agent !== 'string') {
+      return json(400, { error: 'missing agent' });
+    }
+    return withRepoLock(name, async () => {
+      const reg = await registryFor(name);
+      reg.revoke(agent);
+      await metaBackend(name).put(`revoked/${agent}`, encodeRecord(true));
+      return json(200, { agent, revoked: true });
+    });
+  }
+
+  // Public: the active (non-revoked) grants for a repo, each as a wire delegation.
+  async function listGrants(name: string): Promise<Response> {
+    if ((await readMeta(name)) === undefined) {
+      return json(404, { error: `no repo ${name}` });
+    }
+    const reg = await registryFor(name);
+    const b = metaBackend(name);
+    const grants: string[] = [];
+    for (const key of await b.list('grant/')) {
+      const bytes = await b.get(key);
+      if (bytes !== undefined) {
+        const d = decodeRecord(bytes) as Delegation;
+        if (!reg.isRevoked(d.agent)) {
+          grants.push(encodeDelegation(d));
+        }
+      }
+    }
+    return json(200, { grants });
+  }
+
   return {
     async fetch(req: Request): Promise<Response> {
       const url = new URL(req.url);
@@ -438,6 +609,30 @@ export function createServer(config: ServerConfig): Server {
           return json(400, { error: 'malformed path' });
         }
         return land(repoName, req, body);
+      }
+      // grants / revoke: GET+POST /repos/:name/grants and POST /repos/:name/revoke
+      const grantsMatch = path.match(/^\/repos\/(.+)\/grants$/);
+      if (grantsMatch !== null && req.method === 'POST') {
+        const repoName = safeDecode(grantsMatch[1]);
+        if (repoName === undefined) {
+          return json(400, { error: 'malformed path' });
+        }
+        return grant(repoName, req, body);
+      }
+      if (grantsMatch !== null && req.method === 'GET') {
+        const repoName = safeDecode(grantsMatch[1]);
+        if (repoName === undefined) {
+          return json(400, { error: 'malformed path' });
+        }
+        return listGrants(repoName);
+      }
+      const revokeMatch = path.match(/^\/repos\/(.+)\/revoke$/);
+      if (revokeMatch !== null && req.method === 'POST') {
+        const repoName = safeDecode(revokeMatch[1]);
+        if (repoName === undefined) {
+          return json(400, { error: 'malformed path' });
+        }
+        return revoke(repoName, req, body);
       }
       return json(404, { error: 'not found' });
     },
