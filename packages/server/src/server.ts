@@ -1,6 +1,7 @@
 import {
   AgentRegistry,
   type Delegation,
+  delegationPolicy,
   verifyDelegation,
 } from '@thaddeus.run/agent';
 import { PublicIdentity } from '@thaddeus.run/identity';
@@ -84,6 +85,20 @@ function reachableOps(all: readonly Op[], heads: readonly string[]): Op[] {
     .sort((x, y) =>
       x.lamport !== y.lamport ? x.lamport - y.lamport : x.id < y.id ? -1 : 1
     );
+}
+
+// Compose LandPolicies: allow only if every policy allows; the first rejection
+// (with its reason) wins. Each policy is awaited since policies may be async.
+function all(...policies: LandPolicy[]): LandPolicy {
+  return async (p) => {
+    for (const policy of policies) {
+      const decision = await policy(p);
+      if (!decision.allow) {
+        return decision;
+      }
+    }
+    return { allow: true };
+  };
 }
 
 // A Bun.serve-compatible handler over a durable Platform. No keys; verifies and
@@ -300,8 +315,14 @@ export function createServer(config: ServerConfig): Server {
     if (meta === undefined) {
       return json(404, { error: `no repo ${name}` });
     }
-    if (signer !== meta.owner) {
-      return json(403, { error: 'not the repo owner' });
+    // Owner-or-delegate gate: the owner is always authorized; a non-owner must
+    // hold a non-revoked delegation for this repo.
+    const reg = await registryFor(name);
+    if (
+      signer !== meta.owner &&
+      !(reg.delegationFor(signer) !== undefined && !reg.isRevoked(signer))
+    ) {
+      return json(403, { error: 'not authorized to write this repo' });
     }
     const parsed = safeParseJson(body);
     if (parsed === undefined || parsed === null || typeof parsed !== 'object') {
@@ -398,8 +419,14 @@ export function createServer(config: ServerConfig): Server {
     if (meta === undefined) {
       return json(404, { error: `no repo ${name}` });
     }
-    if (signer !== meta.owner) {
-      return json(403, { error: 'not the repo owner' });
+    // Owner-or-delegate gate: the owner is always authorized; a non-owner must
+    // hold a non-revoked delegation for this repo.
+    const reg = await registryFor(name);
+    if (
+      signer !== meta.owner &&
+      !(reg.delegationFor(signer) !== undefined && !reg.isRevoked(signer))
+    ) {
+      return json(403, { error: 'not authorized to write this repo' });
     }
     const parsed = safeParseJson(body);
     if (parsed === undefined || parsed === null || typeof parsed !== 'object') {
@@ -425,17 +452,55 @@ export function createServer(config: ServerConfig): Server {
           error: 'fromHeads references an op the server has not ingested',
         });
       }
+      // Capture the target frontier BEFORE land re-points the view; the
+      // incoming closure is the ops reachable from fromHeads but not from here.
+      const target = into ?? 'main';
+      const priorInto = [...repo.log.heads(target)];
       // Ephemeral in-memory source view: reuse a constant name so the view
       // count stays bounded. Safe because withRepoLock serializes land calls
       // per repo — each land overwrites the view before reading it.
       const src = 'incoming';
       repo.log.view(src, fromHeads);
+      // Compose the base policy with delegation enforcement: every non-owner op
+      // is path+budget gated (the owner is exempt — never scope/budget checked).
       const result = await repo.land({
         from: src,
-        into: into ?? 'main',
+        into: target,
         author: PublicIdentity.fromDid(signer),
-        policy,
+        policy: all(
+          policy,
+          delegationPolicy(reg, (a) => a === meta.owner)
+        ),
       });
+      if (result.landed) {
+        // Record each delegate's landed-op count (owner exempt). incoming =
+        // ops reachable from fromHeads but not from the prior `into` frontier.
+        const priorSet = new Set(
+          reachableOps(repo.log.ops(), priorInto).map((o) => o.id)
+        );
+        const incoming = reachableOps(repo.log.ops(), fromHeads).filter(
+          (o) => !priorSet.has(o.id)
+        );
+        const countByAuthor = new Map<string, number>();
+        for (const op of incoming) {
+          if (op.author !== meta.owner) {
+            countByAuthor.set(
+              op.author,
+              (countByAuthor.get(op.author) ?? 0) + 1
+            );
+          }
+        }
+        for (const [agent, count] of countByAuthor) {
+          if (reg.delegationFor(agent) !== undefined) {
+            reg.record(agent, count, 0);
+            const u = reg.usage(agent);
+            await metaBackend(name).put(
+              `meter/${agent}`,
+              encodeRecord({ changes: u.changes, spend: u.spend })
+            );
+          }
+        }
+      }
       return json(200, result);
     });
   }
