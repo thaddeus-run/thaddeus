@@ -454,6 +454,8 @@ export function createServer(config: ServerConfig): Server {
       }
       // Capture the target frontier BEFORE land re-points the view; the
       // incoming closure is the ops reachable from fromHeads but not from here.
+      // NOTE: this `?? 'main'` default MUST match Repo.land's own `into` default
+      // — they share the same frontier, and a drift would mis-meter delegates.
       const target = into ?? 'main';
       const priorInto = [...repo.log.heads(target)];
       // Ephemeral in-memory source view: reuse a constant name so the view
