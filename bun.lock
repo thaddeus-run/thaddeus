@@ -260,6 +260,7 @@
         "@thaddeus.run/store": "workspace:*",
       },
       "devDependencies": {
+        "@thaddeus.run/agent": "workspace:*",
         "@thaddeus.run/fs": "workspace:*",
         "@thaddeus.run/persist": "workspace:*",
         "@types/bun": "catalog:",
