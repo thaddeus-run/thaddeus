@@ -217,7 +217,11 @@ export function createServer(config: ServerConfig): Server {
         caps.push(...repo.store.caps(pid));
       }
     }
-    return json(200, encodeBundle(ops, objects, caps));
+    return json(200, {
+      view,
+      heads: [...repo.log.heads(view)],
+      ...encodeBundle(ops, objects, caps),
+    });
   }
 
   // Verify signature + owner, then ingest each object (with its caps) and each
