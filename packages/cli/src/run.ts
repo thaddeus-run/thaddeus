@@ -287,10 +287,17 @@ export async function run(
         });
         const dataDir = values.data ?? join(env.cwd, 'thaddeus-data');
         const port = values.port !== undefined ? Number(values.port) : 4000;
+        if (!Number.isInteger(port) || port < 0 || port > 65535) {
+          out(`invalid --port: ${values.port}`);
+          return 2;
+        }
         const server = startServer({ dataDir, port });
         out(`thaddeus serving on ${server.url} (data: ${dataDir})`);
         process.on('SIGINT', () => {
-          void server.stop().then(() => process.exit(0));
+          server
+            .stop()
+            .then(() => process.exit(0))
+            .catch(() => process.exit(1));
         });
         await new Promise<never>(() => {}); // block until interrupted
         return 0; // unreachable

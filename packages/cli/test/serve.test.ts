@@ -20,11 +20,14 @@ describe('startServer', () => {
       dataDir: mkdtempSync(join(tmp, 'data-')),
       port: 0,
     });
-    expect(s.url).toContain('http://localhost:');
-    const res = await fetch(`${s.url}/repos`);
-    expect(res.status).toBe(200);
-    expect(await res.json()).toEqual({ repos: [] });
-    await s.stop();
+    try {
+      expect(s.url).toContain('http://localhost:');
+      const res = await fetch(`${s.url}/repos`);
+      expect(res.status).toBe(200);
+      expect(await res.json()).toEqual({ repos: [] });
+    } finally {
+      await s.stop();
+    }
   });
 
   test('a full CLI flow works against a live served port', async () => {
