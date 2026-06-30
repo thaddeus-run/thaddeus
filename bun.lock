@@ -235,6 +235,7 @@
         "thaddeus": "./dist/bin.js",
       },
       "dependencies": {
+        "@thaddeus.run/agent": "workspace:*",
         "@thaddeus.run/client": "workspace:*",
         "@thaddeus.run/fs": "workspace:*",
         "@thaddeus.run/identity": "workspace:*",

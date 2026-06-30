@@ -1,3 +1,4 @@
+import { signDelegation } from '@thaddeus.run/agent';
 import { Client } from '@thaddeus.run/client';
 import { Workspace } from '@thaddeus.run/fs';
 import type { Identity } from '@thaddeus.run/identity';
@@ -39,6 +40,9 @@ const USAGE = `thaddeus — the Thaddeus CLI
   status                           show working-tree changes
   push   [--no-land]               commit + upload + land into main
   land                             land uploaded-but-unmerged commits
+  grant  <did> [--paths a,b] [--max-changes N]    grant push to a DID/agent
+  revoke <did>                                     revoke a grant
+  grants                                           list active grants
   serve  [--port 4000] [--data ./thaddeus-data]   run a server`;
 
 // Re-open the local durable repo for a working copy at `root`.
@@ -275,6 +279,87 @@ export async function run(
         } else {
           out(
             'published, but the remote has changes not in your clone — re-clone to sync'
+          );
+        }
+        return 0;
+      }
+      case 'grant': {
+        const { values, positionals } = parseArgs({
+          args: [...rest],
+          options: {
+            paths: { type: 'string' },
+            'max-changes': { type: 'string' },
+          },
+          allowPositionals: true,
+        });
+        const did = positionals[0];
+        if (did === undefined) {
+          out('usage: thaddeus grant <did> [--paths a,b] [--max-changes N]');
+          return 2;
+        }
+        const root = findRoot(env.cwd);
+        if (root === undefined) {
+          out("not a thaddeus working copy — run 'thaddeus clone' first");
+          return 2;
+        }
+        const cfg = loadConfig(root);
+        const identity = loadIdentity(env.home);
+        const paths =
+          values.paths !== undefined ? values.paths.split(',') : ['**'];
+        const maxChanges =
+          values['max-changes'] !== undefined
+            ? Number(values['max-changes'])
+            : 1_000_000;
+        if (!Number.isInteger(maxChanges) || maxChanges < 0) {
+          out(`invalid --max-changes: ${values['max-changes']}`);
+          return 2;
+        }
+        const delegation = signDelegation(
+          { agent: did, paths, maxChanges, maxSpend: 1_000_000 },
+          identity
+        );
+        const client = new Client(cfg.server, identity, env.fetchImpl);
+        const g = await client.grant(cfg.repo, delegation);
+        out(
+          `granted ${g.agent} → ${g.paths.join(', ')} (max ${g.maxChanges} changes)`
+        );
+        return 0;
+      }
+      case 'revoke': {
+        const did = rest[0];
+        if (did === undefined) {
+          out('usage: thaddeus revoke <did>');
+          return 2;
+        }
+        const root = findRoot(env.cwd);
+        if (root === undefined) {
+          out("not a thaddeus working copy — run 'thaddeus clone' first");
+          return 2;
+        }
+        const cfg = loadConfig(root);
+        const identity = loadIdentity(env.home);
+        const client = new Client(cfg.server, identity, env.fetchImpl);
+        await client.revoke(cfg.repo, did);
+        out(`revoked ${did}`);
+        return 0;
+      }
+      case 'grants': {
+        const root = findRoot(env.cwd);
+        if (root === undefined) {
+          out("not a thaddeus working copy — run 'thaddeus clone' first");
+          return 2;
+        }
+        const cfg = loadConfig(root);
+        const identity = loadIdentity(env.home);
+        const client = new Client(cfg.server, identity, env.fetchImpl);
+        const grants = await client.listGrants(cfg.repo);
+        if (grants.length === 0) {
+          out('no grants');
+          return 0;
+        }
+        for (const g of grants) {
+          out(
+            `${g.agent} → ${g.paths.join(', ')} (max ${g.maxChanges} changes)`
           );
         }
         return 0;
