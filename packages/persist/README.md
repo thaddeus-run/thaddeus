@@ -1,7 +1,7 @@
 # @thaddeus.run/persist
 
-Durable backends for **Strata** (working name) — the cold tier behind the
-in-memory hot cache.
+Durable backends for **Thaddeus** — the cold tier behind the in-memory hot
+cache.
 
 A `Backend` is a tiny async key→bytes store (`@thaddeus.run/store`).
 `FileBackend` writes each key to a percent-encoded file (atomic temp+rename);

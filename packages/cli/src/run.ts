@@ -8,6 +8,7 @@ import { isAbsolute, join } from 'node:path';
 import { parseArgs } from 'node:util';
 
 import { initIdentity, loadIdentity } from './identity';
+import { startServer } from './serve';
 import {
   baseSnapshot,
   type Config,
@@ -37,7 +38,8 @@ const USAGE = `thaddeus — the Thaddeus CLI
   clone  <server> <repo> [dir]     clone a repo to a working tree
   status                           show working-tree changes
   push   [--no-land]               commit + upload + land into main
-  land                             land uploaded-but-unmerged commits`;
+  land                             land uploaded-but-unmerged commits
+  serve  [--port 4000] [--data ./thaddeus-data]   run a server`;
 
 // Re-open the local durable repo for a working copy at `root`.
 async function openLocal(root: string, repoName: string): Promise<Repo> {
@@ -276,6 +278,29 @@ export async function run(
           );
         }
         return 0;
+      }
+      case 'serve': {
+        const { values } = parseArgs({
+          args: [...rest],
+          options: { port: { type: 'string' }, data: { type: 'string' } },
+          allowPositionals: true,
+        });
+        const dataDir = values.data ?? join(env.cwd, 'thaddeus-data');
+        const port = values.port !== undefined ? Number(values.port) : 4000;
+        if (!Number.isInteger(port) || port < 0 || port > 65535) {
+          out(`invalid --port: ${values.port}`);
+          return 2;
+        }
+        const server = startServer({ dataDir, port });
+        out(`thaddeus serving on ${server.url} (data: ${dataDir})`);
+        process.on('SIGINT', () => {
+          server
+            .stop()
+            .then(() => process.exit(0))
+            .catch(() => process.exit(1));
+        });
+        await new Promise<never>(() => {}); // block until interrupted
+        return 0; // unreachable
       }
       case undefined:
       case 'help':

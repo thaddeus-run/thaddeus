@@ -1,6 +1,6 @@
 # @thaddeus.run/provenance
 
-The signed "why" layer for **Strata** (working name) — Pillar 04.
+The signed "why" layer for **Thaddeus** — Pillar 04.
 
 A `Provenance` record attaches the _why_ — actor, actor kind, intent, reasoning,
 task, and an optional capability-gated prompt — to an `Op.id` from

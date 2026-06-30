@@ -1,6 +1,6 @@
 # @thaddeus.run/fs
 
-The virtual filesystem for **Strata** (working name) — Pillar 05.
+The virtual filesystem for **Thaddeus** — Pillar 05.
 
 A `Workspace` is a copy-on-write working copy over a `@thaddeus.run/log`
 operation log — the worktree-killer. It opens a private, zero-copy forked view

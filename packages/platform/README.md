@@ -1,6 +1,6 @@
 # @thaddeus.run/platform
 
-The platform for **Strata** (working name) — Pillar 06.
+The platform for **Thaddeus** — Pillar 06.
 
 A `Platform` allocates named repos (scopes) in one call (`createRepo`) or by
 bare reference (`open` auto-vivifies). A `Repo` owns its own operation log +

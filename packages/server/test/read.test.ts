@@ -34,6 +34,24 @@ describe('reads', () => {
     const pull = await srv.fetch(
       new Request('http://t/repos/acme/web/pull?view=main')
     );
-    expect(await pull.json()).toEqual({ ops: [], objects: [], caps: [] });
+    const body = await pull.json();
+    expect(body).toMatchObject({ ops: [], objects: [], caps: [] });
+  });
+
+  test('pull returns view + heads alongside the bundle', async () => {
+    const a = Identity.create();
+    const srv = createServer({ backend: new MemoryBackend() });
+    await srv.fetch(signedPost('/repos', { name: 'acme/web' }, a));
+    const pull = await srv.fetch(
+      new Request('http://t/repos/acme%2Fweb/pull?view=main')
+    );
+    const body = (await pull.json()) as {
+      view: string;
+      heads: string[];
+      ops: string[];
+    };
+    expect(body.view).toBe('main');
+    expect(body.heads).toEqual([]);
+    expect(body.ops).toEqual([]);
   });
 });

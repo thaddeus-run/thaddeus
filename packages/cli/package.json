@@ -48,10 +48,10 @@
     "@thaddeus.run/fs": "workspace:*",
     "@thaddeus.run/identity": "workspace:*",
     "@thaddeus.run/persist": "workspace:*",
-    "@thaddeus.run/platform": "workspace:*"
+    "@thaddeus.run/platform": "workspace:*",
+    "@thaddeus.run/server": "workspace:*"
   },
   "devDependencies": {
-    "@thaddeus.run/server": "workspace:*",
     "@types/bun": "catalog:",
     "@typescript/native-preview": "catalog:",
     "tsdown": "catalog:",

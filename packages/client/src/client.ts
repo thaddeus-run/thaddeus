@@ -46,29 +46,22 @@ export class Client {
     return (await this.#ok(res)) as { name: string; owner: string };
   }
 
-  // Pull a view's reachable bundle, ingest it into `backend` as a local durable
-  // repo, and set the local view to the server's reported heads (read from
-  // /views/<view> — not inferred from the bundle frontier). Returns the opened
-  // local Repo and those heads.
+  // Pull a view's reachable bundle in a single atomic request. The /pull
+  // response now includes view+heads alongside ops/objects/caps, so we no
+  // longer need a separate /views call (closes the PR #12 clone TOCTOU).
   async clone(
     name: string,
     backend: Backend,
     view = 'main'
   ): Promise<{ repo: Repo; heads: readonly string[] }> {
     const enc = encodeURIComponent;
-    const viewRes = await this.#fetch(
-      new Request(`${this.#server}/repos/${enc(name)}/views/${enc(view)}`)
-    );
-    const viewBody = (await this.#ok(viewRes)) as {
-      view: string;
-      heads: string[];
-    };
-    const pullRes = await this.#fetch(
+    const res = await this.#fetch(
       new Request(`${this.#server}/repos/${enc(name)}/pull?view=${enc(view)}`)
     );
-    const bundle = decodeBundle(
-      (await this.#ok(pullRes)) as Parameters<typeof decodeBundle>[0]
-    );
+    const body = (await this.#ok(res)) as { heads: string[] } & Parameters<
+      typeof decodeBundle
+    >[0];
+    const bundle = decodeBundle(body);
 
     const repo = await new Platform().openDurable(name, backend);
     for (const object of bundle.objects) {
@@ -80,8 +73,8 @@ export class Client {
     for (const op of bundle.ops) {
       await repo.log.ingest(op);
     }
-    await repo.log.repoint(view, viewBody.heads);
-    return { repo, heads: viewBody.heads };
+    await repo.log.repoint(view, body.heads);
+    return { repo, heads: body.heads };
   }
 
   async listRepos(): Promise<readonly string[]> {
