@@ -1,6 +1,6 @@
 # @thaddeus.run/reputation
 
-Portable, federated reputation for **Strata** (working name) — Pillar 07.
+Portable, federated reputation for **Thaddeus** — Pillar 07.
 
 A `Contribution` is a dual-signed record of a merge/review/release: `subj_sig`
 (the subject's five-field self-claim: subject, repo, ref, kind, at) and

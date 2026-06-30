@@ -1,6 +1,6 @@
 # @thaddeus.run/log
 
-The operation log for **Strata** (working name) — Pillar 03.
+The operation log for **Thaddeus** — Pillar 03.
 
 Signed, CRDT-ordered `Op` records on a DAG. The log is the source of truth; file
 snapshots are a derived projection (`materialize()`). Branches dissolve into

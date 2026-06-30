@@ -1,9 +1,9 @@
 # Thaddeus — Architecture & convergence spine
 
-Thaddeus builds the Strata substrate **one primitive at a time**, releasing each
-as a standalone npm package, while this document keeps the separately-built
+Thaddeus builds the Thaddeus substrate **one primitive at a time**, releasing
+each as a standalone npm package, while this document keeps the separately-built
 pieces converging into one system. There is no "dumb primitive + smart platform"
-seam: the packages compose; Strata is their composition.
+seam: the packages compose; Thaddeus is their composition.
 
 ## Shared primitives (reused, not duplicated)
 
@@ -73,8 +73,9 @@ The remote is driven by a reusable `@thaddeus.run/client` SDK (a `Client`
 holding a self-owned identity: `createRepo`/`clone`/`push`/`land`, all crypto
 client-side) and the **`thaddeus`** CLI (`@thaddeus.run/cli`, alias `thad`) — a
 git-like client with a `.thaddeus/` durable working tree: `init` → `create` →
-`clone` → edit files → `push` (publish to `main`). Multi-writer/agent CLI,
-offline sync, and conflict UX are next.
+`clone` → edit files → `push` (publish to `main`). The server is runnable in one
+command via **`thaddeus serve`**. Multi-writer/agent CLI, offline sync, and
+conflict UX are next.
 
 ## Per-primitive loop
 

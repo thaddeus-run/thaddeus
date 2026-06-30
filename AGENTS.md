@@ -40,12 +40,11 @@ CI-skipped — run those with a `CI=` prefix, e.g. `CI= moonx docs:dev`.
 
 ## Naming
 
-- **Thaddeus** is the company (the umbrella for these projects).
-- **Strata** is the current working name for the substrate product described in
-  the architecture brief. It may be renamed.
+- **Thaddeus** is the product (and the company). The working name "Strata" is
+  retired.
 - Packages live under the `@thaddeus.run/*` npm scope with neutral,
-  product-agnostic names (e.g. `store`, `identity`, `theme`) — not `strata-*` —
-  so a product rename never forces a package rename.
+  product-agnostic names (e.g. `store`, `identity`, `theme`) — so a future
+  product rename never forces a package rename.
 
 ## Skills
 

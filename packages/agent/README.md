@@ -1,6 +1,6 @@
 # @thaddeus.run/agent
 
-Agents as first-class principals for **Strata** (working name) — Pillar 09.
+Agents as first-class principals for **Thaddeus** — Pillar 09.
 
 An agent is a `did:key`, distinct from the human who operates it. An operator
 signs a `Delegation` — a scoped, budgeted grant of authority (`paths`,

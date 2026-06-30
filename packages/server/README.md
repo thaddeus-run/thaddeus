@@ -1,6 +1,6 @@
 # @thaddeus.run/server
 
-The **untrusted API-first remote** for Strata (working name).
+The **untrusted API-first remote** for Thaddeus.
 
 A `Bun.serve` HTTP server over the durable `Platform`. It holds no keys, never
 decrypts, and serves ciphertext: it **verifies** pushed ops/objects/caps
