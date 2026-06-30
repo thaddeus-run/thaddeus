@@ -67,11 +67,13 @@ describe('thaddeus grant/revoke/grants', () => {
       expect(await run(['push'], e(mateWc, teammateHome))).toBe(0);
       expect(out.join('\n').toLowerCase()).toContain('published');
 
-      // Out of scope → push reports the blocked land (non-zero exit).
+      // Out of scope → push reports the blocked land, and the reason names the
+      // delegated-scope violation (not just "didn't land for some reason").
       writeFileSync(join(mateWc, 'readme.md'), 'hi');
       out.length = 0;
       expect(await run(['push'], e(mateWc, teammateHome))).toBe(1);
       expect(out.join('\n').toLowerCase()).toContain('not landed');
+      expect(out.join('\n').toLowerCase()).toContain('scope');
 
       // grants lists the active grant; revoke then blocks the teammate.
       out.length = 0;
