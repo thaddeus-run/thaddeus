@@ -148,6 +148,29 @@ describe('delegationPolicy', () => {
     expect(decision.reason).toContain('outside');
   });
 
+  test('an exempt author bypasses delegation and budget', async () => {
+    const owner = Identity.create();
+    const agent = Identity.create();
+    const registry = new AgentRegistry();
+    // agent is delegated only to src/**, maxChanges 1; owner has NO delegation.
+    registry.register(
+      signDelegation(
+        { agent: agent.did, paths: ['src/**'], maxChanges: 1, maxSpend: 100 },
+        owner
+      )
+    );
+    const policy = delegationPolicy(registry, (a) => a === owner.did);
+
+    // Owner op on any path, no delegation, no budget → allowed.
+    const ownerOp = await op(owner, 'anywhere/x');
+    expect((await policy(proposal([ownerOp]))).allow).toBe(true);
+
+    // Non-owner op still requires an in-scope delegation.
+    const stranger = Identity.create();
+    const strangerOp = await op(stranger, 'anywhere/x');
+    expect((await policy(proposal([strangerOp]))).allow).toBe(false);
+  });
+
   test('is read-only on the meter (dry-run safe)', async () => {
     const operator = Identity.create();
     const agent = Identity.create();
