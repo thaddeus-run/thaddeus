@@ -106,7 +106,7 @@ All notable changes to Thaddeus. Format follows
   durable working copy: `init` (identity seed in `~/.config/thaddeus/`),
   `create`, `clone` (materializes files), `status`, `push` (commit → upload →
   land into `main`), `land`. The product is now **Thaddeus** (the working name
-  "Thaddeus" is retired; a repo-wide doc rename follows).
+  "Strata" is retired; a repo-wide doc rename follows).
 - `thaddeus serve` + atomic pull — run a durable server in one command
   (`thaddeus serve [--port] [--data]`, over a `FileBackend`), and `GET /pull`
   now returns `{ view, heads, …bundle }` so `Client.clone` is a single race-free
