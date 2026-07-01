@@ -91,3 +91,37 @@ export function requireReputationTier(
         };
   };
 }
+
+// A test/proof gate (Pillar 10): merge gated on automated verification, not a
+// human reading a diff. A checker — CI, a property-check harness, a proof
+// engine — signs a provenance record on an op only when its checks pass, so a
+// VERIFIED record from a checker IS the proof. This narrows
+// requireVerifiedProvenance from "any verified why" to "a verified why from a
+// checker": allow iff EVERY incoming op carries at least one verified provenance
+// record whose actor_kind names a checker. `checkerKinds` defaults to ['ci'];
+// an unverified record, or a verified record from a non-checker, never counts.
+export function requirePassingChecks(
+  prov: ProvenanceLog,
+  checkerKinds: readonly string[] = ['ci']
+): LandPolicy {
+  const kinds = new Set(checkerKinds);
+  return (p) => {
+    const missing = p.incomingOps.filter(
+      (op) =>
+        !prov
+          .forOp(op.id)
+          .some(
+            (rec) =>
+              kinds.has(rec.actor_kind) && prov.status(rec) === 'verified'
+          )
+    );
+    return missing.length === 0
+      ? { allow: true }
+      : {
+          allow: false,
+          reason: `${missing.length} op(s) lack a verified check from ${[
+            ...kinds,
+          ].join('/')}`,
+        };
+  };
+}
