@@ -50,6 +50,7 @@
     "@thaddeus.run/fs": "workspace:*",
     "@thaddeus.run/identity": "workspace:*",
     "@thaddeus.run/provenance": "workspace:*",
+    "@thaddeus.run/reputation": "workspace:*",
     "@types/bun": "catalog:",
     "@typescript/native-preview": "catalog:",
     "tsdown": "catalog:",
