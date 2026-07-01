@@ -1,9 +1,10 @@
 import { Workspace } from '@thaddeus.run/fs';
 import { Identity, ready } from '@thaddeus.run/identity';
+import { ReputationLog, signContribution } from '@thaddeus.run/reputation';
 import { beforeAll, describe, expect, test } from 'bun:test';
 
 import { Platform, type Repo } from '../src/platform';
-import { allowAll } from '../src/policy';
+import { allowAll, requireReputationTier } from '../src/policy';
 
 beforeAll(async () => {
   await ready();
@@ -131,6 +132,51 @@ describe('Repo.land — landing as policy', () => {
     expect(result.landed).toBe(false);
     expect(result.reason).toContain('feat/does-not-exist');
     expect(repo.heads('main')).toEqual(before); // main untouched
+  });
+});
+
+describe('Repo.land — reputation-tier gate (Pillar 10)', () => {
+  test('a high-reputation author lands; a low-reputation author is gated, main untouched', async () => {
+    const repo = new Platform().createRepo('acme/svc');
+    const reps = new ReputationLog();
+    const host = Identity.create();
+    const senior = Identity.create();
+    const junior = Identity.create();
+    for (let i = 0; i < 3; i++) {
+      reps.append(
+        signContribution(
+          {
+            repo: 'acme/svc',
+            ref: `m-${i}`,
+            kind: 'merge',
+            at: '2026-07-01T00:00:00Z',
+          },
+          senior,
+          host
+        )
+      );
+    }
+    const gate = requireReputationTier(reps, 3);
+
+    await branch(repo, 'senior/feat', 'src/a.rs', 'fn a() {}', senior);
+    const ok = await repo.land({
+      from: 'senior/feat',
+      author: senior,
+      policy: gate,
+    });
+    expect(ok.landed).toBe(true);
+    expect(repo.heads('main')).toEqual(ok.heads);
+
+    const mainBefore = repo.heads('main');
+    await branch(repo, 'junior/feat', 'src/b.rs', 'fn b() {}', junior);
+    const blocked = await repo.land({
+      from: 'junior/feat',
+      author: junior,
+      policy: gate,
+    });
+    expect(blocked.landed).toBe(false);
+    expect(blocked.reason).toContain('tier');
+    expect(repo.heads('main')).toEqual(mainBefore);
   });
 });
 
