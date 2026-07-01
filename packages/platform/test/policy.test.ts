@@ -220,4 +220,10 @@ describe('policy — requireReputationTier', () => {
     expect(d.allow).toBe(false);
     expect(d.reason).toContain('1 op(s)');
   });
+
+  test('a negative or non-integer tier is rejected at construction', () => {
+    const reps = new ReputationLog();
+    expect(() => requireReputationTier(reps, -1)).toThrow(RangeError);
+    expect(() => requireReputationTier(reps, 1.5)).toThrow(RangeError);
+  });
 });

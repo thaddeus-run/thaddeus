@@ -71,6 +71,14 @@ export function requireReputationTier(
   reps: ReputationLog,
   minMerges: number
 ): LandPolicy {
+  // Fail fast on a misconfigured tier: since `byKind.merge` is always >= 0, a
+  // negative threshold would silently pass every author (a no-op gate). Reject
+  // it at construction so a mistyped tier surfaces immediately, not in prod.
+  if (!Number.isInteger(minMerges) || minMerges < 0) {
+    throw new RangeError(
+      `requireReputationTier: minMerges must be a non-negative integer, got ${minMerges}`
+    );
+  }
   return (p) => {
     const below = p.incomingOps.filter(
       (op) => reps.profile(op.author).byKind.merge < minMerges

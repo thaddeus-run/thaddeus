@@ -3,13 +3,14 @@
 **Date:** 2026-07-01 **Status:** Design — pending user review, then
 implementation plan **Product:** Thaddeus **Company/monorepo:** Thaddeus
 (`@thaddeus.run/*`) **Source of truth (vision):**
-`the-new-age-of-source-control.html`, Pillar 10 (review as policy) **Builds on:**
-`docs/specs/2026-06-24-thaddeus-pillar-06-platform-design.md` (the `LandPolicy`
-seam), `docs/specs/2026-06-24-thaddeus-pillar-07-reputation-design.md` (the
-`ReputationLog`/`Profile`), `docs/specs/2026-06-25-thaddeus-pillar-09-agents-design.md`
-(`Op.author` as a `did:key` principal),
-`docs/specs/2026-06-30-thaddeus-multi-writer-design.md` (the `all(...)`
-composition + delegated land)
+`the-new-age-of-source-control.html`, Pillar 10 (review as policy) **Builds
+on:** `docs/specs/2026-06-24-thaddeus-pillar-06-platform-design.md` (the
+`LandPolicy` seam),
+`docs/specs/2026-06-24-thaddeus-pillar-07-reputation-design.md` (the
+`ReputationLog`/`Profile`),
+`docs/specs/2026-06-25-thaddeus-pillar-09-agents-design.md` (`Op.author` as a
+`did:key` principal), `docs/specs/2026-06-30-thaddeus-multi-writer-design.md`
+(the `all(...)` composition + delegated land)
 
 ---
 
@@ -38,9 +39,9 @@ delegation gates unchanged.
 
 No new substrate primitive. The seam (`LandPolicy`), the reputation aggregator
 (`ReputationLog`/`Profile`), and per-op attribution (`Op.author`) are all P06/
-P07/P09's. This release adds **one pure policy factory** and its wiring
-(export, tests, demo, docs) — mirroring exactly how `requireVerifiedProvenance`
-shipped as a platform built-in.
+P07/P09's. This release adds **one pure policy factory** and its wiring (export,
+tests, demo, docs) — mirroring exactly how `requireVerifiedProvenance` shipped
+as a platform built-in.
 
 The rigid calls:
 
@@ -51,20 +52,21 @@ The rigid calls:
   P07 defines over the host-vouched `attested` set. Self-asserted (`claimed`)
   reputation cannot unlock the gate — the gate inherits P07's trust boundary for
   free.
-- **Pure and ownership-agnostic.** The policy takes no notion of "owner"; it is a
-  total function of `(ReputationLog, minMerges)` over the proposal. Composition
-  (owner-exempt, conflict, delegation) stays the caller's job via `all(...)`.
+- **Pure and ownership-agnostic.** The policy takes no notion of "owner"; it is
+  a total function of `(ReputationLog, minMerges)` over the proposal.
+  Composition (owner-exempt, conflict, delegation) stays the caller's job via
+  `all(...)`.
 - **Fail-closed.** Inherited from `Repo.land()`: on reject, `into` is untouched.
 
 ### 2.1 No new substrate primitive
 
-| Need                          | Reuses                                                       |
-| ----------------------------- | ----------------------------------------------------------- |
-| the seam                      | `@thaddeus.run/platform` `LandPolicy` / `LandProposal`       |
-| the reputation read           | `@thaddeus.run/reputation` `ReputationLog.profile(subject)`  |
-| the tier signal               | `Profile.byKind.merge` (attested merge count)               |
-| per-op attribution            | `Op.author` (`did:key`, signed, P09)                         |
-| composition with other gates  | the server's existing `all(...policies)` combinator          |
+| Need                         | Reuses                                                      |
+| ---------------------------- | ----------------------------------------------------------- |
+| the seam                     | `@thaddeus.run/platform` `LandPolicy` / `LandProposal`      |
+| the reputation read          | `@thaddeus.run/reputation` `ReputationLog.profile(subject)` |
+| the tier signal              | `Profile.byKind.merge` (attested merge count)               |
+| per-op attribution           | `Op.author` (`did:key`, signed, P09)                        |
+| composition with other gates | the server's existing `all(...policies)` combinator         |
 
 ## 3. The release's job
 
@@ -72,8 +74,10 @@ One package, additive:
 
 - **`@thaddeus.run/platform`** — a new pure `LandPolicy` factory
   `requireReputationTier(reps, minMerges)` in `src/policy.ts`, exported from
-  `src/index.ts`; `@thaddeus.run/reputation` added as a dependency (mirroring the
-  existing `@thaddeus.run/provenance` dependency of `requireVerifiedProvenance`).
+  `src/index.ts`; `@thaddeus.run/reputation` added as a **type-only
+  devDependency** (`src/policy.ts` imports `ReputationLog` via `import type`, so
+  no runtime code is pulled in — mirroring the existing type-only
+  `@thaddeus.run/provenance` devDependency of `requireVerifiedProvenance`).
 - **Tests** — unit tests in `packages/platform/test/policy.test.ts` and an
   end-to-end land case in `packages/platform/test/land.test.ts`.
 - **Demo** — a Pillar 10 step in `examples/platform` (the north-star): two
@@ -82,8 +86,8 @@ One package, additive:
   `docs/plans/2026-06-22-pillar-01-encrypted-capability-store.md` row 10 marked
   in-progress.
 
-Not the job (deferred, §8): server-default wiring / a `--policy` reputation flag;
-a named tier ladder; operator-DID resolution (`registry.operatorOf`) for
+Not the job (deferred, §8): server-default wiring / a `--policy` reputation
+flag; a named tier ladder; operator-DID resolution (`registry.operatorOf`) for
 agent-authored ops; owner-exemption inside the policy; the human-veto and
 test/proof gates — each a later Pillar 10 slice.
 
@@ -98,17 +102,17 @@ test/proof gates — each a later Pillar 10 slice.
    proven landings, trivially explainable in the reason string. A distinct
    `review` threshold can be added later without breaking the signature.
 3. **Attribution = per-op author, all-must-pass** — over operator-DID resolution
-   or a single landing author. Mirrors the seam's established per-op idiom and is
-   correct for multi-writer bundles.
-4. **Policy stays pure** — no owner concept, no registry coupling; composition is
-   the caller's job (exactly like `requireVerifiedProvenance`).
+   or a single landing author. Mirrors the seam's established per-op idiom and
+   is correct for multi-writer bundles.
+4. **Policy stays pure** — no owner concept, no registry coupling; composition
+   is the caller's job (exactly like `requireVerifiedProvenance`).
 
 ## 5. The policy
 
 `packages/platform/src/policy.ts`:
 
 ```ts
-import { ReputationLog } from '@thaddeus.run/reputation';
+import type { ReputationLog } from '@thaddeus.run/reputation';
 
 // A reputation-tier gate: merge is a function of proven contribution, not a
 // human reading a diff. Allow iff EVERY incoming op's author has at least
@@ -172,15 +176,16 @@ dual-signed `Contribution`s (host-attested `merge` records):
 
 ## 8. Open items / next primitives
 
-- **Human veto** — a standing reviewer approval/veto record + a `LandPolicy` that
-  checks it (and likely a server endpoint + review queue). No approval concept
-  exists yet; the docs earmark this as the "standing human veto" owed to P10.
+- **Human veto** — a standing reviewer approval/veto record + a `LandPolicy`
+  that checks it (and likely a server endpoint + review queue). No approval
+  concept exists yet; the docs earmark this as the "standing human veto" owed to
+  P10.
 - **Test/proof gate** — extend `requireVerifiedProvenance` into a real
   passing-check/attestation gate.
 - **Operator resolution** — for agent-authored ops, credit
   `registry.operatorOf(op.author)`'s reputation; couples a gate to
   `AgentRegistry`.
-- **Named tier ladder / review threshold** — grow `tierOf` beyond a single
-  merge count once a tier taxonomy is warranted.
+- **Named tier ladder / review threshold** — grow `tierOf` beyond a single merge
+  count once a tier taxonomy is warranted.
 - **Server-default wiring** — expose the gate via a `serve --policy` flag once
   the surface stabilizes (deferred exactly as `requireVerifiedProvenance` is).
