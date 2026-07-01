@@ -2,6 +2,7 @@ export { Platform, Repo } from './platform';
 export {
   allowAll,
   blockOnConflict,
+  blockOnVeto,
   requirePassingChecks,
   requireReputationTier,
   requireVerifiedProvenance,

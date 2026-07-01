@@ -13,10 +13,13 @@ conflicts and **failing closed** (a rejected landing leaves the target
 untouched). Ships `allowAll`, `blockOnConflict`, `requireVerifiedProvenance`,
 `requireReputationTier` — Pillar 10's reputation gate, allowing a landing only
 when every incoming op's author has enough attested `merge` contributions (P07)
-— and `requirePassingChecks` — Pillar 10's test/proof gate, allowing a landing
-only when every incoming op carries a verified provenance record from an
-automated checker (a CI runner, a proof engine), rather than a human reading a
-diff.
+`requirePassingChecks` — Pillar 10's test/proof gate, allowing a landing only
+when every incoming op carries a verified provenance record from an automated
+checker (a CI runner, a proof engine) — and `blockOnVeto` — Pillar 10's standing
+human veto, rejecting a landing that includes any op under a reviewer's verified
+veto (P10 `@thaddeus.run/review`); composed in the floor via `all(...)`, the
+veto overrides an otherwise-green policy, because retiring the mandatory diff
+must not retire a person's authority to say no.
 
 > **Status: spike.** In-memory, single process. The throughput envelope,
 > discoverability-as-query, typed releases, and mirror/peer transport are
