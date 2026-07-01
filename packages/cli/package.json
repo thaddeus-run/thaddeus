@@ -44,6 +44,7 @@
     "prepublishOnly": "moon run cli:prepublish"
   },
   "dependencies": {
+    "@thaddeus.run/agent": "workspace:*",
     "@thaddeus.run/client": "workspace:*",
     "@thaddeus.run/fs": "workspace:*",
     "@thaddeus.run/identity": "workspace:*",

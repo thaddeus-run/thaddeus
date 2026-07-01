@@ -1,6 +1,13 @@
+import type { Delegation } from '@thaddeus.run/agent';
 import type { Identity } from '@thaddeus.run/identity';
 import { Platform, type Repo } from '@thaddeus.run/platform';
-import { decodeBundle, encodeBundle, signRequest } from '@thaddeus.run/server';
+import {
+  decodeBundle,
+  decodeDelegation,
+  encodeBundle,
+  encodeDelegation,
+  signRequest,
+} from '@thaddeus.run/server';
 import type { Backend } from '@thaddeus.run/store';
 
 import { bundleFor } from './bundle';
@@ -114,6 +121,63 @@ export class Client {
       { fromHeads: [...fromHeads], into }
     );
     return (await this.#ok(res)) as LandOutcome;
+  }
+
+  // Owner: register an owner-signed delegation granting `delegation.agent` push.
+  async grant(
+    name: string,
+    delegation: Delegation
+  ): Promise<{
+    agent: string;
+    paths: string[];
+    maxChanges: number;
+    maxSpend: number;
+  }> {
+    const res = await this.#signed(
+      'POST',
+      `/repos/${encodeURIComponent(name)}/grants`,
+      {
+        delegation: encodeDelegation(delegation),
+      }
+    );
+    return (await this.#ok(res)) as {
+      agent: string;
+      paths: string[];
+      maxChanges: number;
+      maxSpend: number;
+    };
+  }
+
+  // Owner: revoke a delegate (terminal).
+  async revoke(
+    name: string,
+    agent: string
+  ): Promise<{ agent: string; revoked: boolean }> {
+    const res = await this.#signed(
+      'POST',
+      `/repos/${encodeURIComponent(name)}/revoke`,
+      { agent }
+    );
+    return (await this.#ok(res)) as { agent: string; revoked: boolean };
+  }
+
+  // The repo's active (non-revoked) delegations — a public, verifiable list.
+  async listGrants(name: string): Promise<Delegation[]> {
+    const res = await this.#fetch(
+      new Request(`${this.#server}/repos/${encodeURIComponent(name)}/grants`)
+    );
+    const body = (await this.#ok(res)) as { grants: string[] };
+    // Decode each entry defensively: a single malformed grant must not crash the
+    // caller, so failures are skipped rather than thrown.
+    const out: Delegation[] = [];
+    for (const g of body.grants) {
+      try {
+        out.push(decodeDelegation(g));
+      } catch {
+        // skip a malformed wire delegation
+      }
+    }
+    return out;
   }
 
   // POST a JSON body with the signed-request envelope.

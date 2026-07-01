@@ -112,6 +112,14 @@ All notable changes to Thaddeus. Format follows
   now returns `{ view, heads, …bundle }` so `Client.clone` is a single race-free
   request (closing the clone read-read race). The product name **Thaddeus**
   replaces the working name "Strata" in forward-facing docs.
+- Multi-writer collaboration — a repo owner grants push/land to other DIDs and
+  agents via owner-signed P09 `Delegation`s over the wire (`thaddeus grant`/
+  `revoke`/`grants`; `POST /grants`, `POST /revoke`, `GET /grants`). The server
+  holds a **durable per-repo `AgentRegistry`** (grants/meter/revocations rebuilt
+  from the backend), widens push/land to **owner-or-delegate**, and enforces
+  `delegationPolicy` per incoming op at land — paths and `maxChanges` (the owner
+  is exempt; fail-closed; revocation terminal). `maxSpend` is carried but not
+  yet metered (no cost model).
 
 ### Changed
 

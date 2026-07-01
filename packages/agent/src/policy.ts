@@ -24,16 +24,27 @@ function matchGlob(glob: string, path: string): boolean {
 // blockOnConflict). Read-only on the registry meter — the caller records spend
 // after a successful land.
 //
+// The optional `exempt` predicate lets the repo owner (who has no delegation
+// record) bypass both the scope check and the budget count. An author that
+// satisfies `exempt` is skipped in every loop — neither checked nor counted.
+// When `exempt` is omitted the behavior is identical to before.
+//
 // Note: this policy gates EVERY op in `proposal.incomingOps` (the
 // source-minus-target closure, spanning all authors on the incoming branch).
 // It therefore assumes a single-agent-authored branch — a mixed human/agent
 // closure will trip "no delegation" on the human's ops. Compose with other
 // policies to handle human or co-authored ops when that arises.
-export function delegationPolicy(registry: AgentRegistry): LandPolicy {
+export function delegationPolicy(
+  registry: AgentRegistry,
+  exempt?: (author: string) => boolean
+): LandPolicy {
   return (p: LandProposal) => {
-    // Authorization + scope: every incoming op must be permitted.
+    // Authorization + scope: every incoming op must be permitted (exempt skips).
     for (const op of p.incomingOps) {
       const agent = op.author;
+      if (exempt?.(agent) === true) {
+        continue;
+      }
       if (registry.isRevoked(agent)) {
         return { allow: false, reason: `agent ${agent} is revoked` };
       }
@@ -48,9 +59,12 @@ export function delegationPolicy(registry: AgentRegistry): LandPolicy {
         };
       }
     }
-    // Budget: project this landing's op count per agent against the caps.
+    // Budget: project this landing's op count per agent (exempt authors excluded).
     const countByAgent = new Map<string, number>();
     for (const op of p.incomingOps) {
+      if (exempt?.(op.author) === true) {
+        continue;
+      }
       countByAgent.set(op.author, (countByAgent.get(op.author) ?? 0) + 1);
     }
     for (const [agent, count] of countByAgent) {

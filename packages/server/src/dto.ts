@@ -1,3 +1,4 @@
+import type { Delegation } from '@thaddeus.run/agent';
 import type { Op } from '@thaddeus.run/log';
 import {
   type Capability,
@@ -43,4 +44,13 @@ export function decodeBundle(b: Bundle): {
     objects: (b.objects ?? []).map((s) => fromWire(s) as EncryptedObject),
     caps: (b.caps ?? []).map((s) => fromWire(s) as Capability),
   };
+}
+
+// A single Delegation on the wire: base64 of the persistence record encoding (so
+// its sig bytes survive JSON), same convention as the bundle items.
+export function encodeDelegation(d: Delegation): string {
+  return Buffer.from(encodeRecord(d)).toString('base64');
+}
+export function decodeDelegation(s: string): Delegation {
+  return decodeRecord(new Uint8Array(Buffer.from(s, 'base64'))) as Delegation;
 }

@@ -235,6 +235,7 @@
         "thaddeus": "./dist/bin.js",
       },
       "dependencies": {
+        "@thaddeus.run/agent": "workspace:*",
         "@thaddeus.run/client": "workspace:*",
         "@thaddeus.run/fs": "workspace:*",
         "@thaddeus.run/identity": "workspace:*",
@@ -253,6 +254,7 @@
       "name": "@thaddeus.run/client",
       "version": "0.0.0",
       "dependencies": {
+        "@thaddeus.run/agent": "workspace:*",
         "@thaddeus.run/identity": "workspace:*",
         "@thaddeus.run/log": "workspace:*",
         "@thaddeus.run/platform": "workspace:*",
@@ -377,6 +379,7 @@
       "version": "0.0.0",
       "dependencies": {
         "@noble/hashes": "catalog:",
+        "@thaddeus.run/agent": "workspace:*",
         "@thaddeus.run/identity": "workspace:*",
         "@thaddeus.run/log": "workspace:*",
         "@thaddeus.run/platform": "workspace:*",

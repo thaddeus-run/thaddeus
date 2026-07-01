@@ -96,7 +96,7 @@ describe('thaddeus push (publish)', () => {
     writeFileSync(join(a, 'x.txt'), 'hi');
     out.length = 0;
     expect(await run(['push'], e(a, otherHome))).toBe(1);
-    expect(out.join('\n').toLowerCase()).toContain('owner');
+    expect(out.join('\n').toLowerCase()).toContain('not authorized');
   });
 
   test('push --no-land uploads without landing; status shows ahead; land finishes', async () => {

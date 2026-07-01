@@ -14,3 +14,10 @@ tasks:
     options:
       cache: false
       runInCI: 'skip'
+  grant-demo:
+    command: 'bun src/grant-demo.ts'
+    deps:
+      - '^:build'
+    options:
+      cache: false
+      runInCI: 'skip'

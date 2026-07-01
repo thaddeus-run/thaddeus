@@ -74,8 +74,11 @@ holding a self-owned identity: `createRepo`/`clone`/`push`/`land`, all crypto
 client-side) and the **`thaddeus`** CLI (`@thaddeus.run/cli`, alias `thad`) — a
 git-like client with a `.thaddeus/` durable working tree: `init` → `create` →
 `clone` → edit files → `push` (publish to `main`). The server is runnable in one
-command via **`thaddeus serve`**. Multi-writer/agent CLI, offline sync, and
-conflict UX are next.
+command via **`thaddeus serve`**. The remote is now **multi-writer**: the owner
+delegates scoped, budgeted push to other DIDs/agents via P09 `Delegation`s
+(`thaddeus grant`/`revoke`/`grants`); the server holds a durable `AgentRegistry`
+and enforces `delegationPolicy` at land — fail-closed, revocation terminal.
+Offline sync and conflict UX are next.
 
 ## Per-primitive loop
 
