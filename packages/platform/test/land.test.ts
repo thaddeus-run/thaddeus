@@ -2,14 +2,31 @@ import { Workspace } from '@thaddeus.run/fs';
 import { Identity, ready } from '@thaddeus.run/identity';
 import { ProvenanceLog } from '@thaddeus.run/provenance';
 import { ReputationLog, signContribution } from '@thaddeus.run/reputation';
+import { VetoLog } from '@thaddeus.run/review';
 import { beforeAll, describe, expect, test } from 'bun:test';
 
 import { Platform, type Repo } from '../src/platform';
 import {
   allowAll,
+  blockOnVeto,
+  type LandPolicy,
   requirePassingChecks,
   requireReputationTier,
 } from '../src/policy';
+
+// The server's policy combinator, inlined here: allow only if every policy
+// allows; the first rejection wins. Proves a veto overrides a green gate.
+function all(...policies: LandPolicy[]): LandPolicy {
+  return async (p) => {
+    for (const policy of policies) {
+      const decision = await policy(p);
+      if (!decision.allow) {
+        return decision;
+      }
+    }
+    return { allow: true };
+  };
+}
 
 beforeAll(async () => {
   await ready();
@@ -231,6 +248,50 @@ describe('Repo.land — test/proof gate (Pillar 10)', () => {
     });
     expect(blocked.landed).toBe(false);
     expect(blocked.reason).toContain('check');
+    expect(repo.heads('main')).toEqual(mainBefore);
+  });
+});
+
+describe('Repo.land — human veto (Pillar 10)', () => {
+  test("a reviewer's standing veto overrides a green policy; main untouched", async () => {
+    const repo = new Platform().createRepo('acme/core');
+    const vetoes = new VetoLog();
+    const reviewer = Identity.create();
+    const dev = Identity.create();
+    // The floor is allowAll — every automated gate is green — yet the veto is
+    // the ceiling: all(allowAll, blockOnVeto) rejects a vetoed op.
+    const gate = all(allowAll, blockOnVeto(vetoes));
+
+    // An un-vetoed op lands cleanly.
+    await branch(repo, 'dev/ok', 'src/a.rs', 'fn a() {}', dev);
+    const ok = await repo.land({ from: 'dev/ok', author: dev, policy: gate });
+    expect(ok.landed).toBe(true);
+    expect(repo.heads('main')).toEqual(ok.heads);
+
+    // A reviewer vetoes the next op; the green floor cannot override it.
+    const mainBefore = repo.heads('main');
+    const vetoedWs = Workspace.open(repo.log, repo.store, {
+      source: 'main',
+      reader: dev,
+      name: 'dev/risky',
+    });
+    vetoedWs.write('src/b.rs', enc('fn b() {}'));
+    const [risky] = await vetoedWs.commit(dev);
+    if (risky == null) {
+      throw new Error('expected a committed op');
+    }
+    vetoes.record(
+      risky,
+      { reason: 'ships a secret in cleartext', at: '2026-07-01T00:00:00Z' },
+      reviewer
+    );
+    const blocked = await repo.land({
+      from: 'dev/risky',
+      author: dev,
+      policy: gate,
+    });
+    expect(blocked.landed).toBe(false);
+    expect(blocked.reason).toContain('veto');
     expect(repo.heads('main')).toEqual(mainBefore);
   });
 });
