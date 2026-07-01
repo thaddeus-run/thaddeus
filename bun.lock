@@ -137,6 +137,7 @@
         "@thaddeus.run/platform": "workspace:*",
         "@thaddeus.run/provenance": "workspace:*",
         "@thaddeus.run/reputation": "workspace:*",
+        "@thaddeus.run/review": "workspace:*",
       },
       "devDependencies": {
         "@types/bun": "catalog:",
@@ -341,6 +342,7 @@
         "@thaddeus.run/identity": "workspace:*",
         "@thaddeus.run/provenance": "workspace:*",
         "@thaddeus.run/reputation": "workspace:*",
+        "@thaddeus.run/review": "workspace:*",
         "@types/bun": "catalog:",
         "@typescript/native-preview": "catalog:",
         "tsdown": "catalog:",
@@ -370,6 +372,22 @@
         "@thaddeus.run/identity": "workspace:*",
       },
       "devDependencies": {
+        "@types/bun": "catalog:",
+        "@typescript/native-preview": "catalog:",
+        "tsdown": "catalog:",
+        "typescript": "catalog:",
+      },
+    },
+    "packages/review": {
+      "name": "@thaddeus.run/review",
+      "version": "0.0.0",
+      "dependencies": {
+        "@noble/hashes": "catalog:",
+        "@thaddeus.run/identity": "workspace:*",
+      },
+      "devDependencies": {
+        "@thaddeus.run/log": "workspace:*",
+        "@thaddeus.run/store": "workspace:*",
         "@types/bun": "catalog:",
         "@typescript/native-preview": "catalog:",
         "tsdown": "catalog:",
@@ -843,6 +861,8 @@
     "@thaddeus.run/provenance": ["@thaddeus.run/provenance@workspace:packages/provenance"],
 
     "@thaddeus.run/reputation": ["@thaddeus.run/reputation@workspace:packages/reputation"],
+
+    "@thaddeus.run/review": ["@thaddeus.run/review@workspace:packages/review"],
 
     "@thaddeus.run/server": ["@thaddeus.run/server@workspace:packages/server"],
 

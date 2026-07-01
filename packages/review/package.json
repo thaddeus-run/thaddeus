@@ -1,14 +1,14 @@
 {
-  "name": "@thaddeus.run/platform",
+  "name": "@thaddeus.run/review",
   "version": "0.0.0",
-  "description": "The platform: named repos (scopes) with one-call creation and landing-as-policy — re-point a shared view to include a workspace's commits, gated by a pluggable policy. Pillar 06.",
+  "description": "The standing human veto — single-signer Veto records bound to an Op.id, verifiable by anyone. Pillar 10 (review as policy).",
   "keywords": [
-    "landing",
-    "merge-policy",
-    "platform",
-    "repository",
+    "did",
+    "operation-log",
+    "review",
     "strata",
-    "substrate"
+    "substrate",
+    "veto"
   ],
   "homepage": "https://thaddeus.run",
   "bugs": {
@@ -22,7 +22,7 @@
   "repository": {
     "type": "git",
     "url": "git+https://github.com/thaddeus-run/thaddeus.git",
-    "directory": "packages/platform"
+    "directory": "packages/review"
   },
   "files": [
     "dist",
@@ -40,18 +40,15 @@
     "access": "public"
   },
   "scripts": {
-    "prepublishOnly": "moon run platform:prepublish"
+    "prepublishOnly": "moon run review:prepublish"
   },
   "dependencies": {
-    "@thaddeus.run/log": "workspace:*",
-    "@thaddeus.run/store": "workspace:*"
+    "@noble/hashes": "catalog:",
+    "@thaddeus.run/identity": "workspace:*"
   },
   "devDependencies": {
-    "@thaddeus.run/fs": "workspace:*",
-    "@thaddeus.run/identity": "workspace:*",
-    "@thaddeus.run/provenance": "workspace:*",
-    "@thaddeus.run/reputation": "workspace:*",
-    "@thaddeus.run/review": "workspace:*",
+    "@thaddeus.run/log": "workspace:*",
+    "@thaddeus.run/store": "workspace:*",
     "@types/bun": "catalog:",
     "@typescript/native-preview": "catalog:",
     "tsdown": "catalog:",
