@@ -305,7 +305,12 @@ export async function run(
         const cfg = loadConfig(root);
         const identity = loadIdentity(env.home);
         const paths =
-          values.paths !== undefined ? values.paths.split(',') : ['**'];
+          values.paths !== undefined
+            ? values.paths
+                .split(',')
+                .map((p) => p.trim())
+                .filter(Boolean)
+            : ['**'];
         const maxChanges =
           values['max-changes'] !== undefined
             ? Number(values['max-changes'])

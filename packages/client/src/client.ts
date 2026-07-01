@@ -167,7 +167,17 @@ export class Client {
       new Request(`${this.#server}/repos/${encodeURIComponent(name)}/grants`)
     );
     const body = (await this.#ok(res)) as { grants: string[] };
-    return body.grants.map(decodeDelegation);
+    // Decode each entry defensively: a single malformed grant must not crash the
+    // caller, so failures are skipped rather than thrown.
+    const out: Delegation[] = [];
+    for (const g of body.grants) {
+      try {
+        out.push(decodeDelegation(g));
+      } catch {
+        // skip a malformed wire delegation
+      }
+    }
+    return out;
   }
 
   // POST a JSON body with the signed-request envelope.

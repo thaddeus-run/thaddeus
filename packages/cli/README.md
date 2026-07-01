@@ -16,18 +16,18 @@ publish. All crypto is client-side; your identity seed lives in
 
 ## Commands
 
-| Command                                       | Description                            |
-| --------------------------------------------- | -------------------------------------- |
-| `init`                                        | Create a self-owned `did:key` identity |
-| `create <server> <repo>`                      | Create a repo on a server              |
-| `clone <server> <repo> [dir]`                 | Clone a repo to a working tree         |
-| `status`                                      | Show working-tree changes              |
-| `push [--no-land]`                            | Commit + upload + land into `main`     |
-| `land`                                        | Land uploaded-but-unmerged commits     |
-| `grant <did> [--paths a,b] [--max-changes N]` | Grant push rights to a DID/agent       |
-| `revoke <did>`                                | Revoke a previously granted delegation |
-| `grants`                                      | List active grants for this repo       |
-| `serve [--port 4000] [--data ./data]`         | Run a durable server                   |
+| Command                                        | Description                            |
+| ---------------------------------------------- | -------------------------------------- |
+| `init`                                         | Create a self-owned `did:key` identity |
+| `create <server> <repo>`                       | Create a repo on a server              |
+| `clone <server> <repo> [dir]`                  | Clone a repo to a working tree         |
+| `status`                                       | Show working-tree changes              |
+| `push [--no-land]`                             | Commit + upload + land into `main`     |
+| `land`                                         | Land uploaded-but-unmerged commits     |
+| `grant <did> [--paths a,b] [--max-changes N]`  | Grant push rights to a DID/agent       |
+| `revoke <did>`                                 | Revoke a previously granted delegation |
+| `grants`                                       | List active grants for this repo       |
+| `serve [--port 4000] [--data ./thaddeus-data]` | Run a durable server                   |
 
 ## Collaboration example
 
@@ -37,7 +37,7 @@ thaddeus grant did:key:z6Mk… --paths 'src/**'
 
 # Teammate: clone, edit, push — lands because src/ is in scope
 thaddeus clone http://localhost:4000 proj ~/proj
-cd ~/proj && echo "fn main() {}" > src/main.rs && thaddeus push
+cd ~/proj && mkdir -p src && echo "fn main() {}" > src/main.rs && thaddeus push
 #   published to main (1 head(s))
 
 # A push outside the granted paths is scope-blocked at land:

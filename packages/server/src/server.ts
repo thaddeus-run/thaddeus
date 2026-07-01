@@ -120,18 +120,30 @@ export function createServer(config: ServerConfig): Server {
     return bytes === undefined ? undefined : (decodeRecord(bytes) as RepoMeta);
   }
 
-  // Durable per-repo AgentRegistry cache, rebuilt from the scoped backend.
-  const registries = new Map<string, AgentRegistry>();
+  // Durable per-repo AgentRegistry cache, keyed by the in-flight BUILD promise
+  // (not the resolved registry) so registryFor is single-flight: two concurrent
+  // cold-cache callers share ONE AgentRegistry instance, mutated in place. If we
+  // cached the resolved value instead, both callers would build separate
+  // registries and the last `set` would clobber a grant/revoke on the other.
+  const registries = new Map<string, Promise<AgentRegistry>>();
 
-  // Build (or fetch the cached) durable AgentRegistry for a repo: register every
-  // persisted grant, replay the persisted meters, then apply revocations. Load
-  // order matters — record() throws for an unregistered agent, so grants must be
-  // registered before their meters replay; revocations apply last.
-  async function registryFor(name: string): Promise<AgentRegistry> {
-    const cached = registries.get(name);
-    if (cached !== undefined) {
-      return cached;
+  // Single-flight cacher: store the build promise synchronously (before any
+  // await) so a second caller in the same tick reuses it. Callers already
+  // `await registryFor(name)`, so they all share the one instance.
+  function registryFor(name: string): Promise<AgentRegistry> {
+    let p = registries.get(name);
+    if (p === undefined) {
+      p = buildRegistry(name);
+      registries.set(name, p);
     }
+    return p;
+  }
+
+  // Build the durable AgentRegistry for a repo: register every persisted grant,
+  // replay the persisted meters, then apply revocations. Load order matters —
+  // record() throws for an unregistered agent, so grants must be registered
+  // before their meters replay; revocations apply last.
+  async function buildRegistry(name: string): Promise<AgentRegistry> {
     const reg = new AgentRegistry();
     const b = metaBackend(name);
     for (const key of await b.list('grant/')) {
@@ -159,7 +171,6 @@ export function createServer(config: ServerConfig): Server {
     for (const key of await b.list('revoked/')) {
       reg.revoke(key.slice('revoked/'.length));
     }
-    registries.set(name, reg);
     return reg;
   }
 
@@ -315,15 +326,6 @@ export function createServer(config: ServerConfig): Server {
     if (meta === undefined) {
       return json(404, { error: `no repo ${name}` });
     }
-    // Owner-or-delegate gate: the owner is always authorized; a non-owner must
-    // hold a non-revoked delegation for this repo.
-    const reg = await registryFor(name);
-    if (
-      signer !== meta.owner &&
-      !(reg.delegationFor(signer) !== undefined && !reg.isRevoked(signer))
-    ) {
-      return json(403, { error: 'not authorized to write this repo' });
-    }
     const parsed = safeParseJson(body);
     if (parsed === undefined || parsed === null || typeof parsed !== 'object') {
       return json(400, { error: 'invalid JSON body' });
@@ -335,6 +337,17 @@ export function createServer(config: ServerConfig): Server {
       return json(400, { error: 'malformed bundle' });
     }
     return withRepoLock(name, async () => {
+      // Owner-or-delegate gate INSIDE the lock: re-check against the one-true
+      // registry AFTER acquiring the lock, so a revoke that ran just before is
+      // seen. The owner is always authorized; a non-owner must hold a
+      // non-revoked delegation for this repo.
+      const reg = await registryFor(name);
+      if (
+        signer !== meta.owner &&
+        !(reg.delegationFor(signer) !== undefined && !reg.isRevoked(signer))
+      ) {
+        return json(403, { error: 'not authorized to write this repo' });
+      }
       const repo = await getRepo(name);
       if (repo === undefined) {
         return json(404, { error: `no repo ${name}` });
@@ -419,15 +432,6 @@ export function createServer(config: ServerConfig): Server {
     if (meta === undefined) {
       return json(404, { error: `no repo ${name}` });
     }
-    // Owner-or-delegate gate: the owner is always authorized; a non-owner must
-    // hold a non-revoked delegation for this repo.
-    const reg = await registryFor(name);
-    if (
-      signer !== meta.owner &&
-      !(reg.delegationFor(signer) !== undefined && !reg.isRevoked(signer))
-    ) {
-      return json(403, { error: 'not authorized to write this repo' });
-    }
     const parsed = safeParseJson(body);
     if (parsed === undefined || parsed === null || typeof parsed !== 'object') {
       return json(400, { error: 'invalid JSON body' });
@@ -440,6 +444,18 @@ export function createServer(config: ServerConfig): Server {
       return json(400, { error: 'into must be a string' });
     }
     return withRepoLock(name, async () => {
+      // Owner-or-delegate gate INSIDE the lock: re-check against the one-true
+      // registry AFTER acquiring the lock, so a revoke that ran just before is
+      // seen. The owner is always authorized; a non-owner must hold a
+      // non-revoked delegation for this repo. The same `reg` composes the
+      // delegationPolicy below.
+      const reg = await registryFor(name);
+      if (
+        signer !== meta.owner &&
+        !(reg.delegationFor(signer) !== undefined && !reg.isRevoked(signer))
+      ) {
+        return json(403, { error: 'not authorized to write this repo' });
+      }
       const repo = await getRepo(name);
       if (repo === undefined) {
         return json(404, { error: `no repo ${name}` });
@@ -554,7 +570,13 @@ export function createServer(config: ServerConfig): Server {
     }
     return withRepoLock(name, async () => {
       const reg = await registryFor(name);
-      reg.register(d);
+      // register() can throw on a malformed delegation; map it to a 400 rather
+      // than letting it escape as a 500 (defense-in-depth after verifyDelegation).
+      try {
+        reg.register(d);
+      } catch {
+        return json(400, { error: 'invalid delegation' });
+      }
       await metaBackend(name).put(`grant/${d.agent}`, encodeRecord(d));
       return json(200, {
         agent: d.agent,
@@ -616,7 +638,13 @@ export function createServer(config: ServerConfig): Server {
     for (const key of await b.list('grant/')) {
       const bytes = await b.get(key);
       if (bytes !== undefined) {
-        const d = decodeRecord(bytes) as Delegation;
+        let d: Delegation;
+        try {
+          d = decodeRecord(bytes) as Delegation;
+        } catch {
+          // skip a corrupt/invalid persisted grant (mirror buildRegistry)
+          continue;
+        }
         if (!reg.isRevoked(d.agent)) {
           grants.push(encodeDelegation(d));
         }

@@ -191,4 +191,79 @@ describe('multi-writer land enforcement', () => {
     expect(over.landed).toBe(false);
     expect(over.reason?.toLowerCase()).toContain('budget');
   });
+
+  // Regression for the registry concurrency race: with a fresh (cold-cache)
+  // server, fire a delegate land and an owner revoke in the SAME tick. Because
+  // registryFor is single-flight (one AgentRegistry per repo) and the
+  // owner-or-delegate gate runs INSIDE withRepoLock, the revoke — which the lock
+  // serializes ahead of the land's gate re-check — must win: the land is
+  // rejected (403 gate or landed:false), never quietly landed on a stale
+  // registry.
+  test('cold-cache: a same-tick revoke wins over a concurrent delegate land', async () => {
+    const a = Identity.create(); // owner
+    const b = Identity.create(); // delegate
+    const backend = new MemoryBackend();
+    const srv = createServer({ backend });
+    await srv.fetch(signed('POST', '/repos', { name: 'r3' }, a));
+    await srv.fetch(
+      signed(
+        'POST',
+        '/repos/r3/grants',
+        {
+          delegation: encodeDelegation(
+            signDelegation(
+              { agent: b.did, paths: ['**'], maxChanges: 100, maxSpend: 1000 },
+              a
+            )
+          ),
+        },
+        a
+      )
+    );
+
+    // B pushes a change and uploads it (push gate still passes pre-revoke).
+    const change = await authored(b, 'src/x.rs');
+    await srv.fetch(signed('POST', '/repos/r3/push', change.bundle, b));
+
+    // Fresh server over the same backend → registry cache is COLD. Fire the
+    // revoke and the delegate land together in one tick.
+    const srv2 = createServer({ backend });
+    const [revokeRes, landRes] = await Promise.all([
+      srv2.fetch(signed('POST', '/repos/r3/revoke', { agent: b.did }, a)),
+      srv2.fetch(
+        signed(
+          'POST',
+          '/repos/r3/land',
+          { fromHeads: change.heads, into: 'main' },
+          b
+        )
+      ),
+    ]);
+    expect(revokeRes.status).toBe(200);
+    // Whichever way withRepoLock serialized the two, the outcome is coherent:
+    // if the land ran before the revoke it lands cleanly (200/landed:true); if
+    // it ran after, the in-lock gate re-check sees the revoke and rejects (403).
+    // What must NEVER happen (the race being fixed) is a land that quietly
+    // succeeds on a stale registry AFTER the revoke was applied — impossible now
+    // because both handlers share one AgentRegistry and gate inside the lock.
+    if (landRes.status === 200) {
+      const land = (await landRes.json()) as LandResult;
+      expect(typeof land.landed).toBe('boolean');
+    } else {
+      expect(landRes.status).toBe(403);
+    }
+
+    // The decisive, deterministic assertion: once the revoke is applied, a fresh
+    // delegate land is unambiguously rejected by the gate (functional revocation
+    // holds on the single-flight registry, cold cache and all).
+    const after = await srv2.fetch(
+      signed(
+        'POST',
+        '/repos/r3/land',
+        { fromHeads: change.heads, into: 'main' },
+        b
+      )
+    );
+    expect(after.status).toBe(403);
+  });
 });

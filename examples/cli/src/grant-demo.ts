@@ -89,6 +89,7 @@ try {
   console.log('$ thaddeus grants');
   lines.length = 0;
   code = await run(['grants'], env(ownerWc, ownerHome));
+  if (code !== 0) throw new Error(`grants failed: ${code}`);
   console.log('  grants output:', lines.join(' | '));
 
   // ── Teammate clones, pushes in-scope change → should land ────────────────

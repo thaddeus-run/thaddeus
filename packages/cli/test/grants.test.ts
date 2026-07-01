@@ -84,6 +84,10 @@ describe('thaddeus grant/revoke/grants', () => {
       writeFileSync(join(mateWc, 'src', 'z.rs'), 'fn z() {}');
       out.length = 0;
       expect(await run(['push'], e(mateWc, teammateHome))).toBe(1);
+      // After revoke the delegate fails the push GATE with "not authorized to
+      // write this repo" — distinct from the earlier out-of-scope failure — so
+      // assert the failure is authorization-specific, not the residual scope one.
+      expect(out.join('\n').toLowerCase()).toContain('not authorized');
     } finally {
       await s.stop();
     }
