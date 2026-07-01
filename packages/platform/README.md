@@ -10,8 +10,10 @@ unchanged.
 `Repo.land` is **landing-as-policy**: it re-points a shared view to include a
 workspace's committed heads, gated by a pluggable `LandPolicy`, surfacing P03
 conflicts and **failing closed** (a rejected landing leaves the target
-untouched). Ships `allowAll`, `blockOnConflict`, and `requireVerifiedProvenance`
-— the seam Pillar 10 fills with review and reputation gates.
+untouched). Ships `allowAll`, `blockOnConflict`, `requireVerifiedProvenance`,
+and `requireReputationTier` — Pillar 10's first gate, allowing a landing only
+when every incoming op's author has enough attested `merge` contributions (P07),
+rather than a human reading a diff.
 
 > **Status: spike.** In-memory, single process. The throughput envelope,
 > discoverability-as-query, typed releases, and mirror/peer transport are

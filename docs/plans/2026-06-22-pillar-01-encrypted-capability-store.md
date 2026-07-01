@@ -214,7 +214,7 @@ becomes a real assertion. When the last stub is gone, the substrate is whole.
 | 07 Identity federation / reputation   | _(planned)_          | planned     | P13 P19 P20      |
 | 08 Semantic graph                     | _(planned)_          | planned     | P14 P5 P18       |
 | 09 Agents as principals               | _(planned)_          | planned     | P16 P3 P21       |
-| 10 Review as policy                   | _(planned)_          | planned     | P15 P12          |
+| 10 Review as policy                   | `platform`           | in progress | P15 P12          |
 | 11 Live database                      | _(planned)_          | planned     | P17 P10          |
 
 ## Per-primitive loop

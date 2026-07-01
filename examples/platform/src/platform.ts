@@ -13,9 +13,11 @@ import {
   blockOnConflict,
   Platform,
   type Repo,
+  requireReputationTier,
   requireVerifiedProvenance,
 } from '@thaddeus.run/platform';
 import { ProvenanceLog } from '@thaddeus.run/provenance';
+import { ReputationLog, signContribution } from '@thaddeus.run/reputation';
 
 const enc = (s: string): Uint8Array => new TextEncoder().encode(s);
 const rule = (): void => console.log('—'.repeat(60));
@@ -130,6 +132,61 @@ rule();
 console.log('3b. requireVerifiedProvenance — merge gated on a signed "why":');
 console.log(`   no provenance → landed: ${noWhy.landed} (${noWhy.reason})`);
 console.log(`   with a verified record → landed: ${withWhy.landed}`);
+
+// Act 3c — a reputation-tier gate (Pillar 10): merge gated on a proven track
+// record, not a human reading a diff. A senior author (3 attested merges)
+// lands; a newcomer (0 attested merges) is gated.
+const svc = platform.createRepo('acme/svc');
+const reps = new ReputationLog();
+const attester = Identity.create();
+for (let i = 0; i < 3; i++) {
+  reps.append(
+    signContribution(
+      {
+        repo: 'acme/svc',
+        ref: `merge-${i}`,
+        kind: 'merge',
+        at: '2026-07-01T00:00:00Z',
+      },
+      alice,
+      attester
+    )
+  );
+}
+const tier = requireReputationTier(reps, 3);
+
+const seniorWs = Workspace.open(svc.log, svc.store, {
+  source: 'main',
+  reader: alice,
+  name: 'alice/feat',
+});
+seniorWs.write('src/feat.rs', enc('fn feat() {}'));
+await seniorWs.commit(alice);
+const seniorLand = await svc.land({
+  from: 'alice/feat',
+  author: alice,
+  policy: tier,
+});
+
+const newcomer = Identity.create();
+const newcomerWs = Workspace.open(svc.log, svc.store, {
+  source: 'main',
+  reader: newcomer,
+  name: 'newcomer/feat',
+});
+newcomerWs.write('src/other.rs', enc('fn other() {}'));
+await newcomerWs.commit(newcomer);
+const newcomerLand = await svc.land({
+  from: 'newcomer/feat',
+  author: newcomer,
+  policy: tier,
+});
+rule();
+console.log('3c. requireReputationTier — merge gated on proven track record:');
+console.log(`   senior (3 attested merges) → landed: ${seniorLand.landed}`);
+console.log(
+  `   newcomer (0) → landed: ${newcomerLand.landed} (${newcomerLand.reason})`
+);
 
 // Act 4 — the mirror property.
 rule();

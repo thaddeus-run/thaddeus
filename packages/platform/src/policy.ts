@@ -1,5 +1,6 @@
 import type { Conflict, Op } from '@thaddeus.run/log';
 import type { ProvenanceLog } from '@thaddeus.run/provenance';
+import type { ReputationLog } from '@thaddeus.run/reputation';
 
 // A proposed landing, computed on a dry-run view before any policy decision.
 export interface LandProposal {
@@ -58,6 +59,35 @@ export function requireVerifiedProvenance(prov: ProvenanceLog): LandPolicy {
       : {
           allow: false,
           reason: `${missing.length} op(s) lack a verified provenance record`,
+        };
+  };
+}
+
+// A reputation-tier gate (Pillar 10): merge is a function of proven
+// contribution, not a human reading a diff. Allow iff EVERY incoming op's
+// author has at least `minMerges` ATTESTED merges — P07 counts only the
+// host-vouched set, so self-claimed reputation can never unlock the gate.
+export function requireReputationTier(
+  reps: ReputationLog,
+  minMerges: number
+): LandPolicy {
+  // Fail fast on a misconfigured tier: since `byKind.merge` is always >= 0, a
+  // negative threshold would silently pass every author (a no-op gate). Reject
+  // it at construction so a mistyped tier surfaces immediately, not in prod.
+  if (!Number.isInteger(minMerges) || minMerges < 0) {
+    throw new RangeError(
+      `requireReputationTier: minMerges must be a non-negative integer, got ${minMerges}`
+    );
+  }
+  return (p) => {
+    const below = p.incomingOps.filter(
+      (op) => reps.profile(op.author).byKind.merge < minMerges
+    );
+    return below.length === 0
+      ? { allow: true }
+      : {
+          allow: false,
+          reason: `${below.length} op(s) authored below the required tier (${minMerges} attested merge(s))`,
         };
   };
 }
