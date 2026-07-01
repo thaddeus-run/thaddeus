@@ -570,6 +570,16 @@ export function createServer(config: ServerConfig): Server {
     }
     return withRepoLock(name, async () => {
       const reg = await registryFor(name);
+      // Revocation is terminal (P09): register() would replace the grant record
+      // but never clear the quarantine, so a re-grant would 200 yet leave the
+      // agent permanently blocked (and absent from GET /grants). Reject it
+      // explicitly so the terminal semantics are unambiguous — issue a fresh DID.
+      if (reg.isRevoked(d.agent)) {
+        return json(409, {
+          error:
+            'agent is revoked; revocation is terminal — grant a fresh identity',
+        });
+      }
       // register() can throw on a malformed delegation; map it to a 400 rather
       // than letting it escape as a 500 (defense-in-depth after verifyDelegation).
       try {

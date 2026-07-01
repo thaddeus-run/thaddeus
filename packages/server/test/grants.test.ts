@@ -93,6 +93,18 @@ describe('grants', () => {
     ).json()) as { grants: string[] };
     expect(after.grants).toHaveLength(0);
 
+    // Re-granting a revoked agent is rejected (409) — revocation is terminal, so
+    // a silent 200-but-no-op would mislead the owner.
+    const regrant = await srv.fetch(
+      signed(
+        'POST',
+        '/repos/r/grants',
+        { delegation: encodeDelegation(deleg) },
+        a
+      )
+    );
+    expect(regrant.status).toBe(409);
+
     // Durable: a fresh server over the same backend still has the (revoked) state.
     const srv2 = createServer({ backend });
     const reloaded = (await (
