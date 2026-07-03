@@ -272,13 +272,14 @@ const riskyWs = Workspace.open(core.log, core.store, {
 });
 riskyWs.write('src/secret.rs', enc('const KEY = "sk-live-…";'));
 const [riskyOp] = await riskyWs.commit(alice);
-if (riskyOp != null) {
-  vetoes.record(
-    riskyOp,
-    { reason: 'ships a secret in cleartext', at: '2026-07-01T00:00:00Z' },
-    reviewer
-  );
+if (riskyOp == null) {
+  throw new Error('expected a committed op'); // fail loud, not a misleading demo
 }
+vetoes.record(
+  riskyOp,
+  { reason: 'ships a secret in cleartext', at: '2026-07-01T00:00:00Z' },
+  reviewer
+);
 const vetoedLand = await core.land({
   from: 'alice/risky',
   author: alice,

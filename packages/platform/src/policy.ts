@@ -148,6 +148,16 @@ export function blockOnVeto(
   vetoes: VetoLog,
   reviewers?: readonly string[]
 ): LandPolicy {
+  // Fail fast on a misconfigured allowlist: an empty `reviewers` array means no
+  // reviewer can ever match, so every veto is ignored and the gate becomes a
+  // silent always-pass — the opposite of a veto's intent. To accept any
+  // reviewer's veto, OMIT `reviewers` (undefined); passing `[]` is a mistake, so
+  // reject it at construction, mirroring requireReputationTier's guard.
+  if (reviewers !== undefined && reviewers.length === 0) {
+    throw new RangeError(
+      'blockOnVeto: reviewers must be a non-empty allowlist, or omitted to accept any reviewer'
+    );
+  }
   const allowed = reviewers === undefined ? undefined : new Set(reviewers);
   return (p) => {
     const vetoed = p.incomingOps.filter((op) =>

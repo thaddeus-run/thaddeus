@@ -439,4 +439,9 @@ describe('policy — blockOnVeto', () => {
     expect(d.allow).toBe(false);
     expect(d.reason).toContain('1 op(s)');
   });
+
+  test('an empty reviewers allowlist is rejected at construction', () => {
+    const vetoes = new VetoLog();
+    expect(() => blockOnVeto(vetoes, [])).toThrow(RangeError);
+  });
 });

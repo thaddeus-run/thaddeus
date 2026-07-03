@@ -154,6 +154,11 @@ export function blockOnVeto(
   vetoes: VetoLog,
   reviewers?: readonly string[]
 ): LandPolicy {
+  // An empty allowlist would silence every veto (always-pass); to accept any
+  // reviewer, OMIT reviewers. Reject [] at construction (mirrors the tier gate).
+  if (reviewers !== undefined && reviewers.length === 0) {
+    throw new RangeError('blockOnVeto: reviewers must be non-empty or omitted');
+  }
   const allow = reviewers === undefined ? undefined : new Set(reviewers);
   return (p) => {
     const vetoed = p.incomingOps.filter((op) =>
@@ -183,8 +188,11 @@ export function blockOnVeto(
   reviewer's veto" is the `reviewers` allowlist.
 - **An unverified veto** (tampered/forged signature): never blocks, even if the
   `reviewer` field names an authorized reviewer. A forgery cannot deny service.
-- **`reviewers: []`** (empty allowlist): no reviewer can match → no veto ever
-  blocks. A degenerate "no one may veto" config, total and composable.
+- **`reviewers: []`** (empty allowlist): rejected at construction with a
+  `RangeError`. No reviewer could match, so every veto would be silenced and the
+  gate would become an always-pass — the opposite of a veto's intent. To accept
+  any reviewer's veto, omit `reviewers` (`undefined`); passing `[]` is a mistake
+  the guard surfaces immediately, mirroring the tier gate's numeric guard.
 - **Empty `incomingOps`**: never reaches the policy — `Repo.land()`
   short-circuits before any policy call.
 - **Multi-op bundle**: any single vetoed op rejects the whole landing; the
