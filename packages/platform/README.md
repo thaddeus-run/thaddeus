@@ -11,9 +11,12 @@ unchanged.
 workspace's committed heads, gated by a pluggable `LandPolicy`, surfacing P03
 conflicts and **failing closed** (a rejected landing leaves the target
 untouched). Ships `allowAll`, `blockOnConflict`, `requireVerifiedProvenance`,
-and `requireReputationTier` — Pillar 10's first gate, allowing a landing only
-when every incoming op's author has enough attested `merge` contributions (P07),
-rather than a human reading a diff.
+`requireReputationTier` — Pillar 10's reputation gate, allowing a landing only
+when every incoming op's author has enough attested `merge` contributions (P07)
+— and `requirePassingChecks` — Pillar 10's test/proof gate, allowing a landing
+only when every incoming op carries a verified provenance record from an
+automated checker (a CI runner, a proof engine), rather than a human reading a
+diff.
 
 > **Status: spike.** In-memory, single process. The throughput envelope,
 > discoverability-as-query, typed releases, and mirror/peer transport are

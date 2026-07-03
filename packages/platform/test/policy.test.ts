@@ -1,7 +1,7 @@
 import { Identity, ready } from '@thaddeus.run/identity';
 import type { Conflict, Op } from '@thaddeus.run/log';
 import { OpLog } from '@thaddeus.run/log';
-import { ProvenanceLog } from '@thaddeus.run/provenance';
+import { ProvenanceLog, signProvenance } from '@thaddeus.run/provenance';
 import {
   type Contribution,
   ReputationLog,
@@ -14,6 +14,7 @@ import {
   allowAll,
   blockOnConflict,
   type LandProposal,
+  requirePassingChecks,
   requireReputationTier,
   requireVerifiedProvenance,
 } from '../src/policy';
@@ -225,5 +226,136 @@ describe('policy — requireReputationTier', () => {
     const reps = new ReputationLog();
     expect(() => requireReputationTier(reps, -1)).toThrow(RangeError);
     expect(() => requireReputationTier(reps, 1.5)).toThrow(RangeError);
+  });
+});
+
+// Record a verified checker attestation on `op`: a provenance record whose
+// actor_kind marks it as machine verification (the checker signs only on pass).
+async function seedCheck(
+  prov: ProvenanceLog,
+  op: Op,
+  checker: Identity,
+  actorKind = 'ci'
+): Promise<void> {
+  await prov.record(
+    op,
+    { intent: 'checks passed', reasoning: 'types + tests green', actorKind },
+    checker
+  );
+}
+
+describe('policy — requirePassingChecks', () => {
+  test('allows when every incoming op has a verified ci attestation', async () => {
+    const store = new MemoryStore();
+    const log = new OpLog(store);
+    const author = Identity.create();
+    const ci = Identity.create();
+    const prov = new ProvenanceLog(store);
+    const op = await log.write('main', 'a.rs', enc('fn a() {}'), author);
+    await seedCheck(prov, op, ci);
+
+    const d = await requirePassingChecks(prov)(proposal({ incomingOps: [op] }));
+    expect(d.allow).toBe(true);
+  });
+
+  test('rejects an op with no provenance at all, naming the count', async () => {
+    const store = new MemoryStore();
+    const log = new OpLog(store);
+    const author = Identity.create();
+    const prov = new ProvenanceLog(store); // never records anything
+    const op = await log.write('main', 'b.rs', enc('fn b() {}'), author);
+
+    const d = await requirePassingChecks(prov)(proposal({ incomingOps: [op] }));
+    expect(d.allow).toBe(false);
+    expect(d.reason).toContain('1 op(s)');
+    expect(d.reason).toContain('ci');
+  });
+
+  test("a verified non-checker record (a human's why) does not count", async () => {
+    const store = new MemoryStore();
+    const log = new OpLog(store);
+    const author = Identity.create();
+    const prov = new ProvenanceLog(store);
+    const op = await log.write('main', 'c.rs', enc('fn c() {}'), author);
+    // A perfectly valid "why", but authored by a human — not a checker.
+    await prov.record(
+      op,
+      { intent: 'add c', reasoning: 'feature', actorKind: 'human' },
+      author
+    );
+
+    const d = await requirePassingChecks(prov)(proposal({ incomingOps: [op] }));
+    expect(d.allow).toBe(false);
+  });
+
+  test('an unverified checker record (tampered) does not satisfy the gate', async () => {
+    const store = new MemoryStore();
+    const log = new OpLog(store);
+    const author = Identity.create();
+    const ci = Identity.create();
+    const prov = new ProvenanceLog(store);
+    const op = await log.write('main', 'd.rs', enc('fn d() {}'), author);
+    // A ci-kind record whose body is tampered after signing: actor_kind matches,
+    // but the signature no longer verifies, so status() is 'unverified'.
+    const signed = signProvenance(
+      {
+        op: op.id,
+        actor_kind: 'ci',
+        intent: 'checks passed',
+        reasoning: 'green',
+        task: null,
+        prompt_ref: null,
+        prompt: null,
+      },
+      ci
+    );
+    prov.append({ ...signed, intent: 'forged: checks passed' });
+
+    const d = await requirePassingChecks(prov)(proposal({ incomingOps: [op] }));
+    expect(d.allow).toBe(false);
+  });
+
+  test('custom checkerKinds gate on that kind', async () => {
+    const store = new MemoryStore();
+    const log = new OpLog(store);
+    const author = Identity.create();
+    const prover = Identity.create();
+    const prov = new ProvenanceLog(store);
+    const op = await log.write('main', 'e.rs', enc('fn e() {}'), author);
+    await seedCheck(prov, op, prover, 'proof');
+
+    // A 'proof' record satisfies checkerKinds:['proof'] but not the default ['ci'].
+    expect(
+      (
+        await requirePassingChecks(prov, ['proof'])(
+          proposal({ incomingOps: [op] })
+        )
+      ).allow
+    ).toBe(true);
+    expect(
+      (await requirePassingChecks(prov)(proposal({ incomingOps: [op] }))).allow
+    ).toBe(false);
+  });
+
+  test('a mixed bundle rejects with the count of unchecked ops', async () => {
+    const store = new MemoryStore();
+    const log = new OpLog(store);
+    const author = Identity.create();
+    const ci = Identity.create();
+    const prov = new ProvenanceLog(store);
+    const checked = await log.write('main', 'f.rs', enc('fn f() {}'), author);
+    const unchecked = await log.write('main', 'g.rs', enc('fn g() {}'), author);
+    await seedCheck(prov, checked, ci);
+
+    const d = await requirePassingChecks(prov)(
+      proposal({ incomingOps: [checked, unchecked] })
+    );
+    expect(d.allow).toBe(false);
+    expect(d.reason).toContain('1 op(s)');
+  });
+
+  test('an empty checkerKinds list is rejected at construction', () => {
+    const prov = new ProvenanceLog(new MemoryStore());
+    expect(() => requirePassingChecks(prov, [])).toThrow(RangeError);
   });
 });

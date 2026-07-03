@@ -91,3 +91,47 @@ export function requireReputationTier(
         };
   };
 }
+
+// A test/proof gate (Pillar 10): merge gated on automated verification, not a
+// human reading a diff. A checker — CI, a property-check harness, a proof
+// engine — signs a provenance record on an op only when its checks pass, so a
+// VERIFIED record from a checker IS the proof. This narrows
+// requireVerifiedProvenance from "any verified why" to "a verified why from a
+// checker": allow iff EVERY incoming op carries at least one verified provenance
+// record whose actor_kind names a checker. `checkerKinds` defaults to ['ci'];
+// an unverified record, or a verified record from a non-checker, never counts.
+export function requirePassingChecks(
+  prov: ProvenanceLog,
+  checkerKinds: readonly string[] = ['ci']
+): LandPolicy {
+  // Fail fast on a misconfigured gate: an empty `checkerKinds` set means no
+  // actor_kind can ever match, so the gate would block every landing — and its
+  // reason string would read "…lack a verified check from " with nothing after
+  // "from". Reject it at construction so the mistake surfaces immediately,
+  // mirroring requireReputationTier's guard.
+  if (checkerKinds.length === 0) {
+    throw new RangeError(
+      'requirePassingChecks: checkerKinds must be a non-empty list of checker actor kinds'
+    );
+  }
+  const kinds = new Set(checkerKinds);
+  return (p) => {
+    const missing = p.incomingOps.filter(
+      (op) =>
+        !prov
+          .forOp(op.id)
+          .some(
+            (rec) =>
+              kinds.has(rec.actor_kind) && prov.status(rec) === 'verified'
+          )
+    );
+    return missing.length === 0
+      ? { allow: true }
+      : {
+          allow: false,
+          reason: `${missing.length} op(s) lack a verified check from ${[
+            ...kinds,
+          ].join('/')}`,
+        };
+  };
+}

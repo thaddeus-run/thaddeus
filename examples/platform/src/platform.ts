@@ -3,9 +3,11 @@
 //
 // Four acts: (1) scopes in one call — createRepo + bare-push open + a fleet
 // loop; (2) landing as policy — two branches on different paths both land;
-// (3) policy blocks — a same-path conflict is rejected by blockOnConflict, and
-// a provenance gate rejects an op with no verified "why"; (4) the mirror
-// property — a landed op is ciphertext a public mirror can serve.
+// (3) policy blocks — a same-path conflict is rejected by blockOnConflict, a
+// provenance gate rejects an op with no verified "why", a reputation-tier gate
+// gates on a proven track record, and a test/proof gate requires a verified CI
+// check; (4) the mirror property — a landed op is ciphertext a public mirror
+// can serve.
 
 import { Workspace } from '@thaddeus.run/fs';
 import { Identity, ready } from '@thaddeus.run/identity';
@@ -13,6 +15,7 @@ import {
   blockOnConflict,
   Platform,
   type Repo,
+  requirePassingChecks,
   requireReputationTier,
   requireVerifiedProvenance,
 } from '@thaddeus.run/platform';
@@ -186,6 +189,60 @@ console.log('3c. requireReputationTier — merge gated on proven track record:')
 console.log(`   senior (3 attested merges) → landed: ${seniorLand.landed}`);
 console.log(
   `   newcomer (0) → landed: ${newcomerLand.landed} (${newcomerLand.reason})`
+);
+
+// Act 3d — a test/proof gate (Pillar 10): merge gated on automated
+// verification, not a human reading a diff. A CI checker signs a provenance
+// record on an op only when its checks pass; an op with that verified
+// attestation lands, an unchecked op is gated.
+const svc2 = platform.createRepo('acme/ci');
+const prov2 = new ProvenanceLog(svc2.store);
+const ci = Identity.create();
+const checks = requirePassingChecks(prov2);
+
+const checkedWs = Workspace.open(svc2.log, svc2.store, {
+  source: 'main',
+  reader: alice,
+  name: 'alice/checked',
+});
+checkedWs.write('src/api.rs', enc('fn api() {}'));
+const [checkedOp] = await checkedWs.commit(alice);
+if (checkedOp != null) {
+  await prov2.record(
+    checkedOp,
+    {
+      intent: 'checks passed',
+      reasoning: 'types + tests green',
+      actorKind: 'ci',
+    },
+    ci
+  );
+}
+const checkedLand = await svc2.land({
+  from: 'alice/checked',
+  author: alice,
+  policy: checks,
+});
+
+const uncheckedWs = Workspace.open(svc2.log, svc2.store, {
+  source: 'main',
+  reader: alice,
+  name: 'alice/unchecked',
+});
+uncheckedWs.write('src/raw.rs', enc('fn raw() {}'));
+await uncheckedWs.commit(alice);
+const uncheckedLand = await svc2.land({
+  from: 'alice/unchecked',
+  author: alice,
+  policy: checks,
+});
+rule();
+console.log(
+  '3d. requirePassingChecks — merge gated on automated verification:'
+);
+console.log(`   with a verified CI check → landed: ${checkedLand.landed}`);
+console.log(
+  `   no check → landed: ${uncheckedLand.landed} (${uncheckedLand.reason})`
 );
 
 // Act 4 — the mirror property.

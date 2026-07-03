@@ -1,10 +1,15 @@
 import { Workspace } from '@thaddeus.run/fs';
 import { Identity, ready } from '@thaddeus.run/identity';
+import { ProvenanceLog } from '@thaddeus.run/provenance';
 import { ReputationLog, signContribution } from '@thaddeus.run/reputation';
 import { beforeAll, describe, expect, test } from 'bun:test';
 
 import { Platform, type Repo } from '../src/platform';
-import { allowAll, requireReputationTier } from '../src/policy';
+import {
+  allowAll,
+  requirePassingChecks,
+  requireReputationTier,
+} from '../src/policy';
 
 beforeAll(async () => {
   await ready();
@@ -176,6 +181,56 @@ describe('Repo.land — reputation-tier gate (Pillar 10)', () => {
     });
     expect(blocked.landed).toBe(false);
     expect(blocked.reason).toContain('tier');
+    expect(repo.heads('main')).toEqual(mainBefore);
+  });
+});
+
+describe('Repo.land — test/proof gate (Pillar 10)', () => {
+  test('an op with a verified CI check lands; an unchecked op is gated, main untouched', async () => {
+    const repo = new Platform().createRepo('acme/api');
+    const prov = new ProvenanceLog(repo.store);
+    const ci = Identity.create();
+    const dev = Identity.create();
+    const gate = requirePassingChecks(prov);
+
+    // A checked op: commit it, then a CI checker attests its checks passed.
+    const checkedWs = Workspace.open(repo.log, repo.store, {
+      source: 'main',
+      reader: dev,
+      name: 'dev/checked',
+    });
+    checkedWs.write('src/a.rs', enc('fn a() {}'));
+    const [checkedOp] = await checkedWs.commit(dev);
+    if (checkedOp == null) {
+      throw new Error('expected a committed op');
+    }
+    await prov.record(
+      checkedOp,
+      {
+        intent: 'checks passed',
+        reasoning: 'types + tests green',
+        actorKind: 'ci',
+      },
+      ci
+    );
+    const ok = await repo.land({
+      from: 'dev/checked',
+      author: dev,
+      policy: gate,
+    });
+    expect(ok.landed).toBe(true);
+    expect(repo.heads('main')).toEqual(ok.heads);
+
+    // An unchecked op carries no CI attestation → gated, main left untouched.
+    const mainBefore = repo.heads('main');
+    await branch(repo, 'dev/unchecked', 'src/b.rs', 'fn b() {}', dev);
+    const blocked = await repo.land({
+      from: 'dev/unchecked',
+      author: dev,
+      policy: gate,
+    });
+    expect(blocked.landed).toBe(false);
+    expect(blocked.reason).toContain('check');
     expect(repo.heads('main')).toEqual(mainBefore);
   });
 });
