@@ -139,6 +139,11 @@ export function requirePassingChecks(
   prov: ProvenanceLog,
   checkerKinds: readonly string[] = ['ci']
 ): LandPolicy {
+  if (checkerKinds.length === 0) {
+    throw new RangeError(
+      'requirePassingChecks: checkerKinds must be non-empty'
+    );
+  }
   const kinds = new Set(checkerKinds);
   return (p) => {
     const missing = p.incomingOps.filter(
@@ -179,10 +184,11 @@ export function requirePassingChecks(
   gate (a verified why _from a checker_).
 - **A checker record with a broken/absent signature** (`unverified`): never
   counts, even though its `actor_kind` matches. Inherits P04's trust boundary.
-- **Empty `checkerKinds`**: no `actor_kind` can match → every op with incoming
-  ops is rejected. A degenerate, still-composable "nothing is a checker"
-  configuration (documented, not thrown — unlike the tier gate's numeric guard,
-  an empty set is unambiguous and total).
+- **Empty `checkerKinds`**: rejected at construction with a `RangeError`. No
+  `actor_kind` could match, so the gate would block every landing — and its
+  reason string would truncate to "…lack a verified check from " with nothing
+  after "from". A construction-time guard surfaces the misconfiguration
+  immediately, mirroring the tier gate's numeric guard.
 - **Empty `incomingOps`**: never reaches the policy — `Repo.land()`
   short-circuits with `landed:false` before any policy call.
 - **Mixed multi-op bundle**: any single op without a verified checker

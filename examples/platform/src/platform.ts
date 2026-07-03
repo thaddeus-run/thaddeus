@@ -195,7 +195,7 @@ console.log(
 // verification, not a human reading a diff. A CI checker signs a provenance
 // record on an op only when its checks pass; an op with that verified
 // attestation lands, an unchecked op is gated.
-const svc2 = platform.createRepo('acme/api');
+const svc2 = platform.createRepo('acme/ci');
 const prov2 = new ProvenanceLog(svc2.store);
 const ci = Identity.create();
 const checks = requirePassingChecks(prov2);

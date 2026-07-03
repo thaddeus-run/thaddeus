@@ -104,6 +104,16 @@ export function requirePassingChecks(
   prov: ProvenanceLog,
   checkerKinds: readonly string[] = ['ci']
 ): LandPolicy {
+  // Fail fast on a misconfigured gate: an empty `checkerKinds` set means no
+  // actor_kind can ever match, so the gate would block every landing — and its
+  // reason string would read "…lack a verified check from " with nothing after
+  // "from". Reject it at construction so the mistake surfaces immediately,
+  // mirroring requireReputationTier's guard.
+  if (checkerKinds.length === 0) {
+    throw new RangeError(
+      'requirePassingChecks: checkerKinds must be a non-empty list of checker actor kinds'
+    );
+  }
   const kinds = new Set(checkerKinds);
   return (p) => {
     const missing = p.incomingOps.filter(

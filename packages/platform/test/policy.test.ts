@@ -353,4 +353,9 @@ describe('policy — requirePassingChecks', () => {
     expect(d.allow).toBe(false);
     expect(d.reason).toContain('1 op(s)');
   });
+
+  test('an empty checkerKinds list is rejected at construction', () => {
+    const prov = new ProvenanceLog(new MemoryStore());
+    expect(() => requirePassingChecks(prov, [])).toThrow(RangeError);
+  });
 });
