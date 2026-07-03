@@ -1,6 +1,7 @@
 import type { Conflict, Op } from '@thaddeus.run/log';
 import type { ProvenanceLog } from '@thaddeus.run/provenance';
 import type { ReputationLog } from '@thaddeus.run/reputation';
+import type { VetoLog } from '@thaddeus.run/review';
 
 // A proposed landing, computed on a dry-run view before any policy decision.
 export interface LandProposal {
@@ -132,6 +133,47 @@ export function requirePassingChecks(
           reason: `${missing.length} op(s) lack a verified check from ${[
             ...kinds,
           ].join('/')}`,
+        };
+  };
+}
+
+// The standing human veto (Pillar 10): a reviewer keeps the right to say no to
+// any change, even one a green policy would merge. Reject iff ANY incoming op
+// carries a verified standing veto — from an allowed reviewer, when `reviewers`
+// is given; from anyone, when it is omitted. Composed in the floor via all(...),
+// which is an AND, a veto overrides every green gate: automation sets the floor,
+// the veto is the ceiling a person can always lower. An unverified veto never
+// blocks, so a forged veto cannot deny service.
+export function blockOnVeto(
+  vetoes: VetoLog,
+  reviewers?: readonly string[]
+): LandPolicy {
+  // Fail fast on a misconfigured allowlist: an empty `reviewers` array means no
+  // reviewer can ever match, so every veto is ignored and the gate becomes a
+  // silent always-pass — the opposite of a veto's intent. To accept any
+  // reviewer's veto, OMIT `reviewers` (undefined); passing `[]` is a mistake, so
+  // reject it at construction, mirroring requireReputationTier's guard.
+  if (reviewers !== undefined && reviewers.length === 0) {
+    throw new RangeError(
+      'blockOnVeto: reviewers must be a non-empty allowlist, or omitted to accept any reviewer'
+    );
+  }
+  const allowed = reviewers === undefined ? undefined : new Set(reviewers);
+  return (p) => {
+    const vetoed = p.incomingOps.filter((op) =>
+      vetoes
+        .forOp(op.id)
+        .some(
+          (v) =>
+            vetoes.status(v) === 'verified' &&
+            (allowed === undefined || allowed.has(v.reviewer))
+        )
+    );
+    return vetoed.length === 0
+      ? { allow: true }
+      : {
+          allow: false,
+          reason: `${vetoed.length} op(s) under a standing veto`,
         };
   };
 }

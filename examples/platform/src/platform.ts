@@ -5,14 +5,15 @@
 // loop; (2) landing as policy — two branches on different paths both land;
 // (3) policy blocks — a same-path conflict is rejected by blockOnConflict, a
 // provenance gate rejects an op with no verified "why", a reputation-tier gate
-// gates on a proven track record, and a test/proof gate requires a verified CI
-// check; (4) the mirror property — a landed op is ciphertext a public mirror
-// can serve.
+// gates on a proven track record, a test/proof gate requires a verified CI
+// check, and a human veto lets a reviewer say no; (4) the mirror property — a
+// landed op is ciphertext a public mirror can serve.
 
 import { Workspace } from '@thaddeus.run/fs';
 import { Identity, ready } from '@thaddeus.run/identity';
 import {
   blockOnConflict,
+  blockOnVeto,
   Platform,
   type Repo,
   requirePassingChecks,
@@ -21,6 +22,7 @@ import {
 } from '@thaddeus.run/platform';
 import { ProvenanceLog } from '@thaddeus.run/provenance';
 import { ReputationLog, signContribution } from '@thaddeus.run/reputation';
+import { VetoLog } from '@thaddeus.run/review';
 
 const enc = (s: string): Uint8Array => new TextEncoder().encode(s);
 const rule = (): void => console.log('—'.repeat(60));
@@ -243,6 +245,51 @@ console.log(
 console.log(`   with a verified CI check → landed: ${checkedLand.landed}`);
 console.log(
   `   no check → landed: ${uncheckedLand.landed} (${uncheckedLand.reason})`
+);
+
+// Act 3e — the standing human veto (Pillar 10): the one right that survives the
+// automation. A reviewer reads a change and says no; the veto is the ceiling a
+// person can always lower, even when no automated gate objects. A forged veto
+// would not verify, so it could never deny service.
+const core = platform.createRepo('acme/core');
+const vetoes = new VetoLog();
+const reviewer = Identity.create();
+const veto = blockOnVeto(vetoes);
+
+// A clean op lands under the veto policy.
+await branch(core, 'alice/clean', 'src/ok.rs', 'fn ok() {}', alice);
+const cleanLand = await core.land({
+  from: 'alice/clean',
+  author: alice,
+  policy: veto,
+});
+
+// A risky op: the automated gates would pass it, but a human vetoes it.
+const riskyWs = Workspace.open(core.log, core.store, {
+  source: 'main',
+  reader: alice,
+  name: 'alice/risky',
+});
+riskyWs.write('src/secret.rs', enc('const KEY = "sk-live-…";'));
+const [riskyOp] = await riskyWs.commit(alice);
+if (riskyOp == null) {
+  throw new Error('expected a committed op'); // fail loud, not a misleading demo
+}
+vetoes.record(
+  riskyOp,
+  { reason: 'ships a secret in cleartext', at: '2026-07-01T00:00:00Z' },
+  reviewer
+);
+const vetoedLand = await core.land({
+  from: 'alice/risky',
+  author: alice,
+  policy: veto,
+});
+rule();
+console.log('3e. blockOnVeto — a human keeps the standing right to say no:');
+console.log(`   un-vetoed op → landed: ${cleanLand.landed}`);
+console.log(
+  `   vetoed op → landed: ${vetoedLand.landed} (${vetoedLand.reason})`
 );
 
 // Act 4 — the mirror property.

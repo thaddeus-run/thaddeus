@@ -7,12 +7,14 @@ import {
   ReputationLog,
   signContribution,
 } from '@thaddeus.run/reputation';
+import { signVeto, VetoLog } from '@thaddeus.run/review';
 import { MemoryStore } from '@thaddeus.run/store';
 import { beforeAll, describe, expect, test } from 'bun:test';
 
 import {
   allowAll,
   blockOnConflict,
+  blockOnVeto,
   type LandProposal,
   requirePassingChecks,
   requireReputationTier,
@@ -357,5 +359,89 @@ describe('policy — requirePassingChecks', () => {
   test('an empty checkerKinds list is rejected at construction', () => {
     const prov = new ProvenanceLog(new MemoryStore());
     expect(() => requirePassingChecks(prov, [])).toThrow(RangeError);
+  });
+});
+
+const VETO_AT = '2026-07-01T00:00:00Z';
+
+describe('policy — blockOnVeto', () => {
+  test('allows when no incoming op is vetoed', async () => {
+    const store = new MemoryStore();
+    const log = new OpLog(store);
+    const author = Identity.create();
+    const vetoes = new VetoLog();
+    const op = await log.write('main', 'a.rs', enc('fn a() {}'), author);
+
+    const d = await blockOnVeto(vetoes)(proposal({ incomingOps: [op] }));
+    expect(d.allow).toBe(true);
+  });
+
+  test('rejects an op under a verified standing veto, naming the count', async () => {
+    const store = new MemoryStore();
+    const log = new OpLog(store);
+    const author = Identity.create();
+    const reviewer = Identity.create();
+    const vetoes = new VetoLog();
+    const op = await log.write('main', 'b.rs', enc('fn b() {}'), author);
+    vetoes.record(op, { reason: 'ships a secret', at: VETO_AT }, reviewer);
+
+    const d = await blockOnVeto(vetoes)(proposal({ incomingOps: [op] }));
+    expect(d.allow).toBe(false);
+    expect(d.reason).toContain('1 op(s)');
+    expect(d.reason).toContain('veto');
+  });
+
+  test('a veto from a non-allowed reviewer does not block', async () => {
+    const store = new MemoryStore();
+    const log = new OpLog(store);
+    const author = Identity.create();
+    const authorized = Identity.create();
+    const outsider = Identity.create();
+    const vetoes = new VetoLog();
+    const op = await log.write('main', 'c.rs', enc('fn c() {}'), author);
+    vetoes.record(op, { reason: 'i dislike this', at: VETO_AT }, outsider);
+
+    // Only `authorized` may veto; the outsider's verified veto is ignored.
+    const d = await blockOnVeto(vetoes, [authorized.did])(
+      proposal({ incomingOps: [op] })
+    );
+    expect(d.allow).toBe(true);
+  });
+
+  test('an unverified veto does not block (a forgery cannot deny service)', async () => {
+    const store = new MemoryStore();
+    const log = new OpLog(store);
+    const author = Identity.create();
+    const reviewer = Identity.create();
+    const vetoes = new VetoLog();
+    const op = await log.write('main', 'd.rs', enc('fn d() {}'), author);
+    const signed = signVeto({ op: op.id, reason: 'x', at: VETO_AT }, reviewer);
+    // Tampered body: names a real reviewer but the signature no longer verifies.
+    vetoes.append({ ...signed, reason: 'forged veto' });
+
+    const d = await blockOnVeto(vetoes)(proposal({ incomingOps: [op] }));
+    expect(d.allow).toBe(true);
+  });
+
+  test('a mixed bundle rejects with the count of vetoed ops', async () => {
+    const store = new MemoryStore();
+    const log = new OpLog(store);
+    const author = Identity.create();
+    const reviewer = Identity.create();
+    const vetoes = new VetoLog();
+    const clean = await log.write('main', 'e.rs', enc('fn e() {}'), author);
+    const vetoed = await log.write('main', 'f.rs', enc('fn f() {}'), author);
+    vetoes.record(vetoed, { reason: 'unsafe', at: VETO_AT }, reviewer);
+
+    const d = await blockOnVeto(vetoes)(
+      proposal({ incomingOps: [clean, vetoed] })
+    );
+    expect(d.allow).toBe(false);
+    expect(d.reason).toContain('1 op(s)');
+  });
+
+  test('an empty reviewers allowlist is rejected at construction', () => {
+    const vetoes = new VetoLog();
+    expect(() => blockOnVeto(vetoes, [])).toThrow(RangeError);
   });
 });
