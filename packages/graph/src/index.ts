@@ -9,3 +9,6 @@ export type {
   Reference,
   Symbol,
 } from './symbol';
+export { signSymbolOp, verifySymbolOp } from './symbolop';
+export type { SymbolOp, SymbolOpFields } from './symbolop';
+export { SymbolOpLog } from './symboloplog';
