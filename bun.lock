@@ -156,6 +156,22 @@
         "@types/bun": "catalog:",
       },
     },
+    "examples/query": {
+      "name": "@thaddeus.run/example-query",
+      "version": "0.0.0",
+      "dependencies": {
+        "@thaddeus.run/fs": "workspace:*",
+        "@thaddeus.run/graph": "workspace:*",
+        "@thaddeus.run/identity": "workspace:*",
+        "@thaddeus.run/log": "workspace:*",
+        "@thaddeus.run/provenance": "workspace:*",
+        "@thaddeus.run/query": "workspace:*",
+        "@thaddeus.run/store": "workspace:*",
+      },
+      "devDependencies": {
+        "@types/bun": "catalog:",
+      },
+    },
     "examples/reputation": {
       "name": "@thaddeus.run/example-reputation",
       "version": "0.0.0",
@@ -886,6 +902,8 @@
     "@thaddeus.run/example-platform": ["@thaddeus.run/example-platform@workspace:examples/platform"],
 
     "@thaddeus.run/example-provenance": ["@thaddeus.run/example-provenance@workspace:examples/provenance"],
+
+    "@thaddeus.run/example-query": ["@thaddeus.run/example-query@workspace:examples/query"],
 
     "@thaddeus.run/example-reputation": ["@thaddeus.run/example-reputation@workspace:examples/reputation"],
 

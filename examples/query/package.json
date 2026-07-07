@@ -1,0 +1,18 @@
+{
+  "name": "@thaddeus.run/example-query",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@thaddeus.run/fs": "workspace:*",
+    "@thaddeus.run/graph": "workspace:*",
+    "@thaddeus.run/identity": "workspace:*",
+    "@thaddeus.run/log": "workspace:*",
+    "@thaddeus.run/provenance": "workspace:*",
+    "@thaddeus.run/query": "workspace:*",
+    "@thaddeus.run/store": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/bun": "catalog:"
+  }
+}
