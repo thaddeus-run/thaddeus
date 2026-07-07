@@ -40,6 +40,41 @@ describe('OpLog write + clock', () => {
     expect(b.lamport).toBe(0);
     expect(log.ops().map((o) => o.id)).toEqual([a.id, b.id].sort());
   });
+
+  test('write/remove stamp a wall-clock `at`; default is a valid ISO instant', async () => {
+    const log = new OpLog(new MemoryStore());
+    const author = Identity.create();
+
+    const w = await log.write('main', 'a.ts', enc('x'), author);
+    expect(Number.isNaN(Date.parse(w.at))).toBe(false); // a real ISO timestamp
+    expect(verifyOp(w)).toBe(true);
+
+    // A pinned `at` is honored (and signed) for both write and remove.
+    const pinned = '2026-07-07T12:00:00.000Z';
+    const w2 = await log.write('main', 'b.ts', enc('y'), author, {
+      at: pinned,
+    });
+    expect(w2.at).toBe(pinned);
+    const r = await log.remove('main', 'b.ts', author, { at: pinned });
+    expect(r.at).toBe(pinned);
+    expect(verifyOp(w2) && verifyOp(r)).toBe(true);
+  });
+
+  test('`at` is descriptive only — ordering stays lamport-based under skew', async () => {
+    const log = new OpLog(new MemoryStore());
+    const author = Identity.create();
+    // The lamport-0 root carries a LATER wall-clock than its lamport-1 child
+    // (clock skew). ops() must still order by lamport, ignoring `at`.
+    const a = await log.write('main', 'a.ts', enc('a'), author, {
+      at: '2026-07-07T23:59:59.000Z',
+    });
+    const b = await log.write('main', 'a.ts', enc('b'), author, {
+      at: '2026-07-07T00:00:00.000Z',
+    });
+    expect(a.lamport).toBe(0);
+    expect(b.lamport).toBe(1);
+    expect(log.ops().map((o) => o.id)).toEqual([a.id, b.id]);
+  });
 });
 
 describe('OpLog materialize (LWW per path, cleartext only)', () => {

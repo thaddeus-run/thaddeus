@@ -13,6 +13,11 @@ export interface Op {
   readonly path: string;
   readonly parents: readonly string[];
   readonly lamport: number;
+  // Wall-clock time the op was authored (ISO-8601 UTC). Descriptive metadata for
+  // time-window queries (P11) — signed, so it cannot be forged on relay. NEVER
+  // used for ordering/convergence: that is `lamport` + the DAG, so clock skew can
+  // never break the merge.
+  readonly at: string;
   readonly author: string;
   readonly payload: Ref | null;
   readonly sig: Uint8Array;
@@ -23,12 +28,14 @@ export interface OpFields {
   readonly path: string;
   readonly parents: readonly string[];
   readonly lamport: number;
+  readonly at: string;
   readonly payload: Ref | null;
 }
 
 // Domain tag prefixed into the signed tuple so an op signature can never be
 // confused with another protocol's payload that happens to serialize the same.
-const OP_DOMAIN = 'thaddeus.log.op.v1';
+// v2 adds the `at` wall-clock field; a v1 signature (no `at`) no longer verifies.
+const OP_DOMAIN = 'thaddeus.log.op.v2';
 
 // Reject non-canonical field values before they are hashed/signed. JSON.stringify
 // silently coerces NaN/Infinity/undefined to `null` inside arrays, so without this
@@ -44,6 +51,15 @@ function assertCanonical(fields: OpFields, author: string): void {
   }
   if (!Number.isSafeInteger(fields.lamport) || fields.lamport < 0) {
     throw new TypeError('op.lamport must be a non-negative safe integer');
+  }
+  // A parseable ISO-8601 instant. Rejecting a non-time string here means a
+  // poisoning `at` can never be signed, and verifyOp (try/catch) rejects it.
+  if (
+    typeof fields.at !== 'string' ||
+    fields.at.length === 0 ||
+    Number.isNaN(Date.parse(fields.at))
+  ) {
+    throw new TypeError('op.at must be a non-empty ISO-8601 timestamp string');
   }
   for (const p of fields.parents) {
     if (typeof p !== 'string' || p.length === 0) {
@@ -75,6 +91,7 @@ export function canonicalOp(fields: OpFields, author: string): Uint8Array {
       fields.lamport,
       author,
       payload,
+      fields.at,
     ])
   );
 }
@@ -92,6 +109,7 @@ export function signOp(fields: OpFields, author: Identity): Op {
     path: fields.path,
     parents: fields.parents,
     lamport: fields.lamport,
+    at: fields.at,
     author: author.did,
     payload: fields.payload,
     sig: author.sign(bytes),

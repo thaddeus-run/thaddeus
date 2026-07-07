@@ -139,6 +139,14 @@ All notable changes to Thaddeus. Format follows
   the universal fallback. A stale rename (the symbol moved under you) is
   rejected. The north-star now renames a symbol as one signed op with a
   provenance "why" (9 pass / 0 todo).
+- `@thaddeus.run/log` — a signed **wall-clock timestamp** on `Op` (Pillar 03
+  extension, `op.at`, ISO-8601 UTC). Covered by the op signature
+  (tamper-evident, domain tag bumped to `thaddeus.log.op.v2`) and stamped by
+  `OpLog.write`/`remove` (a caller may pin `at` for deterministic tests;
+  otherwise the current wall-clock). It is **descriptive metadata only** —
+  ordering and convergence remain `lamport` + the DAG, so clock skew can never
+  break the merge. This is the field the P11 time-window queries need ("all code
+  an untrusted agent touched in the last hour").
 
 ### Changed
 
@@ -228,11 +236,13 @@ All notable changes to Thaddeus. Format follows
 - **`sync()` of the pinned base (P05).** A workspace's base does not advance to
   absorb newer source-view heads; the lifecycle this release is open → edit →
   commit → discard.
-- **Discoverability-as-query (P06→P03/P08/P11).** Date-range history
-  (`log --since/--until`), release-to-release `diff`, and `next <tag>` need a
-  wall-clock timestamp on `Op` (today it carries only a Lamport clock) or the
-  semantic graph of P08. The query _surface_ is platform/live-DB territory; the
-  missing field is a P03 change. Deferred until one of those lands.
+- **Discoverability-as-query (P06→P08/P11).** The P03 prerequisite **shipped** —
+  `Op` now carries a signed wall-clock `op.at`, so date-range history
+  (`log --since/--until`), release-to-release `diff`, and time-window queries
+  are now expressible. What remains is the **query _surface_** itself (Pillar
+  11's `@thaddeus.run/query`) that joins the timestamp, the semantic graph
+  (P08), provenance (P04), and capabilities into answerable questions. Deferred
+  to P11.
 - **Typed Release objects (P06).** A signed
   `Release { tag, at, signed_by, commits, artifacts }` record and its rendered
   page — a clean follow-on slice. Landing-as-policy already delivers "a release
