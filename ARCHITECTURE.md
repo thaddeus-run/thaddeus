@@ -12,7 +12,7 @@ seam: the packages compose; Thaddeus is their composition.
 | Identity (`did:key`)                  | `@thaddeus.run/identity` | P01 caps · P04 provenance · P07 reputation · P09 agents |
 | Object (encrypted, content-addressed) | `@thaddeus.run/store`    | P01 · P02 membrane · P03 snapshots · P11 query          |
 | Capability (sealed key)               | `@thaddeus.run/store`    | P01 · P02 reveal · P09 revocation                       |
-| Op (operation log entry)              | `@thaddeus.run/log`      | P03 · P04 · P05 · P06 · P08 · P10                       |
+| Op (operation log entry)              | `@thaddeus.run/log`      | P03 · P04 · P05 · P06 · P08 · P10 · P11 query           |
 
 ## Build order (each tier depends only on tiers below)
 
@@ -45,7 +45,7 @@ becomes a real assertion. When the last stub is gone, the substrate is whole.
 | 08 Semantic graph                     | `graph`              | built   | P14 P5 P18       |
 | 09 Agents as principals               | `agent`              | built   | P16 P3 P21       |
 | 10 Review as policy                   | `review`             | built   | P15 P12          |
-| 11 Live database                      | _(planned)_          | planned | P17 P10          |
+| 11 Live database                      | `query`              | partial | P17 P10          |
 
 ## Persistence (infrastructure, not a pillar)
 

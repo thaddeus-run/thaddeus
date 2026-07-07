@@ -147,6 +147,19 @@ All notable changes to Thaddeus. Format follows
   ordering and convergence remain `lamport` + the DAG, so clock skew can never
   break the merge. This is the field the P11 time-window queries need ("all code
   an untrusted agent touched in the last hour").
+- `@thaddeus.run/query` — the live query surface (Pillar 11, **query slice**): a
+  read-only `CodeDB` that **joins** the four first-class dimensions the
+  substrate already stores — the semantic graph (P08), operation-log history
+  with wall-clock time (P03), provenance (P04), and capabilities (P01) — into
+  cross-cutting answers Git/GitHub cannot give: `why(opId)` (the signed
+  `--why` + verification), `touchedSince`/`touchedBetween` (time-window),
+  `by(did, window?)` (per-principal), `callers(symbolId)` (who-calls + defs),
+  and `references(name)`. No new signed records; the graph half is
+  decryption-bounded (inherited from the `Workspace` the `SymbolGraph` was built
+  over). The north-star now queries the landed rename (`--why` + a caller
+  lookup + a time-window). Subscriptions that fire on semantic events (P11
+  Slice 2) and policy as standing queries (P11 Slice 3) are the remaining
+  slices.
 
 ### Changed
 
@@ -236,13 +249,20 @@ All notable changes to Thaddeus. Format follows
 - **`sync()` of the pinned base (P05).** A workspace's base does not advance to
   absorb newer source-view heads; the lifecycle this release is open → edit →
   commit → discard.
-- **Discoverability-as-query (P06→P08/P11).** The P03 prerequisite **shipped** —
-  `Op` now carries a signed wall-clock `op.at`, so date-range history
-  (`log --since/--until`), release-to-release `diff`, and time-window queries
-  are now expressible. What remains is the **query _surface_** itself (Pillar
-  11's `@thaddeus.run/query`) that joins the timestamp, the semantic graph
-  (P08), provenance (P04), and capabilities into answerable questions. Deferred
-  to P11.
+- **Discoverability-as-query (P06→P08/P11) — shipped.** The P03 prerequisite
+  (signed `op.at`) and the **query surface** both landed: `@thaddeus.run/query`
+  `CodeDB` joins the timestamp, the semantic graph (P08), provenance (P04), and
+  capabilities into answerable cross-cutting questions. What remains for a full
+  Pillar 11 is Slice 2 (subscriptions that fire on semantic events) and Slice 3
+  (policy as standing queries) — see below.
+- **P11 subscriptions & standing-query policy (P11 Slices 2–3).** The query
+  slice is pull-only. Live **subscriptions** that fire on semantic events (e.g.
+  "tell me when the signature of this public function changes") — via diffing
+  graph snapshots — and **policy as standing queries** evaluated at land over
+  the P10 `LandPolicy` seam ("no untrusted agent may modify auth code") are the
+  two remaining slices. Also deferred for the query surface: incremental/indexed
+  derivation (millisecond scale), a durable query store, and behavioral-diff
+  across full history (present-state only today).
 - **Typed Release objects (P06).** A signed
   `Release { tag, at, signed_by, commits, artifacts }` record and its rendered
   page — a clean follow-on slice. Landing-as-policy already delivers "a release
