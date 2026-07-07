@@ -142,10 +142,10 @@ export class OpLog {
     path: string,
     bytes: Uint8Array,
     author: Identity,
-    opts?: { embargoUntil?: string }
+    opts?: { embargoUntil?: string; at?: string }
   ): Promise<Op> {
     const ref = await this.#store.put(bytes, author);
-    const op = this.#sign(view, path, ref, author);
+    const op = this.#sign(view, path, ref, author, opts?.at);
     if (opts?.embargoUntil !== undefined) {
       await this.#embargoOp(op, opts.embargoUntil, author);
     }
@@ -205,10 +205,21 @@ export class OpLog {
   }
 
   // Build + sign an op extending `view`'s heads — no mutation, not yet placed.
-  #sign(view: string, path: string, payload: Ref | null, author: Identity): Op {
+  // `at` defaults to the current wall-clock; callers pin it for deterministic
+  // tests. It is descriptive only — `lamport` + the DAG remain the ordering key.
+  #sign(
+    view: string,
+    path: string,
+    payload: Ref | null,
+    author: Identity,
+    at?: string
+  ): Op {
     const parents = this.heads(view);
     const lamport = this.#nextLamport(parents);
-    return signOp({ path, parents, lamport, payload }, author);
+    return signOp(
+      { path, parents, lamport, at: at ?? new Date().toISOString(), payload },
+      author
+    );
   }
 
   // Place a built op into the DAG and advance its view. The commit step that
@@ -223,9 +234,10 @@ export class OpLog {
     view: string,
     path: string,
     payload: Ref | null,
-    author: Identity
+    author: Identity,
+    at?: string
   ): Op {
-    const op = this.#sign(view, path, payload, author);
+    const op = this.#sign(view, path, payload, author, at);
     this.#commit(view, op);
     return op;
   }
@@ -318,8 +330,13 @@ export class OpLog {
   }
 
   // Record a delete: a payload:null tombstone op extending the view's heads.
-  async remove(view: string, path: string, author: Identity): Promise<Op> {
-    const op = this.#appendLocal(view, path, null, author);
+  async remove(
+    view: string,
+    path: string,
+    author: Identity,
+    opts?: { at?: string }
+  ): Promise<Op> {
+    const op = this.#appendLocal(view, path, null, author, opts?.at);
     await this.#persistCommit(view, op);
     return op;
   }

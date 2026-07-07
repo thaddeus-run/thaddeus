@@ -13,6 +13,11 @@ export interface Op {
   readonly path: string;
   readonly parents: readonly string[];
   readonly lamport: number;
+  // Wall-clock time the op was authored (ISO-8601 UTC). Descriptive metadata for
+  // time-window queries (P11) — signed, so it cannot be forged on relay. NEVER
+  // used for ordering/convergence: that is `lamport` + the DAG, so clock skew can
+  // never break the merge.
+  readonly at: string;
   readonly author: string;
   readonly payload: Ref | null;
   readonly sig: Uint8Array;
@@ -23,12 +28,14 @@ export interface OpFields {
   readonly path: string;
   readonly parents: readonly string[];
   readonly lamport: number;
+  readonly at: string;
   readonly payload: Ref | null;
 }
 
 // Domain tag prefixed into the signed tuple so an op signature can never be
 // confused with another protocol's payload that happens to serialize the same.
-const OP_DOMAIN = 'thaddeus.log.op.v1';
+// v2 adds the `at` wall-clock field; a v1 signature (no `at`) no longer verifies.
+const OP_DOMAIN = 'thaddeus.log.op.v2';
 
 // Reject non-canonical field values before they are hashed/signed. JSON.stringify
 // silently coerces NaN/Infinity/undefined to `null` inside arrays, so without this
@@ -44,6 +51,22 @@ function assertCanonical(fields: OpFields, author: string): void {
   }
   if (!Number.isSafeInteger(fields.lamport) || fields.lamport < 0) {
     throw new TypeError('op.lamport must be a non-negative safe integer');
+  }
+  // A parseable ISO-8601 **UTC** instant (Z-suffixed). Requiring `Z` — not just
+  // parseability — keeps the signed timestamp unambiguous: a local-time or
+  // offset string (e.g. `…+05:30`) would sign a wall-clock that means different
+  // instants to different readers and would sort wrong under lexicographic
+  // time-window indexes. The write path's default (`toISOString()`) is already
+  // Z-suffixed. Rejecting here means a poisoning `at` can never be signed, and
+  // verifyOp (try/catch) rejects it.
+  if (
+    typeof fields.at !== 'string' ||
+    !fields.at.endsWith('Z') ||
+    Number.isNaN(Date.parse(fields.at))
+  ) {
+    throw new TypeError(
+      'op.at must be an ISO-8601 UTC timestamp string (Z-suffixed)'
+    );
   }
   for (const p of fields.parents) {
     if (typeof p !== 'string' || p.length === 0) {
@@ -75,6 +98,7 @@ export function canonicalOp(fields: OpFields, author: string): Uint8Array {
       fields.lamport,
       author,
       payload,
+      fields.at,
     ])
   );
 }
@@ -92,6 +116,7 @@ export function signOp(fields: OpFields, author: Identity): Op {
     path: fields.path,
     parents: fields.parents,
     lamport: fields.lamport,
+    at: fields.at,
     author: author.did,
     payload: fields.payload,
     sig: author.sign(bytes),
