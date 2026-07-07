@@ -287,6 +287,23 @@
         "typescript": "catalog:",
       },
     },
+    "packages/graph": {
+      "name": "@thaddeus.run/graph",
+      "version": "0.0.0",
+      "dependencies": {
+        "@noble/hashes": "catalog:",
+        "@thaddeus.run/identity": "workspace:*",
+      },
+      "devDependencies": {
+        "@thaddeus.run/fs": "workspace:*",
+        "@thaddeus.run/log": "workspace:*",
+        "@thaddeus.run/store": "workspace:*",
+        "@types/bun": "catalog:",
+        "@typescript/native-preview": "catalog:",
+        "tsdown": "catalog:",
+        "typescript": "catalog:",
+      },
+    },
     "packages/identity": {
       "name": "@thaddeus.run/identity",
       "version": "0.0.0",
@@ -845,6 +862,8 @@
     "@thaddeus.run/example-workspace": ["@thaddeus.run/example-workspace@workspace:examples/workspace"],
 
     "@thaddeus.run/fs": ["@thaddeus.run/fs@workspace:packages/fs"],
+
+    "@thaddeus.run/graph": ["@thaddeus.run/graph@workspace:packages/graph"],
 
     "@thaddeus.run/identity": ["@thaddeus.run/identity@workspace:packages/identity"],
 
