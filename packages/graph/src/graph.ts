@@ -256,9 +256,13 @@ export class SymbolGraph {
     newName: string,
     author: Identity
   ): Promise<{ readonly symbolOp: SymbolOp; readonly ops: readonly Op[] }> {
-    // (1) Current binding + the live occurrence set from a fresh extraction.
+    // (1) Current binding + the live occurrence set from a SINGLE fresh
+    // extraction, so the definition and the reference set can't desync — two
+    // separate extractions would leave a window where a write between them
+    // changes the caller set the rewrite pass then misses (a TOCTOU).
     const from = this.ledger.currentName(symbolId);
-    const def = await this.definitionOf(symbolId);
+    const model = await this.#model();
+    const def = model.defs.find((d) => d.symbol === symbolId) ?? null;
     // (2) Staleness guard: the ledger's name must still match what the text says.
     // If the symbol moved under us (text changed, or an unknown id), reject
     // before writing anything.
@@ -272,7 +276,7 @@ export class SymbolGraph {
         `rename of ${symbolId} to its current name "${newName}" is a no-op`
       );
     }
-    const refs = await this.referencesTo(symbolId);
+    const refs = model.refs.filter((r) => r.symbol === symbolId);
 
     // (3) Render first: rewrite the identifier from→newName at every touched
     // path, then a single commit. Whole-word replace (the heuristic has no scope
