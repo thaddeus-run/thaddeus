@@ -265,23 +265,18 @@ export class SymbolGraph {
     if (from === null || def === null || def.name !== from) {
       throw new StaleRename(symbolId, from ?? '(unknown)', def?.name ?? null);
     }
+    // A rename to the symbol's current name is a no-op — reject it rather than
+    // mint a from===to op and an empty commit.
+    if (newName === from) {
+      throw new RangeError(
+        `rename of ${symbolId} to its current name "${newName}" is a no-op`
+      );
+    }
     const refs = await this.referencesTo(symbolId);
 
-    // (3) Mint + record the one signed artifact of meaning.
-    const symbolOp = signSymbolOp(
-      {
-        kind: 'rename-symbol',
-        symbol: symbolId,
-        from,
-        to: newName,
-        base: null,
-      },
-      author
-    );
-    this.#ops.append(symbolOp);
-
-    // (4) Render: rewrite the identifier from→newName at every touched path, then
-    // a single commit. Whole-word replace (the heuristic has no scope — spec §11).
+    // (3) Render first: rewrite the identifier from→newName at every touched
+    // path, then a single commit. Whole-word replace (the heuristic has no scope
+    // — spec §11).
     const touched = new Set<string>([def.path, ...refs.map((r) => r.path)]);
     const wordRe = new RegExp(`\\b${escapeIdent(from)}\\b`, 'g');
     for (const path of touched) {
@@ -297,14 +292,30 @@ export class SymbolGraph {
     }
     const ops = await this.ws.commit(author);
 
-    // (5) Rebind the ledger so re-extraction re-links the same id to newName.
+    // (4) Only after the render lands: mint + record the signed artifact and
+    // rebind the ledger. Recording after the commit keeps the op log consistent
+    // with the workspace — a `commit` that throws records no rename, so
+    // `history()` can never report a rename that never materialized.
+    const symbolOp = signSymbolOp(
+      {
+        kind: 'rename-symbol',
+        symbol: symbolId,
+        from,
+        to: newName,
+        base: null,
+      },
+      author
+    );
+    this.#ops.append(symbolOp);
     this.ledger.rebind(symbolId, newName);
 
     return { symbolOp, ops };
   }
 
-  // The signed structural history of a symbol (its SymbolOps), oldest binding
-  // first per the log's deterministic order. Empty if never renamed.
+  // The signed structural records for a symbol, in the SymbolOpLog's
+  // deterministic order (by author, then signature — convergent across peers,
+  // NOT the temporal rename sequence; true temporal ordering via the SymbolOp
+  // `base` chain is deferred, spec §11). Empty if the symbol was never renamed.
   history(symbolId: string): readonly SymbolOp[] {
     return this.#ops.forSymbol(symbolId);
   }

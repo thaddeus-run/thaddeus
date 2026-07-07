@@ -87,4 +87,39 @@ describe('SymbolGraph.rename — one signed op, rendered everywhere', () => {
     // Nothing was written: the def is still 'renamed', not 'somethingElse'.
     expect(dec((await ws.read('src/auth.rs'))!)).toContain('fn renamed()');
   });
+
+  test('renaming a symbol to its current name is rejected as a no-op', async () => {
+    const { g, dev } = await seed();
+    const id = (await g.resolve('refresh'))!;
+
+    let threw: unknown = null;
+    try {
+      await g.rename(id, 'refresh', dev);
+    } catch (e) {
+      threw = e;
+    }
+    expect(threw).toBeInstanceOf(RangeError);
+    // No from===to op is minted for a no-op rename.
+    expect(g.history(id)).toEqual([]);
+  });
+
+  test('a commit that throws records no rename in history (no phantom entry)', async () => {
+    const { ws, g, dev } = await seed();
+    const id = (await g.resolve('refresh'))!;
+
+    // Force the render's commit to fail after the writes are staged.
+    (ws as unknown as { commit: () => Promise<never> }).commit = () =>
+      Promise.reject(new Error('commit failed'));
+
+    let threw = false;
+    try {
+      await g.rename(id, 'refreshToken', dev);
+    } catch {
+      threw = true;
+    }
+    expect(threw).toBe(true);
+    // The SymbolOp is recorded only after a successful commit, so a failed
+    // render leaves the op log empty — history never reports a phantom rename.
+    expect(g.history(id)).toEqual([]);
+  });
 });
