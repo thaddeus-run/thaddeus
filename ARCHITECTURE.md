@@ -45,7 +45,7 @@ becomes a real assertion. When the last stub is gone, the substrate is whole.
 | 08 Semantic graph                     | `graph`              | built   | P14 P5 P18       |
 | 09 Agents as principals               | `agent`              | built   | P16 P3 P21       |
 | 10 Review as policy                   | `review`             | built   | P15 P12          |
-| 11 Live database                      | `query`              | partial | P17 P10          |
+| 11 Live database                      | `query` + `watch`    | partial | P17 P10          |
 
 ## Persistence (infrastructure, not a pillar)
 

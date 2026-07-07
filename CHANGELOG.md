@@ -160,6 +160,17 @@ All notable changes to Thaddeus. Format follows
   lookup + a time-window). Subscriptions that fire on semantic events (P11
   Slice 2) and policy as standing queries (P11 Slice 3) are the remaining
   slices.
+- `@thaddeus.run/watch` — live semantic subscriptions (Pillar 11,
+  **subscriptions slice**): `SemanticWatcher.over(graph)` captures a baseline
+  snapshot; `poll()` re-derives the semantic graph, **diffs** it against the
+  baseline, and emits `SemanticEvent`s (`defined`/`removed`/`renamed`/`moved`/
+  `references-changed`), dispatching each to the standing `Subscription`s whose
+  `{ symbol?, kinds? }` filter it matches. Triggers fire on _meaning_ — "tell me
+  when this symbol is renamed / a reference is added" — not on file paths; the
+  detection inherits the graph's decryption boundary. Pull-based (events surface
+  on `poll()`); a push/webhook transport and incremental (non-full-re-derive)
+  diffing are deferred. The north-star now fires a subscription on a rename.
+  Only Slice 3 (policy as standing queries) remains for a full Pillar 11.
 
 ### Changed
 
@@ -255,14 +266,15 @@ All notable changes to Thaddeus. Format follows
   capabilities into answerable cross-cutting questions. What remains for a full
   Pillar 11 is Slice 2 (subscriptions that fire on semantic events) and Slice 3
   (policy as standing queries) — see below.
-- **P11 subscriptions & standing-query policy (P11 Slices 2–3).** The query
-  slice is pull-only. Live **subscriptions** that fire on semantic events (e.g.
-  "tell me when the signature of this public function changes") — via diffing
-  graph snapshots — and **policy as standing queries** evaluated at land over
-  the P10 `LandPolicy` seam ("no untrusted agent may modify auth code") are the
-  two remaining slices. Also deferred for the query surface: incremental/indexed
-  derivation (millisecond scale), a durable query store, and behavioral-diff
-  across full history (present-state only today).
+- **P11 standing-query policy (P11 Slice 3).** Slices 1 (query) and 2
+  (subscriptions, `@thaddeus.run/watch`) shipped. The last slice is **policy as
+  standing queries** evaluated at land over the P10 `LandPolicy` seam ("no
+  untrusted agent may modify auth code"). Also deferred across the P11 slices: a
+  push/webhook transport and incremental (non-full-re-derive) diffing for
+  subscriptions; and for the query surface, incremental/indexed derivation
+  (millisecond scale), a durable query store, `signature-changed` detection
+  (needs a real parser, not the heuristic extractor), and behavioral-diff across
+  full history (present-state only today).
 - **Typed Release objects (P06).** A signed
   `Release { tag, at, signed_by, commits, artifacts }` record and its rendered
   page — a clean follow-on slice. Landing-as-policy already delivers "a release
