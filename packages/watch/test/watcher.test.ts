@@ -106,6 +106,19 @@ describe('SemanticWatcher — subscriptions fire on meaning', () => {
     expect(await watcher.poll()).toEqual([]);
   });
 
+  test('overlapping poll() calls coalesce — delivered exactly once', async () => {
+    const { graph, dev } = await seed();
+    const id = (await graph.resolve('refresh'))!;
+    const watcher = await SemanticWatcher.over(graph);
+    const sub = watcher.watch({ symbol: id, kinds: ['renamed'] });
+
+    await graph.rename(id, 'refreshToken', dev);
+    // Two polls in flight at once must not race the baseline: one diff, one event.
+    const [a, b] = await Promise.all([watcher.poll(), watcher.poll()]);
+    expect(a).toBe(b); // the second call reused the in-flight poll
+    expect(sub.take()).toHaveLength(1); // delivered exactly once
+  });
+
   test('a filter scopes delivery; unwatch stops it', async () => {
     const { graph, dev } = await seed();
     const refresh = (await graph.resolve('refresh'))!;

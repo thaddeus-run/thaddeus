@@ -49,7 +49,11 @@ interface SymbolState {
 
 type Snapshot = Map<string, SymbolState>;
 
-// A reference's identity for set diffing: its site (path + line).
+// A reference's identity for set diffing: its site (path + line). NOTE: two
+// calls to the same symbol on ONE line collapse to a single key — a limitation
+// of the heuristic extractor (which has no per-call column), so adding or
+// removing one of a same-line pair emits no `references-changed` event. A real
+// parser (deferred) carries column positions and removes this.
 const refKey = (r: Reference): string => `${r.path}:${r.line}`;
 
 // Re-derive the whole decryptable graph into a snapshot keyed by stable symbol
@@ -131,26 +135,13 @@ function matches(filter: Filter, e: SemanticEvent): boolean {
   return true;
 }
 
-// Per-subscription event queues, kept off the Subscription object so the handle
-// stays opaque (no internal push method leaks onto the public type).
-const queues = new WeakMap<Subscription, SemanticEvent[]>();
-
-// An opaque subscription handle. `take()` drains the events that have matched
-// this subscription since the last take.
-export class Subscription {
+// An opaque subscription handle: `take()` drains the events that have matched
+// this subscription since the last take. Instances come only from
+// `SemanticWatcher.watch()` — there is no public constructor, so a handle can
+// never exist detached from a watcher (where it would silently receive nothing).
+export interface Subscription {
   readonly filter: Filter;
-
-  constructor(filter: Filter) {
-    this.filter = filter;
-    queues.set(this, []);
-  }
-
-  take(): readonly SemanticEvent[] {
-    const q = queues.get(this) ?? [];
-    const out = [...q];
-    q.length = 0;
-    return out;
-  }
+  take(): readonly SemanticEvent[];
 }
 
 // Subscribe to semantic events over a SymbolGraph by diffing snapshots. Spike —
@@ -159,7 +150,11 @@ export class Subscription {
 export class SemanticWatcher {
   readonly #graph: SymbolGraph;
   #baseline: Snapshot;
-  readonly #subs: Set<Subscription> = new Set();
+  // Each subscription maps to its own pending-event queue.
+  readonly #subs: Map<Subscription, SemanticEvent[]> = new Map();
+  // A poll in flight, reused by any overlapping poll() so two callers can never
+  // race the baseline (double-advance ⇒ missed/duplicated events).
+  #inflight: Promise<readonly SemanticEvent[]> | null = null;
 
   private constructor(graph: SymbolGraph, baseline: Snapshot) {
     this.#graph = graph;
@@ -172,10 +167,19 @@ export class SemanticWatcher {
     return new SemanticWatcher(graph, await snapshot(graph));
   }
 
-  // Register a standing subscription for events matching `filter`.
+  // Register a standing subscription for events matching `filter`. The returned
+  // handle drains its own matched events via `take()`.
   watch(filter: Filter = {}): Subscription {
-    const sub = new Subscription(filter);
-    this.#subs.add(sub);
+    const queue: SemanticEvent[] = [];
+    const sub: Subscription = {
+      filter,
+      take: () => {
+        const out = [...queue];
+        queue.length = 0;
+        return out;
+      },
+    };
+    this.#subs.set(sub, queue);
     return sub;
   }
 
@@ -187,14 +191,28 @@ export class SemanticWatcher {
   // Re-derive the graph, diff it against the baseline, advance the baseline, and
   // dispatch each event to every subscription whose filter it matches. Returns
   // all events (whether or not any subscription matched). Fire on meaning.
+  // Reentrancy-safe: an overlapping call (e.g. an interval firing faster than
+  // the graph resolves) reuses the in-flight poll instead of racing the baseline.
   async poll(): Promise<readonly SemanticEvent[]> {
+    if (this.#inflight !== null) {
+      return this.#inflight;
+    }
+    this.#inflight = this.#runPoll();
+    try {
+      return await this.#inflight;
+    } finally {
+      this.#inflight = null;
+    }
+  }
+
+  async #runPoll(): Promise<readonly SemanticEvent[]> {
     const after = await snapshot(this.#graph);
     const events = diff(this.#baseline, after);
     this.#baseline = after;
     for (const e of events) {
-      for (const sub of this.#subs) {
+      for (const [sub, queue] of this.#subs) {
         if (matches(sub.filter, e)) {
-          queues.get(sub)?.push(e);
+          queue.push(e);
         }
       }
     }
