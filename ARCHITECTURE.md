@@ -42,9 +42,9 @@ becomes a real assertion. When the last stub is gone, the substrate is whole.
 | 05 Virtual FS                         | `fs`                 | built   | P6 P7 P8 P11     |
 | 06 Platform                           | `platform`           | built   | P9 P10 P11       |
 | 07 Identity federation / reputation   | `reputation`         | built   | P13 P19 P20      |
-| 08 Semantic graph                     | _(planned)_          | planned | P14 P5 P18       |
+| 08 Semantic graph                     | `graph`              | built   | P14 P5 P18       |
 | 09 Agents as principals               | `agent`              | built   | P16 P3 P21       |
-| 10 Review as policy                   | _(planned)_          | planned | P15 P12          |
+| 10 Review as policy                   | `review`             | built   | P15 P12          |
 | 11 Live database                      | _(planned)_          | planned | P17 P10          |
 
 ## Persistence (infrastructure, not a pillar)

@@ -120,6 +120,25 @@ All notable changes to Thaddeus. Format follows
   `delegationPolicy` per incoming op at land — paths and `maxChanges` (the owner
   is exempt; fail-closed; revocation terminal). `maxSpend` is carried but not
   yet metered (no cost model).
+- `@thaddeus.run/review` — review as policy, proof, and reputation (Pillar 10):
+  merge becomes a function of pluggable `LandPolicy` gates rather than one human
+  reading a diff — a `requireReputationTier` gate (a landing must clear a
+  reputation floor), a `requirePassingChecks` test/proof gate, and a standing
+  human **veto** (`blockOnVeto` + the `Veto`/`VetoLog` records): retiring the
+  mandatory diff review must not retire the veto. (Positive approval-required
+  gate and a server-side review queue are deferred.)
+- `@thaddeus.run/graph` — the semantic graph (Pillar 08): a `SymbolGraph` over a
+  P05 `Workspace` projects symbols, definitions, references, and call edges from
+  decryptable text — **decryption-bounded for free** (you only see the meaning
+  of code you can decrypt). Code is addressed by a stable `Symbol.id` (minted
+  once at birth, retained across renames by a `SymbolLedger`), and **rename is a
+  first-class operation**: one signed `SymbolOp` rendered across the definition
+  and every reference (the N text ops are its rendering), not a thousand-line
+  find-and-replace. Extraction is one heuristic language behind a rigid
+  `Extractor` seam (a real tree-sitter/LSP parser drops in there); text stays
+  the universal fallback. A stale rename (the symbol moved under you) is
+  rejected. The north-star now renames a symbol as one signed op with a
+  provenance "why" (9 pass / 0 todo).
 
 ### Changed
 
@@ -177,18 +196,35 @@ All notable changes to Thaddeus. Format follows
 
 - **P03 content merge** — 3-way text/content merge for concurrent same-path ops;
   today LWW picks a deterministic winner and `conflicts()` surfaces the rest.
-- **Rename/move as a first-class op (P08)** — currently two unlinked path-ops.
-- **Symbol-level addressing (P08)** — `Op.path` generalizes to a symbol id.
+- **Multi-language / real parser (P08→research)** — the `HeuristicExtractor`
+  recognizes one dialect (`fn <name>(` defs, `<name>(` calls) with no scope,
+  shadowing, or types; a real tree-sitter/LSP parser per language drops in
+  behind the `Extractor` seam (aligns with the "Rust hot-path reimplementation …
+  likely P03 and P08" research entry). Text is the universal fallback.
+- **Type edges & structural ops beyond rename (P08)** — `Edge` ships
+  `calls`/`references` only; `change-signature`/`move-definition`/
+  `extract-function` share the `SymbolOp` record shape but are not built.
+- **Whole-program call graph (P08)** — `callersOf` is best-effort within the
+  decryptable, single-language view; no cross-language whole-program resolution.
+- **Per-symbol capability scope (P08 × P01/P02)** — the brief's "hide one
+  function inside a public file"; capability-scoping at symbol granularity is a
+  later integration pass.
+- **`SymbolOp` durability / federation (P08)** — the `SymbolLedger` and
+  `SymbolOpLog` are in-memory only (like `ProvenanceLog`); Backend persistence
+  and wire ingest are deferred.
+- **Structural conflict-as-function (P08→P10)** — only staleness (`from`
+  mismatch) is checked; real "conflict iff a contract broke" (signature
+  compatibility across callers) is P10 territory.
 - **Repository-as-capability-scoped-slice (P05)** — the repo dissolution half of
   Pillar 03's "branches and the repository dissolve."
 - **Vector/interval clocks** — Lamport + DAG suffice for the spike's ordering.
-- **P06 platform**, **P07 federation/reputation**, **P08 semantic graph**, **P09
-  agents**, **P10 review-as-policy**, **P11 live database** — Tiers 2–4.
-- **Rich review/reputation merge policy (P06→P10).** P06 ships landing as a
-  re-point gated by a pluggable `LandPolicy` (`allowAll`, `blockOnConflict`,
-  `requireVerifiedProvenance`); the semantic/behavioral-diff, test/proof, and
-  reputation-tier gates — and the standing human veto — are Pillar 10 over the
-  same `LandProposal → LandDecision` seam.
+- **P11 live database** — the last unbuilt pillar (Tier 4): a live, subscribable
+  code database over P08's semantic read model (triggers that fire on meaning,
+  the `--why` history query surface).
+- **Rich review/reputation merge policy (P06→P10) — shipped** as
+  `@thaddeus.run/review` (P10): the reputation-tier gate, the test/proof gate,
+  and the standing human veto over the `LandProposal → LandDecision` seam. Still
+  deferred: the positive approval-required gate and a server-side review queue.
 - **`sync()` of the pinned base (P05).** A workspace's base does not advance to
   absorb newer source-view heads; the lifecycle this release is open → edit →
   commit → discard.
