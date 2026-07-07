@@ -6,6 +6,7 @@
   "dependencies": {
     "@thaddeus.run/agent": "workspace:*",
     "@thaddeus.run/fs": "workspace:*",
+    "@thaddeus.run/graph": "workspace:*",
     "@thaddeus.run/identity": "workspace:*",
     "@thaddeus.run/log": "workspace:*",
     "@thaddeus.run/persist": "workspace:*",
