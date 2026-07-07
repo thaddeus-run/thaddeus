@@ -1,0 +1,17 @@
+{
+  "name": "@thaddeus.run/example-watch",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@thaddeus.run/fs": "workspace:*",
+    "@thaddeus.run/graph": "workspace:*",
+    "@thaddeus.run/identity": "workspace:*",
+    "@thaddeus.run/log": "workspace:*",
+    "@thaddeus.run/store": "workspace:*",
+    "@thaddeus.run/watch": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/bun": "catalog:"
+  }
+}

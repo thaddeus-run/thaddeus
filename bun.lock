@@ -212,6 +212,21 @@
         "@types/bun": "catalog:",
       },
     },
+    "examples/watch": {
+      "name": "@thaddeus.run/example-watch",
+      "version": "0.0.0",
+      "dependencies": {
+        "@thaddeus.run/fs": "workspace:*",
+        "@thaddeus.run/graph": "workspace:*",
+        "@thaddeus.run/identity": "workspace:*",
+        "@thaddeus.run/log": "workspace:*",
+        "@thaddeus.run/store": "workspace:*",
+        "@thaddeus.run/watch": "workspace:*",
+      },
+      "devDependencies": {
+        "@types/bun": "catalog:",
+      },
+    },
     "examples/workspace": {
       "name": "@thaddeus.run/example-workspace",
       "version": "0.0.0",
@@ -930,6 +945,8 @@
     "@thaddeus.run/example-semantic-graph": ["@thaddeus.run/example-semantic-graph@workspace:examples/semantic-graph"],
 
     "@thaddeus.run/example-server": ["@thaddeus.run/example-server@workspace:examples/server"],
+
+    "@thaddeus.run/example-watch": ["@thaddeus.run/example-watch@workspace:examples/watch"],
 
     "@thaddeus.run/example-workspace": ["@thaddeus.run/example-workspace@workspace:examples/workspace"],
 
