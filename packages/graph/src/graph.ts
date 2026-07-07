@@ -316,10 +316,10 @@ export class SymbolGraph {
     return { symbolOp, ops };
   }
 
-  // The signed structural records for a symbol, in the SymbolOpLog's
-  // deterministic order (by author, then signature — convergent across peers,
-  // NOT the temporal rename sequence; true temporal ordering via the SymbolOp
-  // `base` chain is deferred, spec §11). Empty if the symbol was never renamed.
+  // The signed structural records for a symbol, in the order the renames were
+  // applied (the SymbolOpLog's insertion order — causal for the single-process
+  // spike). Cross-peer ordering under out-of-order wire ingest needs the
+  // SymbolOp `base` chain and is deferred (spec §11). Empty if never renamed.
   history(symbolId: string): readonly SymbolOp[] {
     return this.#ops.forSymbol(symbolId);
   }

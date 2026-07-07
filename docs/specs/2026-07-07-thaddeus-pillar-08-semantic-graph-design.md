@@ -232,8 +232,8 @@ matters: **(1)** resolve the symbol's current binding (`from` name, def path)
 and reference set from a **fresh** decryption-bounded extraction — you can only
 rename what you can read; **(2)** guard: if `from` no longer matches the
 ledger's current name, throw `StaleRename` before touching anything; and reject
-a no-op rename (`newName === from`) rather than mint an empty op; **(3)** rewrite
-the identifier `from → newName` at the def site and every reference via
+a no-op rename (`newName === from`) rather than mint an empty op; **(3)**
+rewrite the identifier `from → newName` at the def site and every reference via
 `Workspace.write`, then one `Workspace.commit(author)`; **(4)** only after the
 commit lands, mint + record the signed `SymbolOp` and update the ledger binding.
 Recording the `SymbolOp` **after** a successful commit keeps the op log
@@ -491,13 +491,12 @@ content key, `forSymbol(id)` in deterministic order.
 ### 6.4 `rename` — rendering one op across references
 
 Per §4.2: resolve → staleness/no-op guard → for each file containing the def or
-a reference, rewrite the identifier `from → newName` (whole-word) in the text and
-`workspace.write` it, then one `workspace.commit(author)` → mint+record the
+a reference, rewrite the identifier `from → newName` (whole-word) in the text
+and `workspace.write` it, then one `workspace.commit(author)` → mint+record the
 `SymbolOp` and `rebind` the ledger (both post-commit). Returns
-`{ symbolOp, ops }`.
-The rewrite is name-based (the heuristic has no scope), so a same-named symbol
-in another scope would also be rewritten — an honest limitation of the
-single-language heuristic (§11), not of the op model.
+`{ symbolOp, ops }`. The rewrite is name-based (the heuristic has no scope), so
+a same-named symbol in another scope would also be rewritten — an honest
+limitation of the single-language heuristic (§11), not of the op model.
 
 ## 7. Data model
 
@@ -637,12 +636,14 @@ deterministic via injected identities/seeds. Three acts:
 - **In-memory ledger and op-log.** `SymbolLedger` and `SymbolOpLog` are not
   durable and not concurrency-safe; Backend persistence and wire ingest are
   deferred (like `ProvenanceLog`).
-- **`history()` is convergent-ordered, not temporal.** `SymbolOpLog.forSymbol`
-  sorts by `(author, signature, content)` — deterministic and peer-convergent
-  (the `ProvenanceLog` rule), but **not** the order renames were applied. True
-  temporal ordering wants the `SymbolOp.base` chain (each rename references the
-  prior `SymbolOp.id`); `base` is carried on the record but always `null` this
-  release, so multi-rename history order is convergent, not sequential.
+- **`history()` is causal only within one process.** `SymbolOpLog.forSymbol`
+  returns records in **insertion order** — for the single-process spike that is
+  the order renames were applied, so `history()` reads as a real sequence. Once
+  `SymbolOp`s are ingested over a wire out of order, insertion order no longer
+  reflects causality; convergent cross-peer ordering wants the `SymbolOp.base`
+  chain (each rename references the prior `SymbolOp.id`). `base` is carried on the
+  record but always `null` this release, so cross-peer temporal ordering is
+  deferred.
 - **`callersOf` is best-effort and single-language** over the decryptable view;
   no whole-program resolution.
 - **In-memory, single process.** No persistence, no network transport, no

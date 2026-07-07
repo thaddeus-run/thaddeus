@@ -88,6 +88,17 @@ describe('SymbolGraph.rename — one signed op, rendered everywhere', () => {
     expect(dec((await ws.read('src/auth.rs'))!)).toContain('fn renamed()');
   });
 
+  test('history reflects the order renames were applied (causal, single process)', async () => {
+    const { g, dev } = await seed();
+    const id = (await g.resolve('refresh'))!;
+    await g.rename(id, 'aa', dev);
+    await g.rename(id, 'bb', dev);
+    expect(g.history(id).map((h) => `${h.from}->${h.to}`)).toEqual([
+      'refresh->aa',
+      'aa->bb',
+    ]);
+  });
+
   test('renaming a symbol to its current name is rejected as a no-op', async () => {
     const { g, dev } = await seed();
     const id = (await g.resolve('refresh'))!;

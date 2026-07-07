@@ -36,22 +36,15 @@ export class SymbolOpLog {
     ]);
   }
 
-  // The signed structural history of a symbol, in a deterministic order (by
-  // author, then signature bytes, then full content) independent of insertion.
+  // The signed structural records for a symbol, in **insertion order** — for the
+  // single-process spike that is the order the renames were applied (causal
+  // order), so `history()` reads as a meaningful sequence. Unlike
+  // `ProvenanceLog.forOp` (an unordered set of claims about one op), this returns
+  // an ordered chain of renames. Cross-peer convergence — once records are
+  // ingested over a wire out of order — needs an explicit causal/sequence field
+  // or the `SymbolOp.base` chain, and is deferred (spec §11).
   forSymbol(symbolId: string): readonly SymbolOp[] {
-    return [...(this.#bySymbol.get(symbolId) ?? [])].sort((a, b) => {
-      if (a.author !== b.author) {
-        return a.author < b.author ? -1 : 1;
-      }
-      const sa = bytesToHex(a.sig);
-      const sb = bytesToHex(b.sig);
-      if (sa !== sb) {
-        return sa < sb ? -1 : 1;
-      }
-      const ka = this.#contentKey(a);
-      const kb = this.#contentKey(b);
-      return ka < kb ? -1 : ka > kb ? 1 : 0;
-    });
+    return [...(this.#bySymbol.get(symbolId) ?? [])];
   }
 
   // Signature + id integrity over the record. Whether the symbol/op it targets
