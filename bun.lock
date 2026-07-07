@@ -397,6 +397,22 @@
         "typescript": "catalog:",
       },
     },
+    "packages/query": {
+      "name": "@thaddeus.run/query",
+      "version": "0.0.0",
+      "devDependencies": {
+        "@thaddeus.run/fs": "workspace:*",
+        "@thaddeus.run/graph": "workspace:*",
+        "@thaddeus.run/identity": "workspace:*",
+        "@thaddeus.run/log": "workspace:*",
+        "@thaddeus.run/provenance": "workspace:*",
+        "@thaddeus.run/store": "workspace:*",
+        "@types/bun": "catalog:",
+        "@typescript/native-preview": "catalog:",
+        "tsdown": "catalog:",
+        "typescript": "catalog:",
+      },
+    },
     "packages/reputation": {
       "name": "@thaddeus.run/reputation",
       "version": "0.0.0",
@@ -895,6 +911,8 @@
     "@thaddeus.run/platform": ["@thaddeus.run/platform@workspace:packages/platform"],
 
     "@thaddeus.run/provenance": ["@thaddeus.run/provenance@workspace:packages/provenance"],
+
+    "@thaddeus.run/query": ["@thaddeus.run/query@workspace:packages/query"],
 
     "@thaddeus.run/reputation": ["@thaddeus.run/reputation@workspace:packages/reputation"],
 
