@@ -35,20 +35,20 @@ describe('Op record', () => {
     expect(verifyOp({ ...op, id: `${op.id}0` })).toBe(false);
   });
 
-  test('signOp rejects a non-ISO timestamp', () => {
+  test('signOp rejects a non-ISO or non-UTC timestamp', () => {
     const author = Identity.create();
-    expect(() =>
-      signOp(
-        {
-          path: 'a.ts',
-          parents: [],
-          lamport: 0,
-          at: 'not-a-date',
-          payload: null,
-        },
-        author
-      )
-    ).toThrow();
+    const bad = (at: string): void => {
+      expect(() =>
+        signOp(
+          { path: 'a.ts', parents: [], lamport: 0, at, payload: null },
+          author
+        )
+      ).toThrow();
+    };
+    bad('not-a-date');
+    bad('2026-07-07T12:00:00'); // local time, no zone designator
+    bad('2026-07-07T12:00:00+05:30'); // offset, not UTC
+    bad(''); // empty
   });
 
   test('verifyOp returns false (never throws) on malformed input', () => {

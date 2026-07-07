@@ -52,14 +52,21 @@ function assertCanonical(fields: OpFields, author: string): void {
   if (!Number.isSafeInteger(fields.lamport) || fields.lamport < 0) {
     throw new TypeError('op.lamport must be a non-negative safe integer');
   }
-  // A parseable ISO-8601 instant. Rejecting a non-time string here means a
-  // poisoning `at` can never be signed, and verifyOp (try/catch) rejects it.
+  // A parseable ISO-8601 **UTC** instant (Z-suffixed). Requiring `Z` — not just
+  // parseability — keeps the signed timestamp unambiguous: a local-time or
+  // offset string (e.g. `…+05:30`) would sign a wall-clock that means different
+  // instants to different readers and would sort wrong under lexicographic
+  // time-window indexes. The write path's default (`toISOString()`) is already
+  // Z-suffixed. Rejecting here means a poisoning `at` can never be signed, and
+  // verifyOp (try/catch) rejects it.
   if (
     typeof fields.at !== 'string' ||
-    fields.at.length === 0 ||
+    !fields.at.endsWith('Z') ||
     Number.isNaN(Date.parse(fields.at))
   ) {
-    throw new TypeError('op.at must be a non-empty ISO-8601 timestamp string');
+    throw new TypeError(
+      'op.at must be an ISO-8601 UTC timestamp string (Z-suffixed)'
+    );
   }
   for (const p of fields.parents) {
     if (typeof p !== 'string' || p.length === 0) {
