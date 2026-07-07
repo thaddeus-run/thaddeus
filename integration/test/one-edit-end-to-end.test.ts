@@ -14,6 +14,7 @@ import { OpLog } from '@thaddeus.run/log';
 import { MemoryBackend } from '@thaddeus.run/persist';
 import { blockOnConflict, Platform } from '@thaddeus.run/platform';
 import { ProvenanceLog } from '@thaddeus.run/provenance';
+import { CodeDB } from '@thaddeus.run/query';
 import { ReputationLog, signContribution } from '@thaddeus.run/reputation';
 import { MemoryStore, publicIdentity } from '@thaddeus.run/store';
 import { beforeAll, describe, expect, test } from 'bun:test';
@@ -112,6 +113,24 @@ describe('north-star: one edit, end to end', () => {
       author
     );
     expect(prov.status(why)).toBe('verified');
+
+    // P11: the codebase is a live database — join the graph, the timestamped
+    // history, and provenance into cross-cutting queries. The rename is one
+    // op with a verifiable --why; the renamed symbol is still queryable and its
+    // caller is discoverable; and the change shows up in a time-window query.
+    const db = CodeDB.over({ graph, log: repo.log, provenance: prov });
+    const answer = db.why(ops[0].id);
+    expect(answer.verified).toBe(true);
+    expect(answer.why.map((p) => p.intent)).toContain(
+      'rename refresh → refreshToken for clarity'
+    );
+    const renamed = await graph.resolve('refreshToken');
+    expect(
+      (await db.callers(renamed!)).map((c) => c.definition?.name)
+    ).toContain('login');
+    expect(
+      db.touchedSince('2000-01-01T00:00:00.000Z').map((o) => o.id)
+    ).toEqual(expect.arrayContaining(ops.map((o) => o.id)));
   });
 
   test('P06/P07: a landed op mints a merge Contribution verifiable on another instance', async () => {
