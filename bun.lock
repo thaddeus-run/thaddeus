@@ -506,6 +506,23 @@
         "typescript": "catalog:",
       },
     },
+    "packages/watch": {
+      "name": "@thaddeus.run/watch",
+      "version": "0.0.0",
+      "dependencies": {
+        "@thaddeus.run/graph": "workspace:*",
+      },
+      "devDependencies": {
+        "@thaddeus.run/fs": "workspace:*",
+        "@thaddeus.run/identity": "workspace:*",
+        "@thaddeus.run/log": "workspace:*",
+        "@thaddeus.run/store": "workspace:*",
+        "@types/bun": "catalog:",
+        "@typescript/native-preview": "catalog:",
+        "tsdown": "catalog:",
+        "typescript": "catalog:",
+      },
+    },
   },
   "patchedDependencies": {
     "libsodium-wrappers-sumo@0.7.16": "patches/libsodium-wrappers-sumo@0.7.16.patch",
@@ -944,6 +961,8 @@
     "@thaddeus.run/store": ["@thaddeus.run/store@workspace:packages/store"],
 
     "@thaddeus.run/theme": ["@thaddeus.run/theme@workspace:packages/theme"],
+
+    "@thaddeus.run/watch": ["@thaddeus.run/watch@workspace:packages/watch"],
 
     "@tybys/wasm-util": ["@tybys/wasm-util@0.10.2", "", { "dependencies": { "tslib": "^2.4.0" } }, "sha512-RoBvJ2X0wuKlWFIjrwffGw1IqZHKQqzIchKaadZZfnNpsAYp2mM0h36JtPCjNDAHGgYez/15uMBpfGwchhiMgg=="],
 
