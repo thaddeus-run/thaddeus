@@ -4,6 +4,11 @@ import {
   signDelegation,
 } from '@thaddeus.run/agent';
 import { Workspace } from '@thaddeus.run/fs';
+import {
+  HeuristicExtractor,
+  SymbolGraph,
+  verifySymbolOp,
+} from '@thaddeus.run/graph';
 import { Identity, ready } from '@thaddeus.run/identity';
 import { OpLog } from '@thaddeus.run/log';
 import { MemoryBackend } from '@thaddeus.run/persist';
@@ -55,6 +60,58 @@ describe('north-star: one edit, end to end', () => {
     if (op != null) {
       expect(repo.log.publicView(op.id).kind).toBe('open');
     }
+  });
+
+  test('P08: a structural rename is one signed SymbolOp rendered across every reference, with a why', async () => {
+    const repo = new Platform().createRepo('acme/web');
+    const author = Identity.create();
+    const prov = new ProvenanceLog(repo.store);
+
+    // Define a symbol and a caller in a Workspace, then commit it.
+    const ws = Workspace.open(repo.log, repo.store, {
+      source: 'main',
+      reader: author,
+      name: 'feat/graph',
+    });
+    ws.write(
+      'src/auth.rs',
+      new TextEncoder().encode(
+        'fn refresh() {}\nfn login() {\n  refresh();\n}\n'
+      )
+    );
+    await ws.commit(author);
+
+    // Symbol-level addressing: name → stable id; the call site is a reference.
+    const graph = SymbolGraph.over(ws, { extractor: new HeuristicExtractor() });
+    const id = await graph.resolve('refresh');
+    expect(id).not.toBeNull();
+    expect(await graph.referencesTo(id!)).toEqual([
+      { symbol: id!, path: 'src/auth.rs', line: 3 },
+    ]);
+
+    // Rename is ONE signed SymbolOp, rendered across def + call from one call.
+    const { symbolOp, ops } = await graph.rename(id!, 'refreshToken', author);
+    expect(verifySymbolOp(symbolOp)).toBe(true);
+    expect(symbolOp.symbol).toBe(id!);
+    const src = new TextDecoder().decode(await ws.read('src/auth.rs'));
+    expect(src).toContain('fn refreshToken()');
+    expect(src).toContain('refreshToken();');
+    expect(src).not.toContain('refresh(');
+
+    // Identity survived the rename.
+    expect(await graph.resolve('refreshToken')).toBe(id);
+
+    // A signed "why" binds to the rename's rendered op (compose with P04).
+    const why = await prov.record(
+      ops[0],
+      {
+        intent: 'rename refresh → refreshToken for clarity',
+        reasoning: 'the name shadowed a field; renamed the symbol',
+        actorKind: 'agent:claude-code@1.2',
+      },
+      author
+    );
+    expect(prov.status(why)).toBe('verified');
   });
 
   test('P06/P07: a landed op mints a merge Contribution verifiable on another instance', async () => {
