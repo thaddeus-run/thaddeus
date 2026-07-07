@@ -231,12 +231,25 @@ export function restrictPaths(opts: {
       'restrictPaths: protect must be a non-empty list of path globs'
     );
   }
+  // A `..` segment in a protect glob can never match a normal path, so it would
+  // silently protect nothing — reject it at construction (like the other guards).
+  if (opts.protect.some((glob) => glob.split('/').includes('..'))) {
+    throw new RangeError(
+      'restrictPaths: a protect glob must not contain a ".." segment'
+    );
+  }
   const allow = new Set(opts.allow);
   const name = opts.name ?? `protect ${opts.protect.join(', ')}`;
   return standingQuery({
     name,
+    // Fail CLOSED on a traversal path: a `..` path could normalize into a
+    // protected location downstream (a git gateway, a filesystem export), so an
+    // untrusted author may not land it — treat it as protected. `matchGlob`
+    // rejects a `..` path (returns false), which for this BLACKLIST check would
+    // fail OPEN, so the traversal test must come first, not rely on matchGlob.
     forbid: (op) =>
-      opts.protect.some((glob) => matchGlob(glob, op.path)) &&
+      (op.path.split('/').includes('..') ||
+        opts.protect.some((glob) => matchGlob(glob, op.path))) &&
       !allow.has(op.author),
   });
 }

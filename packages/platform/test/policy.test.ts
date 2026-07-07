@@ -524,10 +524,33 @@ describe('policy — standing queries (Pillar 11)', () => {
     expect(d.reason).toContain('no hand-edits to generated files');
   });
 
+  test('restrictPaths fails closed on a `..` traversal path (no fail-open bypass)', async () => {
+    const log = new OpLog(new MemoryStore());
+    const owner = Identity.create();
+    const stranger = Identity.create();
+    // A traversal path that could normalize into src/auth/ downstream.
+    const sneaky = await log.write(
+      'main',
+      'src/auth/../auth/login.rs',
+      enc('x'),
+      stranger
+    );
+    const policy = restrictPaths({
+      protect: ['src/auth/**'],
+      allow: [owner.did],
+    });
+    const d = await policy(proposal({ incomingOps: [sneaky] }));
+    expect(d.allow).toBe(false); // blocked, not silently allowed
+  });
+
   test('misconfiguration is rejected at construction', () => {
     expect(() => standingQuery({ name: '', forbid: () => false })).toThrow(
       RangeError
     );
     expect(() => restrictPaths({ protect: [], allow: [] })).toThrow(RangeError);
+    // A `..` in a protect glob would silently protect nothing → rejected.
+    expect(() =>
+      restrictPaths({ protect: ['src/../etc/**'], allow: [] })
+    ).toThrow(RangeError);
   });
 });
