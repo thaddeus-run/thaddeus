@@ -11,11 +11,11 @@ addresses code by stable `Symbol.id`, and makes **rename a first-class signed
 operation** (one `SymbolOp` rendered across every reference). Extend the
 north-star with a structural-rename assertion.
 
-**Architecture:** A new package with four source modules: `symbol.ts` (projection
-types + the `Extractor` seam + `HeuristicExtractor`), `symbolop.ts` (the signed
-`SymbolOp` record — the `Op`/`Provenance` pattern), `symboloplog.ts` (the
-keep-and-verify registry — the `ProvenanceLog` pattern), and `graph.ts` (the
-`SymbolLedger` + `SymbolGraph` read/rename surface). Reads re-extract from
+**Architecture:** A new package with four source modules: `symbol.ts`
+(projection types + the `Extractor` seam + `HeuristicExtractor`), `symbolop.ts`
+(the signed `SymbolOp` record — the `Op`/`Provenance` pattern), `symboloplog.ts`
+(the keep-and-verify registry — the `ProvenanceLog` pattern), and `graph.ts`
+(the `SymbolLedger` + `SymbolGraph` read/rename surface). Reads re-extract from
 `Workspace` text on each call (decryption-bounded for free); `rename` mints one
 signed `SymbolOp` and renders it through `Workspace.write` + `commit`.
 
@@ -34,9 +34,9 @@ receives them.
   from `Workspace` text on every read; nothing is stored or signed except
   `SymbolOp`. The capability boundary is inherited from `Workspace.read` (a
   `null` read ⇒ the symbol is invisible), never re-checked.
-- **Identity in the ledger, not the bytes (rigid).** A `Symbol.id` is minted once
-  at birth and retained across renames by the `SymbolLedger`. `rename` never
-  mints a new id for an existing symbol.
+- **Identity in the ledger, not the bytes (rigid).** A `Symbol.id` is minted
+  once at birth and retained across renames by the `SymbolLedger`. `rename`
+  never mints a new id for an existing symbol.
 - **Rename is one signed `SymbolOp`; text ops are its rendering (rigid).**
   `rename` mints exactly one `SymbolOp` and produces N ordinary P03 ops as its
   projection. `SymbolOp` follows the `op.ts`/`provenance.ts` signed-record
@@ -51,9 +51,9 @@ receives them.
   federation, structural conflict-as-function (only the `from` staleness guard
   ships). Spike: in-memory, single process.
 - **Tooling:** use `bun` (never npm/pnpm/npx). Run tasks through moon:
-  `moon run <project>:<task>` (or `moonx`). Export `AGENT=1` for AI-friendly test
-  output. Preserve trailing newlines. Commit messages follow Conventional Commits
-  1.0.0.
+  `moon run <project>:<task>` (or `moonx`). Export `AGENT=1` for AI-friendly
+  test output. Preserve trailing newlines. Commit messages follow Conventional
+  Commits 1.0.0.
 - **Naming:** package is `@thaddeus.run/graph` (neutral, product-agnostic);
   primary export `SymbolGraph`. The vision file uses "Strata"; package names
   never use `strata-`.
@@ -141,8 +141,9 @@ and `log` type-only dev):
 > a dev dep only for the tests (they build a `MemoryStore`/`OpLog`/`Workspace`).
 
 `packages/graph/moon.yml`, `tsconfig.json`, `tsdown.config.ts` — copy
-`packages/fs/moon.yml`, `packages/fs/tsconfig.json`, `packages/fs/tsdown.config.ts`
-verbatim (only the surrounding directory differs).
+`packages/fs/moon.yml`, `packages/fs/tsconfig.json`,
+`packages/fs/tsdown.config.ts` verbatim (only the surrounding directory
+differs).
 
 `packages/graph/README.md`:
 
@@ -153,17 +154,17 @@ The semantic graph for **Strata** (working name) — Pillar 08.
 
 `SymbolGraph` projects a graph of symbols, definitions, references, and call
 edges from the plaintext a `@thaddeus.run/fs` `Workspace` materializes — so code
-is something you _query_, and files are one rendered view. It addresses code by a
-stable `Symbol.id` (minted once at birth, retained across renames by a
+is something you _query_, and files are one rendered view. It addresses code by
+a stable `Symbol.id` (minted once at birth, retained across renames by a
 `SymbolLedger`) and makes **rename a first-class operation**: one signed
-`SymbolOp` rendered across the definition and every reference, not a thousand-line
-find-and-replace. The graph is **decryption-bounded** — you only see the meaning
-of code your identity can decrypt.
+`SymbolOp` rendered across the definition and every reference, not a
+thousand-line find-and-replace. The graph is **decryption-bounded** — you only
+see the meaning of code your identity can decrypt.
 
-> **Status: spike.** In-memory, single process. One heuristic language behind the
-> `Extractor` seam (a real tree-sitter/LSP parser drops in there); type edges,
-> structural ops beyond rename, per-symbol capability scope, and durability are
-> deferred (see the design spec).
+> **Status: spike.** In-memory, single process. One heuristic language behind
+> the `Extractor` seam (a real tree-sitter/LSP parser drops in there); type
+> edges, structural ops beyond rename, per-symbol capability scope, and
+> durability are deferred (see the design spec).
 ```
 
 - [ ] **Step 2: Copy the license**
@@ -212,7 +213,8 @@ describe('HeuristicExtractor', () => {
 
 - [ ] **Step 5: Run the test to verify it fails**
 
-Run: `AGENT=1 moon run graph:test` Expected: FAIL — cannot resolve `../src/symbol`.
+Run: `AGENT=1 moon run graph:test` Expected: FAIL — cannot resolve
+`../src/symbol`.
 
 - [ ] **Step 6: Write `src/symbol.ts`**
 
@@ -373,9 +375,9 @@ Add `src/graph.ts`: the `SymbolLedger` (stable-id mint + retention) and the
 
 - Consumes: `Workspace` (type) from `@thaddeus.run/fs`; the `symbol.ts` types +
   `Extractor`.
-- Produces: `SymbolLedger`; `SymbolGraph.over(workspace, { extractor, ledger?, ops? })`
-  with `symbols`, `resolve`, `resolveAt`, `definitionOf`, `referencesTo`,
-  `callersOf`, `edges`.
+- Produces: `SymbolLedger`;
+  `SymbolGraph.over(workspace, { extractor, ledger?, ops? })` with `symbols`,
+  `resolve`, `resolveAt`, `definitionOf`, `referencesTo`, `callersOf`, `edges`.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -403,7 +405,10 @@ async function seed(): Promise<{ ws: Workspace; g: SymbolGraph }> {
   const log = new OpLog(store);
   const dev = Identity.create();
   const ws = Workspace.open(log, store, { source: 'main', reader: dev });
-  ws.write('src/auth.rs', enc('fn refresh() {}\nfn login() {\n  refresh();\n}\n'));
+  ws.write(
+    'src/auth.rs',
+    enc('fn refresh() {}\nfn login() {\n  refresh();\n}\n')
+  );
   await ws.commit(dev);
   const g = SymbolGraph.over(ws, { extractor: new HeuristicExtractor() });
   return { ws, g };
@@ -416,7 +421,11 @@ describe('SymbolGraph — read model', () => {
     expect(id).not.toBeNull();
     expect(await g.resolve('refresh')).toBe(id); // stable across queries
     const def = await g.definitionOf(id!);
-    expect(def).toMatchObject({ name: 'refresh', path: 'src/auth.rs', line: 1 });
+    expect(def).toMatchObject({
+      name: 'refresh',
+      path: 'src/auth.rs',
+      line: 1,
+    });
   });
 
   test('referencesTo includes the call site; callersOf includes login', async () => {
@@ -461,7 +470,8 @@ describe('SymbolGraph — read model', () => {
 
 - [ ] **Step 2: Run the test to verify it fails**
 
-Run: `AGENT=1 moon run graph:test` Expected: FAIL — cannot resolve `../src/graph`.
+Run: `AGENT=1 moon run graph:test` Expected: FAIL — cannot resolve
+`../src/graph`.
 
 - [ ] **Step 3: Write `src/graph.ts` (ledger + read model)**
 
@@ -695,7 +705,9 @@ export class SymbolGraph {
   async callersOf(symbolId: string): Promise<readonly Symbol[]> {
     const { edges, defs } = await this.#model();
     const callerIds = new Set(
-      edges.filter((e) => e.kind === 'calls' && e.to === symbolId).map((e) => e.from)
+      edges
+        .filter((e) => e.kind === 'calls' && e.to === symbolId)
+        .map((e) => e.from)
     );
     const byId = new Map(defs.map((d) => [d.symbol, d] as const));
     return [...callerIds]
@@ -722,10 +734,11 @@ export class SymbolGraph {
 
 > **Implementer note — resolution simplicity.** The helper `#resolveName`
 > approach above is deliberately conservative. If it reads awkwardly during
-> implementation, replace it with the simpler two-pass form: in `#model`, build a
-> `Map<name, id>` from the def pass first (last def of a name wins), then resolve
-> refs by that map. Keep the public read-method behavior and the tests identical;
-> the internal name→id resolution is loose interior, not a rigid seam.
+> implementation, replace it with the simpler two-pass form: in `#model`, build
+> a `Map<name, id>` from the def pass first (last def of a name wins), then
+> resolve refs by that map. Keep the public read-method behavior and the tests
+> identical; the internal name→id resolution is loose interior, not a rigid
+> seam.
 
 - [ ] **Step 4: Update `src/index.ts`**
 
@@ -762,9 +775,9 @@ Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>"
 
 ### Task 3: `SymbolOp` signed record + `SymbolOpLog`
 
-Add the signed structural op (`src/symbolop.ts`, the exact `op.ts`/`provenance.ts`
-pattern) and its keep-and-verify registry (`src/symboloplog.ts`, the
-`provenancelog.ts` pattern).
+Add the signed structural op (`src/symbolop.ts`, the exact
+`op.ts`/`provenance.ts` pattern) and its keep-and-verify registry
+(`src/symboloplog.ts`, the `provenancelog.ts` pattern).
 
 **Files:**
 
@@ -820,7 +833,9 @@ describe('SymbolOp — signed record', () => {
   });
 
   test('an empty required field throws on sign, is rejected on verify', () => {
-    expect(() => signSymbolOp({ ...fields, to: '' }, Identity.create())).toThrow();
+    expect(() =>
+      signSymbolOp({ ...fields, to: '' }, Identity.create())
+    ).toThrow();
   });
 });
 
@@ -1030,7 +1045,8 @@ export { SymbolOpLog } from './symboloplog';
 
 - [ ] **Step 6: Run, typecheck, build**
 
-Run: `AGENT=1 moon run graph:test && moon run graph:typecheck && moon run graph:build`
+Run:
+`AGENT=1 moon run graph:test && moon run graph:typecheck && moon run graph:build`
 Expected: all PASS.
 
 - [ ] **Step 7: Commit**
@@ -1067,7 +1083,8 @@ guard. Add `history`. This is the pillar's proof point.
 - Consumes: `Identity` (type) from `@thaddeus.run/identity`; `Op` (type) from
   `@thaddeus.run/log`; `signSymbolOp`, `SymbolOp` from `./symbolop`;
   `SymbolOpLog` from `./symboloplog`.
-- Produces: `SymbolGraph.rename(symbolId, newName, author): Promise<{ symbolOp; ops }>`,
+- Produces:
+  `SymbolGraph.rename(symbolId, newName, author): Promise<{ symbolOp; ops }>`,
   `SymbolGraph.history(symbolId): readonly SymbolOp[]`, `class StaleRename`.
 
 - [ ] **Step 1: Write the failing test**
@@ -1098,7 +1115,10 @@ async function seed() {
   const log = new OpLog(store);
   const dev = Identity.create();
   const ws = Workspace.open(log, store, { source: 'main', reader: dev });
-  ws.write('src/auth.rs', enc('fn refresh() {}\nfn login() {\n  refresh();\n}\n'));
+  ws.write(
+    'src/auth.rs',
+    enc('fn refresh() {}\nfn login() {\n  refresh();\n}\n')
+  );
   await ws.commit(dev);
   const g = SymbolGraph.over(ws, { extractor: new HeuristicExtractor() });
   return { ws, g, dev };
@@ -1161,7 +1181,8 @@ describe('SymbolGraph.rename — one signed op, rendered everywhere', () => {
 
 - [ ] **Step 2: Run the test to verify it fails**
 
-Run: `AGENT=1 moon run graph:test` Expected: FAIL — `g.rename`/`StaleRename` missing.
+Run: `AGENT=1 moon run graph:test` Expected: FAIL — `g.rename`/`StaleRename`
+missing.
 
 - [ ] **Step 3: Add `rename`, `history`, `StaleRename` to `graph.ts`**
 
@@ -1247,8 +1268,8 @@ function escapeIdent(s: string): string {
 }
 ```
 
-Update `over` to accept and store `opts.ops` (`?? new SymbolOpLog()`), and adjust
-the constructor to hold `#ops`.
+Update `over` to accept and store `opts.ops` (`?? new SymbolOpLog()`), and
+adjust the constructor to hold `#ops`.
 
 - [ ] **Step 4: Update `src/index.ts`**
 
@@ -1258,7 +1279,8 @@ export { SymbolGraph, SymbolLedger, StaleRename } from './graph';
 
 - [ ] **Step 5: Run, typecheck, build**
 
-Run: `AGENT=1 moon run graph:test && moon run graph:typecheck && moon run graph:build`
+Run:
+`AGENT=1 moon run graph:test && moon run graph:typecheck && moon run graph:build`
 Expected: all PASS — rename renders across def + reference, identity survives,
 stale rename rejected.
 
@@ -1282,9 +1304,9 @@ Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>"
 ### Task 5: Extend the north-star with a structural rename
 
 Add one test to `integration/test/one-edit-end-to-end.test.ts` proving the
-manifesto's "structural change" branch: define a symbol + caller in a `Workspace`,
-rename via one `SymbolOp`, all references update, identity preserved, a
-provenance "why" bound to the rename, rendered ops land + mirror.
+manifesto's "structural change" branch: define a symbol + caller in a
+`Workspace`, rename via one `SymbolOp`, all references update, identity
+preserved, a provenance "why" bound to the rename, rendered ops land + mirror.
 
 **Files:**
 
@@ -1309,7 +1331,11 @@ Run: `bun install`.
 Add near the other imports:
 
 ```ts
-import { HeuristicExtractor, SymbolGraph, verifySymbolOp } from '@thaddeus.run/graph';
+import {
+  HeuristicExtractor,
+  SymbolGraph,
+  verifySymbolOp,
+} from '@thaddeus.run/graph';
 ```
 
 Add this test inside the `north-star: one edit, end to end` describe block:
@@ -1368,8 +1394,8 @@ test('P08: a structural rename is one signed SymbolOp rendered across every refe
 
 - [ ] **Step 3: Run the north-star suite**
 
-Run: `AGENT=1 moon run integration:test` Expected: PASS — the existing tests plus
-the new P08 assertion, all green.
+Run: `AGENT=1 moon run integration:test` Expected: PASS — the existing tests
+plus the new P08 assertion, all green.
 
 - [ ] **Step 4: Commit**
 
@@ -1398,24 +1424,28 @@ acts from spec §9.
   `@thaddeus.run/graph`, `@thaddeus.run/identity`, `@thaddeus.run/log`,
   `@thaddeus.run/store`; devDep `@types/bun`)
 - Create: `examples/semantic-graph/moon.yml` (id `example-semantic-graph`; copy
-  `examples/workspace/moon.yml`'s `test --pass-with-no-tests` + `demo` task shape)
-- Create: `examples/semantic-graph/tsconfig.json` (copy `examples/workspace/tsconfig.json`)
+  `examples/workspace/moon.yml`'s `test --pass-with-no-tests` + `demo` task
+  shape)
+- Create: `examples/semantic-graph/tsconfig.json` (copy
+  `examples/workspace/tsconfig.json`)
 - Create: `examples/semantic-graph/src/semantic-graph.ts`
 
-- [ ] **Step 1: Create the config files** — copy the `examples/workspace/` shapes,
-      renaming id → `example-semantic-graph` and the demo entry to
+- [ ] **Step 1: Create the config files** — copy the `examples/workspace/`
+      shapes, renaming id → `example-semantic-graph` and the demo entry to
       `bun src/semantic-graph.ts`.
 
-- [ ] **Step 2: Write the demo** (`examples/semantic-graph/src/semantic-graph.ts`):
-      the three acts — (1) query the graph (`resolve`/`definitionOf`/
-      `referencesTo`/`callersOf`), (2) `rename` and show one signed op renders
-      across every site with identity preserved and `history`, (3) an ungranted
-      def is listed but invisible to the graph. Print the acceptance facts.
+- [ ] **Step 2: Write the demo**
+      (`examples/semantic-graph/src/semantic-graph.ts`): the three acts — (1)
+      query the graph (`resolve`/`definitionOf`/ `referencesTo`/`callersOf`),
+      (2) `rename` and show one signed op renders across every site with
+      identity preserved and `history`, (3) an ungranted def is listed but
+      invisible to the graph. Print the acceptance facts.
 
-- [ ] **Step 3: Install and run** — `bun install && CI= moon run example-semantic-graph:demo`
-      Expected: Act 1 shows the resolved id + caller `login`; Act 2 shows
-      `verifySymbolOp true`, `fn refreshToken()` + `refreshToken();`, same id,
-      one `history` entry; Act 3 shows the secret path listed but `resolve` null.
+- [ ] **Step 3: Install and run** —
+      `bun install && CI= moon run example-semantic-graph:demo` Expected: Act 1
+      shows the resolved id + caller `login`; Act 2 shows `verifySymbolOp true`,
+      `fn refreshToken()` + `refreshToken();`, same id, one `history` entry; Act
+      3 shows the secret path listed but `resolve` null.
 
 - [ ] **Step 4: Typecheck** — `moon run example-semantic-graph:typecheck`.
 
@@ -1437,12 +1467,13 @@ Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>"
 ### Task 7: Update the convergence docs (ARCHITECTURE + CHANGELOG), incl. P10 fix
 
 Flip Pillar 08 to built, redeem the two P08 IOUs, add the new deferred entries —
-and correct the stale Pillar 10 row (it shipped but the table still says planned).
+and correct the stale Pillar 10 row (it shipped but the table still says
+planned).
 
 **Files:**
 
-- Modify: `ARCHITECTURE.md` (P08 row `planned → built`; **P10 row `planned →
-  built`, package `review`**; `graph` note on the `Op` primitive row)
+- Modify: `ARCHITECTURE.md` (P08 row `planned → built`; **P10 row
+  `planned → built`, package `review`**; `graph` note on the `Op` primitive row)
 - Modify: `CHANGELOG.md` (`[Unreleased] → Added` for P08; move the two P08 IOUs
   out of Deferred; add the new P08 deferred entries; add the missing P10/review
   release bullet if absent)
@@ -1450,17 +1481,18 @@ and correct the stale Pillar 10 row (it shipped but the table still says planned
 - [ ] **Step 1: `ARCHITECTURE.md` — status rows.** Change the Pillar 08 row from
       `| 08 Semantic graph | _(planned)_ | planned | P14 P5 P18 |` to
       `| 08 Semantic graph | `graph` | built | P14 P5 P18 |`. In the same pass,
-      change the Pillar 10 row from `_(planned)_ | planned` to `` `review` ``/`built`
-      (queued housekeeping — PRs #15–17 shipped it). Add a `graph` consumer note
-      to the `Op` shared-primitive row's "Reused by" cell.
+      change the Pillar 10 row from `_(planned)_ | planned` to
+      `` `review` ``/`built` (queued housekeeping — PRs #15–17 shipped it). Add
+      a `graph` consumer note to the `Op` shared-primitive row's "Reused by"
+      cell.
 
-- [ ] **Step 2: `CHANGELOG.md` — Added.** Under `[Unreleased] → Added`, after the
-      last package bullet, add the P08 release note (SymbolGraph over a Workspace;
-      stable Symbol.id in a SymbolLedger; rename-symbol as one signed SymbolOp
-      rendered across every reference; the Extractor seam + single-language
-      HeuristicExtractor; decryption-bounded). If no `@thaddeus.run/review`
-      (P10) bullet exists, add it too (reputation-tier gate, test/proof gate,
-      standing human veto).
+- [ ] **Step 2: `CHANGELOG.md` — Added.** Under `[Unreleased] → Added`, after
+      the last package bullet, add the P08 release note (SymbolGraph over a
+      Workspace; stable Symbol.id in a SymbolLedger; rename-symbol as one signed
+      SymbolOp rendered across every reference; the Extractor seam +
+      single-language HeuristicExtractor; decryption-bounded). If no
+      `@thaddeus.run/review` (P10) bullet exists, add it too (reputation-tier
+      gate, test/proof gate, standing human veto).
 
 - [ ] **Step 3: `CHANGELOG.md` — Deferred ledger.** Remove the two existing P08
       scope-cut IOUs (**Rename/move as a first-class op (P08)**, **Symbol-level
@@ -1498,9 +1530,11 @@ demo, and the docs land green together.
 - [ ] **Step 2: Format and lint** — `moon run root:format root:lint`.
 - [ ] **Step 3: Typecheck affected** —
       `moon run graph:typecheck integration:typecheck example-semantic-graph:typecheck`.
-- [ ] **Step 4: Affected tests** — `AGENT=1 moon run graph:test integration:test`.
+- [ ] **Step 4: Affected tests** —
+      `AGENT=1 moon run graph:test integration:test`.
 - [ ] **Step 5: Confirm nothing regressed** — `AGENT=1 moon run :test`.
-- [ ] **Step 6: Run the demo once more** — `CI= moon run example-semantic-graph:demo`.
+- [ ] **Step 6: Run the demo once more** —
+      `CI= moon run example-semantic-graph:demo`.
 - [ ] **Step 7: Final commit (only if format/lint produced changes)**
 
 ```bash
@@ -1522,15 +1556,15 @@ Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>"
   rebind), the read-model assembly in `#model`, and the `SymbolOp` record +
   `SymbolOpLog` — both copied from `op.ts`/`provenance.ts`/`provenancelog.ts`.
 - **Decryption-bounded for free:** never re-check capabilities in `graph`. A
-  `workspace.read` that returns `null` means the file is undecryptable or absent;
-  skip it. The Task 2 "ungranted def is invisible" test pins this.
+  `workspace.read` that returns `null` means the file is undecryptable or
+  absent; skip it. The Task 2 "ungranted def is invisible" test pins this.
 - **Identity is in the ledger, not the bytes:** the id is minted once from the
   birth `(path, name, kind)` and retained via `rebind`. The Task 4 "identity
-  survived" assertion (`resolve('refreshToken') === id`) is the load-bearing one —
-  if it fails, rename is minting a new symbol.
-- **One `SymbolOp`, N text ops:** `rename` returns exactly one `symbolOp` and the
-  `Workspace.commit` ops. The Task 4/5 assertions pin "one signed op" + "rendered
-  everywhere"; keep them.
+  survived" assertion (`resolve('refreshToken') === id`) is the load-bearing one
+  — if it fails, rename is minting a new symbol.
+- **One `SymbolOp`, N text ops:** `rename` returns exactly one `symbolOp` and
+  the `Workspace.commit` ops. The Task 4/5 assertions pin "one signed op" +
+  "rendered everywhere"; keep them.
 - **The extractor and name-resolution are loose interior.** If the `#model`
   name→id resolution reads awkwardly, use the simpler two-pass `Map<name,id>`
   form (Task 2 implementer note). Do not change the public read-method behavior
@@ -1539,8 +1573,8 @@ Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>"
   workspace symlinks resolve before build/test.
 - **Signed-record fidelity:** `symbolop.ts` must match `op.ts` exactly — domain
   tag, `assertCanonical` (throw on empty/malformed), `id = blake3(canonical)`,
-  fail-closed `verify` with the id check. The Task 3 "tampering fails closed" and
-  "empty field throws" tests pin this.
+  fail-closed `verify` with the id check. The Task 3 "tampering fails closed"
+  and "empty field throws" tests pin this.
 - **Determinism:** tests use `Identity.create()` (fresh keys) but assert only on
   structural facts (resolved ids equal, verified/invalid, rendered text, sorted
   order), never on specific key or id bytes — so they are reproducible.

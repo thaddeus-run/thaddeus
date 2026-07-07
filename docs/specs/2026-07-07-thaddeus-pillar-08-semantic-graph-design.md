@@ -17,46 +17,46 @@ Strata is an 11-pillar replacement for Git+GitHub, built **one primitive at a
 time** (Pillar 01 spec §4). Tiers 0–3 have shipped: identity + store (P01), the
 membrane (P02), the operation log (P03), provenance (P04), the virtual
 filesystem (P05), the platform (P06), federated reputation (P07), agents as
-principals (P09), and review-as-policy (P10). Two greenfield pillars remain — the
-**semantic graph (P08)** and the **live database (P11)** — and P11 depends on
-P08. This spec is P08.
+principals (P09), and review-as-policy (P10). Two greenfield pillars remain —
+the **semantic graph (P08)** and the **live database (P11)** — and P11 depends
+on P08. This spec is P08.
 
 **Pillar 08 — the semantic graph** is chosen now because:
 
 - **It is the last foundational primitive, and it proves the manifesto's central
-  claim.** The brief's thesis is that *code is not a pile of text files; it is a
-  live, structured graph you query — files are one rendered view*. Everything
+  claim.** The brief's thesis is that _code is not a pile of text files; it is a
+  live, structured graph you query — files are one rendered view_. Everything
   built so far is the substrate plumbing that carries bytes; P08 is where the
   substrate first understands what those bytes **mean**. Without it, the "same
   pipeline, finer unit" promise of the brief's one-edit callout (line 638) — a
   `rename-symbol` op that targets a symbol id instead of a path — cannot be
   demonstrated.
 - **It consumes Tier 0–2 across their public APIs only, and adds little new
-  machinery.** Like P05, most of P08 is composition. The graph is *derived* from
-  the plaintext a `Workspace` already materializes (P05), and a rename *renders*
-  through the `Workspace.write` + `commit` path into ordinary signed P03 ops. The
-  genuinely new code is one signed record type (`SymbolOp`, built the way P04
-  built `Provenance`) and an in-memory symbol-identity ledger.
+  machinery.** Like P05, most of P08 is composition. The graph is _derived_ from
+  the plaintext a `Workspace` already materializes (P05), and a rename _renders_
+  through the `Workspace.write` + `commit` path into ordinary signed P03 ops.
+  The genuinely new code is one signed record type (`SymbolOp`, built the way
+  P04 built `Provenance`) and an in-memory symbol-identity ledger.
 - **It redeems IOUs the CHANGELOG already owes.** Two deferred entries name P08
-  by hand: *"Rename/move as a first-class op (P08) — currently two unlinked
-  path-ops"* and *"Symbol-level addressing (P08) — `Op.path` generalizes to a
-  symbol id."* This release pays both.
+  by hand: _"Rename/move as a first-class op (P08) — currently two unlinked
+  path-ops"_ and _"Symbol-level addressing (P08) — `Op.path` generalizes to a
+  symbol id."_ This release pays both.
 
 It resolves the brief's Pillar 08 problem cluster (`ARCHITECTURE.md` lists P08
-against **P14, P5, P18**): meaning becomes the addressable artifact, a structural
-change is one operation rather than a thousand-line find-and-replace, and a merge
-can, in principle, raise a conflict only when a *contract* broke rather than on
-whitespace.
+against **P14, P5, P18**): meaning becomes the addressable artifact, a
+structural change is one operation rather than a thousand-line find-and-replace,
+and a merge can, in principle, raise a conflict only when a _contract_ broke
+rather than on whitespace.
 
 ## 2. Governing principle — _stable seams, playground interiors_
 
-Unchanged from Pillars 01–07/09/10 (§2): **rigid** = the new package's public API
-(`SymbolGraph` and its method shapes), the `SymbolOp` signed record shape, the
-`Extractor` interface, and the north-star flow; **loose** = everything behind
-those seams — the extractor's regex internals, the in-memory ledger
-representation, the single supported language. Consequences here: in-memory only,
-single process, no persistence, no network transport, no production hardening,
-one heuristic language.
+Unchanged from Pillars 01–07/09/10 (§2): **rigid** = the new package's public
+API (`SymbolGraph` and its method shapes), the `SymbolOp` signed record shape,
+the `Extractor` interface, and the north-star flow; **loose** = everything
+behind those seams — the extractor's regex internals, the in-memory ledger
+representation, the single supported language. Consequences here: in-memory
+only, single process, no persistence, no network transport, no production
+hardening, one heuristic language.
 
 The genuinely rigid, expensive-to-reverse calls in this release are: **(a)** a
 symbol's **identity lives in a ledger + signed rename ops, not in the bytes**
@@ -103,17 +103,18 @@ Reading each of the brief's Pillar 08 claims, this release takes a position:
    `Extractor` seam; real per-language parsing (tree-sitter / LSP) drops in
    later without touching `SymbolGraph`.
 5. **Merge raises a conflict only if a contract broke** (partly deferred). The
-   spike honors this *in miniature* via a staleness guard (a rename whose `from`
-   no longer matches is rejected); full structural/contract conflict detection is
-   P10 territory.
+   spike honors this _in miniature_ via a staleness guard (a rename whose `from`
+   no longer matches is rejected); full structural/contract conflict detection
+   is P10 territory.
 
 ## 3. The release's job
 
-Introduce `@thaddeus.run/graph`: the `SymbolGraph` read/rename surface over a P05
-`Workspace`, plus the signed `SymbolOp` record. Deliverables:
+Introduce `@thaddeus.run/graph`: the `SymbolGraph` read/rename surface over a
+P05 `Workspace`, plus the signed `SymbolOp` record. Deliverables:
 
-- The **`Extractor`** seam and a **`HeuristicExtractor`** (§6): a single-language,
-  regex-based symbol/reference extractor, explicitly a spike seam.
+- The **`Extractor`** seam and a **`HeuristicExtractor`** (§6): a
+  single-language, regex-based symbol/reference extractor, explicitly a spike
+  seam.
 - The **`Symbol` / `Definition` / `Reference` / `Edge`** projection types (§7).
 - The **`SymbolLedger`** (§6.2): the in-memory map that mints and retains a
   symbol's stable id across renames.
@@ -125,28 +126,29 @@ Introduce `@thaddeus.run/graph`: the `SymbolGraph` read/rename surface over a P0
   (`symbols`, `resolve`, `resolveAt`, `definitionOf`, `referencesTo`,
   `callersOf`, `edges`, `history`), and the write **`rename`** (§6.4) — the
   differentiated operation.
-- A **semantic-graph CLI demo** (`examples/semantic-graph/`) enacting
-  define → resolve → rename (one op renders everywhere) → a decryption-bounded
-  query (§9).
+- A **semantic-graph CLI demo** (`examples/semantic-graph/`) enacting define →
+  resolve → rename (one op renders everywhere) → a decryption-bounded query
+  (§9).
 - The north-star integration test extended with a **structural-rename**
   assertion; `ARCHITECTURE.md` Pillar 08 row flipped `planned → built`; the flow
   stays green (§12).
 
 Not the job: multi-language extraction, real parser / scope & shadowing
-resolution, type inference and type edges, structural ops beyond `rename-symbol`,
-whole-program call-graph completeness, per-symbol capability scope, durability /
-federation of `SymbolOp`, and full contract-conflict detection (§5, §11).
+resolution, type inference and type edges, structural ops beyond
+`rename-symbol`, whole-program call-graph completeness, per-symbol capability
+scope, durability / federation of `SymbolOp`, and full contract-conflict
+detection (§5, §11).
 
 ## 4. Decisions taken (brainstorm outcomes)
 
-1. **Home — a new package `@thaddeus.run/graph`** (primary export `SymbolGraph`).
-   Neutral, product-agnostic name per the scope convention (AGENTS.md "Naming");
-   matches the brief's "semantic graph" and the `ARCHITECTURE.md` Pillar 08
-   label. It consumes `@thaddeus.run/fs` (`Workspace` — a value import),
-   `@thaddeus.run/store` (`AccessDenied` value + `Ref` type), and
-   `@thaddeus.run/identity` (`Identity` / `PublicIdentity` values, for signing)
-   across their public APIs only, and imports `@thaddeus.run/log` (`Op`, `OpLog`)
-   as types.
+1. **Home — a new package `@thaddeus.run/graph`** (primary export
+   `SymbolGraph`). Neutral, product-agnostic name per the scope convention
+   (AGENTS.md "Naming"); matches the brief's "semantic graph" and the
+   `ARCHITECTURE.md` Pillar 08 label. It consumes `@thaddeus.run/fs`
+   (`Workspace` — a value import), `@thaddeus.run/store` (`AccessDenied` value +
+   `Ref` type), and `@thaddeus.run/identity` (`Identity` / `PublicIdentity`
+   values, for signing) across their public APIs only, and imports
+   `@thaddeus.run/log` (`Op`, `OpLog`) as types.
 
 2. **The graph is a projection of Workspace text, not a stored artifact.**
    Symbols, definitions, references, and edges are **re-extracted from the
@@ -166,23 +168,24 @@ federation of `SymbolOp`, and full contract-conflict detection (§5, §11).
    that maps the current lookup key `(path, name, kind) → id` and back.
    Re-extraction of unchanged text re-links to the same id via the lookup key; a
    rename rewrites the ledger binding `(path, from, kind) → (path, to, kind)`
-   **atomically with** the text rewrite, so post-rename extraction of the now-`to`
-   definition re-links to the *same* id. Identity is preserved across a rename
-   precisely because the id is not derived from the current name — it is minted
-   at birth and carried by the rename op. The alternative — deriving the id from
-   the current name/text — was rejected: it makes rename mint a new symbol, which
-   is exactly the churn the pillar exists to eliminate.
+   **atomically with** the text rewrite, so post-rename extraction of the
+   now-`to` definition re-links to the _same_ id. Identity is preserved across a
+   rename precisely because the id is not derived from the current name — it is
+   minted at birth and carried by the rename op. The alternative — deriving the
+   id from the current name/text — was rejected: it makes rename mint a new
+   symbol, which is exactly the churn the pillar exists to eliminate.
 
 4. **A rename is one signed `SymbolOp`; the text ops are its rendering.**
    `SymbolGraph.rename(symbolId, newName, author)` mints **one** signed
    `SymbolOp{ kind:'rename-symbol', symbol, from, to, base, author, sig }` — the
-   source of truth for the change — and then *renders* it by rewriting the
+   source of truth for the change — and then _renders_ it by rewriting the
    identifier at the definition site and every reference through
    `Workspace.write` + a single `Workspace.commit(author)`, producing the normal
    P03 `Op`s the rest of the substrate (provenance, land, mirror) consumes
-   unchanged. "A rename is *one* operation, not a thousand-line find-and-replace"
-   (brief line 621); the N text ops are explicitly the *projection* of the one
-   `SymbolOp`, mirroring the pillar's own "text is one rendering."
+   unchanged. "A rename is _one_ operation, not a thousand-line
+   find-and-replace" (brief line 621); the N text ops are explicitly the
+   _projection_ of the one `SymbolOp`, mirroring the pillar's own "text is one
+   rendering."
 
 5. **Extraction is single-language behind a rigid seam; text is the universal
    fallback.** `Extractor` is the rigid interface; `HeuristicExtractor` is the
@@ -192,12 +195,12 @@ federation of `SymbolOp`, and full contract-conflict detection (§5, §11).
    parsing (tree-sitter, rust-analyzer/tsserver) is the frontier's actual hard
    problem — seconds to cold-index, hundreds of MB to GBs of RAM per workspace,
    and putting that on the canonical write path for a fleet of agents is the
-   thing to get *right*, later. The spike's job is to prove the substrate shape
+   thing to get _right_, later. The spike's job is to prove the substrate shape
    (identity, rename-as-op, symbol queries), not to ship a language server. A
    real parser drops in behind `Extractor` without touching `SymbolGraph`.
 
-6. **Conflict-as-function, in miniature.** The brief's "raises a conflict only if
-   a contract broke" is honored by the `from` field: a rename whose `from` no
+6. **Conflict-as-function, in miniature.** The brief's "raises a conflict only
+   if a contract broke" is honored by the `from` field: a rename whose `from` no
    longer matches the ledger's current name for the symbol is **stale** (the
    symbol moved under the caller) and is rejected before any text is written.
    Full structural conflict detection (signature compatibility across callers,
@@ -205,16 +208,16 @@ federation of `SymbolOp`, and full contract-conflict detection (§5, §11).
 
 ### 4.1 Why this is almost no new machinery (honest claim)
 
-Like P05, the differentiated capability is mostly *composition* of primitives
+Like P05, the differentiated capability is mostly _composition_ of primitives
 already shipped:
 
-| P08 capability                     | Mechanism (existing)                                       |
-| ---------------------------------- | ---------------------------------------------------------- |
-| read source text for extraction    | `Workspace.read` / `list` (P05) — decryption-bounded       |
-| render a rename across references   | `Workspace.write` + `Workspace.commit` (P05) → P03 ops      |
-| the signed structural op           | the `Op` / `Provenance` signed-record pattern (P03/P04)     |
-| keep-and-verify structural history  | the `ProvenanceLog` in-memory registry pattern (P04)       |
-| capability boundary on the graph    | inherited from `Workspace` reads (P05 §6.4)                |
+| P08 capability                     | Mechanism (existing)                                    |
+| ---------------------------------- | ------------------------------------------------------- |
+| read source text for extraction    | `Workspace.read` / `list` (P05) — decryption-bounded    |
+| render a rename across references  | `Workspace.write` + `Workspace.commit` (P05) → P03 ops  |
+| the signed structural op           | the `Op` / `Provenance` signed-record pattern (P03/P04) |
+| keep-and-verify structural history | the `ProvenanceLog` in-memory registry pattern (P04)    |
+| capability boundary on the graph   | inherited from `Workspace` reads (P05 §6.4)             |
 
 P08's genuinely new code is small: the `Extractor` heuristic, the read-model
 projection (`SymbolGraph` queries), the `SymbolLedger` (stable-id minting +
@@ -225,17 +228,17 @@ source of truth.
 ### 4.2 `rename` step order (the one subtle rule)
 
 `rename(symbolId, newName, author)` executes in this order, and the order
-matters: **(1)** resolve the symbol's current binding (`from` name, def path) and
-reference set from a **fresh** decryption-bounded extraction — you can only
-rename what you can read; **(2)** guard: if `from` no longer matches the ledger's
-current name, throw `StaleRename` before touching anything; **(3)** mint and
-record the signed `SymbolOp`; **(4)** rewrite the identifier `from → newName` at
-the def site and every reference via `Workspace.write`, then one
-`Workspace.commit(author)`; **(5)** update the ledger binding atomically so
-re-extraction re-links the same id. The `SymbolOp` is minted *before* the text
-render so the artifact of meaning exists even if a later store write is fallible;
-the ledger update happens *after* a successful commit so the projection and the
-identity map never disagree.
+matters: **(1)** resolve the symbol's current binding (`from` name, def path)
+and reference set from a **fresh** decryption-bounded extraction — you can only
+rename what you can read; **(2)** guard: if `from` no longer matches the
+ledger's current name, throw `StaleRename` before touching anything; **(3)**
+mint and record the signed `SymbolOp`; **(4)** rewrite the identifier
+`from → newName` at the def site and every reference via `Workspace.write`, then
+one `Workspace.commit(author)`; **(5)** update the ledger binding atomically so
+re-extraction re-links the same id. The `SymbolOp` is minted _before_ the text
+render so the artifact of meaning exists even if a later store write is
+fallible; the ledger update happens _after_ a successful commit so the
+projection and the identity map never disagree.
 
 ## 5. Scope
 
@@ -260,17 +263,18 @@ identity map never disagree.
   the drop-in seam for tree-sitter/LSP per language. Text is the universal
   fallback.
 - **Real parser / scope & shadowing resolution** → the regex extractor has no
-  scope analysis; a real language server is the "do it great" target (aligns with
-  the existing "Rust hot-path reimplementation … likely P03 and P08" research
-  ledger entry).
+  scope analysis; a real language server is the "do it great" target (aligns
+  with the existing "Rust hot-path reimplementation … likely P03 and P08"
+  research ledger entry).
 - **Type inference and type edges** → `Edge` ships `calls`/`references` only.
 - **Structural ops beyond `rename-symbol`** → `change-signature`,
-  `move-definition`, `extract-function` share the `SymbolOp` record shape but are
-  not built.
+  `move-definition`, `extract-function` share the `SymbolOp` record shape but
+  are not built.
 - **Whole-program call-graph completeness** → `callersOf` is best-effort within
   the decryptable, single-language view.
-- **Per-symbol capability scope** (the brief's "hide one function inside a public
-  file") → powerful and easy to get wrong; a P01/P02 × P08 integration pass.
+- **Per-symbol capability scope** (the brief's "hide one function inside a
+  public file") → powerful and easy to get wrong; a P01/P02 × P08 integration
+  pass.
 - **Durability / federation of `SymbolOp`** → the ledger and `SymbolOpLog` are
   in-memory only (like `ProvenanceLog`); Backend persistence and wire ingest are
   deferred.
@@ -447,9 +451,9 @@ export type { Symbol, Definition, Reference, Edge, Extractor, SymbolOp };
 On every read query, `SymbolGraph` walks `workspace.list()`, reads each
 decryptable file (`workspace.read`, `null` skipped), and runs the `Extractor`
 over its text. Definitions populate/consult the ledger (§6.2) to attach a stable
-`Symbol.id`; references and calls become `Reference`s and `Edge`s pointing at the
-resolved ids. Undecryptable files never enter the graph — the capability boundary
-is inherited from `Workspace`, not re-checked.
+`Symbol.id`; references and calls become `Reference`s and `Edge`s pointing at
+the resolved ids. Undecryptable files never enter the graph — the capability
+boundary is inherited from `Workspace`, not re-checked.
 
 ### 6.2 The `SymbolLedger` — stable identity
 
@@ -463,20 +467,21 @@ The ledger is the graph's only mutable, non-projection state:
   `(path, name, kind)` is the deterministic spike default.)
 - **Re-link:** subsequent extraction of unchanged text finds the key and reuses
   the id.
-- **Rebind (rename):** `rebind(id, from → to)` rewrites `(path, from, kind) → id`
-  to `(path, to, kind) → id`, keeping the *same* id. Re-extraction of the now-`to`
-  definition therefore re-links to the same symbol.
+- **Rebind (rename):** `rebind(id, from → to)` rewrites
+  `(path, from, kind) → id` to `(path, to, kind) → id`, keeping the _same_ id.
+  Re-extraction of the now-`to` definition therefore re-links to the same
+  symbol.
 
 The ledger is seeded lazily by extraction and shared across a `SymbolGraph`'s
-queries within one construction; a caller may pass a persistent `SymbolLedger` to
-carry identity across `over` calls on the same evolving workspace.
+queries within one construction; a caller may pass a persistent `SymbolLedger`
+to carry identity across `over` calls on the same evolving workspace.
 
 ### 6.3 `SymbolOp` — the signed structural op
 
 `SymbolOp` follows the `Op`/`Provenance` record discipline exactly (§8): a
 `SymbolOpFields` tuple, a domain-tagged canonical JSON encoding, an
-`assertCanonical` that rejects empty/malformed fields before hashing, `id =
-blake3(canonical)`, `sig = author.sign(canonical)`, and a fail-closed
+`assertCanonical` that rejects empty/malformed fields before hashing,
+`id = blake3(canonical)`, `sig = author.sign(canonical)`, and a fail-closed
 `verifySymbolOp` (any mismatch or malformed input → `false`, never throws). The
 `SymbolOpLog` is the `ProvenanceLog` pattern: keep-and-verify, dedup on a total
 content key, `forSymbol(id)` in deterministic order.
@@ -486,10 +491,10 @@ content key, `forSymbol(id)` in deterministic order.
 Per §4.2: resolve → staleness-guard → mint+record `SymbolOp` → for each file
 containing the def or a reference, rewrite the identifier `from → newName`
 (whole-word) in the text and `workspace.write` it, then one
-`workspace.commit(author)` → `rebind` the ledger. Returns
-`{ symbolOp, ops }`. The rewrite is name-based (the heuristic has no scope), so a
-same-named symbol in another scope would also be rewritten — an honest limitation
-of the single-language heuristic (§11), not of the op model.
+`workspace.commit(author)` → `rebind` the ledger. Returns `{ symbolOp, ops }`.
+The rewrite is name-based (the heuristic has no scope), so a same-named symbol
+in another scope would also be rewritten — an honest limitation of the
+single-language heuristic (§11), not of the op model.
 
 ## 7. Data model
 
@@ -530,17 +535,17 @@ addressed at birth; there is nothing new to encrypt.
 - `blake3` (`@noble/hashes/blake3`) for the id and the canonical byte digest.
 - The author `Identity.sign` / `PublicIdentity.fromDid(...).verify` (P01) over
   domain-tagged canonical JSON — domain tag `'thaddeus.graph.symbolop.v1'`, so a
-  `SymbolOp` signature can never be confused with an op (`thaddeus.log.op.v1`) or
-  provenance (`thaddeus.provenance.v1`) signature.
+  `SymbolOp` signature can never be confused with an op (`thaddeus.log.op.v1`)
+  or provenance (`thaddeus.provenance.v1`) signature.
 - `assertCanonical` rejects non-canonical field values (empty strings, wrong
   types) before hashing, exactly as `op.ts`/`provenance.ts` do, so a poisoning
   value cannot be signed and `verifySymbolOp` rejects it.
 
 The symbol id mint is `blake3` over a domain-tagged birth key (§6.2) — a
-content-address, not a signature. `SymbolGraph` performs no encryption of its own;
-all content encryption/decryption stays in `store`/`Workspace`. Methods that
-touch identity/store/log `await ready()` transitively; the package documents that
-`ready()` must be awaited before use (consistent with Tier 0–3).
+content-address, not a signature. `SymbolGraph` performs no encryption of its
+own; all content encryption/decryption stays in `store`/`Workspace`. Methods
+that touch identity/store/log `await ready()` transitively; the package
+documents that `ready()` must be awaited before use (consistent with Tier 0–3).
 
 ## 9. The demo — the semantic graph (CLI)
 
@@ -559,11 +564,11 @@ deterministic via injected identities/seeds. Three acts:
 **Act 2 — rename is one operation.**
 
 3. `const { symbolOp, ops } = await g.rename(id, 'refreshToken', dev);` Show
-   `verifySymbolOp(symbolOp) === true`, `symbolOp.symbol === id` — **one** signed
-   op — and that `ws.grep('refresh(')` now returns only `refreshToken(` at both
-   the def and the call site, from that single call. Show `g.resolve
-   ('refreshToken') === id` (identity survived) and `g.history(id)` lists the
-   rename.
+   `verifySymbolOp(symbolOp) === true`, `symbolOp.symbol === id` — **one**
+   signed op — and that `ws.grep('refresh(')` now returns only `refreshToken(`
+   at both the def and the call site, from that single call. Show
+   `g.resolve ('refreshToken') === id` (identity survived) and `g.history(id)`
+   lists the rename.
 
 **Act 3 — the graph stops at the capability boundary.**
 
@@ -586,9 +591,9 @@ deterministic via injected identities/seeds. Three acts:
    `symbolOp` with `verifySymbolOp === true`, `kind === 'rename-symbol'`,
    `symbol === id`, `from === 'refresh'`, `to === 'refreshToken'`. _(Pins
    decision 4.)_
-5. **Rename renders across every reference** — after the rename, `grep('refresh(')`
-   matches only `refreshToken(` at both the def and the call site; no site is
-   missed and none is left stale.
+5. **Rename renders across every reference** — after the rename,
+   `grep('refresh(')` matches only `refreshToken(` at both the def and the call
+   site; no site is missed and none is left stale.
 6. **Identity survives rename** — `resolve('refreshToken') === id` (same id;
    rename did not mint a new symbol) and `resolve('refresh') === null`. _(Pins
    decision 3.)_
@@ -603,20 +608,20 @@ deterministic via injected identities/seeds. Three acts:
 10. **`history`** — after a rename, `history(id)` lists the `SymbolOp`; a symbol
     never renamed returns `[]`.
 11. **Decryption-bounded graph** — a definition in an object the reader cannot
-    decrypt is absent from `symbols`/`resolve`/`edges` (no throw), while its path
-    still appears in `ws.list()`. _(Pins decision 2.)_
+    decrypt is absent from `symbols`/`resolve`/`edges` (no throw), while its
+    path still appears in `ws.list()`. _(Pins decision 2.)_
 12. **Composition (north-star)** — the seeded flow gains a structural-rename
     assertion: define a symbol + a caller in a `Workspace`, `resolve`, `rename`,
-    and assert one signed `SymbolOp`, all references updated, identity preserved,
-    a `ProvenanceLog` "why" bound to the rename, and the rendered ops landing +
-    mirror-servable; the flow stays green.
+    and assert one signed `SymbolOp`, all references updated, identity
+    preserved, a `ProvenanceLog` "why" bound to the rename, and the rendered ops
+    landing + mirror-servable; the flow stays green.
 
 ## 11. Honest limitations (stated, not hidden)
 
-- **One heuristic language, no real parser.** The `HeuristicExtractor` recognizes
-  `fn <name>(` / `<name>(` only; it mis-identifies symbols inside comments and
-  strings, cannot resolve scope or shadowing, and knows nothing of types. It is a
-  spike seam; `Extractor` is where a real parser lands.
+- **One heuristic language, no real parser.** The `HeuristicExtractor`
+  recognizes `fn <name>(` / `<name>(` only; it mis-identifies symbols inside
+  comments and strings, cannot resolve scope or shadowing, and knows nothing of
+  types. It is a spike seam; `Extractor` is where a real parser lands.
 - **Name-based rename render.** With no scope analysis, `rename` rewrites the
   identifier by whole-word match, so a same-named symbol in another scope would
   also be rewritten. Correct scoping is a real-parser concern.
@@ -647,8 +652,8 @@ deterministic via injected identities/seeds. Three acts:
   call graph**, **per-symbol capability scope**, **`SymbolOp` durability /
   federation**, **structural conflict-as-function (→P10)**.
 - **`ARCHITECTURE.md`** — flip the **Pillar 08** row `planned → built` (package
-  `@thaddeus.run/graph`). The `Op` primitive row already lists P08; add a `graph`
-  consumer note (the rename render produces ops). _(Do the queued P10
+  `@thaddeus.run/graph`). The `Op` primitive row already lists P08; add a
+  `graph` consumer note (the rename render produces ops). _(Do the queued P10
   housekeeping in the same pass — the table still marks Pillar 10 "planned"
   though `@thaddeus.run/review` shipped; flip it to `built`.)_
 - **North-star** — add the structural-rename assertion (§10.12) to
@@ -659,10 +664,10 @@ deterministic via injected identities/seeds. Three acts:
 - **Pillar 11 (live database)** is the natural next primitive and depends on
   this one: wrap `SymbolGraph`'s read model (`edges`, `referencesTo`,
   `definitionOf`) with a subscription/trigger surface — "query the present
-  semantic state; stand up triggers that fire on *meaning*" (brief line 721) —
-  plus the deferred `--why` provenance-history query surface. The `Op` wall-clock
-  timestamp (a small P03 change the CHANGELOG defers) unblocks time-range history
-  there.
+  semantic state; stand up triggers that fire on _meaning_" (brief line 721) —
+  plus the deferred `--why` provenance-history query surface. The `Op`
+  wall-clock timestamp (a small P03 change the CHANGELOG defers) unblocks
+  time-range history there.
 - **A real `Extractor`** (tree-sitter / language server) behind the seam is the
   first "do it great" follow-on, and the point where multi-language and correct
   scoping arrive.
