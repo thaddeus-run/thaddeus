@@ -1,12 +1,34 @@
 import { blake3 } from '@noble/hashes/blake3';
 import { bytesToHex } from '@noble/hashes/utils';
 import type { Workspace } from '@thaddeus.run/fs';
+import type { Identity } from '@thaddeus.run/identity';
+import type { Op } from '@thaddeus.run/log';
 
 import type { Definition, Edge, Extractor, Reference, Symbol } from './symbol';
+import { signSymbolOp, type SymbolOp } from './symbolop';
+import { SymbolOpLog } from './symboloplog';
 
 // Domain tag for the birth-mint content address, so a symbol id can never
 // collide with an op id, provenance hash, or another protocol's digest.
 const SYMBOL_DOMAIN = 'thaddeus.graph.symbol.v1';
+
+// Thrown when a rename's expected `from` name no longer matches the symbol's
+// current binding — the symbol moved under the caller. No text is written.
+export class StaleRename extends Error {
+  constructor(symbolId: string, expected: string, actual: string | null) {
+    super(
+      `stale rename of ${symbolId}: expected current name ${expected}, found ${actual}`
+    );
+    this.name = 'StaleRename';
+  }
+}
+
+// Escape a bare identifier for use inside a RegExp. Identifiers are
+// [A-Za-z0-9_], so this is defensive; it keeps the helper honest if the
+// character set ever widens.
+function escapeIdent(s: string): string {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
 
 // The current binding of a symbol — its lookup key. `id` is stable; this moves.
 interface Binding {
@@ -86,25 +108,29 @@ export class SymbolGraph {
   protected readonly ws: Workspace;
   readonly #extractor: Extractor;
   protected readonly ledger: SymbolLedger;
+  readonly #ops: SymbolOpLog;
 
   protected constructor(
     ws: Workspace,
     extractor: Extractor,
-    ledger: SymbolLedger
+    ledger: SymbolLedger,
+    ops: SymbolOpLog
   ) {
     this.ws = ws;
     this.#extractor = extractor;
     this.ledger = ledger;
+    this.#ops = ops;
   }
 
   static over(
     workspace: Workspace,
-    opts: { extractor: Extractor; ledger?: SymbolLedger }
+    opts: { extractor: Extractor; ledger?: SymbolLedger; ops?: SymbolOpLog }
   ): SymbolGraph {
     return new SymbolGraph(
       workspace,
       opts.extractor,
-      opts.ledger ?? new SymbolLedger()
+      opts.ledger ?? new SymbolLedger(),
+      opts.ops ?? new SymbolOpLog()
     );
   }
 
@@ -219,5 +245,67 @@ export class SymbolGraph {
   async edges(): Promise<readonly Edge[]> {
     const { edges } = await this.#model();
     return edges;
+  }
+
+  // Rename a symbol as ONE signed SymbolOp rendered across the def and every
+  // reference. Order (spec §4.2): resolve current binding → staleness guard →
+  // mint+record SymbolOp → rewrite each occurrence via Workspace.write + one
+  // commit → rebind the ledger. Returns the semantic op and the rendered P03 ops.
+  async rename(
+    symbolId: string,
+    newName: string,
+    author: Identity
+  ): Promise<{ readonly symbolOp: SymbolOp; readonly ops: readonly Op[] }> {
+    // (1) Current binding + the live occurrence set from a fresh extraction.
+    const from = this.ledger.currentName(symbolId);
+    const def = await this.definitionOf(symbolId);
+    // (2) Staleness guard: the ledger's name must still match what the text says.
+    // If the symbol moved under us (text changed, or an unknown id), reject
+    // before writing anything.
+    if (from === null || def === null || def.name !== from) {
+      throw new StaleRename(symbolId, from ?? '(unknown)', def?.name ?? null);
+    }
+    const refs = await this.referencesTo(symbolId);
+
+    // (3) Mint + record the one signed artifact of meaning.
+    const symbolOp = signSymbolOp(
+      {
+        kind: 'rename-symbol',
+        symbol: symbolId,
+        from,
+        to: newName,
+        base: null,
+      },
+      author
+    );
+    this.#ops.append(symbolOp);
+
+    // (4) Render: rewrite the identifier from→newName at every touched path, then
+    // a single commit. Whole-word replace (the heuristic has no scope — spec §11).
+    const touched = new Set<string>([def.path, ...refs.map((r) => r.path)]);
+    const wordRe = new RegExp(`\\b${escapeIdent(from)}\\b`, 'g');
+    for (const path of touched) {
+      const bytes = await this.ws.read(path);
+      if (bytes === null) {
+        continue;
+      }
+      const text = new TextDecoder().decode(bytes);
+      this.ws.write(
+        path,
+        new TextEncoder().encode(text.replace(wordRe, newName))
+      );
+    }
+    const ops = await this.ws.commit(author);
+
+    // (5) Rebind the ledger so re-extraction re-links the same id to newName.
+    this.ledger.rebind(symbolId, newName);
+
+    return { symbolOp, ops };
+  }
+
+  // The signed structural history of a symbol (its SymbolOps), oldest binding
+  // first per the log's deterministic order. Empty if never renamed.
+  history(symbolId: string): readonly SymbolOp[] {
+    return this.#ops.forSymbol(symbolId);
   }
 }
