@@ -177,3 +177,79 @@ export function blockOnVeto(
         };
   };
 }
+
+// Minimal path glob, mirroring @thaddeus.run/agent's delegationPolicy matcher:
+// `**` matches everything; `prefix/**` matches any path under `prefix/`;
+// otherwise the glob must equal the path exactly. A `..` segment fails closed.
+function matchGlob(glob: string, path: string): boolean {
+  if (path.split('/').includes('..')) {
+    return false;
+  }
+  if (glob === '**') {
+    return true;
+  }
+  if (glob.endsWith('/**')) {
+    return path.startsWith(glob.slice(0, -2));
+  }
+  return glob === path;
+}
+
+// Policy as a standing query (Pillar 11): express an invariant as a predicate
+// over the proposed change and let the substrate enforce it AS changes converge
+// — not a CI script that runs late. `forbid` returns true for an op that
+// violates the invariant; the landing is rejected if any incoming op does. The
+// building block restrictPaths and any bespoke rule compose over this.
+export function standingQuery(opts: {
+  name: string;
+  forbid: (op: Op) => boolean;
+}): LandPolicy {
+  if (opts.name.length === 0) {
+    throw new RangeError('standingQuery: name must be a non-empty string');
+  }
+  return (p) => {
+    const violations = p.incomingOps.filter((op) => opts.forbid(op));
+    return violations.length === 0
+      ? { allow: true }
+      : {
+          allow: false,
+          reason: `standing query "${opts.name}": ${violations.length} op(s) violate the invariant`,
+        };
+  };
+}
+
+// The manifesto's headline standing query — "no untrusted agent may modify auth
+// code" — as an enforced land invariant: reject a landing where an incoming op
+// touches a PROTECTED path (glob) unless its author is in the `allow` set. Not a
+// late CI check but an invariant the substrate holds as changes converge.
+export function restrictPaths(opts: {
+  protect: readonly string[];
+  allow: readonly string[];
+  name?: string;
+}): LandPolicy {
+  if (opts.protect.length === 0) {
+    throw new RangeError(
+      'restrictPaths: protect must be a non-empty list of path globs'
+    );
+  }
+  // A `..` segment in a protect glob can never match a normal path, so it would
+  // silently protect nothing — reject it at construction (like the other guards).
+  if (opts.protect.some((glob) => glob.split('/').includes('..'))) {
+    throw new RangeError(
+      'restrictPaths: a protect glob must not contain a ".." segment'
+    );
+  }
+  const allow = new Set(opts.allow);
+  const name = opts.name ?? `protect ${opts.protect.join(', ')}`;
+  return standingQuery({
+    name,
+    // Fail CLOSED on a traversal path: a `..` path could normalize into a
+    // protected location downstream (a git gateway, a filesystem export), so an
+    // untrusted author may not land it — treat it as protected. `matchGlob`
+    // rejects a `..` path (returns false), which for this BLACKLIST check would
+    // fail OPEN, so the traversal test must come first, not rely on matchGlob.
+    forbid: (op) =>
+      (op.path.split('/').includes('..') ||
+        opts.protect.some((glob) => matchGlob(glob, op.path))) &&
+      !allow.has(op.author),
+  });
+}

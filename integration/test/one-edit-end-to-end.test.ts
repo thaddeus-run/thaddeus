@@ -12,7 +12,11 @@ import {
 import { Identity, ready } from '@thaddeus.run/identity';
 import { OpLog } from '@thaddeus.run/log';
 import { MemoryBackend } from '@thaddeus.run/persist';
-import { blockOnConflict, Platform } from '@thaddeus.run/platform';
+import {
+  blockOnConflict,
+  Platform,
+  restrictPaths,
+} from '@thaddeus.run/platform';
 import { ProvenanceLog } from '@thaddeus.run/provenance';
 import { CodeDB } from '@thaddeus.run/query';
 import { ReputationLog, signContribution } from '@thaddeus.run/reputation';
@@ -131,6 +135,55 @@ describe('north-star: one edit, end to end', () => {
     expect(
       db.touchedSince('2000-01-01T00:00:00.000Z').map((o) => o.id)
     ).toEqual(expect.arrayContaining(ops.map((o) => o.id)));
+  });
+
+  test('P11: policy as a standing query — an untrusted agent cannot land auth code', async () => {
+    const repo = new Platform().createRepo('acme/web');
+    const owner = Identity.create();
+    const stranger = Identity.create();
+    // The invariant runs AS changes converge, not as a late CI check.
+    const policy = restrictPaths({
+      protect: ['src/auth/**'],
+      allow: [owner.did],
+      name: 'no untrusted agent may modify auth code',
+    });
+
+    // A stranger's landing that touches protected auth code is rejected.
+    const evil = Workspace.open(repo.log, repo.store, {
+      source: 'main',
+      reader: stranger,
+      name: 'feat/evil',
+    });
+    evil.write(
+      'src/auth/login.rs',
+      new TextEncoder().encode('fn backdoor() {}')
+    );
+    await evil.commit(stranger);
+    const blocked = await repo.land({
+      from: 'feat/evil',
+      into: 'main',
+      author: stranger,
+      policy,
+    });
+    expect(blocked.landed).toBe(false);
+    expect(blocked.reason).toContain('no untrusted agent may modify auth code');
+    expect(repo.log.materialize('main').has('src/auth/login.rs')).toBe(false);
+
+    // The owner may land the same protected path.
+    const fix = Workspace.open(repo.log, repo.store, {
+      source: 'main',
+      reader: owner,
+      name: 'feat/fix',
+    });
+    fix.write('src/auth/login.rs', new TextEncoder().encode('fn login() {}'));
+    await fix.commit(owner);
+    const landed = await repo.land({
+      from: 'feat/fix',
+      into: 'main',
+      author: owner,
+      policy,
+    });
+    expect(landed.landed).toBe(true);
   });
 
   test('P06/P07: a landed op mints a merge Contribution verifiable on another instance', async () => {

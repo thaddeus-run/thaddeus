@@ -160,6 +160,15 @@ All notable changes to Thaddeus. Format follows
   lookup + a time-window). Subscriptions that fire on semantic events (P11
   Slice 2) and policy as standing queries (P11 Slice 3) are the remaining
   slices.
+- `@thaddeus.run/platform` — policy as standing queries (Pillar 11, **Slice
+  3**): `standingQuery` and `restrictPaths` `LandPolicy`s alongside the P06/P10
+  gates. A standing query expresses an invariant as a predicate over the
+  proposed change and the substrate enforces it **as changes converge** at land
+  — not a CI script that runs late. `restrictPaths` is the manifesto's headline
+  — "no untrusted agent may modify auth code": reject a landing whose op touches
+  a protected path (glob) unless its author is in the `allow` set (fail-closed
+  on a `..` segment; misconfiguration rejected at construction). The north-star
+  now rejects a stranger's landing to `src/auth/**` while allowing the owner's.
 
 ### Changed
 
@@ -255,14 +264,15 @@ All notable changes to Thaddeus. Format follows
   capabilities into answerable cross-cutting questions. What remains for a full
   Pillar 11 is Slice 2 (subscriptions that fire on semantic events) and Slice 3
   (policy as standing queries) — see below.
-- **P11 subscriptions & standing-query policy (P11 Slices 2–3).** The query
-  slice is pull-only. Live **subscriptions** that fire on semantic events (e.g.
-  "tell me when the signature of this public function changes") — via diffing
-  graph snapshots — and **policy as standing queries** evaluated at land over
-  the P10 `LandPolicy` seam ("no untrusted agent may modify auth code") are the
-  two remaining slices. Also deferred for the query surface: incremental/indexed
-  derivation (millisecond scale), a durable query store, and behavioral-diff
-  across full history (present-state only today).
+- **P11 subscriptions (P11 Slice 2).** Policy as standing queries (Slice 3)
+  shipped above. Live **subscriptions** that fire on semantic events (e.g. "tell
+  me when the signature of this public function changes") — via diffing graph
+  snapshots — are the remaining P11 slice (`@thaddeus.run/watch`, in flight).
+  Also deferred across the P11 slices: a push/webhook transport for
+  subscriptions; symbol-level standing queries (needs the graph over the
+  proposed state, not just paths); and for the query surface,
+  incremental/indexed derivation (millisecond scale), a durable query store, and
+  behavioral-diff across full history (present-state only today).
 - **Typed Release objects (P06).** A signed
   `Release { tag, at, signed_by, commits, artifacts }` record and its rendered
   page — a clean follow-on slice. Landing-as-policy already delivers "a release
