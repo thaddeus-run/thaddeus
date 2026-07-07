@@ -41,12 +41,14 @@
   "scripts": {
     "prepublishOnly": "moon run query:prepublish"
   },
+  "dependencies": {
+    "@thaddeus.run/graph": "workspace:*",
+    "@thaddeus.run/log": "workspace:*",
+    "@thaddeus.run/provenance": "workspace:*"
+  },
   "devDependencies": {
     "@thaddeus.run/fs": "workspace:*",
-    "@thaddeus.run/graph": "workspace:*",
     "@thaddeus.run/identity": "workspace:*",
-    "@thaddeus.run/log": "workspace:*",
-    "@thaddeus.run/provenance": "workspace:*",
     "@thaddeus.run/store": "workspace:*",
     "@types/bun": "catalog:",
     "@typescript/native-preview": "catalog:",

@@ -8,8 +8,11 @@ import type { Op, OpLog } from '@thaddeus.run/log';
 import type { Provenance, ProvenanceLog } from '@thaddeus.run/provenance';
 
 // The signed "why" behind a change: the provenance records bound to an op, plus
-// the op itself and a convenience `verified` flag (at least one record whose
-// signature checks out). Pillar 11's --why surface.
+// the op itself and a convenience `verified` flag — true when AT LEAST ONE bound
+// record's signature checks out. (Provenance is keep-and-label: a peer can
+// attach an unsigned/forged claim, so requiring *every* record to verify would
+// let one such claim poison a genuine why. Matches P04's "an unverifiable why
+// poisons nothing.") Pillar 11's --why surface.
 export interface Why {
   readonly opId: string;
   readonly op: Op | null;
@@ -23,14 +26,23 @@ export interface Caller {
   readonly definition: Definition | null;
 }
 
-// A time bound must be a parseable ISO-8601 instant — reject junk loudly rather
-// than silently matching nothing.
+// A caller-supplied time bound must be a parseable ISO-8601 instant — reject
+// junk loudly rather than silently matching nothing.
 function instant(label: string, at: string): number {
   const t = Date.parse(at);
   if (Number.isNaN(t)) {
     throw new RangeError(`${label} must be an ISO-8601 timestamp: ${at}`);
   }
   return t;
+}
+
+// Parse a STORED op's `at` leniently: a single unparseable record must not throw
+// the whole query (a bad row shouldn't poison every temporal query), so it is
+// simply excluded from time-window results. Normal ops always carry a valid,
+// signed `at` (op.ts asserts it), so this only guards the degenerate case.
+function opInstant(at: string): number | null {
+  const t = Date.parse(at);
+  return Number.isNaN(t) ? null : t;
 }
 
 // The live query surface (Pillar 11, query slice). A read-only facade that JOINS
@@ -65,13 +77,13 @@ export class CodeDB {
   }
 
   // The --why behind an op: its provenance records + the op + a `verified` flag
-  // (there is at least one record and every record's signature checks out).
+  // that is true when at least one bound record's signature checks out (a forged
+  // or unsigned peer claim alongside a genuine why does not flip it to false —
+  // keep-and-label, per P04).
   why(opId: string): Why {
     const why = this.#provenance.forOp(opId);
     const op = this.#log.ops().find((o) => o.id === opId) ?? null;
-    const verified =
-      why.length > 0 &&
-      why.every((p) => this.#provenance.status(p) === 'verified');
+    const verified = why.some((p) => this.#provenance.status(p) === 'verified');
     return { opId, op, why, verified };
   }
 
@@ -80,7 +92,10 @@ export class CodeDB {
   // `by()` for a specific principal.
   touchedSince(at: string): readonly Op[] {
     const lo = instant('at', at);
-    return this.#log.ops().filter((o) => instant('op.at', o.at) >= lo);
+    return this.#log.ops().filter((o) => {
+      const t = opInstant(o.at);
+      return t !== null && t >= lo;
+    });
   }
 
   // Every op authored within the inclusive window [from, to].
@@ -88,8 +103,8 @@ export class CodeDB {
     const lo = instant('from', from);
     const hi = instant('to', to);
     return this.#log.ops().filter((o) => {
-      const t = instant('op.at', o.at);
-      return t >= lo && t <= hi;
+      const t = opInstant(o.at);
+      return t !== null && t >= lo && t <= hi;
     });
   }
 
@@ -102,8 +117,12 @@ export class CodeDB {
       if (o.author !== did) {
         return false;
       }
-      const t = instant('op.at', o.at);
-      return (lo === undefined || t >= lo) && (hi === undefined || t <= hi);
+      const t = opInstant(o.at);
+      return (
+        t !== null &&
+        (lo === undefined || t >= lo) &&
+        (hi === undefined || t <= hi)
+      );
     });
   }
 

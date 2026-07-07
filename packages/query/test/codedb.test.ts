@@ -61,6 +61,23 @@ describe('CodeDB — the query surface', () => {
     expect(w.verified).toBe(false);
   });
 
+  test('a genuine why stays verified alongside an unverifiable (forged) record', async () => {
+    const { ops, provenance, author, db } = await seed();
+    const op = ops[0];
+    const good = await provenance.record(
+      op,
+      { intent: 'genuine', reasoning: 'real reason', actorKind: 'agent:x' },
+      author
+    );
+    // Keep-and-label: a peer attaches a forged record (good's signature over a
+    // tampered field). It is kept but does not verify — and must NOT poison the
+    // genuine why.
+    provenance.append({ ...good, reasoning: 'a plausible lie' });
+    const w = db.why(op.id);
+    expect(w.why).toHaveLength(2);
+    expect(w.verified).toBe(true);
+  });
+
   test('touchedSince / touchedBetween filter by wall-clock', async () => {
     const { ops, db } = await seed();
     const ids = ops.map((o) => o.id);
