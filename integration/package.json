@@ -14,7 +14,8 @@
     "@thaddeus.run/provenance": "workspace:*",
     "@thaddeus.run/query": "workspace:*",
     "@thaddeus.run/reputation": "workspace:*",
-    "@thaddeus.run/store": "workspace:*"
+    "@thaddeus.run/store": "workspace:*",
+    "@thaddeus.run/watch": "workspace:*"
   },
   "devDependencies": {
     "@types/bun": "catalog:"

@@ -17,6 +17,7 @@ import { ProvenanceLog } from '@thaddeus.run/provenance';
 import { CodeDB } from '@thaddeus.run/query';
 import { ReputationLog, signContribution } from '@thaddeus.run/reputation';
 import { MemoryStore, publicIdentity } from '@thaddeus.run/store';
+import { SemanticWatcher } from '@thaddeus.run/watch';
 import { beforeAll, describe, expect, test } from 'bun:test';
 
 // The brief's "one edit, end to end" flow. Tier 0 (identity + store) is real
@@ -131,6 +132,42 @@ describe('north-star: one edit, end to end', () => {
     expect(
       db.touchedSince('2000-01-01T00:00:00.000Z').map((o) => o.id)
     ).toEqual(expect.arrayContaining(ops.map((o) => o.id)));
+  });
+
+  test('P11: a standing subscription fires on the semantic event of a rename', async () => {
+    const repo = new Platform().createRepo('acme/web');
+    const author = Identity.create();
+    const ws = Workspace.open(repo.log, repo.store, {
+      source: 'main',
+      reader: author,
+      name: 'feat/watch',
+    });
+    ws.write(
+      'src/auth.rs',
+      new TextEncoder().encode(
+        'fn refresh() {}\nfn login() {\n  refresh();\n}\n'
+      )
+    );
+    await ws.commit(author);
+    const graph = SymbolGraph.over(ws, { extractor: new HeuristicExtractor() });
+    const id = await graph.resolve('refresh');
+
+    // Subscriptions fire on MEANING, not on file paths: stand up a trigger for
+    // "this symbol is renamed", rename it, and poll — the event surfaces.
+    const watcher = await SemanticWatcher.over(graph);
+    const sub = watcher.watch({ symbol: id!, kinds: ['renamed'] });
+    await graph.rename(id!, 'refreshToken', author);
+    await watcher.poll();
+
+    const events = sub.take();
+    expect(events).toHaveLength(1);
+    const e = events[0];
+    expect(e.kind).toBe('renamed');
+    if (e.kind === 'renamed') {
+      expect(e.symbol).toBe(id!);
+      expect(e.from).toBe('refresh');
+      expect(e.to).toBe('refreshToken');
+    }
   });
 
   test('P06/P07: a landed op mints a merge Contribution verifiable on another instance', async () => {
