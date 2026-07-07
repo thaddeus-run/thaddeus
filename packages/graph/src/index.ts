@@ -1,3 +1,4 @@
+export { SymbolGraph, SymbolLedger } from './graph';
 export { HeuristicExtractor } from './symbol';
 export type {
   Definition,
