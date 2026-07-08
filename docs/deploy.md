@@ -49,9 +49,10 @@ curl http://localhost:4000/repos      # {"repos":[]}
 
 ## Fly.io
 
-The repo ships a [`fly.toml`](../fly.toml) with everything wired: port 4000, the
-`/data` volume, TLS, and a health check. Edit `app` to a unique name and pick a
-region, then:
+The repo ships a [`fly.toml`](../fly.toml) with everything wired: the `/data`
+volume, TLS, a health check, and port **8080** — Fly's proxy default. The server
+reads `$PORT`, so it binds 8080 on Fly (it defaults to 4000 only for a local
+`docker run`). Edit `app` to a unique name and pick a region, then:
 
 ```sh
 fly launch --copy-config --no-deploy          # create the app, keep this fly.toml
@@ -62,14 +63,13 @@ fly deploy
 Fly builds the Dockerfile, mounts the volume at `/data`, and terminates TLS
 (`force_https`).
 
-> **Use `--copy-config` (or plain `fly deploy` on an existing app), not a bare
-> `fly launch`.** A bare `fly launch` _regenerates_ `fly.toml` from Fly's
-> defaults and sets `internal_port = 8080` — but the container listens on
-> **4000**. fly-proxy then can't reach the app, and the deploy ends in
-> `timeout trying to get your app` with the warning _"not listening on the
-> expected address."_ If you hit that, set `internal_port = 4000` in your
-> `fly.toml` and re-run `fly deploy` — the built image is reused, so it's a
-> config-only change.
+> **Keep `PORT` and `internal_port` equal.** fly-proxy routes to
+> `internal_port`; the server listens on `$PORT`. This file sets both to 8080,
+> which is Fly's default — so its CLI and web/GitHub Launch flows won't drift
+> them apart. If a deploy ever ends in `timeout trying to get your app` (with
+> _"not listening on the expected address"_), the two have diverged: set them to
+> the same value and re-run `fly deploy` (the built image is reused, so it's a
+> config-only change).
 
 ## A plain VPS (e.g. Oracle Cloud always-free, a KVM)
 

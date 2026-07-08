@@ -9,7 +9,12 @@ primary_region = "fra"
 [build]
 
 [env]
-PORT = "4000"
+# The server binds to $PORT. We use 8080 to match Fly's proxy default: a bare
+# `fly launch` (and the web/GitHub Launch flow) forces internal_port = 8080
+# regardless of this file, so pinning PORT to the same value keeps them in
+# agreement however you deploy. Locally the container still defaults to 4000
+# (see the Dockerfile) — it only binds 8080 when PORT says so.
+PORT = "8080"
 THADDEUS_DATA = "/data"
 # THADDEUS_HOST = "1"          # uncomment to run an attesting instance (P07)
 # THADDEUS_MIN_MERGES = "0"    # gate land on N attested merges per author
@@ -21,10 +26,11 @@ source = "thaddeus_data"
 destination = "/data"
 
 [http_service]
-# MUST match the container's port (Dockerfile EXPOSE + the PORT env, both 4000).
-# A bare `fly launch` regenerates this file with Fly's default 8080 — keep it
-# 4000, or fly-proxy can't reach the app ("not listening on the expected address").
-internal_port = 4000
+# fly-proxy routes here; it MUST equal the PORT env above (both 8080), or the
+# proxy can't reach the app ("not listening on the expected address"). 8080 is
+# Fly's default, so the Launch flow won't drift it. The container reads $PORT,
+# so it binds 8080 here even though it defaults to 4000 for a local docker run.
+internal_port = 8080
 force_https = true # Fly terminates TLS at the edge
 auto_stop_machines = "off" # the server is stateful — keep it running
 auto_start_machines = true
