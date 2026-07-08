@@ -1,3 +1,4 @@
+import type { Identity } from '@thaddeus.run/identity';
 import { FileBackend } from '@thaddeus.run/persist';
 import type { LandPolicy } from '@thaddeus.run/platform';
 import { createServer } from '@thaddeus.run/server';
@@ -7,6 +8,8 @@ export interface ServeOptions {
   dataDir: string; // FileBackend root (the durable cold tier)
   port?: number; // default 4000; pass 0 for an OS-assigned port (tests)
   policy?: LandPolicy; // default blockOnConflict (createServer's default)
+  host?: Identity; // attest reputation with this key (P07); omit to hold no keys
+  minMerges?: number; // gate land on this many attested merges per op author
 }
 
 // A running server handle.
@@ -23,6 +26,8 @@ export function startServer(opts: ServeOptions): RunningServer {
   const srv = createServer({
     backend: new FileBackend(opts.dataDir),
     policy: opts.policy,
+    host: opts.host,
+    minMerges: opts.minMerges,
   });
   const http = Bun.serve({ port: opts.port ?? 4000, fetch: srv.fetch });
   // http.port is always defined after a successful Bun.serve() call; the type

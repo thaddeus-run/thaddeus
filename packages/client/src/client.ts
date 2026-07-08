@@ -2,11 +2,13 @@ import type { Delegation } from '@thaddeus.run/agent';
 import type { Identity } from '@thaddeus.run/identity';
 import { Platform, type Repo } from '@thaddeus.run/platform';
 import { type Provenance, ProvenanceLog } from '@thaddeus.run/provenance';
+import type { ContributionClaim } from '@thaddeus.run/reputation';
 import { type Veto, VetoLog } from '@thaddeus.run/review';
 import {
   decodeBundle,
   decodeDelegation,
   encodeBundle,
+  encodeClaim,
   encodeDelegation,
   signRequest,
 } from '@thaddeus.run/server';
@@ -30,6 +32,16 @@ export interface LandOutcome {
   into: string;
   heads: string[];
   reason?: string;
+}
+
+// A subject's server-wide reputation profile (P07): counts of attested
+// (host-vouched) vs claimed (self-asserted) contributions, plus the attested
+// tally by kind.
+export interface ReputationProfile {
+  subject: string;
+  attested: number;
+  claimed: number;
+  byKind: Record<string, number>;
 }
 
 // FetchLike matches the server's fetch(req: Request) shape. The client always
@@ -150,18 +162,29 @@ export class Client {
   }
 
   // Land uploaded heads into a target view under the server's policy. A blocked
-  // land returns { landed: false, reason } — it is NOT thrown.
+  // land returns { landed: false, reason } — it is NOT thrown. `contrib` carries
+  // subject-signed reputation claims (P07) that an attesting host co-signs for
+  // the landed ops.
   async land(
     name: string,
     fromHeads: readonly string[],
-    into = 'main'
+    into = 'main',
+    contrib: readonly ContributionClaim[] = []
   ): Promise<LandOutcome> {
     const res = await this.#signed(
       'POST',
       `/repos/${encodeURIComponent(name)}/land`,
-      { fromHeads: [...fromHeads], into }
+      { fromHeads: [...fromHeads], into, contrib: contrib.map(encodeClaim) }
     );
     return (await this.#ok(res)) as LandOutcome;
+  }
+
+  // A subject's server-wide reputation profile (P07). Public read — no signature.
+  async reputation(did: string): Promise<ReputationProfile> {
+    const res = await this.#fetch(
+      new Request(`${this.#server}/reputation/${encodeURIComponent(did)}`)
+    );
+    return (await this.#ok(res)) as ReputationProfile;
   }
 
   // Owner: register an owner-signed delegation granting `delegation.agent` push.

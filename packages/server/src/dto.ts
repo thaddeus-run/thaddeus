@@ -1,6 +1,7 @@
 import type { Delegation } from '@thaddeus.run/agent';
 import type { Op } from '@thaddeus.run/log';
 import type { Provenance } from '@thaddeus.run/provenance';
+import type { ContributionClaim } from '@thaddeus.run/reputation';
 import type { Veto } from '@thaddeus.run/review';
 import {
   type Capability,
@@ -67,4 +68,17 @@ export function encodeDelegation(d: Delegation): string {
 }
 export function decodeDelegation(s: string): Delegation {
   return decodeRecord(new Uint8Array(Buffer.from(s, 'base64'))) as Delegation;
+}
+
+// A subject-signed reputation claim (P07) on the wire — base64 of the record
+// encoding so its subj_sig survives JSON. Rides in the land request body (not the
+// pull/push Bundle): the client claims a contribution for a landed op, and an
+// attesting host co-signs it.
+export function encodeClaim(claim: ContributionClaim): string {
+  return Buffer.from(encodeRecord(claim)).toString('base64');
+}
+export function decodeClaim(s: string): ContributionClaim {
+  return decodeRecord(
+    new Uint8Array(Buffer.from(s, 'base64'))
+  ) as ContributionClaim;
 }

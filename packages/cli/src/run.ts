@@ -6,6 +6,7 @@ import type { Op } from '@thaddeus.run/log';
 import { FileBackend } from '@thaddeus.run/persist';
 import { Platform, type Repo } from '@thaddeus.run/platform';
 import { type Provenance, ProvenanceLog } from '@thaddeus.run/provenance';
+import { type ContributionClaim, signClaim } from '@thaddeus.run/reputation';
 import { signVeto, VetoLog } from '@thaddeus.run/review';
 import { type Backend, scoped } from '@thaddeus.run/store';
 import { readFileSync } from 'node:fs';
@@ -51,7 +52,8 @@ const USAGE = `thaddeus — the Thaddeus CLI
   grant  <did> [--paths a,b] [--max-changes N]    grant push to a DID/agent
   revoke <did>                                     revoke a grant
   grants                                           list active grants
-  serve  [--port 4000] [--data ./thaddeus-data]   run a server`;
+  reputation <did>                                 show a DID's server-wide reputation
+  serve  [--port 4000] [--data ./dir] [--host] [--min-merges N]   run a server`;
 
 // Re-open the local durable repo for a working copy at `root`.
 async function openLocal(root: string, repoName: string): Promise<Repo> {
@@ -134,6 +136,23 @@ function headsAhead(repo: Repo, base: readonly string[]): number {
     if (!baseClosure.has(id)) n += 1;
   }
   return n;
+}
+
+// Build a subject-signed merge claim (P07) for each op the author is publishing,
+// so an attesting host can co-sign it on land. Only the author's own ops earn a
+// merge (the server re-checks subject === op.author before attesting), and a
+// non-attesting server simply ignores the claims — so this is always safe to send.
+function mergeClaims(
+  repoName: string,
+  ops: readonly Op[],
+  identity: Identity
+): ContributionClaim[] {
+  const at = new Date().toISOString();
+  return ops
+    .filter((op) => op.author === identity.did)
+    .map((op) =>
+      signClaim({ repo: repoName, ref: op.id, kind: 'merge', at }, identity)
+    );
 }
 
 // Stage the working-tree diff into a workspace over local main and commit it,
@@ -328,7 +347,13 @@ export async function run(
           out("uploaded (not landed — run 'thaddeus land' to publish)");
           return 0;
         }
-        const landed = await client.land(cfg.repo, heads, 'main');
+        // Ship a merge claim per published op; an attesting host co-signs it.
+        const landed = await client.land(
+          cfg.repo,
+          heads,
+          'main',
+          mergeClaims(cfg.repo, whyTarget, identity)
+        );
         if (!landed.landed) {
           out(
             `not landed: ${landed.reason ?? 'blocked by policy'} (content uploaded)`
@@ -359,7 +384,13 @@ export async function run(
         const local = await openLocal(root, cfg.repo);
         const heads = [...local.log.heads('main')];
         const client = new Client(cfg.server, identity, env.fetchImpl);
-        const landed = await client.land(cfg.repo, heads, 'main');
+        // Mint a merge claim for each committed-but-unpublished op being landed.
+        const claims = mergeClaims(
+          cfg.repo,
+          opsAhead(local, cfg.base),
+          identity
+        );
+        const landed = await client.land(cfg.repo, heads, 'main', claims);
         if (!landed.landed) {
           out(`not landed: ${landed.reason ?? 'nothing to land'}`);
           return 1;
@@ -634,10 +665,39 @@ export async function run(
         }
         return 0;
       }
+      case 'reputation': {
+        const did = rest[0];
+        if (did === undefined) {
+          out('usage: thaddeus reputation <did>');
+          return 2;
+        }
+        const root = findRoot(env.cwd);
+        if (root === undefined) {
+          out("not a thaddeus working copy — run 'thaddeus clone' first");
+          return 2;
+        }
+        const cfg = loadConfig(root);
+        const identity = loadIdentity(env.home);
+        const client = new Client(cfg.server, identity, env.fetchImpl);
+        const profile = await client.reputation(did);
+        out(profile.subject);
+        out(`  attested: ${profile.attested}  claimed: ${profile.claimed}`);
+        const kinds = Object.entries(profile.byKind)
+          .filter(([, n]) => n > 0)
+          .map(([k, n]) => `${k}=${n}`)
+          .join(', ');
+        out(`  by kind: ${kinds.length > 0 ? kinds : '(none)'}`);
+        return 0;
+      }
       case 'serve': {
         const { values } = parseArgs({
           args: [...rest],
-          options: { port: { type: 'string' }, data: { type: 'string' } },
+          options: {
+            port: { type: 'string' },
+            data: { type: 'string' },
+            host: { type: 'boolean' },
+            'min-merges': { type: 'string' },
+          },
           allowPositionals: true,
         });
         const dataDir = values.data ?? join(env.cwd, 'thaddeus-data');
@@ -646,8 +706,24 @@ export async function run(
           out(`invalid --port: ${values.port}`);
           return 2;
         }
-        const server = startServer({ dataDir, port });
-        out(`thaddeus serving on ${server.url} (data: ${dataDir})`);
+        // `--host` makes this an attesting instance, co-signing reputation
+        // claims with the operator's own identity; `--min-merges` gates land on
+        // that many attested merges per op author.
+        const host = values.host === true ? loadIdentity(env.home) : undefined;
+        let minMerges: number | undefined;
+        if (values['min-merges'] !== undefined) {
+          minMerges = Number(values['min-merges']);
+          if (!Number.isInteger(minMerges) || minMerges < 0) {
+            out(`invalid --min-merges: ${values['min-merges']}`);
+            return 2;
+          }
+        }
+        const server = startServer({ dataDir, port, host, minMerges });
+        out(
+          `thaddeus serving on ${server.url} (data: ${dataDir}${
+            host !== undefined ? `, attesting as ${host.did}` : ''
+          })`
+        );
         process.on('SIGINT', () => {
           server
             .stop()

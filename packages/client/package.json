@@ -46,6 +46,7 @@
     "@thaddeus.run/log": "workspace:*",
     "@thaddeus.run/platform": "workspace:*",
     "@thaddeus.run/provenance": "workspace:*",
+    "@thaddeus.run/reputation": "workspace:*",
     "@thaddeus.run/review": "workspace:*",
     "@thaddeus.run/server": "workspace:*",
     "@thaddeus.run/store": "workspace:*"

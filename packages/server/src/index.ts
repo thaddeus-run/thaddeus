@@ -9,7 +9,9 @@ export {
 export {
   type Bundle,
   decodeBundle,
+  decodeClaim,
   decodeDelegation,
   encodeBundle,
+  encodeClaim,
   encodeDelegation,
 } from './dto';

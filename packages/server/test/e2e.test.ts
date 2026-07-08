@@ -3,6 +3,7 @@ import { Identity, ready } from '@thaddeus.run/identity';
 import { OpLog } from '@thaddeus.run/log';
 import { FileBackend } from '@thaddeus.run/persist';
 import { signProvenance } from '@thaddeus.run/provenance';
+import { signClaim } from '@thaddeus.run/reputation';
 import { signVeto } from '@thaddeus.run/review';
 import { AccessDenied, MemoryStore } from '@thaddeus.run/store';
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
@@ -10,7 +11,12 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import { type Bundle, decodeBundle, encodeBundle } from '../src/dto';
+import {
+  type Bundle,
+  decodeBundle,
+  encodeBundle,
+  encodeClaim,
+} from '../src/dto';
 import { createServer } from '../src/server';
 import { signRequest } from '../src/sign';
 import { expectRejects } from './reject';
@@ -229,6 +235,88 @@ describe('server e2e', () => {
       );
       expect(repull.prov.map((p) => p.intent)).toContain('fix race in refresh');
       expect(repull.prov.map((p) => p.op)).toContain(opId);
+    } finally {
+      await http2.stop(true);
+    }
+  });
+
+  test('landing mints an attested merge (P07) that survives a restart and honors the tier gate', async () => {
+    const root = mkdtempSync(join(tmp, 'rep-'));
+    const a = Identity.create();
+    const host = Identity.create(); // the attesting host key
+
+    // Phase 1: an attesting server (host, no tier gate). A lands op1 with a
+    // subject-signed merge claim; the host co-signs it into an attested merge.
+    const srv1 = createServer({ backend: new FileBackend(root), host });
+    const http1 = Bun.serve({ port: 0, fetch: srv1.fetch });
+    const c1 = client(`http://localhost:${http1.port}`);
+    try {
+      await c1.post('/repos', { name: 'r' }, a);
+      const committed = await commitLocally(a, 'src/a.rs', 'fn a() {}');
+      const op1 = committed.log.ops()[0];
+      await c1.post('/repos/r/push', committed.bundle, a);
+      const claim = signClaim(
+        { repo: 'r', ref: op1.id, kind: 'merge', at: new Date().toISOString() },
+        a
+      );
+      const landed = (await (
+        await c1.post(
+          '/repos/r/land',
+          {
+            fromHeads: committed.heads,
+            into: 'main',
+            contrib: [encodeClaim(claim)],
+          },
+          a
+        )
+      ).json()) as { landed: boolean };
+      expect(landed.landed).toBe(true);
+
+      const profile = (await (
+        await c1.get(`/reputation/${encodeURIComponent(a.did)}`)
+      ).json()) as { attested: number; byKind: { merge: number } };
+      expect(profile.attested).toBe(1);
+      expect(profile.byKind.merge).toBe(1);
+    } finally {
+      await http1.stop(true);
+    }
+
+    // Phase 2: restart WITH a reputation floor. The attested merge survives, and
+    // it clears the tier gate so A can still land.
+    const srv2 = createServer({
+      backend: new FileBackend(root),
+      host,
+      minMerges: 1,
+    });
+    const http2 = Bun.serve({ port: 0, fetch: srv2.fetch });
+    const c2 = client(`http://localhost:${http2.port}`);
+    try {
+      const profile = (await (
+        await c2.get(`/reputation/${encodeURIComponent(a.did)}`)
+      ).json()) as { attested: number; byKind: { merge: number } };
+      expect(profile.attested).toBe(1); // survived the restart
+      expect(profile.byKind.merge).toBe(1);
+
+      // A (1 attested merge) clears minMerges=1 and lands op2.
+      const committed = await commitLocally(a, 'src/b.rs', 'fn b() {}');
+      const op2 = committed.log.ops()[0];
+      await c2.post('/repos/r/push', committed.bundle, a);
+      const claim = signClaim(
+        { repo: 'r', ref: op2.id, kind: 'merge', at: new Date().toISOString() },
+        a
+      );
+      const landed = (await (
+        await c2.post(
+          '/repos/r/land',
+          {
+            fromHeads: committed.heads,
+            into: 'main',
+            contrib: [encodeClaim(claim)],
+          },
+          a
+        )
+      ).json()) as { landed: boolean; reason?: string };
+      expect(landed.landed).toBe(true);
     } finally {
       await http2.stop(true);
     }

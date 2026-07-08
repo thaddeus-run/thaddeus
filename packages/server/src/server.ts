@@ -4,7 +4,7 @@ import {
   delegationPolicy,
   verifyDelegation,
 } from '@thaddeus.run/agent';
-import { PublicIdentity } from '@thaddeus.run/identity';
+import { type Identity, PublicIdentity } from '@thaddeus.run/identity';
 import type { Op } from '@thaddeus.run/log';
 import {
   blockOnConflict,
@@ -12,8 +12,15 @@ import {
   type LandPolicy,
   Platform,
   type Repo,
+  requireReputationTier,
 } from '@thaddeus.run/platform';
 import { ProvenanceLog } from '@thaddeus.run/provenance';
+import {
+  attest,
+  type ContributionClaim,
+  ReputationLog,
+  verifyClaim,
+} from '@thaddeus.run/reputation';
 import { VetoLog } from '@thaddeus.run/review';
 import {
   type Backend,
@@ -26,6 +33,7 @@ import {
 
 import {
   decodeBundle,
+  decodeClaim,
   decodeDelegation,
   encodeBundle,
   encodeDelegation,
@@ -56,6 +64,14 @@ export interface ServerConfig {
   backend: Backend;
   policy?: LandPolicy;
   now?: () => string;
+  // An optional host identity turns this into an ATTESTING instance: on a
+  // successful land it co-signs each client-pushed reputation claim (P07) for a
+  // landed op, minting a host-vouched Contribution. Without it, the server holds
+  // no keys and reputation does not accrue.
+  host?: Identity;
+  // When set, land is additionally gated on durable server-wide reputation:
+  // every incoming op's author must have at least this many ATTESTED merges.
+  minMerges?: number;
 }
 
 export interface Server {
@@ -190,6 +206,21 @@ export function createServer(config: ServerConfig): Server {
       vetoes.set(name, p);
     }
     return p;
+  }
+
+  // The durable server-wide ReputationLog (P07). Reputation spans repos, so it is
+  // held ONCE over the un-scoped backend (top-level `rep/` prefix), not a per-repo
+  // scope. Single-flight so concurrent callers share one instance; evict a
+  // rejected load so a transient backend error self-heals.
+  let reputationPromise: Promise<ReputationLog> | undefined;
+  function reputationLog(): Promise<ReputationLog> {
+    reputationPromise ??= ReputationLog.load(config.backend).catch(
+      (e: unknown) => {
+        reputationPromise = undefined;
+        throw e;
+      }
+    );
+    return reputationPromise;
   }
 
   // Build the durable AgentRegistry for a repo: register every persisted grant,
@@ -528,12 +559,25 @@ export function createServer(config: ServerConfig): Server {
     if (parsed === undefined || parsed === null || typeof parsed !== 'object') {
       return json(400, { error: 'invalid JSON body' });
     }
-    const { fromHeads, into } = parsed as {
+    const { fromHeads, into, contrib } = parsed as {
       fromHeads: string[];
       into?: string;
+      contrib?: string[];
     };
     if (into !== undefined && typeof into !== 'string') {
       return json(400, { error: 'into must be a string' });
+    }
+    // Decode any client-pushed reputation claims (P07). A malformed entry is
+    // dropped rather than failing the whole land.
+    const claims: ContributionClaim[] = [];
+    if (Array.isArray(contrib)) {
+      for (const s of contrib) {
+        try {
+          claims.push(decodeClaim(s));
+        } catch {
+          // skip a malformed claim
+        }
+      }
     }
     return withRepoLock(name, async () => {
       // Owner-or-delegate gate INSIDE the lock: re-check against the one-true
@@ -577,15 +621,23 @@ export function createServer(config: ServerConfig): Server {
       // veto pushed for any incoming op is the ceiling that blocks the land. With
       // no vetoes recorded, blockOnVeto allows, so this is a safe always-on gate.
       const vetoLog = await vetoFor(name);
+      const reps = await reputationLog();
+      // When configured with a reputation floor, add a durable tier gate: every
+      // incoming op's author must clear `minMerges` ATTESTED merges. Self-claimed
+      // reputation never counts, so the gate honors only host-vouched history.
+      const gates: LandPolicy[] = [
+        policy,
+        delegationPolicy(reg, (a) => a === meta.owner),
+        blockOnVeto(vetoLog),
+      ];
+      if (config.minMerges !== undefined) {
+        gates.push(requireReputationTier(reps, config.minMerges));
+      }
       const result = await repo.land({
         from: src,
         into: target,
         author: PublicIdentity.fromDid(signer),
-        policy: all(
-          policy,
-          delegationPolicy(reg, (a) => a === meta.owner),
-          blockOnVeto(vetoLog)
-        ),
+        policy: all(...gates),
       });
       if (result.landed) {
         // Record each delegate's landed-op count (owner exempt). incoming =
@@ -613,6 +665,24 @@ export function createServer(config: ServerConfig): Server {
               `meter/${agent}`,
               encodeRecord({ changes: u.changes, spend: u.spend })
             );
+          }
+        }
+        // Attest client-pushed reputation claims (P07) for the landed ops. Only
+        // an attesting instance (config.host) mints, and only for a claim whose
+        // subject is the ACTUAL author of the landed op it names — so no one can
+        // claim credit for another's merge, and a claim for an unlanded op is
+        // ignored. The result is a host-vouched, durable Contribution.
+        if (config.host !== undefined && claims.length > 0) {
+          const byId = new Map(incoming.map((o) => [o.id, o]));
+          for (const claim of claims) {
+            const op = byId.get(claim.ref);
+            if (
+              op !== undefined &&
+              claim.subject === op.author &&
+              verifyClaim(claim)
+            ) {
+              await reps.ingest(attest(claim, config.host));
+            }
           }
         }
       }
@@ -760,6 +830,20 @@ export function createServer(config: ServerConfig): Server {
     return json(200, { grants });
   }
 
+  // Public: a subject's server-wide reputation profile (P07) — attested vs
+  // claimed counts and the attested tally by kind. Counts (not the full records)
+  // keep the response JSON-safe; the tier gate reads the same durable log.
+  async function reputationProfile(did: string): Promise<Response> {
+    const reps = await reputationLog();
+    const profile = reps.profile(did);
+    return json(200, {
+      subject: profile.subject,
+      attested: profile.attested.length,
+      claimed: profile.claimed.length,
+      byKind: profile.byKind,
+    });
+  }
+
   return {
     async fetch(req: Request): Promise<Response> {
       const url = new URL(req.url);
@@ -771,6 +855,15 @@ export function createServer(config: ServerConfig): Server {
 
       if (path === '/repos' && req.method === 'GET') {
         return listRepos();
+      }
+      // GET /reputation/:did — the subject's server-wide profile.
+      const repMatch = path.match(/^\/reputation\/(.+)$/);
+      if (repMatch !== null && req.method === 'GET') {
+        const did = safeDecode(repMatch[1]);
+        if (did === undefined) {
+          return json(400, { error: 'malformed path' });
+        }
+        return reputationProfile(did);
       }
       if (path === '/repos' && req.method === 'POST') {
         return createRepo(req, body);
