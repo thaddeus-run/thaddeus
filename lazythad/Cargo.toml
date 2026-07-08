@@ -1,6 +1,6 @@
 [package]
 name = "lazythad"
-version = "0.1.0"
+version = "0.1.0-alpha"
 edition = "2021"
 description = "A lazygit-style terminal UI for Thaddeus — browse repos, the op log, the signed why, vetoes, and reputation over the untrusted HTTP remote."
 license = "Apache-2.0"

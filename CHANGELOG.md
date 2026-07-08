@@ -5,6 +5,11 @@ All notable changes to Thaddeus. Format follows
 
 ## [Unreleased]
 
+## [0.1.0-alpha] - 2026-07-08
+
+The first pre-alpha: all eleven pillars, the untrusted server, the installable
+CLI, and the lazythad TUI.
+
 ### Added
 
 - `@thaddeus.run/identity` — self-owned `did:key` identity: sign/verify,

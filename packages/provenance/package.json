@@ -1,6 +1,6 @@
 {
   "name": "@thaddeus.run/provenance",
-  "version": "0.0.0",
+  "version": "0.1.0-alpha",
   "description": "A signed \"why\" layer — Provenance records (actor, intent, reasoning, task, capability-gated prompt) bound to an Op.id and verifiable by anyone. Pillar 04.",
   "keywords": [
     "did",

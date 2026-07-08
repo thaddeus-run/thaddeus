@@ -1,6 +1,6 @@
 {
   "name": "@thaddeus.run/review",
-  "version": "0.0.0",
+  "version": "0.1.0-alpha",
   "description": "The standing human veto — single-signer Veto records bound to an Op.id, verifiable by anyone. Pillar 10 (review as policy).",
   "keywords": [
     "did",

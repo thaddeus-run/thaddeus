@@ -1,17 +1,33 @@
 THADDEUS █
-OPEN SOURCE [TYPESCRIPT]
+OPEN SOURCE [TYPESCRIPT · RUST]
 
 ~~~
 
-PRODUCT: Thaddeus (WORKING NAME)
+PRODUCT: Thaddeus
 THE ARCHITECTURE FOR SOURCE CONTROL AFTER GIT
-STATUS: SCAFFOLD
+STATUS: PRE-ALPHA (v0.1.0-alpha)
 
 ~~~
 
-PACKAGES:
- - @thaddeus.run/store  — encrypted capability store (Pillar 01)
- - @thaddeus.run/theme  — shared design tokens
+Encrypted, content-addressed objects. A signed operation log. A signed "why"
+behind every change. Merge as policy — proofs, reputation, a standing human
+veto — instead of a person reading a diff.
+
+~~~
+
+QUICKSTART: see docs/getting-started.md
+  thaddeus init → serve → create → clone → edit → push -m → log / why
+
+~~~
+
+TOOLS:
+ - thaddeus / thad  — the CLI (a git-like client + `serve`), compiled binary
+ - lazythad         — a lazygit-style terminal UI (Rust · ratatui)
+
+SUBSTRATE (@thaddeus.run/*):
+ - identity store log provenance fs platform reputation agent graph review
+   query watch  — the eleven pillars
+ - persist server client cli  — durable backends, the untrusted remote, SDK, CLI
 
 APPS:
  - apps/docs     — documentation site (Next.js)
