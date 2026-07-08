@@ -44,11 +44,21 @@ export function saveCliConfig(home: string, cfg: CliConfig): void {
   });
 }
 
-// A server argument is an http(s) URL; a repo is `owner/name` with no scheme.
-// This distinguishes a leading `create https://host repo` (back-compat) from a
-// bare `create repo` (use the default), and validates a `--server`/`use` value.
+// Whether `s` is a usable http(s) server URL (scheme + a non-empty host) — not
+// merely scheme-shaped, so `https://` is rejected. This both validates a
+// `--server`/`use` value and distinguishes a leading `create https://host repo`
+// (back-compat) from a bare `create repo` (a repo is `owner/name`, not a URL).
 export function isServerUrl(s: string | undefined): boolean {
-  return s !== undefined && /^https?:\/\//i.test(s);
+  if (s === undefined) return false;
+  try {
+    const url = new URL(s);
+    return (
+      (url.protocol === 'http:' || url.protocol === 'https:') &&
+      url.hostname !== ''
+    );
+  } catch {
+    return false;
+  }
 }
 
 // The message shown when `create`/`clone` can't resolve a server. This is the

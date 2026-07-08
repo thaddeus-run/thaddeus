@@ -28,9 +28,15 @@ function globToRe(glob: string): string {
     const c = glob[i];
     if (c === '*') {
       if (glob[i + 1] === '*') {
-        re += '.*';
-        i++;
-        if (glob[i + 1] === '/') i++; // `**/` matches zero or more directories
+        i++; // consume the second '*'
+        if (glob[i + 1] === '/') {
+          // `**/` = zero or more whole directory segments — keep the `/`
+          // boundary so `**/logs` matches `logs`/`a/logs` but not `mylogs`.
+          re += '(?:.*/)?';
+          i++; // consume the '/'
+        } else {
+          re += '.*'; // `**` (e.g. trailing `a/**`) crosses everything
+        }
       } else {
         re += '[^/]*';
       }

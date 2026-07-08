@@ -59,6 +59,18 @@ describe('loadIgnore', () => {
     expect(ig.ignored('src/main.ts', false)).toBe(false);
   });
 
+  test('**/ preserves the directory boundary', () => {
+    const root = mkdtempSync(join(tmp, 'globstar-'));
+    writeFileSync(join(root, '.thaddeusignore'), '**/logs\na/**/tmp\n');
+    const ig = loadIgnore(root);
+    expect(ig.ignored('logs', true)).toBe(true);
+    expect(ig.ignored('x/logs', true)).toBe(true);
+    expect(ig.ignored('mylogs', true)).toBe(false); // not a false positive
+    expect(ig.ignored('a/tmp', true)).toBe(true);
+    expect(ig.ignored('a/x/y/tmp', true)).toBe(true);
+    expect(ig.ignored('a/tmpx', true)).toBe(false);
+  });
+
   test('an existing .thaddeusignore wins; .gitignore is not read or overwritten', () => {
     const root = mkdtempSync(join(tmp, 'own-'));
     writeFileSync(join(root, '.gitignore'), 'fromgit\n');

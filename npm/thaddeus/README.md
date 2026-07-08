@@ -13,8 +13,8 @@ thaddeus help
 Point it at a server (your choice — never pre-filled):
 
 ```sh
-thaddeus use --hosted        # the official https://ams1.thaddeus.run
-thaddeus use <your-server>   # or your own / a local `thaddeus serve`
+thaddeus use --hosted            # the official https://ams1.thaddeus.run
+thaddeus use https://your-host   # or your own / a local `thaddeus serve`
 ```
 
 Installing fetches the `thaddeus` binary for your platform from the

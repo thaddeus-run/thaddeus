@@ -72,10 +72,17 @@ describe('thaddeus use (default server)', () => {
     expect(out.join('\n')).toContain('--hosted');
   });
 
-  test('rejects a non-url', async () => {
+  test('rejects a non-url and a scheme-only url', async () => {
     const { out, e } = harness();
     expect(await run(['use', 'not-a-url'], e)).toBe(2);
+    expect(await run(['use', 'https://'], e)).toBe(2); // scheme, no host
     expect(out.join('\n')).toContain('invalid server url');
+  });
+
+  test('--hosted together with a positional url is rejected', async () => {
+    const { out, e } = harness();
+    expect(await run(['use', '--hosted', 'https://x'], e)).toBe(2);
+    expect(out.join('\n')).toContain('not both');
   });
 });
 

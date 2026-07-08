@@ -285,6 +285,11 @@ export async function run(
         }
         // `use --hosted` opts in to the official server; `use <url>` sets a
         // custom one; bare `use` shows the current default (never pre-filled).
+        // Passing both is ambiguous — reject rather than silently pick one.
+        if (values.hosted === true && positionals[0] !== undefined) {
+          out('use either --hosted or a <url>, not both');
+          return 2;
+        }
         const url = values.hosted === true ? HOSTED_SERVER : positionals[0];
         if (url === undefined) {
           if (values.json === true) {
