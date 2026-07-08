@@ -1,0 +1,12 @@
+.git
+**/node_modules
+**/dist
+**/.next
+**/.output
+**/.vinxi
+lazythad/target
+packages/cli/release
+release
+.moon/cache
+*.log
+thaddeus-data

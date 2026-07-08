@@ -1,0 +1,30 @@
+# Fly.io deploy for `thaddeus serve`. `fly launch --copy-config` (first time) or
+# `fly deploy` builds the Dockerfile; a volume holds the durable substrate.
+# Rename `app` and pick a region before deploying.
+app = "thaddeus"
+primary_region = "fra"
+
+[build]
+
+[env]
+PORT = "4000"
+THADDEUS_DATA = "/data"
+# THADDEUS_HOST = "1"          # uncomment to run an attesting instance (P07)
+# THADDEUS_MIN_MERGES = "0"    # gate land on N attested merges per author
+
+# One durable volume, mounted where the FileBackend + host identity live.
+# Create it once: `fly volumes create thaddeus_data --size 3 --region fra`.
+[[mounts]]
+source = "thaddeus_data"
+destination = "/data"
+
+[http_service]
+internal_port = 4000
+force_https = true # Fly terminates TLS at the edge
+auto_stop_machines = "off" # the server is stateful — keep it running
+auto_start_machines = true
+min_machines_running = 1
+
+[[vm]]
+size = "shared-cpu-1x"
+memory = "512mb"
