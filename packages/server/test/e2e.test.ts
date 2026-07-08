@@ -3,6 +3,7 @@ import { Identity, ready } from '@thaddeus.run/identity';
 import { OpLog } from '@thaddeus.run/log';
 import { FileBackend } from '@thaddeus.run/persist';
 import { signProvenance } from '@thaddeus.run/provenance';
+import { signVeto } from '@thaddeus.run/review';
 import { AccessDenied, MemoryStore } from '@thaddeus.run/store';
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import { mkdtempSync, rmSync } from 'node:fs';
@@ -228,6 +229,59 @@ describe('server e2e', () => {
       );
       expect(repull.prov.map((p) => p.intent)).toContain('fix race in refresh');
       expect(repull.prov.map((p) => p.op)).toContain(opId);
+    } finally {
+      await http2.stop(true);
+    }
+  });
+
+  test('a pushed veto (P10) blocks a subsequent land across a restart', async () => {
+    const root = mkdtempSync(join(tmp, 'veto-'));
+    const a = Identity.create();
+    const srv1 = createServer({ backend: new FileBackend(root) });
+    const http1 = Bun.serve({ port: 0, fetch: srv1.fetch });
+    const c1 = client(`http://localhost:${http1.port}`);
+    let heads: string[] = [];
+    try {
+      await c1.post('/repos', { name: 'r' }, a);
+      const committed = await commitLocally(
+        a,
+        'src/auth.rs',
+        'fn refresh() {}'
+      );
+      heads = committed.heads;
+      const op = committed.log.ops()[0];
+      // Push the code but do NOT land it yet.
+      await c1.post('/repos/r/push', committed.bundle, a);
+      // A reviewer (here the owner) signs a standing veto and pushes it alone.
+      const veto = signVeto(
+        { op: op.id, reason: 'ships a secret', at: new Date().toISOString() },
+        a
+      );
+      const pushed = (await (
+        await c1.post('/repos/r/push', encodeBundle([], [], [], [], [veto]), a)
+      ).json()) as { accepted: { veto: number } };
+      expect(pushed.accepted.veto).toBe(1);
+
+      // The verified veto blocks the land — main is untouched.
+      const blocked = (await (
+        await c1.post('/repos/r/land', { fromHeads: heads, into: 'main' }, a)
+      ).json()) as { landed: boolean; reason?: string };
+      expect(blocked.landed).toBe(false);
+      expect(blocked.reason).toContain('veto');
+    } finally {
+      await http1.stop(true);
+    }
+
+    // Restart: a fresh server over the SAME dir still honors the durable veto.
+    const srv2 = createServer({ backend: new FileBackend(root) });
+    const http2 = Bun.serve({ port: 0, fetch: srv2.fetch });
+    const c2 = client(`http://localhost:${http2.port}`);
+    try {
+      const stillBlocked = (await (
+        await c2.post('/repos/r/land', { fromHeads: heads, into: 'main' }, a)
+      ).json()) as { landed: boolean; reason?: string };
+      expect(stillBlocked.landed).toBe(false);
+      expect(stillBlocked.reason).toContain('veto');
     } finally {
       await http2.stop(true);
     }

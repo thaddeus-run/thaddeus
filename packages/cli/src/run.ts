@@ -6,6 +6,7 @@ import type { Op } from '@thaddeus.run/log';
 import { FileBackend } from '@thaddeus.run/persist';
 import { Platform, type Repo } from '@thaddeus.run/platform';
 import { type Provenance, ProvenanceLog } from '@thaddeus.run/provenance';
+import { signVeto, VetoLog } from '@thaddeus.run/review';
 import { type Backend, scoped } from '@thaddeus.run/store';
 import { readFileSync } from 'node:fs';
 import { isAbsolute, join } from 'node:path';
@@ -44,6 +45,8 @@ const USAGE = `thaddeus — the Thaddeus CLI
   push   [-m "<why>"] [--no-land]  commit + upload (+ a signed why) + land
   log                              show main's history with the why per change
   why    <op>                      show the signed why for one op
+  veto   <op> [-m "<reason>"]      lodge a standing veto that blocks a land
+  vetoes <op>                      list the standing vetoes on one op
   land                             land uploaded-but-unmerged commits
   grant  <did> [--paths a,b] [--max-changes N]    grant push to a DID/agent
   revoke <did>                                     revoke a grant
@@ -386,6 +389,7 @@ export async function run(
           local.store,
           repoScope(root, cfg.repo)
         );
+        const vetoLog = await VetoLog.load(repoScope(root, cfg.repo));
         const ops = opsOnView(local, 'main');
         if (ops.length === 0) {
           out('no history');
@@ -393,7 +397,14 @@ export async function run(
         }
         for (const op of ops) {
           const why = provLog.forOp(op.id);
-          out(`${op.id.slice(0, 10)}  ${op.at}  ${op.path}`);
+          // A ⛔ marker flags an op under a verified standing veto — the reader
+          // sees at a glance which changes a reviewer has blocked.
+          const vetoed = vetoLog
+            .forOp(op.id)
+            .some((v) => vetoLog.status(v) === 'verified');
+          out(
+            `${op.id.slice(0, 10)}  ${op.at}  ${op.path}${vetoed ? '  ⛔ vetoed' : ''}`
+          );
           out(
             `    ${why.length > 0 ? why.map((p) => p.intent).join('; ') : '(no why)'}`
           );
@@ -441,6 +452,99 @@ export async function run(
           if (p.reasoning.length > 0 && p.reasoning !== p.intent) {
             out(`    reasoning: ${p.reasoning}`);
           }
+        }
+        return 0;
+      }
+      case 'veto': {
+        const { values, positionals } = parseArgs({
+          args: [...rest],
+          options: { message: { type: 'string', short: 'm' } },
+          allowPositionals: true,
+        });
+        const prefix = positionals[0];
+        if (prefix === undefined) {
+          out('usage: thaddeus veto <op> [-m "<reason>"]');
+          return 2;
+        }
+        const root = findRoot(env.cwd);
+        if (root === undefined) {
+          out("not a thaddeus working copy — run 'thaddeus clone' first");
+          return 2;
+        }
+        const cfg = loadConfig(root);
+        const identity = loadIdentity(env.home);
+        const local = await openLocal(root, cfg.repo);
+        // Resolve a short op-id prefix (as printed by `log`) to a full op.
+        const matches = opsOnView(local, 'main').filter((o) =>
+          o.id.startsWith(prefix)
+        );
+        if (matches.length === 0) {
+          out(`no op matching ${prefix}`);
+          return 1;
+        }
+        if (matches.length > 1) {
+          out(`ambiguous op prefix ${prefix} (${matches.length} matches)`);
+          return 2;
+        }
+        const op = matches[0];
+        const reason = values.message ?? 'vetoed';
+        const veto = signVeto(
+          { op: op.id, reason, at: new Date().toISOString() },
+          identity
+        );
+        // Persist locally (so `log`/`vetoes` show it offline) then push a
+        // veto-only bundle. A verified veto blocks any subsequent land of the op.
+        const vetoLog = new VetoLog(repoScope(root, cfg.repo));
+        await vetoLog.ingest(veto);
+        const client = new Client(cfg.server, identity, env.fetchImpl);
+        const pushed = await client.pushVetoes(cfg.repo, [veto]);
+        if (pushed.accepted.veto === 0) {
+          out(
+            `veto not accepted${
+              pushed.rejected.length > 0
+                ? `: ${pushed.rejected.map((r) => r.reason).join('; ')}`
+                : ''
+            }`
+          );
+          return 1;
+        }
+        out(`vetoed ${op.id.slice(0, 10)}: ${reason}`);
+        return 0;
+      }
+      case 'vetoes': {
+        const prefix = rest[0];
+        if (prefix === undefined) {
+          out('usage: thaddeus vetoes <op>');
+          return 2;
+        }
+        const root = findRoot(env.cwd);
+        if (root === undefined) {
+          out("not a thaddeus working copy — run 'thaddeus clone' first");
+          return 2;
+        }
+        const cfg = loadConfig(root);
+        const local = await openLocal(root, cfg.repo);
+        const vetoLog = await VetoLog.load(repoScope(root, cfg.repo));
+        const matches = opsOnView(local, 'main').filter((o) =>
+          o.id.startsWith(prefix)
+        );
+        if (matches.length === 0) {
+          out(`no op matching ${prefix}`);
+          return 1;
+        }
+        if (matches.length > 1) {
+          out(`ambiguous op prefix ${prefix} (${matches.length} matches)`);
+          return 2;
+        }
+        const op = matches[0];
+        const records = vetoLog.forOp(op.id);
+        if (records.length === 0) {
+          out('no vetoes');
+          return 0;
+        }
+        out(`op ${op.id.slice(0, 10)}  ${op.path}`);
+        for (const v of records) {
+          out(`  [${vetoLog.status(v)}] ${v.reviewer}: ${v.reason}`);
         }
         return 0;
       }

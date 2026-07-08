@@ -8,11 +8,13 @@ import { PublicIdentity } from '@thaddeus.run/identity';
 import type { Op } from '@thaddeus.run/log';
 import {
   blockOnConflict,
+  blockOnVeto,
   type LandPolicy,
   Platform,
   type Repo,
 } from '@thaddeus.run/platform';
 import { ProvenanceLog } from '@thaddeus.run/provenance';
+import { VetoLog } from '@thaddeus.run/review';
 import {
   type Backend,
   type Capability,
@@ -168,6 +170,24 @@ export function createServer(config: ServerConfig): Server {
         throw e;
       });
       provenances.set(name, p);
+    }
+    return p;
+  }
+
+  // Durable per-repo VetoLog cache — the standing human "no" (P10) alongside the
+  // code. Single-flight like provenances so concurrent callers share one
+  // instance; store-free (a veto carries no capability-gated payload).
+  const vetoes = new Map<string, Promise<VetoLog>>();
+
+  function vetoFor(name: string): Promise<VetoLog> {
+    let p = vetoes.get(name);
+    if (p === undefined) {
+      // Evict a REJECTED load so a transient backend error self-heals next call.
+      p = VetoLog.load(metaBackend(name)).catch((e: unknown) => {
+        vetoes.delete(name);
+        throw e;
+      });
+      vetoes.set(name, p);
     }
     return p;
   }
@@ -330,13 +350,16 @@ export function createServer(config: ServerConfig): Server {
       }
     }
     // The signed "why" for every op in the view (P04), so a clone carries the
-    // meaning, not just the code.
+    // meaning, not just the code. The standing "no" (P10) travels the same way,
+    // so a clone can see (and re-serve) any veto over the view's ops.
     const provLog = await provenanceFor(name);
     const prov = ops.flatMap((op) => [...provLog.forOp(op.id)]);
+    const vetoLog = await vetoFor(name);
+    const veto = ops.flatMap((op) => [...vetoLog.forOp(op.id)]);
     return json(200, {
       view,
       heads: [...repo.log.heads(view)],
-      ...encodeBundle(ops, objects, caps, prov),
+      ...encodeBundle(ops, objects, caps, prov, veto),
     });
   }
 
@@ -453,12 +476,26 @@ export function createServer(config: ServerConfig): Server {
           rejected.push({ kind: 'prov', id: p.op ?? '?', reason: String(err) });
         }
       }
+      // Ingest the standing "no" (P10) the same way: keep-and-label + durable
+      // write-through so a restarted server still blocks a vetoed land. A forged
+      // veto is kept but rendered `unverified`, and the land gate never counts it.
+      let vetoOk = 0;
+      const vetoLog = await vetoFor(name);
+      for (const v of bundle.veto) {
+        try {
+          await vetoLog.ingest(v);
+          vetoOk += 1;
+        } catch (err) {
+          rejected.push({ kind: 'veto', id: v.op ?? '?', reason: String(err) });
+        }
+      }
       return json(200, {
         accepted: {
           objects: objectsOk,
           ops: opsOk,
           caps: capsOk,
           prov: provOk,
+          veto: vetoOk,
         },
         rejected,
       });
@@ -534,15 +571,20 @@ export function createServer(config: ServerConfig): Server {
       // per repo — each land overwrites the view before reading it.
       const src = 'incoming';
       repo.log.view(src, fromHeads);
-      // Compose the base policy with delegation enforcement: every non-owner op
-      // is path+budget gated (the owner is exempt — never scope/budget checked).
+      // Compose the base policy with delegation enforcement AND the durable
+      // standing veto: every non-owner op is path+budget gated (the owner is
+      // exempt), and — no matter how green every automated gate is — a verified
+      // veto pushed for any incoming op is the ceiling that blocks the land. With
+      // no vetoes recorded, blockOnVeto allows, so this is a safe always-on gate.
+      const vetoLog = await vetoFor(name);
       const result = await repo.land({
         from: src,
         into: target,
         author: PublicIdentity.fromDid(signer),
         policy: all(
           policy,
-          delegationPolicy(reg, (a) => a === meta.owner)
+          delegationPolicy(reg, (a) => a === meta.owner),
+          blockOnVeto(vetoLog)
         ),
       });
       if (result.landed) {

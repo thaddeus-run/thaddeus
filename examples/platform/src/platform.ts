@@ -275,7 +275,7 @@ const [riskyOp] = await riskyWs.commit(alice);
 if (riskyOp == null) {
   throw new Error('expected a committed op'); // fail loud, not a misleading demo
 }
-vetoes.record(
+await vetoes.record(
   riskyOp,
   { reason: 'ships a secret in cleartext', at: '2026-07-01T00:00:00Z' },
   reviewer

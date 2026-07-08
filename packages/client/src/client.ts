@@ -2,6 +2,7 @@ import type { Delegation } from '@thaddeus.run/agent';
 import type { Identity } from '@thaddeus.run/identity';
 import { Platform, type Repo } from '@thaddeus.run/platform';
 import { type Provenance, ProvenanceLog } from '@thaddeus.run/provenance';
+import { type Veto, VetoLog } from '@thaddeus.run/review';
 import {
   decodeBundle,
   decodeDelegation,
@@ -14,7 +15,13 @@ import { type Backend, scoped } from '@thaddeus.run/store';
 import { bundleFor } from './bundle';
 
 export interface PushResult {
-  accepted: { objects: number; ops: number; caps: number; prov: number };
+  accepted: {
+    objects: number;
+    ops: number;
+    caps: number;
+    prov: number;
+    veto: number;
+  };
   rejected: { kind: string; id: string; reason: string }[];
 }
 
@@ -65,6 +72,7 @@ export class Client {
     repo: Repo;
     heads: readonly string[];
     provenance: ProvenanceLog;
+    vetoes: VetoLog;
   }> {
     const enc = encodeURIComponent;
     const res = await this.#fetch(
@@ -86,17 +94,20 @@ export class Client {
       await repo.log.ingest(op);
     }
     await repo.log.repoint(view, body.heads);
-    // Persist the pulled "why" (P04) into the working copy's own scope, so
-    // `thaddeus log`/`why` can read it offline — same `repo/<name>/` namespace
-    // openDurable uses for the code, keeping the whole substrate in one place.
-    const provenance = new ProvenanceLog(
-      repo.store,
-      scoped(backend, `repo/${name}/`)
-    );
+    // Persist the pulled "why" (P04) and standing "no" (P10) into the working
+    // copy's own scope, so `thaddeus log`/`why`/`vetoes` can read them offline —
+    // same `repo/<name>/` namespace openDurable uses for the code, keeping the
+    // whole substrate in one place.
+    const metaScope = scoped(backend, `repo/${name}/`);
+    const provenance = new ProvenanceLog(repo.store, metaScope);
     for (const p of bundle.prov) {
       await provenance.ingest(p);
     }
-    return { repo, heads: body.heads, provenance };
+    const vetoes = new VetoLog(metaScope);
+    for (const v of bundle.veto) {
+      await vetoes.ingest(v);
+    }
+    return { repo, heads: body.heads, provenance, vetoes };
   }
 
   async listRepos(): Promise<readonly string[]> {
@@ -120,6 +131,20 @@ export class Client {
       'POST',
       `/repos/${encodeURIComponent(name)}/push`,
       encodeBundle(ops, objects, caps, provenance)
+    );
+    return (await this.#ok(res)) as PushResult;
+  }
+
+  // Push standing vetoes (P10) with no code — a veto-only bundle. The pusher must
+  // be an authorized writer (owner or delegate), the same gate as any push: a
+  // VERIFIED veto blocks a land, so only writers may lodge one (an unauthenticated
+  // veto endpoint would let anyone deny service). Idempotent — re-pushing an
+  // identical veto is a server-side no-op.
+  async pushVetoes(name: string, vetoes: readonly Veto[]): Promise<PushResult> {
+    const res = await this.#signed(
+      'POST',
+      `/repos/${encodeURIComponent(name)}/push`,
+      encodeBundle([], [], [], [], vetoes)
     );
     return (await this.#ok(res)) as PushResult;
   }

@@ -1,6 +1,8 @@
+import { blake3 } from '@noble/hashes/blake3';
 import { bytesToHex } from '@noble/hashes/utils';
 import type { Identity } from '@thaddeus.run/identity';
 import type { Op } from '@thaddeus.run/log';
+import { type Backend, decodeRecord, encodeRecord } from '@thaddeus.run/store';
 
 import { signVeto, verifyVeto, type Veto } from './veto';
 
@@ -8,33 +10,80 @@ import { signVeto, verifyVeto, type Veto } from './veto';
 // signature-invalid vetoes (a forged veto must not silently deny service).
 export type VetoStatus = 'verified' | 'unverified';
 
-// In-memory registry of vetoes keyed by Op.id. Spike — not durable, not
-// concurrency-safe, single process. Store-free (like ReputationLog): a veto
-// carries no capability-gated payload. Unlike OpLog, an invalid veto is KEPT and
-// labelled `unverified` rather than rejected — the land policy simply never
-// counts it, and a reader still sees the disputed claim.
+// Registry of vetoes keyed by Op.id. Durable when constructed with a `Backend`
+// (write-through + static `load`); in-memory otherwise. Store-free (a veto
+// carries no capability-gated payload), so unlike ProvenanceLog it needs no
+// Store. Unlike OpLog, an invalid veto is KEPT and labelled `unverified` rather
+// than rejected — the land policy simply never counts it, and a reader still
+// sees the disputed claim. Spike — not concurrency-safe, single process.
 export class VetoLog {
+  readonly #backend: Backend | undefined;
   readonly #byOp: Map<string, Veto[]> = new Map();
+
+  constructor(backend?: Backend) {
+    this.#backend = backend;
+  }
+
+  // Rebuild a durable log from a backend. Records are content-addressed and
+  // keep-and-label, so a torn/old-version record that fails to decode is skipped
+  // (never surfaced as truth), mirroring ProvenanceLog.load.
+  static async load(backend: Backend): Promise<VetoLog> {
+    const log = new VetoLog(backend);
+    for (const key of await backend.list('veto/')) {
+      const bytes = await backend.get(key);
+      if (bytes === undefined) {
+        continue;
+      }
+      try {
+        log.#insert(decodeRecord(bytes) as Veto);
+      } catch {
+        continue; // torn/old-version/corrupt record — skip, never surface
+      }
+    }
+    return log;
+  }
 
   // Build + sign a veto for `op` and record it. `at` is the caller's timestamp
   // (ISO 8601); the log takes no clock so it stays deterministic and testable.
-  record(
+  // Persists write-through when durable (no-op without a backend).
+  async record(
     op: Op,
     fields: { reason: string; at: string },
     reviewer: Identity
-  ): Veto {
+  ): Promise<Veto> {
     const v = signVeto(
       { op: op.id, reason: fields.reason, at: fields.at },
       reviewer
     );
     this.#insert(v);
+    await this.#persist(v);
     return v;
   }
 
-  // Ingest a veto from a peer. KEEPS it regardless of validity so it can be
-  // rendered `unverified`. Idempotent on the full record content.
+  // Durably ingest a veto from a peer/the wire (keep-and-label). Write-through
+  // first so a failed backend write leaves no visible-but-non-durable record;
+  // then keep in memory. Idempotent (content-addressed key).
+  async ingest(v: Veto): Promise<void> {
+    await this.#persist(v);
+    this.#insert(v);
+  }
+
+  // Ingest a veto from a peer, IN-MEMORY only (no persistence). KEEPS it
+  // regardless of validity so it can be rendered `unverified`.
   append(v: Veto): void {
     this.#insert(v);
+  }
+
+  // Write-through for a veto (no-op without a backend). Content-addressed key
+  // `veto/<blake3(contentKey)>`: write-once, so re-persisting an identical record
+  // is idempotent and dedup stays consistent with the in-memory #insert.
+  async #persist(v: Veto): Promise<void> {
+    if (this.#backend !== undefined) {
+      const key = `veto/${bytesToHex(
+        blake3(new TextEncoder().encode(this.#contentKey(v)))
+      )}`;
+      await this.#backend.put(key, encodeRecord(v));
+    }
   }
 
   // A total identity key over EVERY field of a veto. Dedup keys on this, not on
