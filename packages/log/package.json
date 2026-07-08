@@ -1,6 +1,6 @@
 {
   "name": "@thaddeus.run/log",
-  "version": "0.1.0-alpha",
+  "version": "0.1.1-alpha",
   "description": "An operation log — signed, CRDT-ordered operations on a DAG; snapshots are a derived projection, branches dissolve into zero-copy named views.",
   "keywords": [
     "crdt",
