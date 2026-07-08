@@ -92,7 +92,7 @@ Every read verb also has `--json` for scripting or a TUI.
   rewrites the code as one signed `SymbolOp`; `thaddeus history <symbol>` shows
   the rename chain.
 - **Delegation:** grant an agent scoped, budgeted push access —
-  `thaddeus grant <did> --paths src/** --max-changes 50`; `thaddeus grants`;
+  `thaddeus grant <did> --paths 'src/**' --max-changes 50`; `thaddeus grants`;
   `thaddeus revoke <did>`.
 
 ## 7. Browse it in a TUI
