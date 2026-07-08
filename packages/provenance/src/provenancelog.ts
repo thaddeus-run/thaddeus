@@ -2,7 +2,13 @@ import { blake3 } from '@noble/hashes/blake3';
 import { bytesToHex } from '@noble/hashes/utils';
 import type { Identity } from '@thaddeus.run/identity';
 import type { Op } from '@thaddeus.run/log';
-import type { Ref, Store } from '@thaddeus.run/store';
+import {
+  type Backend,
+  decodeRecord,
+  encodeRecord,
+  type Ref,
+  type Store,
+} from '@thaddeus.run/store';
 
 import {
   type Provenance,
@@ -14,16 +20,38 @@ import {
 // signature-invalid records (the brief's trust rule).
 export type ProvenanceStatus = 'verified' | 'unverified';
 
-// In-memory registry of provenance keyed by Op.id. Spike — not durable, not
-// concurrency-safe, single process. Unlike OpLog, an invalid record is KEPT and
-// labelled `unverified` rather than rejected: an unverifiable "why" poisons
-// nothing — it is just a claim to disbelieve.
+// Registry of provenance keyed by Op.id. Durable when constructed with a
+// `Backend` (write-through + static `load`); in-memory otherwise. Unlike OpLog,
+// an invalid record is KEPT and labelled `unverified` rather than rejected: an
+// unverifiable "why" poisons nothing — it is just a claim to disbelieve. Spike —
+// not concurrency-safe, single process.
 export class ProvenanceLog {
   readonly #store: Store;
+  readonly #backend: Backend | undefined;
   readonly #byOp: Map<string, Provenance[]> = new Map();
 
-  constructor(store: Store) {
+  constructor(store: Store, backend?: Backend) {
     this.#store = store;
+    this.#backend = backend;
+  }
+
+  // Rebuild a durable log from a backend. Records are content-addressed and
+  // keep-and-label, so a torn/old-version record that fails to decode is skipped
+  // (never surfaced as truth), mirroring OpLog.load / MemoryStore.open.
+  static async load(store: Store, backend: Backend): Promise<ProvenanceLog> {
+    const log = new ProvenanceLog(store, backend);
+    for (const key of await backend.list('prov/')) {
+      const bytes = await backend.get(key);
+      if (bytes === undefined) {
+        continue;
+      }
+      try {
+        log.#insert(decodeRecord(bytes) as Provenance);
+      } catch {
+        continue; // torn/old-version/corrupt record — skip, never surface
+      }
+    }
+    return log;
   }
 
   // Build + sign provenance for `op`. If `prompt` bytes are given, store them as
@@ -66,13 +94,35 @@ export class ProvenanceLog {
       actor
     );
     this.#insert(p);
+    await this.#persist(p);
     return p;
   }
 
-  // Ingest a provenance record from a peer. KEEPS it regardless of validity so
-  // it can be rendered `unverified`. Idempotent on the full record content.
+  // Durably ingest a provenance record from a peer/the wire (the server's
+  // verify-nothing keep-and-label path). Write-through first so a failed backend
+  // write leaves no visible-but-non-durable record; then keep-and-label in
+  // memory. Idempotent (content-addressed key).
+  async ingest(p: Provenance): Promise<void> {
+    await this.#persist(p);
+    this.#insert(p);
+  }
+
+  // Ingest a provenance record from a peer, IN-MEMORY only (no persistence).
+  // KEEPS it regardless of validity so it can be rendered `unverified`.
   append(p: Provenance): void {
     this.#insert(p);
+  }
+
+  // Write-through for a record (no-op without a backend). Content-addressed key
+  // `prov/<blake3(contentKey)>`: write-once, so re-persisting an identical record
+  // is idempotent and dedup stays consistent with the in-memory #insert.
+  async #persist(p: Provenance): Promise<void> {
+    if (this.#backend !== undefined) {
+      const key = `prov/${bytesToHex(
+        blake3(new TextEncoder().encode(this.#contentKey(p)))
+      )}`;
+      await this.#backend.put(key, encodeRecord(p));
+    }
   }
 
   // A total identity key over EVERY field of a record. Dedup keys on this, not

@@ -437,6 +437,7 @@
       },
       "devDependencies": {
         "@thaddeus.run/log": "workspace:*",
+        "@thaddeus.run/persist": "workspace:*",
         "@types/bun": "catalog:",
         "@typescript/native-preview": "catalog:",
         "tsdown": "catalog:",
