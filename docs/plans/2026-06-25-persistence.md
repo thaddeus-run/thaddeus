@@ -5,7 +5,7 @@
 > superpowers:executing-plans to implement this plan task-by-task. Steps use
 > checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Make a Strata repo survive a process restart — a pluggable durable
+**Goal:** Make a Thaddeus repo survive a process restart — a pluggable durable
 `Backend` (filesystem + in-memory), an optional `backend` on `Store`/`OpLog`
 (hot-cache write-through + static `open`/`load`, synchronous reads untouched),
 and `Platform.createDurable`/`openDurable` — proven by a "commit → land →
@@ -187,8 +187,8 @@ export { decodeRecord, encodeRecord } from './backend';
 {
   "name": "@thaddeus.run/persist",
   "version": "0.0.0",
-  "description": "Durable backends for the Strata substrate: a pluggable key→bytes Backend with filesystem and in-memory implementations (the code.store cold tier).",
-  "keywords": ["persistence", "storage", "backend", "strata", "substrate"],
+  "description": "Durable backends for the Thaddeus substrate: a pluggable key→bytes Backend with filesystem and in-memory implementations (the code.store cold tier).",
+  "keywords": ["persistence", "storage", "backend", "Thaddeus", "substrate"],
   "homepage": "https://thaddeus.run",
   "bugs": { "url": "https://github.com/thaddeus-run/thaddeus/issues" },
   "license": "Apache-2.0",
@@ -283,7 +283,7 @@ export default config;
 ```markdown
 # @thaddeus.run/persist
 
-Durable backends for **Strata** (working name) — the cold tier behind the
+Durable backends for **Thaddeus** (working name) — the cold tier behind the
 in-memory hot cache.
 
 A `Backend` is a tiny async key→bytes store (`@thaddeus.run/store`).

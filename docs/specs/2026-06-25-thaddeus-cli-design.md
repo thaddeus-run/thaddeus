@@ -9,7 +9,7 @@ implementation plan **Product:** Thaddeus **Company/monorepo:** Thaddeus
 
 > **Naming:** the product is now **Thaddeus** (the working name "Strata" is
 > retired). The npm scope `@thaddeus.run/*` is unchanged. Existing docs that
-> still say "Strata" are renamed in a separate pass (§11).
+> still say "Thaddeus" are renamed in a separate pass (§11).
 
 ---
 
@@ -314,8 +314,9 @@ server sees only signatures and ciphertext.
   remote is now driven by a reusable `@thaddeus.run/client` SDK and the
   `thaddeus` CLI with a git-like disk working tree; multi-user/agent CLI,
   offline sync, and conflict UX are next.
-- **Naming** — note in both that the product is **Thaddeus** ("Strata" retired);
-  a repo-wide rename of remaining "Strata" mentions is a follow-up pass.
+- **Naming** — note in both that the product is **Thaddeus** ("Thaddeus"
+  retired); a repo-wide rename of remaining "Thaddeus" mentions is a follow-up
+  pass.
 
 ## 13. Open items / next primitives
 

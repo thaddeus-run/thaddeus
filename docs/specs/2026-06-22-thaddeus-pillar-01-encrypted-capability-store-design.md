@@ -1,7 +1,7 @@
 # Thaddeus — Pillar 01: encrypted objects with per-object capabilities (design)
 
 **Date:** 2026-06-22 **Status:** Design — pending user review, then
-implementation plan **Product:** Strata (working name) · **Company/monorepo:**
+implementation plan **Product:** Thaddeus (working name) · **Company/monorepo:**
 Thaddeus (`@thaddeus/*`) **Source of truth (vision):**
 `the-new-age-of-source-control.html`, Pillar 01 **Builds on:**
 `docs/superpowers/specs/2026-06-22-thaddeus-monorepo-design.md` (the scaffold)
@@ -10,9 +10,9 @@ Thaddeus (`@thaddeus/*`) **Source of truth (vision):**
 
 ## 1. Context — why this primitive, why first
 
-Strata is an 11-pillar replacement for Git+GitHub. You cannot spec 11 pillars at
-once, so we build **one primitive at a time, releasing each on its own**, and we
-build the machinery that guarantees the separately-built pieces converge into
+Thaddeus is an 11-pillar replacement for Git+GitHub. You cannot spec 11 pillars
+at once, so we build **one primitive at a time, releasing each on its own**, and
+we build the machinery that guarantees the separately-built pieces converge into
 one substrate (§4).
 
 The first primitive is **Pillar 01 — encrypted objects with per-object
@@ -138,19 +138,19 @@ mirror-holds-ciphertext) and stubs everything above.
 > north-star flow to use the new real package → update `CHANGELOG.md` + the
 > status/traceability table.
 
-### 4.5 Dual-purpose — standalone for others, melted-together for Strata
+### 4.5 Dual-purpose — standalone for others, melted-together for Thaddeus
 
 Each package has two lives, and the design must serve both:
 
 1. **Standalone, usable by anyone.** `@thaddeus/store` is _"an encrypted,
    capability-based object store"_ — installable and useful to someone who has
-   never heard of Strata. Each package gets its own README and value
-   proposition, stays dependency-light, and **leaks no Strata-product
+   never heard of Thaddeus. Each package gets its own README and value
+   proposition, stays dependency-light, and **leaks no Thaddeus-product
    assumptions**.
-2. **Melted together in Strata.** Inside our system the same packages compose
+2. **Melted together in Thaddeus.** Inside our system the same packages compose
    into the substrate — via the shared primitives, the north-star flow, and the
    hosted Commons layer. Melting happens by **composition, not coupling**:
-   Strata depends on the packages; the packages never depend on Strata.
+   Thaddeus depends on the packages; the packages never depend on Thaddeus.
 
 This is not a tension to manage — it _is_ the brief's Part VIII three-layer
 model: **Protocol** (open spec) + **Substrate** (open, adoption-tuned

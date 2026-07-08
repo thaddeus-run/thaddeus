@@ -1,6 +1,7 @@
 # @thaddeus.run/query
 
-The live query surface for **Strata** (working name) — Pillar 11 (query slice).
+The live query surface for **Thaddeus** (working name) — Pillar 11 (query
+slice).
 
 `CodeDB` treats the codebase as a database you interrogate: it **joins** the
 four first-class dimensions the substrate already stores — the semantic graph

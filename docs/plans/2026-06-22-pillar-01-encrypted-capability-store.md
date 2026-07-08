@@ -54,7 +54,7 @@ did:key).
   (never commit on `main`). Conventional Commits. When an agent makes a commit,
   append the harness footer (`Co-Authored-By: Claude …` and
   `Claude-Session: …`).
-- **Names:** npm scope `@thaddeus.run/*`; "Strata" is the product name and
+- **Names:** npm scope `@thaddeus.run/*`; "Thaddeus" is the product name and
   appears in copy only.
 
 ---
@@ -117,8 +117,8 @@ In `AGENTS.md`, change the naming-example line so it reads:
 
 ```markdown
 - Packages live under the `@thaddeus.run/*` npm scope with neutral,
-  product-agnostic names (e.g. `store`, `identity`, `theme`) — not `strata-*` —
-  so a product rename never forces a package rename.
+  product-agnostic names (e.g. `store`, `identity`, `theme`) — not `Thaddeus-*`
+  — so a product rename never forces a package rename.
 ```
 
 - [ ] **Step 5: Verify no stale references remain**
@@ -170,10 +170,10 @@ Create `ARCHITECTURE.md`:
 ```markdown
 # Thaddeus — Architecture & convergence spine
 
-Thaddeus builds the Strata substrate **one primitive at a time**, releasing each
-as a standalone npm package, while this document keeps the separately-built
+Thaddeus builds the Thaddeus substrate **one primitive at a time**, releasing
+each as a standalone npm package, while this document keeps the separately-built
 pieces converging into one system. There is no "dumb primitive + smart platform"
-seam: the packages compose; Strata is their composition.
+seam: the packages compose; Thaddeus is their composition.
 
 ## Shared primitives (reused, not duplicated)
 
@@ -1262,7 +1262,7 @@ import type { ReactNode } from 'react';
 
 // Touch the workspace package so the build/typecheck graph exercises the
 // cross-package resolution (docs -> @thaddeus.run/store) end to end.
-const sample = address(new TextEncoder().encode('Strata'));
+const sample = address(new TextEncoder().encode('Thaddeus'));
 
 export default function HomePage(): ReactNode {
   return (
@@ -1276,14 +1276,14 @@ export default function HomePage(): ReactNode {
           letterSpacing: '-0.02em',
         }}
       >
-        Strata Docs
+        Thaddeus Docs
       </h1>
       <p style={{ color: 'var(--thaddeus-muted)', fontSize: '1.125rem' }}>
-        Documentation for Strata — the live, permissioned, agent-native code
+        Documentation for Thaddeus — the live, permissioned, agent-native code
         substrate from Thaddeus.
       </p>
       <p style={{ marginTop: '2rem', fontFamily: 'ui-monospace, monospace' }}>
-        content address of &ldquo;Strata&rdquo;: {sample.slice(0, 16)}…
+        content address of &ldquo;Thaddeus&rdquo;: {sample.slice(0, 16)}…
       </p>
     </main>
   );
@@ -1705,7 +1705,7 @@ public APIs fixed in Interfaces blocks, internals free. §2.1 language → TS
 throughout, crypto in compiled libs. §4.1 doc system → ARCHITECTURE.md +
 CHANGELOG.md + spec move (Task 1). §4.2 build order → Tier table in
 ARCHITECTURE.md. §4.3 north-star → Task 7. §4.5 dual-purpose → packages
-publishable + Strata-agnostic; standalone READMEs. §4.6 repo layout → Task 1
+publishable + Thaddeus-agnostic; standalone READMEs. §4.6 repo layout → Task 1
 (re-scope/rename), Tasks 6–7 (examples/integration), names/license. §5 scope in
 → Tasks 2–7; scope out → not implemented (no P02–P11). §6 packages → Tasks 2–5.
 §7 data model → object.ts/capability.ts. §8 crypto → libsodium + noble + scure.

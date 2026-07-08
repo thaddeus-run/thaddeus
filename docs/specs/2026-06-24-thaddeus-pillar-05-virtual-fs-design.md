@@ -1,7 +1,7 @@
 # Thaddeus — Pillar 05: a virtual, API-first filesystem (design)
 
 **Date:** 2026-06-24 **Status:** Design — pending user review, then
-implementation plan **Product:** Strata (working name) · **Company/monorepo:**
+implementation plan **Product:** Thaddeus (working name) · **Company/monorepo:**
 Thaddeus (`@thaddeus.run/*`) **Source of truth (vision):**
 `the-new-age-of-source-control.html`, Pillar 05 **Builds on:**
 `docs/specs/2026-06-23-thaddeus-pillar-03-operation-log-design.md`,
@@ -12,7 +12,7 @@ Thaddeus (`@thaddeus.run/*`) **Source of truth (vision):**
 
 ## 1. Context — why this primitive, why now
 
-Strata is an 11-pillar replacement for Git+GitHub, built **one primitive at a
+Thaddeus is an 11-pillar replacement for Git+GitHub, built **one primitive at a
 time** (Pillar 01 spec §4). Tier 0 shipped (`@thaddeus.run/identity`,
 `@thaddeus.run/store`). Tier 1 — the spine — shipped: the **membrane** (P02,
 timed reveal) and the **operation log** (P03, signed `Op` records with

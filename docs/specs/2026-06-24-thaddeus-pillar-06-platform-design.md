@@ -1,7 +1,7 @@
 # Thaddeus — Pillar 06: the platform, where landing gets its policy (design)
 
 **Date:** 2026-06-24 **Status:** Design — pending user review, then
-implementation plan **Product:** Strata (working name) · **Company/monorepo:**
+implementation plan **Product:** Thaddeus (working name) · **Company/monorepo:**
 Thaddeus (`@thaddeus.run/*`) **Source of truth (vision):**
 `the-new-age-of-source-control.html`, Pillar 06 **Builds on:**
 `docs/specs/2026-06-24-thaddeus-pillar-05-virtual-fs-design.md`,
@@ -13,7 +13,7 @@ Thaddeus (`@thaddeus.run/*`) **Source of truth (vision):**
 
 ## 1. Context — why this primitive, why now
 
-Strata is an 11-pillar replacement for Git+GitHub, built **one primitive at a
+Thaddeus is an 11-pillar replacement for Git+GitHub, built **one primitive at a
 time** (Pillar 01 spec §4). Tier 0 shipped (`@thaddeus.run/identity`,
 `@thaddeus.run/store`). Tier 1 — the spine — shipped: the **membrane** (P02) and
 the **operation log** (P03). Tier 2 added the **provenance** layer (P04, the

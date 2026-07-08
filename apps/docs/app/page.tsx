@@ -18,7 +18,7 @@ const PermissionModelDemo = dynamic(() => import('./permission-model-demo'), {
 export default function HomePage(): ReactNode {
   return (
     <main className="pm-shell">
-      <p className="pm-eyebrow">Strata · permission model</p>
+      <p className="pm-eyebrow">Thaddeus · permission model</p>
       <h1 className="pm-h1">Permission lives on the secret, not the repo.</h1>
       <p className="pm-lede">
         One encrypted object, two people. The bytes stay sealed at rest — a

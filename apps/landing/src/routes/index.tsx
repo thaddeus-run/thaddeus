@@ -8,10 +8,10 @@ export const Route = createFileRoute('/')({
 function LandingPage(): ReactNode {
   return (
     <main className="landing">
-      <h1 className="wordmark">Strata</h1>
+      <h1 className="wordmark">Thaddeus</h1>
       <p className="deck">
-        Source control is the wrong category. Strata is the one that replaces it
-        — a live, permissioned, agent-native code substrate for an age of
+        Source control is the wrong category. Thaddeus is the one that replaces
+        it — a live, permissioned, agent-native code substrate for an age of
         secrets, coordinated security, private-by-default work, and a million
         agents writing code in parallel.
       </p>

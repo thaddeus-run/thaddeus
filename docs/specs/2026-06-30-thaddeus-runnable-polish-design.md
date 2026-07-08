@@ -21,7 +21,7 @@ all flagged as deferred during the recent PRs:
   separately; a concurrent land between them could split the snapshot (both PR
   #12 bots flagged it; resolution was deferred to a server-side atomic pull).
 - **The product was renamed Strata → Thaddeus** during the CLI work;
-  forward-facing docs still say "Strata".
+  forward-facing docs still say "Thaddeus".
 
 This release closes all three. It is **infrastructure polish, not a pillar** —
 no new substrate, the server gains only additive response fields, and the rename
@@ -69,10 +69,10 @@ historical design docs.
    standalone `GET /views/:view` endpoint stays (it has other callers and is a
    cheap heads-only read).
 
-3. **Rename forward-facing only.** Historical specs/plans recorded "Strata
+3. **Rename forward-facing only.** Historical specs/plans recorded "Thaddeus
    (working name)" accurately for their date; rewriting them is churn that
    muddies git history. `AGENTS.md` is updated to declare the product is
-   **Thaddeus** (Strata retired) while keeping the `@thaddeus.run/*`
+   **Thaddeus** (Thaddeus retired) while keeping the `@thaddeus.run/*`
    package-naming guidance.
 
 ## 5. Scope
@@ -198,7 +198,7 @@ No hand-rolled launcher.
    records exactly one request path.)
 6. **No-regression** — existing `server`/`client`/`cli` suites stay green; the
    additive pull fields don't break `decodeBundle` or any existing reader.
-7. **Rename complete + scoped** — `grep -r Strata` over forward-facing files
+7. **Rename complete + scoped** — `grep -r Thaddeus` over forward-facing files
    (package `README.md`s, `src/**` comments, `AGENTS.md`, `ARCHITECTURE.md`,
    `CHANGELOG.md`) returns nothing; `AGENTS.md` declares the product is
    Thaddeus; `docs/specs` + `docs/plans` are unchanged (historical).
@@ -214,8 +214,8 @@ No hand-rolled launcher.
 - **Atomic pull, not atomic clone-vs-future-push.** One pull is a consistent
   revision; it does not subscribe to later changes (no live updates) — re-clone
   or re-pull to refresh.
-- **Rename is forward-facing.** Historical specs/plans still say "Strata"; that
-  is intentional (dated records).
+- **Rename is forward-facing.** Historical specs/plans still say "Thaddeus";
+  that is intentional (dated records).
 
 ## 12. Seeded/updated docs
 
@@ -226,7 +226,7 @@ No hand-rolled launcher.
   closing the clone TOCTOU); note the forward-facing Strata → Thaddeus rename.
 - **`ARCHITECTURE.md`** — note `thaddeus serve` in the Client & CLI section;
   Strata → Thaddeus.
-- **`AGENTS.md`** — naming section: product is **Thaddeus** (Strata retired);
+- **`AGENTS.md`** — naming section: product is **Thaddeus** (Thaddeus retired);
   packages stay `@thaddeus.run/*`.
 
 ## 13. Open items / next primitives

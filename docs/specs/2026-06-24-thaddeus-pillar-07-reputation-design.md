@@ -1,7 +1,7 @@
 # Thaddeus — Pillar 07: portable identity & federated reputation (design)
 
 **Date:** 2026-06-24 **Status:** Design — pending user review, then
-implementation plan **Product:** Strata (working name) · **Company/monorepo:**
+implementation plan **Product:** Thaddeus (working name) · **Company/monorepo:**
 Thaddeus (`@thaddeus.run/*`) **Source of truth (vision):**
 `the-new-age-of-source-control.html`, Pillar 07 **Builds on:**
 `docs/specs/2026-06-22-thaddeus-pillar-01-encrypted-capability-store-design.md`
@@ -12,7 +12,7 @@ signed-record + log pattern this mirrors)
 
 ## 1. Context — why this primitive, why now
 
-Strata is an 11-pillar replacement for Git+GitHub, built **one primitive at a
+Thaddeus is an 11-pillar replacement for Git+GitHub, built **one primitive at a
 time** (Pillar 01 spec §4). Tier 0 (`identity`, `store`) and Tier 1 (membrane,
 operation log) shipped; Tier 2 completed with provenance (P04), the virtual FS
 (P05), and the platform (P06). The seeded north-star runs at **5 pass / 0

@@ -30,7 +30,7 @@ describe('ProvenanceLog', () => {
         intent: 'fix race in token refresh',
         reasoning: 'added a mutex',
         actorKind: 'agent:claude-code@1.2',
-        task: 'STRATA-417',
+        task: 'Thaddeus-417',
       },
       actor
     );

@@ -55,8 +55,8 @@ receives them.
   test output. Preserve trailing newlines. Commit messages follow Conventional
   Commits 1.0.0.
 - **Naming:** package is `@thaddeus.run/graph` (neutral, product-agnostic);
-  primary export `SymbolGraph`. The vision file uses "Strata"; package names
-  never use `strata-`.
+  primary export `SymbolGraph`. The vision file uses "Thaddeus"; package names
+  never use `Thaddeus-`.
 - **Verification baseline after code changes:** `moon run root:format root:lint`
   plus the affected `moonx graph:typecheck` and `moonx graph:test`.
 
@@ -101,7 +101,7 @@ and `log` type-only dev):
   "name": "@thaddeus.run/graph",
   "version": "0.0.0",
   "description": "The semantic graph — code as a queryable graph of symbols, definitions, references, and call edges over a Workspace, with rename as a first-class signed SymbolOp. Pillar 08.",
-  "keywords": ["semantic-graph", "symbols", "rename", "strata", "substrate"],
+  "keywords": ["semantic-graph", "symbols", "rename", "Thaddeus", "substrate"],
   "homepage": "https://thaddeus.run",
   "bugs": { "url": "https://github.com/thaddeus-run/thaddeus/issues" },
   "license": "Apache-2.0",
@@ -150,7 +150,7 @@ differs).
 ```markdown
 # @thaddeus.run/graph
 
-The semantic graph for **Strata** (working name) — Pillar 08.
+The semantic graph for **Thaddeus** (working name) — Pillar 08.
 
 `SymbolGraph` projects a graph of symbols, definitions, references, and call
 edges from the plaintext a `@thaddeus.run/fs` `Workspace` materializes — so code

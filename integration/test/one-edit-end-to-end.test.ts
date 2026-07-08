@@ -36,7 +36,7 @@ describe('north-star: one edit, end to end', () => {
     const repo = new Platform().createRepo('acme/web');
     const author = Identity.create();
 
-    // The edit enters Strata through the virtual filesystem on a NAMED, landable
+    // The edit enters Thaddeus through the virtual filesystem on a NAMED, landable
     // branch: stage a write in a copy-on-write workspace, then commit it.
     const ws = Workspace.open(repo.log, repo.store, {
       source: 'main',
@@ -419,7 +419,7 @@ describe('north-star: one edit, end to end', () => {
         intent: 'fix race in token refresh',
         reasoning: 'refresh() re-entered before lock; added a mutex',
         actorKind: 'agent:claude-code@1.2',
-        task: 'STRATA-417',
+        task: 'Thaddeus-417',
       },
       author
     );

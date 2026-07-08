@@ -1,7 +1,7 @@
 # Thaddeus — Persistence: durable Store + OpLog (design)
 
 **Date:** 2026-06-25 **Status:** Design — pending user review, then
-implementation plan **Product:** Strata (working name) · **Company/monorepo:**
+implementation plan **Product:** Thaddeus (working name) · **Company/monorepo:**
 Thaddeus (`@thaddeus.run/*`) **Source of truth (vision):**
 `the-new-age-of-source-control.html`, Pillar 06 ("API-first remote", the
 code.store "in-memory writes, cold storage" model) **Builds on:**

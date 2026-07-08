@@ -1,13 +1,13 @@
 import { Fragment, type ReactNode } from 'react';
 
 // The concepts / vocabulary page: a static, end-user-facing glossary of the
-// nouns Strata redefines, plus how they compose into one substrate. No crypto
+// nouns Thaddeus redefines, plus how they compose into one substrate. No crypto
 // runs here — it is plain prose, so it stays a server component.
 
 type Status = 'built' | 'in build' | 'coming';
 
 type Term = {
-  name: string; // Strata's word
+  name: string; // Thaddeus's word
   was: string; // the Git-world framing it replaces
   status: Status;
   where: string; // pillar + package, e.g. "Pillar 01 · store"
@@ -24,12 +24,12 @@ const TERMS: Term[] = [
     where: 'Pillar 01 · identity',
     body: (
       <>
-        A principal is whoever acts on the code — and in Strata that is always a
-        keypair that <em>signs</em>, never a display name you can type. Its
+        A principal is whoever acts on the code — and in Thaddeus that is always
+        a keypair that <em>signs</em>, never a display name you can type. Its
         public half, written as a <code>did:key</code>, <em>is</em> the name.
         The same kind of identity stands for a human or an agent, and every
         operation, capability, and signature traces back to one. Git trusts a{' '}
-        <code>user.name</code> anyone can set; Strata trusts a signature only
+        <code>user.name</code> anyone can set; Thaddeus trusts a signature only
         the holder of the key can produce.
       </>
     ),
@@ -44,7 +44,7 @@ const TERMS: Term[] = [
         An object is an encrypted, content-addressed snapshot of a value. It is
         named by the hash of its <em>ciphertext</em>, so an untrusted mirror can
         store and verify it without ever being able to read it. Where
-        Git&rsquo;s blob is plaintext anyone with the repo can read, a Strata
+        Git&rsquo;s blob is plaintext anyone with the repo can read, a Thaddeus
         object is sealed at rest — the bytes and the permission to read them are
         two different things.
       </>
@@ -200,13 +200,13 @@ const STATUS_CLASS: Record<Status, string> = {
 export default function ConceptsPage(): ReactNode {
   return (
     <main className="pm-shell">
-      <p className="pm-eyebrow">Strata · concepts &amp; vocabulary</p>
+      <p className="pm-eyebrow">Thaddeus · concepts &amp; vocabulary</p>
       <h1 className="pm-h1">
         New words, because the old ones name the wrong thing.
       </h1>
       <p className="pm-lede">
         Git&rsquo;s nouns — repository, commit, branch, clone — quietly assume
-        one public pile of files, on a real disk, that one human reads. Strata
+        one public pile of files, on a real disk, that one human reads. Thaddeus
         rejects those assumptions, so the vocabulary changes with the model.
         Here is the language, defined for the people who have to use it, with
         each term marked for how real it is today.
@@ -237,7 +237,7 @@ export default function ConceptsPage(): ReactNode {
         </h2>
         <p className="cx-coming__lede">
           These are specified in the architecture brief but not yet implemented.
-          Strata ships one primitive at a time — and says so.
+          Thaddeus ships one primitive at a time — and says so.
         </p>
         <ul className="cx-coming__list">
           {COMING.map((c) => (
@@ -299,8 +299,8 @@ export default function ConceptsPage(): ReactNode {
         This vocabulary is the architecture brief made concrete, one package at
         a time. Terms marked <b>built</b> run today in your browser on the{' '}
         <a href="/">permission-model page</a>; <b>in&nbsp;build</b> is specified
-        and underway; <b>coming</b> is specified and ledgered. Strata earns each
-        word by shipping the primitive behind it.
+        and underway; <b>coming</b> is specified and ledgered. Thaddeus earns
+        each word by shipping the primitive behind it.
       </p>
     </main>
   );

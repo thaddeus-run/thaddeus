@@ -108,7 +108,7 @@ const wd = Workspace.open(docs.log, docs.store, {
   reader: alice,
   name: 'alice/readme',
 });
-wd.write('README.md', enc('# Strata'));
+wd.write('README.md', enc('# Thaddeus'));
 const [readmeOp] = await wd.commit(alice);
 const prov = new ProvenanceLog(docs.store);
 const gate = requireVerifiedProvenance(prov);

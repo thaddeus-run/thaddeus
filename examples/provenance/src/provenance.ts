@@ -36,7 +36,7 @@ const why = await prov.record(
     intent: 'fix race in token refresh',
     reasoning: 'refresh() re-entered before lock; added a mutex',
     actorKind: 'agent:claude-code@1.2',
-    task: 'STRATA-417',
+    task: 'Thaddeus-417',
     prompt: enc(
       'PROMPT: patch the token refresh race. context: <secret repo map>'
     ),
@@ -45,7 +45,7 @@ const why = await prov.record(
 );
 
 rule();
-console.log(`$ strata log src/auth.rs --why`);
+console.log(`$ Thaddeus log src/auth.rs --why`);
 console.log(
   `  @@ refresh() … (Op ${op.id.slice(0, 4)}, lamport ${op.lamport})`
 );

@@ -68,8 +68,8 @@ of its own** — signing/verifying delegate to `identity`.
   Conventional Commits 1.0.0.
 - **Naming:** package is `@thaddeus.run/agent`; primary exports `Delegation`,
   `signDelegation`/`verifyDelegation`/`canonicalDelegation`, `AgentRegistry`,
-  `delegationPolicy`. The vision file uses "Strata"; package names never use
-  `strata-`.
+  `delegationPolicy`. The vision file uses "Thaddeus"; package names never use
+  `Thaddeus-`.
 - **Verification baseline after code changes:** `moon run root:format root:lint`
   plus the affected `moonx agent:typecheck` and `moonx agent:test`.
 
@@ -117,7 +117,7 @@ Create the package skeleton (copying `packages/reputation`'s config shape) and
     "identity",
     "capability",
     "delegation",
-    "strata",
+    "Thaddeus",
     "substrate"
   ],
   "homepage": "https://thaddeus.run",
@@ -238,7 +238,7 @@ export default config;
 ```markdown
 # @thaddeus.run/agent
 
-Agents as first-class principals for **Strata** (working name) — Pillar 09.
+Agents as first-class principals for **Thaddeus** (working name) — Pillar 09.
 
 An agent is a `did:key`, distinct from the human who operates it. An operator
 signs a `Delegation` — a scoped, budgeted grant of authority (`paths`,

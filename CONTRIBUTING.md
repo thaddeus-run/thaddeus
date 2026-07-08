@@ -83,7 +83,8 @@ a green PR.
 
 - Agent-facing rules and the verification baseline live in `AGENTS.md`; deeper
   domain conventions live in `.agents/skills/`.
-- **Thaddeus** is the company; **Strata** is the working product name; packages
-  are scoped `@thaddeus.run/*` with neutral names. See `AGENTS.md` → Naming.
+- **Thaddeus** is the company; **Thaddeus** is the working product name;
+  packages are scoped `@thaddeus.run/*` with neutral names. See `AGENTS.md` →
+  Naming.
 - Published packages use plain `bun publish`, which runs their moon `prepublish`
   guard chain automatically.
