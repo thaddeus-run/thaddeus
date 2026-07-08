@@ -14,6 +14,41 @@ import { join } from 'node:path';
 // other's temp file.
 let tmpSeq = 0;
 
+// Codes for a transient lock on the rename destination (a virus scanner or the
+// Windows Search indexer momentarily holding the file) — worth retrying. A
+// non-transient error (ENOSPC, EROFS, …) is not retried.
+const TRANSIENT_RENAME_ERRORS = new Set([
+  'EPERM',
+  'EACCES',
+  'EBUSY',
+  'ENOTEMPTY',
+]);
+
+// Rename `from` → `to`, retrying on a transient lock. On Windows `rename` over a
+// live destination fails intermittently with EPERM/EBUSY while another process
+// briefly holds it; a short backoff clears it. Atomicity is preserved — this is
+// still a single rename, we just tolerate the lock. On final failure the temp
+// file is cleaned up so `.staging/` never accumulates orphans.
+async function renameWithRetry(from: string, to: string): Promise<void> {
+  for (let attempt = 0; ; attempt++) {
+    try {
+      await rename(from, to);
+      return;
+    } catch (err) {
+      const code = (err as NodeJS.ErrnoException).code;
+      if (
+        attempt >= 10 ||
+        code === undefined ||
+        !TRANSIENT_RENAME_ERRORS.has(code)
+      ) {
+        await unlink(from).catch(() => {});
+        throw err;
+      }
+      await new Promise((resolve) => setTimeout(resolve, 10 * (attempt + 1)));
+    }
+  }
+}
+
 // Filesystem backend: each key → one percent-encoded file under `root`. Writes
 // go through a `.staging/` subdir (same filesystem → atomic rename), so a
 // crash never yields a half-written file and staging files never appear in
@@ -33,7 +68,7 @@ export class FileBackend implements Backend {
     await mkdir(staging, { recursive: true });
     const tmp = join(staging, `${process.pid}-${tmpSeq++}`);
     await writeFile(tmp, bytes);
-    await rename(tmp, this.#path(key));
+    await renameWithRetry(tmp, this.#path(key));
   }
 
   async get(key: string): Promise<Uint8Array | undefined> {

@@ -17,6 +17,16 @@ All notable changes to Thaddeus. Format follows
   `thaddeus use --hosted` opts in to `https://ams1.thaddeus.run` — surfaced in
   the hint, `thaddeus help`, the release notes, and the docs, but always the
   user's explicit choice.
+- **The working tree honors `.gitignore` and `.thaddeusignore`.** `status`,
+  `diff`, and `push` no longer walk or upload ignored paths, and always prune
+  `.git`, `.thaddeus`, and `node_modules` — so versioning a real project (e.g. a
+  vite app) no longer tries to bundle hundreds of MB of dependencies (which was
+  both the slow `status` and the `413 Payload Too Large` on `push`). Root-level
+  ignore files are read with common gitignore semantics (names, `dir/`, `*.ext`,
+  `/anchored`, `!negation`); nested ignore files are a later refinement.
+- **`lazythad` uses your default server.** With no argument it falls back to the
+  CLI's saved default (`thaddeus use`), then to `http://localhost:4000` — so
+  `thaddeus use --hosted` points the TUI at the hosted server too.
 - **Release automation & distribution.** A `release.yml` workflow (on a `v*`
   tag) cross-builds the `thaddeus` CLI (bun `--compile`, every OS/arch from one
   runner) and the `lazythad` TUI (cargo, one native runner per target) and
@@ -35,6 +45,10 @@ All notable changes to Thaddeus. Format follows
   so a `status`/`push` that printed its result appeared to "do nothing". It now
   sets `process.exitCode` and lets the process end naturally, flushing all
   output first.
+- **`push` no longer fails on Windows with `EPERM` during commit.** The
+  `FileBackend`'s atomic temp+rename now retries on a transient lock
+  (`EPERM`/`EBUSY`/`EACCES`) — a virus scanner or the Windows Search indexer
+  briefly holding the destination no longer aborts a write.
 
 ## [0.1.0-alpha] - 2026-07-08
 
