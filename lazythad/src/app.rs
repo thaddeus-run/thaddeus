@@ -91,12 +91,13 @@ impl App {
         self.pull.ops.get(self.op_sel)
     }
 
+    // Moving the repos cursor is pure state (instant) — the (blocking) pull only
+    // happens on an explicit Enter, so arrowing the list never freezes the UI.
     fn move_down(&mut self) {
         match self.focus {
             Focus::Repos => {
                 if self.repo_sel + 1 < self.repos.len() {
                     self.repo_sel += 1;
-                    self.load_selected_repo();
                 }
             }
             Focus::Log => {
@@ -110,10 +111,7 @@ impl App {
     fn move_up(&mut self) {
         match self.focus {
             Focus::Repos => {
-                if self.repo_sel > 0 {
-                    self.repo_sel -= 1;
-                    self.load_selected_repo();
-                }
+                self.repo_sel = self.repo_sel.saturating_sub(1);
             }
             Focus::Log => {
                 self.op_sel = self.op_sel.saturating_sub(1);
@@ -136,8 +134,12 @@ impl App {
     /// to navigation/actions.
     pub fn on_key(&mut self, key: KeyEvent) {
         if self.reputation.is_some() {
-            // Any key dismisses the reputation overlay.
-            self.reputation = None;
+            // The overlay is modal: q/Esc still quit (matching the documented
+            // keys), any other key just dismisses it.
+            match key.code {
+                KeyCode::Char('q') | KeyCode::Esc => self.should_quit = true,
+                _ => self.reputation = None,
+            }
             return;
         }
         match key.code {
@@ -150,10 +152,10 @@ impl App {
             }
             KeyCode::Down | KeyCode::Char('j') => self.move_down(),
             KeyCode::Up | KeyCode::Char('k') => self.move_up(),
-            // Enter on the repos pane jumps focus into that repo's log.
-            KeyCode::Enter | KeyCode::Char('l')
-                if self.focus == Focus::Repos && !self.pull.ops.is_empty() =>
-            {
+            // Enter on the repos pane loads that repo's log and focuses it — the
+            // one place a (blocking) pull is triggered by navigation.
+            KeyCode::Enter | KeyCode::Char('l') if self.focus == Focus::Repos => {
+                self.load_selected_repo();
                 self.focus = Focus::Log;
             }
             KeyCode::Char('r') => self.refresh(),
@@ -226,6 +228,19 @@ mod tests {
         app.on_key(key(KeyCode::Tab));
         assert_eq!(app.focus, Focus::Log);
         app.on_key(key(KeyCode::Char('q')));
+        assert!(app.should_quit);
+    }
+
+    #[test]
+    fn overlay_dismisses_on_any_key_but_q_still_quits() {
+        let mut app = fixture();
+        app.reputation = Some(Reputation::default());
+        app.on_key(key(KeyCode::Char('j'))); // a non-quit key only dismisses
+        assert!(app.reputation.is_none());
+        assert!(!app.should_quit);
+
+        app.reputation = Some(Reputation::default());
+        app.on_key(key(KeyCode::Char('q'))); // q quits even from the overlay
         assert!(app.should_quit);
     }
 

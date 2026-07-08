@@ -7,6 +7,7 @@
 //! fields and ignore the signature entirely (serde drops unknown fields).
 
 use std::collections::HashMap;
+use std::time::Duration;
 
 use anyhow::{Context, Result};
 use base64::engine::general_purpose::STANDARD;
@@ -136,31 +137,41 @@ fn pct_encode(s: &str) -> String {
     out
 }
 
-fn get_string(url: &str) -> Result<String> {
-    let body = ureq::get(url)
-        .call()
-        .with_context(|| format!("GET {url}"))?
-        .into_string()
-        .context("read response body")?;
-    Ok(body)
-}
-
 /// A handle to one Thaddeus remote.
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct Remote {
     base: String,
+    agent: ureq::Agent,
 }
 
 impl Remote {
     pub fn new(server: &str) -> Self {
+        // Bound the blocking calls: an unreachable server should fail in seconds
+        // (surfaced in the status line) rather than freeze the UI for ureq's 30s
+        // default. Fetches still block the event loop while in flight — moving
+        // them to a background thread with a "loading…" state is a fast-follow.
+        let agent = ureq::AgentBuilder::new()
+            .timeout_connect(Duration::from_secs(5))
+            .timeout(Duration::from_secs(10))
+            .build();
         Remote {
             base: server.trim_end_matches('/').to_string(),
+            agent,
         }
+    }
+
+    fn get(&self, url: &str) -> Result<String> {
+        self.agent
+            .get(url)
+            .call()
+            .with_context(|| format!("GET {url}"))?
+            .into_string()
+            .context("read response body")
     }
 
     /// The repos the remote mirrors, sorted.
     pub fn repos(&self) -> Result<Vec<String>> {
-        let body = get_string(&format!("{}/repos", self.base))?;
+        let body = self.get(&format!("{}/repos", self.base))?;
         let r: ReposResponse = serde_json::from_str(&body).context("decode /repos")?;
         Ok(r.repos)
     }
@@ -173,7 +184,7 @@ impl Remote {
             pct_encode(repo),
             pct_encode(view)
         );
-        let body = get_string(&url)?;
+        let body = self.get(&url)?;
         let resp: PullResponse = serde_json::from_str(&body).context("decode /pull")?;
         Ok(assemble_pull(resp))
     }
@@ -181,7 +192,7 @@ impl Remote {
     /// A DID's server-wide reputation profile.
     pub fn reputation(&self, did: &str) -> Result<Reputation> {
         let url = format!("{}/reputation/{}", self.base, pct_encode(did));
-        let body = get_string(&url)?;
+        let body = self.get(&url)?;
         serde_json::from_str(&body).context("decode /reputation")
     }
 }
