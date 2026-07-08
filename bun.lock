@@ -302,9 +302,12 @@
         "@thaddeus.run/client": "workspace:*",
         "@thaddeus.run/fs": "workspace:*",
         "@thaddeus.run/identity": "workspace:*",
+        "@thaddeus.run/log": "workspace:*",
         "@thaddeus.run/persist": "workspace:*",
         "@thaddeus.run/platform": "workspace:*",
+        "@thaddeus.run/provenance": "workspace:*",
         "@thaddeus.run/server": "workspace:*",
+        "@thaddeus.run/store": "workspace:*",
       },
       "devDependencies": {
         "@types/bun": "catalog:",
@@ -321,6 +324,7 @@
         "@thaddeus.run/identity": "workspace:*",
         "@thaddeus.run/log": "workspace:*",
         "@thaddeus.run/platform": "workspace:*",
+        "@thaddeus.run/provenance": "workspace:*",
         "@thaddeus.run/server": "workspace:*",
         "@thaddeus.run/store": "workspace:*",
       },
@@ -437,6 +441,7 @@
       },
       "devDependencies": {
         "@thaddeus.run/log": "workspace:*",
+        "@thaddeus.run/persist": "workspace:*",
         "@types/bun": "catalog:",
         "@typescript/native-preview": "catalog:",
         "tsdown": "catalog:",
@@ -499,6 +504,7 @@
         "@thaddeus.run/identity": "workspace:*",
         "@thaddeus.run/log": "workspace:*",
         "@thaddeus.run/platform": "workspace:*",
+        "@thaddeus.run/provenance": "workspace:*",
         "@thaddeus.run/store": "workspace:*",
       },
       "devDependencies": {

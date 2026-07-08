@@ -57,6 +57,77 @@ describe('thaddeus push (publish)', () => {
     expect(readFileSync(join(b, 'readme.md'), 'utf8')).toBe('# hello');
   });
 
+  test('push -m attaches a signed why; a fresh clone reads it in log/why', async () => {
+    const srv = createServer({ backend: new MemoryBackend() });
+    const fetchImpl = srv.fetch.bind(srv);
+    const home = await clientHome(fetchImpl, 'why-home');
+    const out: string[] = [];
+    const e = (cwd: string) => ({
+      cwd,
+      home,
+      fetchImpl,
+      out: (l: string) => out.push(l),
+    });
+
+    await run(['create', 'http://t', 'proj-why'], e(home));
+    const a = mkdtempSync(join(tmp, 'why-a-'));
+    await run(['clone', 'http://t', 'proj-why', a], e(a));
+    writeFileSync(join(a, 'auth.rs'), 'fn refresh() {}');
+    out.length = 0;
+    expect(await run(['push', '-m', 'fix race in refresh'], e(a))).toBe(0);
+    expect(out.join('\n')).toContain('1 why');
+
+    // A fresh clone carries the why: `log` shows it against the change.
+    const b = mkdtempSync(join(tmp, 'why-b-'));
+    await run(['clone', 'http://t', 'proj-why', b], e(b));
+    out.length = 0;
+    expect(await run(['log'], e(b))).toBe(0);
+    const logOut = out.join('\n');
+    expect(logOut).toContain('fix race in refresh');
+    expect(logOut).toContain('auth.rs');
+
+    // `why <op>` prints the verified record (op-id prefix taken from `log`).
+    const idLine = logOut.split('\n').find((l) => /^[0-9a-f]{10}/.test(l));
+    const opId = idLine?.slice(0, 10);
+    expect(opId).toBeDefined();
+    out.length = 0;
+    expect(await run(['why', opId!], e(b))).toBe(0);
+    const whyOut = out.join('\n');
+    expect(whyOut).toContain('fix race in refresh');
+    expect(whyOut).toContain('[verified]');
+  });
+
+  test('push -m annotates already-committed ops when nothing new is staged', async () => {
+    const srv = createServer({ backend: new MemoryBackend() });
+    const fetchImpl = srv.fetch.bind(srv);
+    const home = await clientHome(fetchImpl, 'ahead-home');
+    const out: string[] = [];
+    const e = (cwd: string) => ({
+      cwd,
+      home,
+      fetchImpl,
+      out: (l: string) => out.push(l),
+    });
+
+    await run(['create', 'http://t', 'proj-ahead'], e(home));
+    const a = mkdtempSync(join(tmp, 'ahead-a-'));
+    await run(['clone', 'http://t', 'proj-ahead', a], e(a));
+    writeFileSync(join(a, 'x.rs'), 'fn x() {}');
+    // Commit + upload without landing and without a why.
+    expect(await run(['push', '--no-land'], e(a))).toBe(0);
+    // Now `push -m` with nothing new staged: the why must attach to the
+    // already-committed (ahead) op, not be silently dropped.
+    out.length = 0;
+    expect(await run(['push', '-m', 'batch fix'], e(a))).toBe(0);
+    expect(out.join('\n')).toContain('1 why');
+
+    const b = mkdtempSync(join(tmp, 'ahead-b-'));
+    await run(['clone', 'http://t', 'proj-ahead', b], e(b));
+    out.length = 0;
+    await run(['log'], e(b));
+    expect(out.join('\n')).toContain('batch fix');
+  });
+
   test('push with no changes says nothing to publish', async () => {
     const srv = createServer({ backend: new MemoryBackend() });
     const fetchImpl = srv.fetch.bind(srv);

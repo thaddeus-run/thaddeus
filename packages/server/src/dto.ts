@@ -1,5 +1,6 @@
 import type { Delegation } from '@thaddeus.run/agent';
 import type { Op } from '@thaddeus.run/log';
+import type { Provenance } from '@thaddeus.run/provenance';
 import {
   type Capability,
   decodeRecord,
@@ -9,11 +10,14 @@ import {
 
 // The wire reuses the persistence record codec (JSON + {$u8: base64}) per item,
 // so byte fields (sig/nonce/ciphertext/wrapped_key) survive JSON transport. Each
-// item rides as a base64 string; the bundle is plain JSON.
+// item rides as a base64 string; the bundle is plain JSON. `prov` carries the
+// signed "why" (P04) alongside the code; optional so an older client still
+// round-trips.
 export interface Bundle {
   ops: string[];
   objects: string[];
   caps: string[];
+  prov?: string[];
 }
 
 const toWire = (value: unknown): string =>
@@ -25,12 +29,14 @@ const fromWire = (s: string): unknown =>
 export function encodeBundle(
   ops: readonly Op[],
   objects: readonly EncryptedObject[],
-  caps: readonly Capability[]
+  caps: readonly Capability[],
+  prov: readonly Provenance[] = []
 ): Bundle {
   return {
     ops: ops.map(toWire),
     objects: objects.map(toWire),
     caps: caps.map(toWire),
+    prov: prov.map(toWire),
   };
 }
 
@@ -38,11 +44,13 @@ export function decodeBundle(b: Bundle): {
   ops: Op[];
   objects: EncryptedObject[];
   caps: Capability[];
+  prov: Provenance[];
 } {
   return {
     ops: (b.ops ?? []).map((s) => fromWire(s) as Op),
     objects: (b.objects ?? []).map((s) => fromWire(s) as EncryptedObject),
     caps: (b.caps ?? []).map((s) => fromWire(s) as Capability),
+    prov: (b.prov ?? []).map((s) => fromWire(s) as Provenance),
   };
 }
 

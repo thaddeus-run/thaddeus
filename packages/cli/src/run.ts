@@ -2,8 +2,11 @@ import { signDelegation } from '@thaddeus.run/agent';
 import { Client } from '@thaddeus.run/client';
 import { Workspace } from '@thaddeus.run/fs';
 import type { Identity } from '@thaddeus.run/identity';
+import type { Op } from '@thaddeus.run/log';
 import { FileBackend } from '@thaddeus.run/persist';
 import { Platform, type Repo } from '@thaddeus.run/platform';
+import { type Provenance, ProvenanceLog } from '@thaddeus.run/provenance';
+import { type Backend, scoped } from '@thaddeus.run/store';
 import { readFileSync } from 'node:fs';
 import { isAbsolute, join } from 'node:path';
 import { parseArgs } from 'node:util';
@@ -38,7 +41,9 @@ const USAGE = `thaddeus — the Thaddeus CLI
   create <server> <repo>           create a repo on a server
   clone  <server> <repo> [dir]     clone a repo to a working tree
   status                           show working-tree changes
-  push   [--no-land]               commit + upload + land into main
+  push   [-m "<why>"] [--no-land]  commit + upload (+ a signed why) + land
+  log                              show main's history with the why per change
+  why    <op>                      show the signed why for one op
   land                             land uploaded-but-unmerged commits
   grant  <did> [--paths a,b] [--max-changes N]    grant push to a DID/agent
   revoke <did>                                     revoke a grant
@@ -51,6 +56,56 @@ async function openLocal(root: string, repoName: string): Promise<Repo> {
     repoName,
     new FileBackend(join(root, '.thaddeus', 'store'))
   );
+}
+
+// The working copy's per-repo backend scope — the same `repo/<name>/` namespace
+// openDurable uses — so a ProvenanceLog reads/writes the "why" alongside the code.
+function repoScope(root: string, repoName: string): Backend {
+  return scoped(
+    new FileBackend(join(root, '.thaddeus', 'store')),
+    `repo/${repoName}/`
+  );
+}
+
+// Ops reachable from a view's heads, newest-first (descending lamport, id).
+function opsOnView(repo: Repo, view: string): Op[] {
+  const all = repo.log.ops();
+  const byId = new Map(all.map((o) => [o.id, o]));
+  const seen = new Set<string>();
+  const stack = [...repo.log.heads(view)];
+  while (stack.length > 0) {
+    const id = stack.pop();
+    if (id === undefined || seen.has(id)) continue;
+    seen.add(id);
+    const op = byId.get(id);
+    if (op !== undefined) stack.push(...op.parents);
+  }
+  return all
+    .filter((o) => seen.has(o.id))
+    .sort((x, y) =>
+      x.lamport !== y.lamport ? y.lamport - x.lamport : x.id < y.id ? 1 : -1
+    );
+}
+
+// The ops reachable from local `main` but not from `base` — i.e. every
+// committed-but-unpublished op, newest-first. `push -m` annotates these when no
+// new op was committed this invocation (so the why is never silently dropped).
+function opsAhead(repo: Repo, base: readonly string[]): Op[] {
+  const byId = new Map(repo.log.ops().map((o) => [o.id, o]));
+  const closure = (heads: readonly string[]): Set<string> => {
+    const seen = new Set<string>();
+    const stack = [...heads];
+    while (stack.length > 0) {
+      const id = stack.pop();
+      if (id === undefined || seen.has(id)) continue;
+      seen.add(id);
+      const op = byId.get(id);
+      if (op !== undefined) stack.push(...op.parents);
+    }
+    return seen;
+  };
+  const baseClosure = closure(base);
+  return opsOnView(repo, 'main').filter((o) => !baseClosure.has(o.id));
 }
 
 // How many ops are reachable from local `main` but not from `base` (the last
@@ -85,7 +140,7 @@ async function commitDiff(
   root: string,
   repo: Repo,
   identity: Identity
-): Promise<{ heads: string[]; committed: boolean }> {
+): Promise<{ heads: string[]; committed: boolean; ops: readonly Op[] }> {
   const ws = Workspace.open(repo.log, repo.store, {
     source: 'main',
     reader: identity,
@@ -107,11 +162,11 @@ async function commitDiff(
   }
   const ops = await ws.commit(identity);
   if (ops.length === 0) {
-    return { heads: [...repo.log.heads('main')], committed: false };
+    return { heads: [...repo.log.heads('main')], committed: false, ops: [] };
   }
   const heads = [...repo.log.heads('staging')];
   await repo.log.repoint('main', heads);
-  return { heads, committed: true };
+  return { heads, committed: true, ops };
 }
 
 // The injectable entry point. Returns a process exit code.
@@ -203,7 +258,10 @@ export async function run(
       case 'push': {
         const { values } = parseArgs({
           args: [...rest],
-          options: { 'no-land': { type: 'boolean' } },
+          options: {
+            'no-land': { type: 'boolean' },
+            message: { type: 'string', short: 'm' },
+          },
           allowPositionals: true,
         });
         const root = findRoot(env.cwd);
@@ -214,16 +272,49 @@ export async function run(
         const cfg = loadConfig(root);
         const identity = loadIdentity(env.home);
         const local = await openLocal(root, cfg.repo);
-        const { heads, committed } = await commitDiff(root, local, identity);
+        const { heads, committed, ops } = await commitDiff(
+          root,
+          local,
+          identity
+        );
         const ahead = headsAhead(local, cfg.base);
         if (!committed && ahead === 0) {
           out('nothing to publish');
           return 0;
         }
+        // A `-m "<why>"` attaches a signed provenance record (the reason for the
+        // change) to the op(s) this push publishes — the ops just committed, or
+        // (when nothing new was staged) the already-committed-but-unpublished
+        // ops — persisted locally and shipped with the push, so the why is never
+        // silently dropped and every clone carries it.
+        const message = values.message;
+        const provenance: Provenance[] = [];
+        const whyTarget = ops.length > 0 ? ops : opsAhead(local, cfg.base);
+        if (
+          message !== undefined &&
+          message.length > 0 &&
+          whyTarget.length > 0
+        ) {
+          const provLog = new ProvenanceLog(
+            local.store,
+            repoScope(root, cfg.repo)
+          );
+          for (const op of whyTarget) {
+            provenance.push(
+              await provLog.record(
+                op,
+                { intent: message, reasoning: message, actorKind: 'human' },
+                identity
+              )
+            );
+          }
+        }
         const client = new Client(cfg.server, identity, env.fetchImpl);
-        const pushed = await client.push(cfg.repo, local, heads);
+        const pushed = await client.push(cfg.repo, local, heads, provenance);
         out(
-          `uploaded ${pushed.accepted.ops} op(s), ${pushed.accepted.objects} object(s)`
+          `uploaded ${pushed.accepted.ops} op(s), ${pushed.accepted.objects} object(s)${
+            pushed.accepted.prov > 0 ? `, ${pushed.accepted.prov} why` : ''
+          }`
         );
         if (pushed.rejected.length > 0) {
           out(
@@ -280,6 +371,76 @@ export async function run(
           out(
             'published, but the remote has changes not in your clone — re-clone to sync'
           );
+        }
+        return 0;
+      }
+      case 'log': {
+        const root = findRoot(env.cwd);
+        if (root === undefined) {
+          out("not a thaddeus working copy — run 'thaddeus clone' first");
+          return 2;
+        }
+        const cfg = loadConfig(root);
+        const local = await openLocal(root, cfg.repo);
+        const provLog = await ProvenanceLog.load(
+          local.store,
+          repoScope(root, cfg.repo)
+        );
+        const ops = opsOnView(local, 'main');
+        if (ops.length === 0) {
+          out('no history');
+          return 0;
+        }
+        for (const op of ops) {
+          const why = provLog.forOp(op.id);
+          out(`${op.id.slice(0, 10)}  ${op.at}  ${op.path}`);
+          out(
+            `    ${why.length > 0 ? why.map((p) => p.intent).join('; ') : '(no why)'}`
+          );
+        }
+        return 0;
+      }
+      case 'why': {
+        const prefix = rest[0];
+        if (prefix === undefined) {
+          out('usage: thaddeus why <op>');
+          return 2;
+        }
+        const root = findRoot(env.cwd);
+        if (root === undefined) {
+          out("not a thaddeus working copy — run 'thaddeus clone' first");
+          return 2;
+        }
+        const cfg = loadConfig(root);
+        const local = await openLocal(root, cfg.repo);
+        const provLog = await ProvenanceLog.load(
+          local.store,
+          repoScope(root, cfg.repo)
+        );
+        // Resolve a short op-id prefix (as printed by `log`) to a full op.
+        const matches = opsOnView(local, 'main').filter((o) =>
+          o.id.startsWith(prefix)
+        );
+        if (matches.length === 0) {
+          out(`no op matching ${prefix}`);
+          return 1;
+        }
+        if (matches.length > 1) {
+          out(`ambiguous op prefix ${prefix} (${matches.length} matches)`);
+          return 2;
+        }
+        const op = matches[0];
+        out(`op ${op.id.slice(0, 10)}  ${op.at}  ${op.path}  by ${op.author}`);
+        const records = provLog.forOp(op.id);
+        if (records.length === 0) {
+          out('  (no why recorded)');
+          return 0;
+        }
+        for (const p of records) {
+          out(`  [${provLog.status(p)}] ${p.actor_kind}: ${p.intent}`);
+          if (p.reasoning.length > 0 && p.reasoning !== p.intent) {
+            out(`    reasoning: ${p.reasoning}`);
+          }
         }
         return 0;
       }

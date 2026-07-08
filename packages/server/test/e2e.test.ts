@@ -2,6 +2,7 @@ import { Workspace } from '@thaddeus.run/fs';
 import { Identity, ready } from '@thaddeus.run/identity';
 import { OpLog } from '@thaddeus.run/log';
 import { FileBackend } from '@thaddeus.run/persist';
+import { signProvenance } from '@thaddeus.run/provenance';
 import { AccessDenied, MemoryStore } from '@thaddeus.run/store';
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import { mkdtempSync, rmSync } from 'node:fs';
@@ -168,6 +169,65 @@ describe('server e2e', () => {
       const ref2 = clog2.materialize('main', a).get('src/auth.rs')?.ref;
       expect(ref2).toBeDefined();
       expect(dec(await cstore2.get(ref2!, a))).toBe('fn refresh() {}');
+    } finally {
+      await http2.stop(true);
+    }
+  });
+
+  test('the signed why (P04) travels in the bundle and survives a restart', async () => {
+    const root = mkdtempSync(join(tmp, 'why-'));
+    const a = Identity.create();
+    const srv1 = createServer({ backend: new FileBackend(root) });
+    const http1 = Bun.serve({ port: 0, fetch: srv1.fetch });
+    const c1 = client(`http://localhost:${http1.port}`);
+    let opId = '';
+    try {
+      await c1.post('/repos', { name: 'r' }, a);
+      const { bundle, heads, log } = await commitLocally(
+        a,
+        'src/auth.rs',
+        'fn refresh() {}'
+      );
+      const op = log.ops()[0];
+      opId = op.id;
+      // Sign a "why" bound to the op and ship it alongside the code.
+      const why = signProvenance(
+        {
+          op: op.id,
+          actor_kind: 'agent:claude@1',
+          intent: 'fix race in refresh',
+          reasoning: 'added a mutex',
+          task: null,
+          prompt_ref: null,
+          prompt: null,
+        },
+        a
+      );
+      const withWhy: Bundle = {
+        ...bundle,
+        prov: encodeBundle([], [], [], [why]).prov,
+      };
+      await c1.post('/repos/r/push', withWhy, a);
+      await c1.post('/repos/r/land', { fromHeads: heads, into: 'main' }, a);
+
+      const pulled = decodeBundle(
+        (await (await c1.get('/repos/r/pull?view=main')).json()) as Bundle
+      );
+      expect(pulled.prov.map((p) => p.intent)).toContain('fix race in refresh');
+    } finally {
+      await http1.stop(true);
+    }
+
+    // Restart: a fresh server over the SAME dir still serves the why.
+    const srv2 = createServer({ backend: new FileBackend(root) });
+    const http2 = Bun.serve({ port: 0, fetch: srv2.fetch });
+    const c2 = client(`http://localhost:${http2.port}`);
+    try {
+      const repull = decodeBundle(
+        (await (await c2.get('/repos/r/pull?view=main')).json()) as Bundle
+      );
+      expect(repull.prov.map((p) => p.intent)).toContain('fix race in refresh');
+      expect(repull.prov.map((p) => p.op)).toContain(opId);
     } finally {
       await http2.stop(true);
     }
