@@ -158,8 +158,18 @@ All notable changes to Thaddeus. Format follows
   decryption-bounded (inherited from the `Workspace` the `SymbolGraph` was built
   over). The north-star now queries the landed rename (`--why` + a caller
   lookup + a time-window). Subscriptions that fire on semantic events (P11
-  Slice 2) and policy as standing queries (P11 Slice 3) are the remaining
-  slices.
+  Slice 2) and policy as standing queries (P11 Slice 3) followed — see below.
+- `@thaddeus.run/watch` — live semantic subscriptions (Pillar 11,
+  **subscriptions slice**): `SemanticWatcher.over(graph)` captures a baseline
+  snapshot; `poll()` re-derives the semantic graph, **diffs** it against the
+  baseline, and emits `SemanticEvent`s (`defined`/`removed`/`renamed`/`moved`/
+  `references-changed`), dispatching each to the standing `Subscription`s whose
+  `{ symbol?, kinds? }` filter it matches. Triggers fire on _meaning_ — "tell me
+  when this symbol is renamed / a reference is added" — not on file paths; the
+  detection inherits the graph's decryption boundary. Pull-based (events surface
+  on `poll()`, reentrancy-safe); a push/webhook transport and incremental
+  (non-full-re-derive) diffing are deferred. The north-star now fires a
+  subscription on a rename.
 - `@thaddeus.run/platform` — policy as standing queries (Pillar 11, **Slice
   3**): `standingQuery` and `restrictPaths` `LandPolicy`s alongside the P06/P10
   gates. A standing query expresses an invariant as a predicate over the
@@ -167,8 +177,10 @@ All notable changes to Thaddeus. Format follows
   — not a CI script that runs late. `restrictPaths` is the manifesto's headline
   — "no untrusted agent may modify auth code": reject a landing whose op touches
   a protected path (glob) unless its author is in the `allow` set (fail-closed
-  on a `..` segment; misconfiguration rejected at construction). The north-star
-  now rejects a stranger's landing to `src/auth/**` while allowing the owner's.
+  on a `..` traversal path; misconfiguration rejected at construction). The
+  north-star now rejects a stranger's landing to `src/auth/**` while allowing
+  the owner's. **With this, all three Pillar 11 slices — query, subscriptions,
+  standing-query policy — are complete.**
 
 ### Changed
 
@@ -264,15 +276,14 @@ All notable changes to Thaddeus. Format follows
   capabilities into answerable cross-cutting questions. What remains for a full
   Pillar 11 is Slice 2 (subscriptions that fire on semantic events) and Slice 3
   (policy as standing queries) — see below.
-- **P11 subscriptions (P11 Slice 2).** Policy as standing queries (Slice 3)
-  shipped above. Live **subscriptions** that fire on semantic events (e.g. "tell
-  me when the signature of this public function changes") — via diffing graph
-  snapshots — are the remaining P11 slice (`@thaddeus.run/watch`, in flight).
-  Also deferred across the P11 slices: a push/webhook transport for
-  subscriptions; symbol-level standing queries (needs the graph over the
-  proposed state, not just paths); and for the query surface,
-  incremental/indexed derivation (millisecond scale), a durable query store, and
-  behavioral-diff across full history (present-state only today).
+- **P11 cross-cutting deferrals.** All three Pillar 11 slices — query,
+  subscriptions, standing-query policy — shipped; what remains is depth, not
+  breadth: a push/webhook transport and incremental (non-full-re-derive) diffing
+  for subscriptions; `signature-changed` detection and symbol-level standing
+  queries (both need a real parser / the graph over the proposed state, not the
+  heuristic extractor and paths); and for the query surface, incremental/indexed
+  derivation (millisecond scale), a durable query store, and behavioral-diff
+  across full history (present-state only today).
 - **Typed Release objects (P06).** A signed
   `Release { tag, at, signed_by, commits, artifacts }` record and its rendered
   page — a clean follow-on slice. Landing-as-policy already delivers "a release
