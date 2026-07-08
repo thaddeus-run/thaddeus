@@ -214,11 +214,24 @@ All notable changes to Thaddeus. Format follows
   pass across `@thaddeus.run/*` (dropped the retired `strata` keyword,
   de-Strata'd two descriptions). Still deferred: multiple remotes and a
   per-platform release matrix (the commands are documented in `cli:compile`).
+- **`lazythad` — a Rust/ratatui terminal UI.** A lazygit-style browser for
+  Thaddeus (a standalone Cargo crate at `lazythad/`, toolchain pinned in
+  `.prototools`, its own CI job). Because reads are a public mirror, it holds no
+  keys and does no decryption: three panes (repos · op log · detail) show the op
+  log newest-first with a ⛔ marker for a vetoed op, the signed why, veto
+  claims, and — over an overlay — a DID's reputation, all over
+  `GET /repos`/`…/pull`/`/reputation/:did`. Keyboard-driven (`j`/`k`, `Tab`,
+  `Enter`, `r`, `R`, `q`), plus a headless `--dump` text mode and
+  `--version`/`--help`. Read-mostly; write actions (`land`, `veto`) need the
+  ed25519 signed-request envelope in Rust and are a fast-follow.
 
 ### Changed
 
 - Re-scoped packages `@thaddeus/*` → `@thaddeus.run/*`; renamed the `core`
   placeholder package to `store`.
+- Completed the repo-wide **Strata → Thaddeus** rename in forward-facing copy
+  (docs, specs, package READMEs/comments, apps), retiring the working name
+  everywhere except the sentences that record the retirement itself.
 
 ## Deferred — known gaps we owe (tracking note, not shipped)
 

@@ -38,3 +38,27 @@ jobs:
           moon run identity:build store:build theme:build
           moon run identity:typecheck store:typecheck integration:typecheck
           moon run identity:test store:test integration:test
+
+  # The lazythad TUI (lazythad/) is a standalone Rust crate outside the moon/bun
+  # graph, so it gets its own job: format, lint, and test with the toolchain
+  # pinned in .prototools.
+  lazythad:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Rust 1.95.0
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: '1.95.0'
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: lazythad
+      - name: Format
+        run: cargo fmt --manifest-path lazythad/Cargo.toml --check
+      - name: Lint
+        run:
+          cargo clippy --manifest-path lazythad/Cargo.toml --all-targets -- -D
+          warnings
+      - name: Test
+        run: cargo test --manifest-path lazythad/Cargo.toml

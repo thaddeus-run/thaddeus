@@ -1,0 +1,22 @@
+[package]
+name = "lazythad"
+version = "0.1.0"
+edition = "2021"
+description = "A lazygit-style terminal UI for Thaddeus — browse repos, the op log, the signed why, vetoes, and reputation over the untrusted HTTP remote."
+license = "Apache-2.0"
+repository = "https://github.com/thaddeus-run/thaddeus"
+
+[[bin]]
+name = "lazythad"
+path = "src/main.rs"
+
+[dependencies]
+ratatui = "0.29"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+base64 = "0.22"
+ureq = "2"
+anyhow = "1"
+
+[profile.release]
+strip = true
