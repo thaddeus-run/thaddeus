@@ -102,6 +102,9 @@ always skips `.git`, `.thaddeus`, and `node_modules`, so `status`/`push` stay
 fast and never upload dependency or build trees. Edit `.thaddeusignore` to
 change what Thaddeus ignores.
 
+List what's on a server with `thaddeus repos` (`--mine` for repos your identity
+owns), and remove one you own with `thaddeus delete <repo> --yes` (irreversible).
+
 ## 5. Read the history and the why
 
 ```sh

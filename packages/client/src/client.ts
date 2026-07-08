@@ -137,6 +137,45 @@ export class Client {
     return body.repos;
   }
 
+  // Repos with their owner DID (the mirror's GET /repos carries owners). Lets a
+  // caller list "repos I own" by filtering on its identity's did.
+  async listReposWithOwners(): Promise<
+    readonly { name: string; owner: string | null }[]
+  > {
+    const res = await this.#fetch(new Request(`${this.#server}/repos`));
+    const body = (await this.#ok(res)) as {
+      repos: string[];
+      owners?: Record<string, string>;
+    };
+    return body.repos.map((name) => ({
+      name,
+      owner: body.owners?.[name] ?? null,
+    }));
+  }
+
+  // Delete a repo (owner-only, enforced server-side). Irreversible.
+  async deleteRepo(name: string): Promise<void> {
+    const path = `/repos/${encodeURIComponent(name)}`;
+    const h = signRequest(
+      'DELETE',
+      path,
+      new Uint8Array(),
+      this.#identity,
+      new Date().toISOString()
+    );
+    const res = await this.#fetch(
+      new Request(`${this.#server}${path}`, {
+        method: 'DELETE',
+        headers: {
+          'x-thaddeus-did': h.did,
+          'x-thaddeus-timestamp': h.timestamp,
+          'x-thaddeus-signature': h.signature,
+        },
+      })
+    );
+    await this.#ok(res);
+  }
+
   // Upload the ops/objects/caps reachable from `heads`. Idempotent — the server
   // re-ingest of existing content is a no-op.
   async push(
