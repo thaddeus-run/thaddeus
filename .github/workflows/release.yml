@@ -68,8 +68,11 @@ jobs:
               target: x86_64-unknown-linux-gnu,
               name: linux-x64,
             }
+          # Both macOS slices build on the arm64 runner — macOS cross-compiles
+          # x86_64-apple-darwin natively, so we avoid the scarce macos-13 Intel
+          # runners (which can queue for tens of minutes and stall the release).
           - { os: macos-14, target: aarch64-apple-darwin, name: darwin-arm64 }
-          - { os: macos-13, target: x86_64-apple-darwin, name: darwin-x64 }
+          - { os: macos-14, target: x86_64-apple-darwin, name: darwin-x64 }
           - {
               os: windows-latest,
               target: x86_64-pc-windows-msvc,
