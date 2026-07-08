@@ -1,6 +1,7 @@
 import type { Delegation } from '@thaddeus.run/agent';
 import type { Identity } from '@thaddeus.run/identity';
 import { Platform, type Repo } from '@thaddeus.run/platform';
+import { type Provenance, ProvenanceLog } from '@thaddeus.run/provenance';
 import {
   decodeBundle,
   decodeDelegation,
@@ -8,12 +9,12 @@ import {
   encodeDelegation,
   signRequest,
 } from '@thaddeus.run/server';
-import type { Backend } from '@thaddeus.run/store';
+import { type Backend, scoped } from '@thaddeus.run/store';
 
 import { bundleFor } from './bundle';
 
 export interface PushResult {
-  accepted: { objects: number; ops: number; caps: number };
+  accepted: { objects: number; ops: number; caps: number; prov: number };
   rejected: { kind: string; id: string; reason: string }[];
 }
 
@@ -60,7 +61,11 @@ export class Client {
     name: string,
     backend: Backend,
     view = 'main'
-  ): Promise<{ repo: Repo; heads: readonly string[] }> {
+  ): Promise<{
+    repo: Repo;
+    heads: readonly string[];
+    provenance: ProvenanceLog;
+  }> {
     const enc = encodeURIComponent;
     const res = await this.#fetch(
       new Request(`${this.#server}/repos/${enc(name)}/pull?view=${enc(view)}`)
@@ -81,7 +86,17 @@ export class Client {
       await repo.log.ingest(op);
     }
     await repo.log.repoint(view, body.heads);
-    return { repo, heads: body.heads };
+    // Persist the pulled "why" (P04) into the working copy's own scope, so
+    // `thaddeus log`/`why` can read it offline — same `repo/<name>/` namespace
+    // openDurable uses for the code, keeping the whole substrate in one place.
+    const provenance = new ProvenanceLog(
+      repo.store,
+      scoped(backend, `repo/${name}/`)
+    );
+    for (const p of bundle.prov) {
+      await provenance.ingest(p);
+    }
+    return { repo, heads: body.heads, provenance };
   }
 
   async listRepos(): Promise<readonly string[]> {
@@ -97,13 +112,14 @@ export class Client {
   async push(
     name: string,
     repo: Repo,
-    heads: readonly string[]
+    heads: readonly string[],
+    provenance: readonly Provenance[] = []
   ): Promise<PushResult> {
     const { ops, objects, caps } = bundleFor(repo, heads);
     const res = await this.#signed(
       'POST',
       `/repos/${encodeURIComponent(name)}/push`,
-      encodeBundle(ops, objects, caps)
+      encodeBundle(ops, objects, caps, provenance)
     );
     return (await this.#ok(res)) as PushResult;
   }
