@@ -9,13 +9,21 @@ export interface DiffLine {
   readonly text: string;
 }
 
-// A per-file change with its rendered line diff. `binary` files carry no lines.
+// A per-file change with its rendered line diff. `binary` files carry no lines;
+// `truncated` marks a text file too large to diff cell-by-cell (see below).
 export interface FileDiff {
   readonly path: string;
   readonly status: 'added' | 'modified' | 'deleted';
   readonly binary: boolean;
+  readonly truncated: boolean;
   readonly lines: readonly DiffLine[];
 }
+
+// Cap on the LCS DP table size (rows × cols). The table is O(n·m) numbers, so
+// past this cap (~1.4k × 1.4k lines) a huge generated/lock/minified file would
+// risk an OOM — above it we report the change coarsely instead of building the
+// table. A space-optimal Hirschberg diff would lift this, and is deferred.
+const MAX_DIFF_CELLS = 2_000_000;
 
 // Split into lines WITHOUT a trailing empty element for a final newline, so a
 // file and the same file with a trailing newline don't diff as a phantom line.
@@ -95,6 +103,7 @@ export function fileDiff(
       path,
       status: 'added',
       binary,
+      truncated: false,
       lines: binary
         ? []
         : toLines(decode(target)).map((text) => ({ tag: '+', text })),
@@ -106,6 +115,7 @@ export function fileDiff(
       path,
       status: 'deleted',
       binary,
+      truncated: false,
       lines: binary
         ? []
         : toLines(decode(base)).map((text) => ({ tag: '-', text })),
@@ -115,13 +125,26 @@ export function fileDiff(
   const binary =
     (base !== undefined && isBinary(base)) ||
     (target !== undefined && isBinary(target));
+  if (binary || base === undefined || target === undefined) {
+    return { path, status: 'modified', binary, truncated: false, lines: [] };
+  }
+  const oldText = decode(base);
+  const newText = decode(target);
+  // Bail to a coarse report rather than OOM on a pathologically large text file.
+  if (toLines(oldText).length * toLines(newText).length > MAX_DIFF_CELLS) {
+    return {
+      path,
+      status: 'modified',
+      binary: false,
+      truncated: true,
+      lines: [],
+    };
+  }
   return {
     path,
     status: 'modified',
-    binary,
-    lines:
-      binary || base === undefined || target === undefined
-        ? []
-        : lineDiff(decode(base), decode(target)),
+    binary: false,
+    truncated: false,
+    lines: lineDiff(oldText, newText),
   };
 }

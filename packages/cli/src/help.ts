@@ -83,7 +83,8 @@ export const HELP: Record<string, string> = {
 
   Show 'main' history newest-first with the signed why per change and a ⛔
   marker for a vetoed op. --since/--until filter by the op's signed timestamp
-  (op.at), inclusive, comparing ISO 8601 strings.`,
+  (op.at), inclusive, compared as instants (any ISO 8601 form, e.g.
+  2026-07-01 or 2026-07-01T12:00:00+02:00).`,
 
   why: `thaddeus why <op> [--json]
 

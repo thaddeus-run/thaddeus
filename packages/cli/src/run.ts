@@ -367,6 +367,10 @@ export async function run(
             out('  binary file differs');
             continue;
           }
+          if (fd.truncated) {
+            out('  file too large to diff');
+            continue;
+          }
           for (const line of fd.lines) {
             out(`${line.tag}${line.text}`);
           }
@@ -703,14 +707,28 @@ export async function run(
         );
         const vetoLog = await VetoLog.load(repoScope(root, cfg.repo));
         // --since/--until filter by the op's signed wall-clock timestamp
-        // (op.at). ISO 8601 strings sort lexically, so a string compare IS a
-        // time compare; both bounds are inclusive.
-        const { since, until } = values;
-        const ops = opsOnView(local, 'main').filter(
-          (op) =>
-            (since === undefined || op.at >= since) &&
-            (until === undefined || op.at <= until)
-        );
+        // (op.at), both bounds inclusive. Parse the bounds AND op.at to instants
+        // (epoch ms) and compare those — a lexical string compare would misorder
+        // a non-UTC offset like `+05:30` against op.at's canonical `…Z` form.
+        const sinceMs =
+          values.since !== undefined ? Date.parse(values.since) : undefined;
+        const untilMs =
+          values.until !== undefined ? Date.parse(values.until) : undefined;
+        if (sinceMs !== undefined && Number.isNaN(sinceMs)) {
+          out(`invalid --since: ${values.since}`);
+          return 2;
+        }
+        if (untilMs !== undefined && Number.isNaN(untilMs)) {
+          out(`invalid --until: ${values.until}`);
+          return 2;
+        }
+        const ops = opsOnView(local, 'main').filter((op) => {
+          const t = Date.parse(op.at);
+          return (
+            (sinceMs === undefined || t >= sinceMs) &&
+            (untilMs === undefined || t <= untilMs)
+          );
+        });
         const isVetoed = (op: Op): boolean =>
           vetoLog.forOp(op.id).some((v) => vetoLog.status(v) === 'verified');
         if (values.json === true) {
