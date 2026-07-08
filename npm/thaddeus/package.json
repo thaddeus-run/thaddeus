@@ -1,5 +1,5 @@
 {
-  "name": "thaddeus",
+  "name": "@thaddeus.run/cli",
   "version": "0.1.0-alpha",
   "description": "The Thaddeus CLI — a post-Git, agent-native source-control substrate. Installs the prebuilt `thaddeus` binary for your platform.",
   "keywords": [
@@ -27,6 +27,9 @@
     "download.cjs",
     "install.cjs"
   ],
+  "publishConfig": {
+    "access": "public"
+  },
   "scripts": {
     "postinstall": "node install.cjs"
   },

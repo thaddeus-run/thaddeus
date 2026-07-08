@@ -12,9 +12,10 @@ All notable changes to Thaddeus. Format follows
   runner) and the `lazythad` TUI (cargo, one native runner per target) and
   publishes a GitHub Release with the binaries + `SHA256SUMS`. An `install.sh`
   (`curl … | sh`) downloads both and sets up `PATH`. Both tools are also
-  installable from npm (`npm i -g thaddeus lazythad`) via launcher packages that
-  fetch the prebuilt binary (postinstall, with a download-on-first-run
-  fallback); npm publishing is gated on an `NPM_TOKEN` secret.
+  installable from npm (`npm i -g @thaddeus.run/cli @thaddeus.run/lazythad`) via
+  launcher packages that fetch the prebuilt binary (postinstall, with a
+  download-on-first-run fallback); npm publishing is gated on an `NPM_TOKEN`
+  secret.
 
 ## [0.1.0-alpha] - 2026-07-08
 

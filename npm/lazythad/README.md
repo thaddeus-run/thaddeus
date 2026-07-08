@@ -1,11 +1,12 @@
-# lazythad
+# @thaddeus.run/lazythad
 
 A lazygit-style terminal UI for [Thaddeus](https://thaddeus.run) (Rust ·
 [ratatui](https://ratatui.rs)) — browse a server's repos, the op log, the signed
-why, vetoes, and reputation. Distributed as a prebuilt binary.
+why, vetoes, and reputation. Distributed as a prebuilt binary. Installs the
+`lazythad` command.
 
 ```sh
-npm i -g lazythad
+npm i -g @thaddeus.run/lazythad
 lazythad http://localhost:4000
 ```
 

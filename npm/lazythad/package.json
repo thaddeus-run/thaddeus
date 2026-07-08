@@ -1,5 +1,5 @@
 {
-  "name": "lazythad",
+  "name": "@thaddeus.run/lazythad",
   "version": "0.1.0-alpha",
   "description": "lazythad — a lazygit-style terminal UI for Thaddeus. Installs the prebuilt `lazythad` binary for your platform.",
   "keywords": [
@@ -27,6 +27,9 @@
     "download.cjs",
     "install.cjs"
   ],
+  "publishConfig": {
+    "access": "public"
+  },
   "scripts": {
     "postinstall": "node install.cjs"
   },

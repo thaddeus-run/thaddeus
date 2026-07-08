@@ -16,7 +16,7 @@ veto — instead of a person reading a diff.
 ~~~
 
 INSTALL: curl -fsSL https://raw.githubusercontent.com/thaddeus-run/thaddeus/main/install.sh | sh
-  (or: npm i -g thaddeus lazythad)
+  (or: npm i -g @thaddeus.run/cli @thaddeus.run/lazythad)
 
 QUICKSTART: see docs/getting-started.md
   thaddeus init → serve → create → clone → edit → push -m → log / why

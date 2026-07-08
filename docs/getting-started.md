@@ -23,7 +23,7 @@ curl -fsSL https://raw.githubusercontent.com/thaddeus-run/thaddeus/main/install.
 **npm:**
 
 ```sh
-npm i -g thaddeus lazythad     # each fetches the prebuilt binary for your platform
+npm i -g @thaddeus.run/cli @thaddeus.run/lazythad   # each fetches the prebuilt binary
 ```
 
 **Manual:** download the binary for your platform from the

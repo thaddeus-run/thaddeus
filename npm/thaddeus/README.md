@@ -1,10 +1,11 @@
-# thaddeus
+# @thaddeus.run/cli
 
 The [Thaddeus](https://thaddeus.run) CLI — a post-Git, agent-native
-source-control substrate — distributed as a prebuilt binary.
+source-control substrate — distributed as a prebuilt binary. Installs the
+`thaddeus` (and `thad`) command.
 
 ```sh
-npm i -g thaddeus
+npm i -g @thaddeus.run/cli
 thaddeus --version
 thaddeus help
 ```
