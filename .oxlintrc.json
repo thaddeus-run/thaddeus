@@ -81,6 +81,7 @@
   "globals": {},
   "ignorePatterns": [
     "**/dist/**",
+    "npm/**",
     "{packages,apps}/*/node_modules/**",
     "{packages,apps}/*/.next/**",
     "{packages,apps}/*/out/**",

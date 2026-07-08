@@ -1,0 +1,36 @@
+{
+  "name": "thaddeus",
+  "version": "0.1.0-alpha",
+  "description": "The Thaddeus CLI — a post-Git, agent-native source-control substrate. Installs the prebuilt `thaddeus` binary for your platform.",
+  "keywords": [
+    "cli",
+    "git-alternative",
+    "source-control",
+    "thaddeus"
+  ],
+  "homepage": "https://thaddeus.run",
+  "bugs": {
+    "url": "https://github.com/thaddeus-run/thaddeus/issues"
+  },
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/thaddeus-run/thaddeus.git",
+    "directory": "npm/thaddeus"
+  },
+  "bin": {
+    "thad": "bin/thaddeus.cjs",
+    "thaddeus": "bin/thaddeus.cjs"
+  },
+  "files": [
+    "bin/thaddeus.cjs",
+    "download.cjs",
+    "install.cjs"
+  ],
+  "scripts": {
+    "postinstall": "node install.cjs"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}
