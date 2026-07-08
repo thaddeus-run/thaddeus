@@ -33,6 +33,16 @@ dl() {
 fetch() { # print a URL's body to stdout
   if command -v curl >/dev/null 2>&1; then curl -fsSL "$1"; else wget -qO- "$1"; fi
 }
+# sha256 hex of a file via whichever tool is present ('' if none available).
+sha256_of() {
+  if command -v sha256sum >/dev/null 2>&1; then
+    sha256sum "$1" | awk '{print $1}'
+  elif command -v shasum >/dev/null 2>&1; then
+    shasum -a 256 "$1" | awk '{print $1}'
+  else
+    printf ''
+  fi
+}
 
 # --- detect platform ---
 os=$(uname -s)
@@ -61,6 +71,8 @@ if [ -z "$version" ]; then
   [ -n "$version" ] || err "could not determine the latest release"
 fi
 base="https://github.com/$REPO/releases/download/$version"
+# The release's checksum manifest — each binary is verified against it below.
+sums=$(fetch "$base/SHA256SUMS" 2>/dev/null || printf '')
 
 mkdir -p "$BIN_DIR"
 printf 'Installing Thaddeus %s (%s-%s) → %s\n' "$version" "$os" "$arch" "$BIN_DIR"
@@ -72,6 +84,20 @@ for tool in thaddeus lazythad; do
   dest="$BIN_DIR/$tool$ext"
   info "↓ $asset"
   if dl "$base/$asset" "$dest.tmp" 2>/dev/null; then
+    # Verify against SHA256SUMS when the manifest lists this asset — a tampered
+    # asset or compromised CDN edge is then rejected rather than installed.
+    expected=$(printf '%s\n' "$sums" |
+      awk -v a="$asset" '($2 == a) || ($2 == "*" a) { print $1 }' | head -1)
+    if [ -n "$expected" ]; then
+      actual=$(sha256_of "$dest.tmp")
+      if [ -z "$actual" ]; then
+        rm -f "$dest.tmp"
+        err "need sha256sum or shasum to verify $asset"
+      elif [ "$actual" != "$expected" ]; then
+        rm -f "$dest.tmp"
+        err "checksum mismatch for $asset (expected $expected, got $actual)"
+      fi
+    fi
     chmod +x "$dest.tmp"
     mv "$dest.tmp" "$dest"
     installed="$installed $tool"
