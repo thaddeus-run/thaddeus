@@ -144,7 +144,9 @@ jobs:
           \`\`\`sh
           curl -fsSL https://raw.githubusercontent.com/${GITHUB_REPOSITORY}/main/install.sh | sh
           \`\`\`
-          Or via npm: \`npm i -g @thaddeus.run/cli @thaddeus.run/lazythad\`. See CHANGELOG.md for changes."
+          Or via npm: \`npm i -g @thaddeus.run/cli @thaddeus.run/lazythad\`.
+
+          Point it at a server with \`thaddeus use\`: \`--hosted\` for the official https://ams1.thaddeus.run, or \`thaddeus use <your-server>\` for your own. See CHANGELOG.md for changes."
           if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
             gh release upload "$TAG" release/* --repo "$GITHUB_REPOSITORY" --clobber
           else
