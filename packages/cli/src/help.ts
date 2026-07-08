@@ -10,6 +10,8 @@ Working tree
   create <repo> [--server URL]  create a repo on a server
   clone  <repo> [dir] [--server URL]
                                 clone a repo to a working tree
+  repos  [--mine]               list server repos (--mine = owned by you)
+  delete <repo> --yes           delete a repo you own (irreversible)
   status                        show working-tree changes
   diff   [--staged] [path...]   show a line diff of working-tree changes
   push   [-m "<why>"]           commit + upload (+ a signed why) + land
@@ -72,6 +74,16 @@ export const HELP: Record<string, string> = {
   Clone <repo> into [dir] (defaults to the repo's last path segment) from a
   server resolved like 'create' (--server, else a leading https:// argument,
   else your default). Materializes 'main' and records the remote.`,
+
+  repos: `thaddeus repos [--mine] [--server <url>] [--json]
+
+  List the repos on a server (resolved like 'create': --server, else your
+  default). --mine shows only repos your identity owns.`,
+
+  delete: `thaddeus delete <repo> [--server <url>] --yes
+
+  Delete a repo you own. Irreversible — there is no undo or GC yet — so --yes is
+  required. The server rejects a delete from anyone but the repo's owner.`,
 
   status: `thaddeus status [--json]
 

@@ -24,7 +24,7 @@ describe('startServer', () => {
       expect(s.url).toContain('http://localhost:');
       const res = await fetch(`${s.url}/repos`);
       expect(res.status).toBe(200);
-      expect(await res.json()).toEqual({ repos: [] });
+      expect(await res.json()).toEqual({ repos: [], owners: {} });
     } finally {
       await s.stop();
     }

@@ -5,6 +5,16 @@ All notable changes to Thaddeus. Format follows
 
 ## [Unreleased]
 
+### Added
+
+- **Server-side repo management: `thaddeus repos` + `thaddeus delete`.** `repos
+  [--mine]` lists a server's repos — the mirror's `GET /repos` now includes each
+  repo's owner DID (public info), and `--mine` filters to repos your identity
+  owns. `delete <repo> --yes` removes a repo you own via an owner-gated
+  `DELETE /repos/:name` (drops the repo's keys + evicts its caches).
+  Irreversible — no GC/undo yet, and the server-wide reputation log is left
+  intact; `--yes` is required so a fat-fingered name can't wipe a repo.
+
 ## [0.1.1-alpha] - 2026-07-08
 
 ### Added

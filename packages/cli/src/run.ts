@@ -310,6 +310,81 @@ export async function run(
         out(`default server set to ${url}`);
         return 0;
       }
+      case 'repos': {
+        const { values } = parseArgs({
+          args: [...rest],
+          options: {
+            server: { type: 'string' },
+            mine: { type: 'boolean' },
+            json: { type: 'boolean' },
+          },
+          allowPositionals: true,
+        });
+        if (values.server !== undefined && !isServerUrl(values.server)) {
+          out(`invalid --server url: ${values.server}`);
+          return 2;
+        }
+        const resolved = resolveServer(values.server, [], env.home);
+        if (resolved === null) {
+          out(noServerHint('repos'));
+          return 2;
+        }
+        const identity = loadIdentity(env.home);
+        const client = new Client(resolved.server, identity, env.fetchImpl);
+        let repos = await client.listReposWithOwners();
+        if (values.mine === true) {
+          repos = repos.filter((r) => r.owner === identity.did);
+        }
+        if (values.json === true) {
+          out(JSON.stringify(repos));
+          return 0;
+        }
+        if (repos.length === 0) {
+          out(values.mine === true ? 'no repos owned by you' : 'no repos');
+          return 0;
+        }
+        for (const r of repos) {
+          out(`${r.name}${r.owner !== null ? `  (owner ${r.owner})` : ''}`);
+        }
+        return 0;
+      }
+      case 'delete': {
+        const { values, positionals } = parseArgs({
+          args: [...rest],
+          options: { server: { type: 'string' }, yes: { type: 'boolean' } },
+          allowPositionals: true,
+        });
+        if (values.server !== undefined && !isServerUrl(values.server)) {
+          out(`invalid --server url: ${values.server}`);
+          return 2;
+        }
+        const resolved = resolveServer(values.server, positionals, env.home);
+        if (resolved === null) {
+          out(noServerHint('delete'));
+          return 2;
+        }
+        const repo = resolved.rest[0];
+        if (repo === undefined) {
+          out('usage: thaddeus delete <repo> [--server <url>] --yes');
+          return 2;
+        }
+        // Destructive and irreversible (no undo/GC yet), so require an explicit
+        // --yes; the server independently gates the delete on repo ownership.
+        if (values.yes !== true) {
+          out(
+            `refusing to delete ${repo} without --yes (this is irreversible)`
+          );
+          return 2;
+        }
+        const client = new Client(
+          resolved.server,
+          loadIdentity(env.home),
+          env.fetchImpl
+        );
+        await client.deleteRepo(repo);
+        out(`deleted ${repo}`);
+        return 0;
+      }
       case 'create': {
         const { values, positionals } = parseArgs({
           args: [...rest],

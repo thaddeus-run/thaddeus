@@ -357,8 +357,58 @@ export function createServer(config: ServerConfig): Server {
     const keys = await config.backend.list('repo/');
     const names = keys
       .filter((k) => k.endsWith('/meta/repo'))
-      .map((k) => k.slice('repo/'.length, -'/meta/repo'.length));
-    return json(200, { repos: names.sort() });
+      .map((k) => k.slice('repo/'.length, -'/meta/repo'.length))
+      .sort();
+    // Include each repo's owner DID so a client can list "repos I own" without a
+    // second round-trip. Owners are already public on the mirror (they sign
+    // every op), so this leaks nothing new.
+    const owners: Record<string, string> = {};
+    for (const name of names) {
+      const meta = await readMeta(name);
+      if (meta !== undefined) {
+        owners[name] = meta.owner;
+      }
+    }
+    return json(200, { repos: names, owners });
+  }
+
+  // DELETE /repos/:name — owner-only. Drops every backend key under the repo's
+  // scope and evicts its per-repo caches. Irreversible (no GC/undo yet). The
+  // server-wide ReputationLog (top-level `rep/`) spans repos and is NOT removed.
+  async function deleteRepo(
+    name: string,
+    req: Request,
+    body: Uint8Array
+  ): Promise<Response> {
+    const signer = verifyRequest(
+      'DELETE',
+      new URL(req.url).pathname,
+      body,
+      headers(req),
+      Date.parse(now())
+    );
+    if (signer === null) {
+      return json(401, { error: 'unsigned or invalid request' });
+    }
+    return withRepoLock(name, async () => {
+      const meta = await readMeta(name);
+      if (meta === undefined) {
+        return json(404, { error: `no repo ${name}` });
+      }
+      if (signer !== meta.owner) {
+        return json(403, { error: 'not the repo owner' });
+      }
+      const b = metaBackend(name);
+      for (const key of await b.list('')) {
+        await b.delete(key);
+      }
+      repoCache.delete(name);
+      registries.delete(name);
+      provenances.delete(name);
+      vetoes.delete(name);
+      symops.delete(name);
+      return json(200, { deleted: name });
+    });
   }
 
   // Returns the heads of a named view for a repo; 404 if the repo doesn't exist.
@@ -909,6 +959,16 @@ export function createServer(config: ServerConfig): Server {
       }
       if (path === '/repos' && req.method === 'POST') {
         return createRepo(req, body);
+      }
+      // DELETE /repos/:name — owner-only. (Suffixed routes below are GET/POST,
+      // so this bare-name match never steals a push/land/grants path.)
+      const deleteMatch = path.match(/^\/repos\/(.+)$/);
+      if (deleteMatch !== null && req.method === 'DELETE') {
+        const repoName = safeDecode(deleteMatch[1]);
+        if (repoName === undefined) {
+          return json(400, { error: 'malformed path' });
+        }
+        return deleteRepo(repoName, req, body);
       }
       // /repos/:name/views/:view  and  /repos/:name/pull
       // Names can contain '/' (e.g. "acme/web"); split on the fixed suffixes.
