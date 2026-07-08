@@ -43,6 +43,6 @@ describe('wire bundle codec', () => {
   test('tolerates missing arrays (decodes to empty)', () => {
     // @ts-expect-error — deliberately omit fields to exercise the ?? [] guards
     const back = decodeBundle({});
-    expect(back).toEqual({ ops: [], objects: [], caps: [] });
+    expect(back).toEqual({ ops: [], objects: [], caps: [], prov: [] });
   });
 });

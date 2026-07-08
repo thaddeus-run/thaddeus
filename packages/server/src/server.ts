@@ -12,6 +12,7 @@ import {
   Platform,
   type Repo,
 } from '@thaddeus.run/platform';
+import { ProvenanceLog } from '@thaddeus.run/provenance';
 import {
   type Backend,
   type Capability,
@@ -135,6 +136,27 @@ export function createServer(config: ServerConfig): Server {
     if (p === undefined) {
       p = buildRegistry(name);
       registries.set(name, p);
+    }
+    return p;
+  }
+
+  // Durable per-repo ProvenanceLog cache — the "why" (P04) alongside the code.
+  // Single-flight like registries so concurrent callers share one instance.
+  const provenances = new Map<string, Promise<ProvenanceLog>>();
+
+  async function buildProvenance(name: string): Promise<ProvenanceLog> {
+    const repo = await getRepo(name);
+    if (repo === undefined) {
+      throw new Error(`no repo ${name}`);
+    }
+    return ProvenanceLog.load(repo.store, metaBackend(name));
+  }
+
+  function provenanceFor(name: string): Promise<ProvenanceLog> {
+    let p = provenances.get(name);
+    if (p === undefined) {
+      p = buildProvenance(name);
+      provenances.set(name, p);
     }
     return p;
   }
@@ -296,10 +318,14 @@ export function createServer(config: ServerConfig): Server {
         caps.push(...repo.store.caps(pid));
       }
     }
+    // The signed "why" for every op in the view (P04), so a clone carries the
+    // meaning, not just the code.
+    const provLog = await provenanceFor(name);
+    const prov = ops.flatMap((op) => [...provLog.forOp(op.id)]);
     return json(200, {
       view,
       heads: [...repo.log.heads(view)],
-      ...encodeBundle(ops, objects, caps),
+      ...encodeBundle(ops, objects, caps, prov),
     });
   }
 
@@ -403,8 +429,26 @@ export function createServer(config: ServerConfig): Server {
           rejected.push({ kind: 'op', id: op.id ?? '?', reason: String(err) });
         }
       }
+      // Ingest the signed "why" (P04): keep-and-label + durable write-through, so
+      // a restarted server still serves the reason behind each change. An
+      // unverifiable why poisons nothing (it is kept and rendered `unverified`).
+      let provOk = 0;
+      const provLog = await provenanceFor(name);
+      for (const p of bundle.prov) {
+        try {
+          await provLog.ingest(p);
+          provOk += 1;
+        } catch (err) {
+          rejected.push({ kind: 'prov', id: p.op ?? '?', reason: String(err) });
+        }
+      }
       return json(200, {
-        accepted: { objects: objectsOk, ops: opsOk, caps: capsOk },
+        accepted: {
+          objects: objectsOk,
+          ops: opsOk,
+          caps: capsOk,
+          prov: provOk,
+        },
         rejected,
       });
     });
