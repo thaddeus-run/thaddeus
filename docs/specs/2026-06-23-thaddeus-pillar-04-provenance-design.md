@@ -1,7 +1,7 @@
 # Thaddeus — Pillar 04: a first-class, signed "why" layer (design)
 
 **Date:** 2026-06-23 **Status:** Design — pending user review, then
-implementation plan **Product:** Strata (working name) · **Company/monorepo:**
+implementation plan **Product:** Thaddeus (working name) · **Company/monorepo:**
 Thaddeus (`@thaddeus.run/*`) **Source of truth (vision):**
 `the-new-age-of-source-control.html`, Pillar 04 **Builds on:**
 `docs/specs/2026-06-23-thaddeus-pillar-03-operation-log-design.md`,
@@ -12,7 +12,7 @@ Thaddeus (`@thaddeus.run/*`) **Source of truth (vision):**
 
 ## 1. Context — why this primitive, why now
 
-Strata is an 11-pillar replacement for Git+GitHub, built **one primitive at a
+Thaddeus is an 11-pillar replacement for Git+GitHub, built **one primitive at a
 time**, each release swapping one stub in the north-star integration test for a
 real package (Pillar 01 spec §4).
 
@@ -357,7 +357,7 @@ Provenance {
   actor_kind: "agent:claude-code@1.2"          // or "human" — descriptive label, signed
   intent:     "fix race in token refresh"      // short why
   reasoning:  "refresh() re-entered before lock; added a mutex"
-  task:       "STRATA-417" | null              // issue/task link, optional
+  task:       "Thaddeus-417" | null              // issue/task link, optional
   prompt_ref: blake3(prompt_text) | null       // tamper-evident hash; null if no prompt
   prompt:     Ref | null                        // capability-gated pointer; null if no prompt
   sig:        ed25519(actor, canonical(...))    // over ALL fields above (§4.2)
@@ -412,8 +412,8 @@ deterministic via injected identities/seeds. Three acts:
 1. Reuse `@thaddeus.run/log`: `write('main', 'src/auth.rs', fixBytes, author)`
    to produce a real `Op`.
 2. `record(op, { intent, reasoning, task, actorKind: 'agent:claude-code@1.2', prompt }, actor)`.
-3. Render a `strata log src/auth.rs --why`-style block: the op id + lamport, the
-   actor/actor_kind/operator, intent and task, and `✓ verified`.
+3. Render a `Thaddeus log src/auth.rs --why`-style block: the op id + lamport,
+   the actor/actor_kind/operator, intent and task, and `✓ verified`.
 
 **Act 2 — the trust rule (tamper → unverified).**
 

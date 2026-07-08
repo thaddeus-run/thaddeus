@@ -45,7 +45,8 @@ already uses.
   `moon run <project>:<task>`. Export `AGENT=1` for AI-friendly test output.
   Preserve trailing newlines. Commit messages follow Conventional Commits 1.0.0.
 - **Naming:** package is `@thaddeus.run/provenance` (neutral, product-agnostic).
-  Source of truth vision file uses "Strata"; package names never use `strata-`.
+  Source of truth vision file uses "Thaddeus"; package names never use
+  `Thaddeus-`.
 - **Verification baseline after code changes:** `moon run root:format root:lint`
   plus the affected `moonx provenance:typecheck` and `moonx provenance:test`.
 
@@ -91,7 +92,7 @@ the pure record module: the `Provenance` type and
   "name": "@thaddeus.run/provenance",
   "version": "0.0.0",
   "description": "A signed \"why\" layer — Provenance records (actor, intent, reasoning, task, capability-gated prompt) bound to an Op.id and verifiable by anyone. Pillar 04.",
-  "keywords": ["provenance", "did", "operation-log", "strata", "substrate"],
+  "keywords": ["provenance", "did", "operation-log", "Thaddeus", "substrate"],
   "homepage": "https://thaddeus.run",
   "bugs": {
     "url": "https://github.com/thaddeus-run/thaddeus/issues"
@@ -202,7 +203,7 @@ export default config;
 ```markdown
 # @thaddeus.run/provenance
 
-The signed "why" layer for **Strata** (working name) — Pillar 04.
+The signed "why" layer for **Thaddeus** (working name) — Pillar 04.
 
 A `Provenance` record attaches the _why_ — actor, actor kind, intent, reasoning,
 task, and an optional capability-gated prompt — to an `Op.id` from
@@ -256,7 +257,7 @@ const fields = (op: string) => ({
   actor_kind: 'agent:claude-code@1.2',
   intent: 'fix race in token refresh',
   reasoning: 'refresh() re-entered before lock; added a mutex',
-  task: 'STRATA-417' as string | null,
+  task: 'Thaddeus-417' as string | null,
   prompt_ref: null,
   prompt: null,
 });
@@ -278,7 +279,7 @@ describe('Provenance record', () => {
     expect(verifyProvenance({ ...p, actor_kind: 'human' })).toBe(false);
     expect(verifyProvenance({ ...p, intent: 'lie' })).toBe(false);
     expect(verifyProvenance({ ...p, reasoning: 'lie' })).toBe(false);
-    expect(verifyProvenance({ ...p, task: 'STRATA-000' })).toBe(false);
+    expect(verifyProvenance({ ...p, task: 'Thaddeus-000' })).toBe(false);
     expect(verifyProvenance({ ...p, prompt_ref: 'deadbeef' })).toBe(false);
   });
 
@@ -553,7 +554,7 @@ describe('ProvenanceLog', () => {
         intent: 'fix race in token refresh',
         reasoning: 'added a mutex',
         actorKind: 'agent:claude-code@1.2',
-        task: 'STRATA-417',
+        task: 'Thaddeus-417',
       },
       actor
     );
@@ -984,7 +985,7 @@ test('P04: a signed Provenance record attaches the why to the Op', async () => {
       intent: 'fix race in token refresh',
       reasoning: 'refresh() re-entered before lock; added a mutex',
       actorKind: 'agent:claude-code@1.2',
-      task: 'STRATA-417',
+      task: 'Thaddeus-417',
     },
     author
   );
@@ -1150,7 +1151,7 @@ const why = await prov.record(
     intent: 'fix race in token refresh',
     reasoning: 'refresh() re-entered before lock; added a mutex',
     actorKind: 'agent:claude-code@1.2',
-    task: 'STRATA-417',
+    task: 'Thaddeus-417',
     prompt: enc(
       'PROMPT: patch the token refresh race. context: <secret repo map>'
     ),
@@ -1159,7 +1160,7 @@ const why = await prov.record(
 );
 
 rule();
-console.log(`$ strata log src/auth.rs --why`);
+console.log(`$ Thaddeus log src/auth.rs --why`);
 console.log(
   `  @@ refresh() … (Op ${op.id.slice(0, 4)}, lamport ${op.lamport})`
 );

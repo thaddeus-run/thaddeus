@@ -1,9 +1,9 @@
 # @thaddeus.run/landing
 
-The marketing/landing site for **Strata** (working name) — built with
+The marketing/landing site for **Thaddeus** (working name) — built with
 [TanStack Start](https://tanstack.com/start).
 
-> **Status: scaffold.** A root route + a single index route showing the Strata
+> **Status: scaffold.** A root route + a single index route showing the Thaddeus
 > wordmark and deck. The full narrative from
 > `the-new-age-of-source-control.html` can be ported in here later.
 

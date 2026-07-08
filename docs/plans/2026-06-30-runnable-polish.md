@@ -6,7 +6,7 @@
 > checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Make Thaddeus cleanly runnable — a `thaddeus serve` command, a
-race-free atomic `GET /pull`, and the forward-facing Strata→Thaddeus rename.
+race-free atomic `GET /pull`, and the forward-facing Thaddeus→Thaddeus rename.
 
 **Architecture:** `serve` is a thin, testable `startServer()` (wrapping the
 existing `createServer` + `Bun.serve`) plus a blocking CLI command. The atomic
@@ -402,13 +402,13 @@ Claude-Session: https://claude.ai/code/session_01Ltrk2Wto4o6XNPcGkUZ6X5"
       `packages/server/README.md`, `packages/agent/README.md`,
       `packages/provenance/README.md`, `packages/log/README.md`,
       `packages/fs/README.md`, `packages/persist/README.md`), replace every
-      `Strata (working name)` with `Thaddeus`, and every remaining standalone
-      `Strata` with `Thaddeus`. Read each file, apply the edits, and confirm the
-      sentence still reads naturally (e.g. `for **Strata**` →
+      `Thaddeus (working name)` with `Thaddeus`, and every remaining standalone
+      `Thaddeus` with `Thaddeus`. Read each file, apply the edits, and confirm
+      the sentence still reads naturally (e.g. `for **Thaddeus**` →
       `for **Thaddeus**`).
 
 - [ ] **Step 2: Update `AGENTS.md` naming** — find the `## Naming` section. It
-      currently says Strata is the working name that may be renamed. Replace
+      currently says Thaddeus is the working name that may be renamed. Replace
       that bullet/paragraph with:
 
 ```markdown
@@ -419,14 +419,14 @@ Claude-Session: https://claude.ai/code/session_01Ltrk2Wto4o6XNPcGkUZ6X5"
   product rename never forces a package rename.
 ```
 
-(Preserve any other naming guidance in that section; only the Strata line
+(Preserve any other naming guidance in that section; only the Thaddeus line
 changes.)
 
-- [ ] **Step 3: `ARCHITECTURE.md`** — replace `Strata` → `Thaddeus` throughout,
-      and in the "Client & CLI" section add a sentence that the server is now
-      runnable in one command via **`thaddeus serve`**.
+- [ ] **Step 3: `ARCHITECTURE.md`** — replace `Thaddeus` → `Thaddeus`
+      throughout, and in the "Client & CLI" section add a sentence that the
+      server is now runnable in one command via **`thaddeus serve`**.
 
-- [ ] **Step 4: `CHANGELOG.md`** — (a) replace `Strata` → `Thaddeus` in the
+- [ ] **Step 4: `CHANGELOG.md`** — (a) replace `Thaddeus` → `Thaddeus` in the
       existing `[Unreleased]` entries; (b) add an Added bullet:
 
 ```markdown
@@ -451,7 +451,7 @@ cd ~/notes && echo "# notes" > readme.md && thaddeus push
 - [ ] **Step 6: Verify the rename is complete + scoped** —
 
 ```bash
-grep -rI "Strata" packages/*/README.md AGENTS.md ARCHITECTURE.md CHANGELOG.md
+grep -rI "Thaddeus" packages/*/README.md AGENTS.md ARCHITECTURE.md CHANGELOG.md
 ```
 
 Expected: **no output** (zero matches). Then confirm history is untouched:
@@ -466,9 +466,9 @@ git status --short docs/   # expected: empty (no docs/specs or docs/plans change
 
 ```bash
 git add packages/*/README.md AGENTS.md ARCHITECTURE.md CHANGELOG.md
-git commit -m "docs: rename Strata -> Thaddeus (forward-facing) + record serve/atomic-pull
+git commit -m "docs: rename Thaddeus -> Thaddeus (forward-facing) + record serve/atomic-pull
 
-The product is Thaddeus; the working name Strata is retired in package
+The product is Thaddeus; the working name Thaddeus is retired in package
 READMEs, AGENTS.md, ARCHITECTURE.md, and the CHANGELOG. CHANGELOG/ARCHITECTURE
 note thaddeus serve and the atomic pull; the CLI README usage now starts with
 thaddeus serve. Historical docs/specs + docs/plans are left as dated artifacts.
@@ -502,7 +502,7 @@ Claude-Session: https://claude.ai/code/session_01Ltrk2Wto4o6XNPcGkUZ6X5"
       across the workspace (the changes are additive; nothing else touched).
 
 - [ ] **Step 6: Confirm the rename** —
-      `grep -rI "Strata" packages/*/README.md AGENTS.md ARCHITECTURE.md CHANGELOG.md`
+      `grep -rI "Thaddeus" packages/*/README.md AGENTS.md ARCHITECTURE.md CHANGELOG.md`
       Expected: no output; `git diff --name-only main -- docs/` shows only the
       new spec/plan, no historical-doc edits.
 

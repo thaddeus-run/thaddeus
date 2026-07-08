@@ -16,7 +16,7 @@ const fields = (op: string) => ({
   actor_kind: 'agent:claude-code@1.2',
   intent: 'fix race in token refresh',
   reasoning: 'refresh() re-entered before lock; added a mutex',
-  task: 'STRATA-417' as string | null,
+  task: 'Thaddeus-417' as string | null,
   prompt_ref: null,
   prompt: null,
 });
@@ -38,7 +38,7 @@ describe('Provenance record', () => {
     expect(verifyProvenance({ ...p, actor_kind: 'human' })).toBe(false);
     expect(verifyProvenance({ ...p, intent: 'lie' })).toBe(false);
     expect(verifyProvenance({ ...p, reasoning: 'lie' })).toBe(false);
-    expect(verifyProvenance({ ...p, task: 'STRATA-000' })).toBe(false);
+    expect(verifyProvenance({ ...p, task: 'Thaddeus-000' })).toBe(false);
     expect(verifyProvenance({ ...p, prompt_ref: 'deadbeef' })).toBe(false);
     // The prompt Ref is in the signed tuple too: swapping null → a Ref breaks it.
     expect(

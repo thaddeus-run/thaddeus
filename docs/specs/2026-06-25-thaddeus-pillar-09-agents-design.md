@@ -1,7 +1,7 @@
 # Thaddeus — Pillar 09: agents as first-class principals (design)
 
 **Date:** 2026-06-25 **Status:** Design — pending user review, then
-implementation plan **Product:** Strata (working name) · **Company/monorepo:**
+implementation plan **Product:** Thaddeus (working name) · **Company/monorepo:**
 Thaddeus (`@thaddeus.run/*`) **Source of truth (vision):**
 `the-new-age-of-source-control.html`, Pillar 09 **Builds on:**
 `docs/specs/2026-06-22-thaddeus-pillar-01-encrypted-capability-store-design.md`
@@ -14,7 +14,7 @@ signed-record pattern, and reputation this layer will later consume)
 
 ## 1. Context — why this primitive, why now
 
-Strata is an 11-pillar replacement for Git+GitHub, built **one primitive at a
+Thaddeus is an 11-pillar replacement for Git+GitHub, built **one primitive at a
 time** (Pillar 01 spec §4). Tiers 0–2 shipped; Tier 3 began with portable
 identity + federated reputation (P07). The seeded north-star runs at **6 pass /
 0 todo**.

@@ -63,8 +63,8 @@ runner, tsdown bundler. No new runtime dependencies and **no crypto of its own**
   `moon run <project>:<task>`. Export `AGENT=1` for AI-friendly test output.
   Preserve trailing newlines. Commit messages follow Conventional Commits 1.0.0.
 - **Naming:** package is `@thaddeus.run/platform` (neutral, product-agnostic);
-  primary exports `Platform`, `Repo`. The vision file uses "Strata"; package
-  names never use `strata-`.
+  primary exports `Platform`, `Repo`. The vision file uses "Thaddeus"; package
+  names never use `Thaddeus-`.
 - **Verification baseline after code changes:** `moon run root:format root:lint`
   plus the affected `moonx platform:typecheck` and `moonx platform:test`.
 
@@ -116,7 +116,7 @@ arrive in Tasks 2–3.
     "repository",
     "landing",
     "merge-policy",
-    "strata",
+    "Thaddeus",
     "substrate"
   ],
   "homepage": "https://thaddeus.run",
@@ -236,7 +236,7 @@ export default config;
 ```markdown
 # @thaddeus.run/platform
 
-The platform for **Strata** (working name) — Pillar 06.
+The platform for **Thaddeus** (working name) — Pillar 06.
 
 A `Platform` allocates named repos (scopes) in one call (`createRepo`) or by
 bare reference (`open` auto-vivifies). A `Repo` owns its own operation log +
@@ -1027,7 +1027,7 @@ test('P05/P01: an edit originates in a Workspace → stored as ciphertext a mirr
   const log = new OpLog(store);
   const author = Identity.create();
 
-  // The edit enters Strata through the virtual filesystem, not a hand-built op:
+  // The edit enters Thaddeus through the virtual filesystem, not a hand-built op:
   // stage a write in a copy-on-write workspace, then commit it into the log.
   const ws = Workspace.open(log, store, { source: 'main', reader: author });
   ws.write('src/auth.rs', new TextEncoder().encode('fn refresh() {}'));
@@ -1050,7 +1050,7 @@ test('P05/P06/P01: an edit originates in a Workspace, lands into main under poli
   const repo = new Platform().createRepo('acme/web');
   const author = Identity.create();
 
-  // The edit enters Strata through the virtual filesystem on a NAMED, landable
+  // The edit enters Thaddeus through the virtual filesystem on a NAMED, landable
   // branch: stage a write in a copy-on-write workspace, then commit it.
   const ws = Workspace.open(repo.log, repo.store, {
     source: 'main',
@@ -1285,7 +1285,7 @@ const wd = Workspace.open(docs.log, docs.store, {
   reader: alice,
   name: 'alice/readme',
 });
-wd.write('README.md', enc('# Strata'));
+wd.write('README.md', enc('# Thaddeus'));
 const [readmeOp] = await wd.commit(alice);
 const prov = new ProvenanceLog(docs.store);
 const gate = requireVerifiedProvenance(prov);

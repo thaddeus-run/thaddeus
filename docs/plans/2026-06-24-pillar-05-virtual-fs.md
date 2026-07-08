@@ -52,8 +52,8 @@ runner, tsdown bundler. No new runtime dependencies and **no crypto of its own**
   `moon run <project>:<task>`. Export `AGENT=1` for AI-friendly test output.
   Preserve trailing newlines. Commit messages follow Conventional Commits 1.0.0.
 - **Naming:** package is `@thaddeus.run/fs` (neutral, product-agnostic); primary
-  export `Workspace`. The vision file uses "Strata"; package names never use
-  `strata-`.
+  export `Workspace`. The vision file uses "Thaddeus"; package names never use
+  `Thaddeus-`.
 - **Verification baseline after code changes:** `moon run root:format root:lint`
   plus the affected `moonx fs:typecheck` and `moonx fs:test`.
 
@@ -110,7 +110,7 @@ Tasks 2–4.
     "filesystem",
     "workspace",
     "operation-log",
-    "strata",
+    "Thaddeus",
     "substrate"
   ],
   "homepage": "https://thaddeus.run",
@@ -227,7 +227,7 @@ export default config;
 ```markdown
 # @thaddeus.run/fs
 
-The virtual filesystem for **Strata** (working name) — Pillar 05.
+The virtual filesystem for **Thaddeus** (working name) — Pillar 05.
 
 A `Workspace` is a copy-on-write working copy over a `@thaddeus.run/log`
 operation log — the worktree-killer. It opens a private, zero-copy forked view
@@ -1051,7 +1051,7 @@ test('P05/P01: an edit originates in a Workspace → stored as ciphertext a mirr
   const log = new OpLog(store);
   const author = Identity.create();
 
-  // The edit enters Strata through the virtual filesystem, not a hand-built op:
+  // The edit enters Thaddeus through the virtual filesystem, not a hand-built op:
   // stage a write in a copy-on-write workspace, then commit it into the log.
   const ws = Workspace.open(log, store, { source: 'main', reader: author });
   ws.write('src/auth.rs', new TextEncoder().encode('fn refresh() {}'));
@@ -1080,7 +1080,7 @@ git commit -m "test(integration): the seeded edit now originates in a Workspace 
 
 Reroute the north-star's first step through @thaddeus.run/fs: stage a
 write in a copy-on-write Workspace and commit it into the log, producing
-the same signed Op the rest of the flow consumes. Edits enter Strata
+the same signed Op the rest of the flow consumes. Edits enter Thaddeus
 through the virtual filesystem, not a hand-built op. Flow stays 5 pass /
 0 todo.
 

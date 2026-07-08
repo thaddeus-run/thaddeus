@@ -1,7 +1,7 @@
 # Thaddeus — Pillar 02: visibility as a time-varying policy, "the membrane" (design)
 
 **Date:** 2026-06-23 **Status:** Design — pending user review, then
-implementation plan **Product:** Strata (working name) · **Company/monorepo:**
+implementation plan **Product:** Thaddeus (working name) · **Company/monorepo:**
 Thaddeus (`@thaddeus.run/*`) **Source of truth (vision):**
 `the-new-age-of-source-control.html`, Pillar 02 **Builds on:**
 `docs/specs/2026-06-22-thaddeus-pillar-01-encrypted-capability-store-design.md`
@@ -10,7 +10,7 @@ Thaddeus (`@thaddeus.run/*`) **Source of truth (vision):**
 
 ## 1. Context — why this primitive, why now
 
-Strata is an 11-pillar replacement for Git+GitHub, built **one primitive at a
+Thaddeus is an 11-pillar replacement for Git+GitHub, built **one primitive at a
 time**, each release swapping one stub in the north-star integration test for a
 real package (the convergence machinery; Pillar 01 spec §4).
 
@@ -147,7 +147,7 @@ class Identity {
 ```
 
 `fromSeed` is generally useful (reproducible test identities, well-known
-identities) and Strata-agnostic — it does not leak product assumptions.
+identities) and Thaddeus-agnostic — it does not leak product assumptions.
 
 ### `@thaddeus.run/store` (the membrane)
 

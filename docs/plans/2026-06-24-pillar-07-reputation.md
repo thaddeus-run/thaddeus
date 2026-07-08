@@ -68,8 +68,8 @@ delegated to `identity`.
   Preserve trailing newlines. Commit messages follow Conventional Commits 1.0.0.
 - **Naming:** package is `@thaddeus.run/reputation` (neutral, product-agnostic);
   primary exports the `Contribution` record, the sign/verify functions, and
-  `ReputationLog`. The vision file uses "Strata"; package names never use
-  `strata-`.
+  `ReputationLog`. The vision file uses "Thaddeus"; package names never use
+  `Thaddeus-`.
 - **Verification baseline after code changes:** `moon run root:format root:lint`
   plus the affected `moonx reputation:typecheck` and `moonx reputation:test`.
 
@@ -119,7 +119,7 @@ sign/verify. `ReputationLog` arrives in Task 2.
     "identity",
     "federation",
     "contribution",
-    "strata",
+    "Thaddeus",
     "substrate"
   ],
   "homepage": "https://thaddeus.run",
@@ -237,7 +237,7 @@ export default config;
 ```markdown
 # @thaddeus.run/reputation
 
-Portable, federated reputation for **Strata** (working name) — Pillar 07.
+Portable, federated reputation for **Thaddeus** (working name) — Pillar 07.
 
 A `Contribution` is a dual-signed record of a merge/review/release: `subj_sig`
 (the subject claims it) and `host_sig` (an instance attests it happened there),

@@ -3,6 +3,9 @@ gh = "2.93.0"
 node = "24.11.0"
 proto = "0.57.4"
 moon = "2.3.3"
+# The lazythad TUI crate (lazythad/) is Rust; pin the toolchain here so `proto
+# use` and CI provision it consistently, like every other tool.
+rust = "1.95.0"
 
 [plugins]
 gh = "https://raw.githubusercontent.com/appthrust/proto-toml-plugins/main/gh/plugin.toml"

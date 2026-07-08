@@ -122,7 +122,7 @@ Create `packages/log/package.json`:
   "name": "@thaddeus.run/log",
   "version": "0.0.0",
   "description": "An operation log — signed, CRDT-ordered operations on a DAG; snapshots are a derived projection, branches dissolve into zero-copy named views.",
-  "keywords": ["crdt", "operation-log", "did", "strata", "substrate"],
+  "keywords": ["crdt", "operation-log", "did", "Thaddeus", "substrate"],
   "homepage": "https://thaddeus.run",
   "bugs": {
     "url": "https://github.com/thaddeus-run/thaddeus/issues"
@@ -240,7 +240,7 @@ Create `packages/log/README.md`:
 ```markdown
 # @thaddeus.run/log
 
-The operation log for **Strata** (working name) — Pillar 03.
+The operation log for **Thaddeus** (working name) — Pillar 03.
 
 Signed, CRDT-ordered `Op` records on a DAG. The log is the source of truth; file
 snapshots are a derived projection (`materialize()`). Branches dissolve into

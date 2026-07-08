@@ -1,7 +1,7 @@
 # Thaddeus — Pillar 08: code as a structured, queryable graph (design)
 
 **Date:** 2026-07-07 **Status:** Design — pending user review, then
-implementation plan **Product:** Strata (working name) · **Company/monorepo:**
+implementation plan **Product:** Thaddeus (working name) · **Company/monorepo:**
 Thaddeus (`@thaddeus.run/*`) **Source of truth (vision):**
 `the-new-age-of-source-control.html`, Pillar 08 **Builds on:**
 `docs/specs/2026-06-24-thaddeus-pillar-05-virtual-fs-design.md`,
@@ -13,7 +13,7 @@ Thaddeus (`@thaddeus.run/*`) **Source of truth (vision):**
 
 ## 1. Context — why this primitive, why now
 
-Strata is an 11-pillar replacement for Git+GitHub, built **one primitive at a
+Thaddeus is an 11-pillar replacement for Git+GitHub, built **one primitive at a
 time** (Pillar 01 spec §4). Tiers 0–3 have shipped: identity + store (P01), the
 membrane (P02), the operation log (P03), provenance (P04), the virtual
 filesystem (P05), the platform (P06), federated reputation (P07), agents as

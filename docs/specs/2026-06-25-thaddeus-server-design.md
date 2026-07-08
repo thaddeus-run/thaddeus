@@ -1,7 +1,7 @@
 # Thaddeus — Server: the untrusted API-first remote (design)
 
 **Date:** 2026-06-25 **Status:** Design — pending user review, then
-implementation plan **Product:** Strata (working name) · **Company/monorepo:**
+implementation plan **Product:** Thaddeus (working name) · **Company/monorepo:**
 Thaddeus (`@thaddeus.run/*`) **Source of truth (vision):**
 `the-new-age-of-source-control.html`, Part VI ("API-first remote", code.store)
 **Builds on:** `docs/specs/2026-06-24-thaddeus-pillar-06-platform-design.md`

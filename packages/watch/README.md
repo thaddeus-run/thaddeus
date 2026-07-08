@@ -1,6 +1,6 @@
 # @thaddeus.run/watch
 
-Live semantic subscriptions for **Strata** (working name) — Pillar 11
+Live semantic subscriptions for **Thaddeus** (working name) — Pillar 11
 (subscriptions slice).
 
 `SemanticWatcher` turns the semantic graph (P08) into something you can

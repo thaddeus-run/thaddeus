@@ -4,9 +4,9 @@ import type { ReactNode } from 'react';
 import './globals.css';
 
 export const metadata: Metadata = {
-  title: 'Strata Docs — Thaddeus',
+  title: 'Thaddeus Docs — Thaddeus',
   description:
-    'Documentation for Strata, the live, permissioned, agent-native code substrate from Thaddeus.',
+    'Documentation for Thaddeus, the live, permissioned, agent-native code substrate from Thaddeus.',
 };
 
 export default function RootLayout({
@@ -20,7 +20,7 @@ export default function RootLayout({
         <header className="site-nav">
           <div className="site-nav__inner">
             <a className="site-nav__brand" href="/">
-              Strata
+              Thaddeus
             </a>
             <nav className="site-nav__links" aria-label="Primary">
               <a href="/">Permission model</a>

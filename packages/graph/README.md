@@ -1,6 +1,6 @@
 # @thaddeus.run/graph
 
-The semantic graph for **Strata** (working name) — Pillar 08.
+The semantic graph for **Thaddeus** (working name) — Pillar 08.
 
 `SymbolGraph` projects a graph of symbols, definitions, references, and call
 edges from the plaintext a `@thaddeus.run/fs` `Workspace` materializes — so code

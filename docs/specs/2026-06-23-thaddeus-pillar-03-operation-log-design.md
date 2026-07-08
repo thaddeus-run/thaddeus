@@ -1,7 +1,7 @@
 # Thaddeus — Pillar 03: an operation log with continuous convergence (design)
 
 **Date:** 2026-06-23 **Status:** Design — pending user review, then
-implementation plan **Product:** Strata (working name) · **Company/monorepo:**
+implementation plan **Product:** Thaddeus (working name) · **Company/monorepo:**
 Thaddeus (`@thaddeus.run/*`) **Source of truth (vision):**
 `the-new-age-of-source-control.html`, Pillar 03 **Builds on:**
 `docs/specs/2026-06-23-thaddeus-pillar-02-membrane-design.md`,
@@ -11,7 +11,7 @@ Thaddeus (`@thaddeus.run/*`) **Source of truth (vision):**
 
 ## 1. Context — why this primitive, why now
 
-Strata is an 11-pillar replacement for Git+GitHub, built **one primitive at a
+Thaddeus is an 11-pillar replacement for Git+GitHub, built **one primitive at a
 time**, each release swapping one stub in the north-star integration test for a
 real package (Pillar 01 spec §4).
 
@@ -154,15 +154,15 @@ record, so nothing on an op is relay-malleable.
 
 ### 4.3 Addressable unit = `path` now, staged to symbol-id at P08
 
-LWW keyed on `path` is file-unit granularity — coarser than Strata's per-object
-pitch. This is a **deliberate staging choice, not a regression to fix later**:
-the brief itself generalizes the unit at Pillar 08 ("the Op targets a symbol id
-instead of a path"). Going finer _now_ requires either P08's semantic graph (a
-later tier needing a language server) or line/byte deltas (the text-CRDT
-frontier already deferred). So `path` is the correct spike unit; the `Op.path`
-field generalizes to a symbol-id under P08 without a record reshape. The cost is
-named (§11): concurrent same-path edits drop the loser's bytes at the
-materialized layer.
+LWW keyed on `path` is file-unit granularity — coarser than Thaddeus's
+per-object pitch. This is a **deliberate staging choice, not a regression to fix
+later**: the brief itself generalizes the unit at Pillar 08 ("the Op targets a
+symbol id instead of a path"). Going finer _now_ requires either P08's semantic
+graph (a later tier needing a language server) or line/byte deltas (the
+text-CRDT frontier already deferred). So `path` is the correct spike unit; the
+`Op.path` field generalizes to a symbol-id under P08 without a record reshape.
+The cost is named (§11): concurrent same-path edits drop the loser's bytes at
+the materialized layer.
 
 ### 4.4 Convergence model — Lamport + DAG, not vector clocks
 
