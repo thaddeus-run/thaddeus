@@ -23,7 +23,8 @@ curl -fsSL https://raw.githubusercontent.com/thaddeus-run/thaddeus/main/install.
 **npm:**
 
 ```sh
-npm i -g @thaddeus.run/cli @thaddeus.run/lazythad   # each fetches the prebuilt binary
+# pre-alpha publishes to the `alpha` channel, so pin @alpha:
+npm i -g @thaddeus.run/cli@alpha @thaddeus.run/lazythad@alpha
 ```
 
 **Manual:** download the binary for your platform from the

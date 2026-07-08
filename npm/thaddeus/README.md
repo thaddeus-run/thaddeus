@@ -5,7 +5,7 @@ source-control substrate — distributed as a prebuilt binary. Installs the
 `thaddeus` (and `thad`) command.
 
 ```sh
-npm i -g @thaddeus.run/cli
+npm i -g @thaddeus.run/cli@alpha
 thaddeus --version
 thaddeus help
 ```

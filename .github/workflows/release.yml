@@ -156,17 +156,23 @@ jobs:
     name: Publish npm launchers
     needs: [release]
     runs-on: ubuntu-latest
-    env:
-      NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+    permissions:
+      contents: read
+      # OIDC identity for npm Trusted Publishing — no NPM_TOKEN secret needed;
+      # npm authenticates via this token and emits a provenance attestation.
+      # Requires each package to have a Trusted Publisher configured on
+      # npmjs.com pointing at this repo + workflow (release.yml).
+      id-token: write
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version: '24'
           registry-url: 'https://registry.npmjs.org'
+      # Trusted publishing (OIDC) needs npm >= 11.5.1; ensure a current npm.
+      - name: Update npm
+        run: npm install -g npm@latest
       - name: Publish thaddeus + lazythad launchers
-        # Skipped (not failed) until NPM_TOKEN is configured in repo secrets.
-        if: ${{ env.NODE_AUTH_TOKEN != '' }}
         env:
           TAG_INPUT: ${{ github.event.inputs.tag }}
           REF_NAME: ${{ github.ref_name }}
@@ -194,5 +200,5 @@ jobs:
           for pkg in thaddeus lazythad; do
             ( cd "npm/$pkg" \
               && npm version "$version" --no-git-tag-version --allow-same-version \
-              && npm publish --access public $dist )
+              && npm publish --provenance --access public $dist )
           done
