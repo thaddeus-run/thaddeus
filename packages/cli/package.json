@@ -1,7 +1,8 @@
 {
   "name": "@thaddeus.run/cli",
   "version": "0.1.0-alpha",
-  "description": "The Thaddeus CLI (thaddeus / thad): clone, edit, and publish over the untrusted remote with a git-like working tree.",
+  "private": true,
+  "description": "The Thaddeus CLI (thaddeus / thad) source — compiled into the distributed binary. The published `@thaddeus.run/cli` on npm is the binary launcher in `npm/thaddeus`, so this workspace package is private.",
   "keywords": [
     "cli",
     "source-control",

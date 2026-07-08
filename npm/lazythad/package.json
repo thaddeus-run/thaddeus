@@ -1,0 +1,39 @@
+{
+  "name": "@thaddeus.run/lazythad",
+  "version": "0.1.0-alpha",
+  "description": "lazythad — a lazygit-style terminal UI for Thaddeus. Installs the prebuilt `lazythad` binary for your platform.",
+  "keywords": [
+    "lazygit",
+    "ratatui",
+    "source-control",
+    "thaddeus",
+    "tui"
+  ],
+  "homepage": "https://thaddeus.run",
+  "bugs": {
+    "url": "https://github.com/thaddeus-run/thaddeus/issues"
+  },
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/thaddeus-run/thaddeus.git",
+    "directory": "npm/lazythad"
+  },
+  "bin": {
+    "lazythad": "bin/lazythad.cjs"
+  },
+  "files": [
+    "bin/lazythad.cjs",
+    "download.cjs",
+    "install.cjs"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "scripts": {
+    "postinstall": "node install.cjs"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}

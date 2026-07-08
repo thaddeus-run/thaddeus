@@ -12,10 +12,21 @@ explained change in a few minutes.
 ## 1. Install the CLI
 
 The CLI ships as a self-contained binary (`thaddeus`, aliased `thad`) — no
-runtime dependency.
+runtime dependency. The TUI (`lazythad`) ships the same way.
 
-**From a release binary** (recommended): download the `thaddeus` binary for your
-platform from the
+**Install script** (recommended — installs both and sets up your `PATH`):
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/thaddeus-run/thaddeus/main/install.sh | sh
+```
+
+**npm:**
+
+```sh
+npm i -g @thaddeus.run/cli @thaddeus.run/lazythad   # each fetches the prebuilt binary
+```
+
+**Manual:** download the binary for your platform from the
 [releases page](https://github.com/thaddeus-run/thaddeus/releases) and put it on
 your `PATH`.
 

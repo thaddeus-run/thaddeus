@@ -1,0 +1,181 @@
+name: Release
+
+# On a v* tag: cross-build the CLI (bun --compile, every OS/arch from one runner)
+# and the TUI (cargo, one native runner per target), publish a GitHub Release with
+# the binaries + checksums, then publish the npm launcher packages (if NPM_TOKEN
+# is set). Manual runs take the tag as an input.
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Existing tag to release (e.g. v0.1.0-alpha)'
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  cli:
+    name: Build CLI binaries
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Install proto toolchain
+        uses: moonrepo/setup-toolchain@261c62cb5b0f580c7be7c8cd0f023a2e96756095 # v0
+        with:
+          auto-install: true
+      - name: Install dependencies
+        run: |
+          sed -i 's/^minimumReleaseAge = .*/minimumReleaseAge = 0/' bunfig.toml
+          bun install --frozen-lockfile
+      - name: Build the CLI dependency chain
+        run: moon run cli:build
+      - name: Cross-compile every target
+        run: |
+          mkdir -p dist-bins
+          # bun cross-compiles all of these from this one Linux runner.
+          targets="bun-linux-x64:linux-x64 bun-linux-arm64:linux-arm64 \
+                   bun-darwin-x64:darwin-x64 bun-darwin-arm64:darwin-arm64 \
+                   bun-windows-x64:windows-x64"
+          for pair in $targets; do
+            target="${pair%%:*}"; name="${pair##*:}"; out="dist-bins/thaddeus-$name"
+            case "$name" in *windows*) out="$out.exe";; esac
+            echo "→ $target"
+            bun build --compile --minify --target="$target" --outfile "$out" packages/cli/src/bin.ts
+          done
+          ls -la dist-bins
+      - uses: actions/upload-artifact@v4
+        with:
+          name: cli-binaries
+          path: dist-bins/*
+
+  tui:
+    name: Build TUI (${{ matrix.name }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        # Native builds only (ring/TLS cross-compilation is a known pain); the
+        # CLI already covers linux-arm64. Adding a lazythad-linux-arm64 build is a
+        # follow-up.
+        include:
+          - {
+              os: ubuntu-latest,
+              target: x86_64-unknown-linux-gnu,
+              name: linux-x64,
+            }
+          - { os: macos-14, target: aarch64-apple-darwin, name: darwin-arm64 }
+          - { os: macos-13, target: x86_64-apple-darwin, name: darwin-x64 }
+          - {
+              os: windows-latest,
+              target: x86_64-pc-windows-msvc,
+              name: windows-x64,
+            }
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Rust 1.95.0
+        uses: dtolnay/rust-toolchain@fa04a1451ff1842e2626ccb99004d0195b455a88 # master
+        with:
+          toolchain: '1.95.0'
+          targets: ${{ matrix.target }}
+      - uses: Swatinem/rust-cache@42dc69e1aa15d09112580998cf2ef0119e2e91ae # v2
+        with:
+          workspaces: lazythad
+      - name: Build
+        shell: bash
+        run:
+          cargo build --release --locked --manifest-path lazythad/Cargo.toml
+          --target ${{ matrix.target }}
+      - name: Stage the binary
+        shell: bash
+        run: |
+          mkdir -p dist-bins
+          ext=""; case "${{ matrix.name }}" in *windows*) ext=".exe";; esac
+          cp "lazythad/target/${{ matrix.target }}/release/lazythad$ext" "dist-bins/lazythad-${{ matrix.name }}$ext"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: tui-${{ matrix.name }}
+          path: dist-bins/*
+
+  release:
+    name: Publish GitHub Release
+    needs: [cli, tui]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+      - name: Collect binaries and checksums
+        run: |
+          mkdir -p release
+          find artifacts -type f -exec cp {} release/ \;
+          ( cd release && sha256sum * > SHA256SUMS )
+          ls -la release
+      - name: Determine tag
+        id: tag
+        env:
+          TAG_INPUT: ${{ github.event.inputs.tag }}
+          REF_NAME: ${{ github.ref_name }}
+        run: |
+          tag="${TAG_INPUT:-$REF_NAME}"
+          # Validate before use — the tag reaches shell commands, so restrict it
+          # to tag-safe characters (defense-in-depth against injection).
+          if ! printf '%s' "$tag" | grep -Eq '^v[0-9A-Za-z.+-]+$'; then
+            echo "refusing to release an unexpected tag: $tag" >&2
+            exit 1
+          fi
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+      - name: Create or update the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.tag.outputs.tag }}
+        run: |
+          NOTES="Prebuilt \`thaddeus\` (CLI) and \`lazythad\` (TUI) binaries.
+
+          Install both with PATH set up:
+          \`\`\`sh
+          curl -fsSL https://raw.githubusercontent.com/${GITHUB_REPOSITORY}/main/install.sh | sh
+          \`\`\`
+          Or via npm: \`npm i -g @thaddeus.run/cli @thaddeus.run/lazythad\`. See CHANGELOG.md for changes."
+          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release upload "$TAG" release/* --repo "$GITHUB_REPOSITORY" --clobber
+          else
+            gh release create "$TAG" release/* --repo "$GITHUB_REPOSITORY" \
+              --title "Thaddeus $TAG" --notes "$NOTES" --verify-tag
+          fi
+
+  npm:
+    name: Publish npm launchers
+    needs: [release]
+    runs-on: ubuntu-latest
+    env:
+      NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          registry-url: 'https://registry.npmjs.org'
+      - name: Publish thaddeus + lazythad launchers
+        # Skipped (not failed) until NPM_TOKEN is configured in repo secrets.
+        if: ${{ env.NODE_AUTH_TOKEN != '' }}
+        env:
+          TAG_INPUT: ${{ github.event.inputs.tag }}
+          REF_NAME: ${{ github.ref_name }}
+        run: |
+          tag="${TAG_INPUT:-$REF_NAME}"
+          if ! printf '%s' "$tag" | grep -Eq '^v[0-9A-Za-z.+-]+$'; then
+            echo "refusing to publish an unexpected tag: $tag" >&2
+            exit 1
+          fi
+          version="${tag#v}"
+          for pkg in thaddeus lazythad; do
+            ( cd "npm/$pkg" \
+              && npm version "$version" --no-git-tag-version --allow-same-version \
+              && npm publish --access public )
+          done
