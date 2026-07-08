@@ -1,7 +1,9 @@
 # Fly.io deploy for `thaddeus serve`. `fly launch --copy-config` (first time) or
 # `fly deploy` builds the Dockerfile; a volume holds the durable substrate.
 # Rename `app` and pick a region before deploying.
-app = "thaddeus"
+# Set a UNIQUE app name before deploying — `thaddeus` is taken, so `fly deploy`
+# as-is will fail. Use `fly launch` (which picks/creates a name) or edit this.
+app = "thaddeus-changeme"
 primary_region = "fra"
 
 [build]
@@ -24,6 +26,14 @@ force_https = true # Fly terminates TLS at the edge
 auto_stop_machines = "off" # the server is stateful — keep it running
 auto_start_machines = true
 min_machines_running = 1
+
+# HTTP health check — restart the machine if the server stops answering
+# (a TCP-only check misses a crashed HTTP handler). /repos always returns 200.
+[[http_service.checks]]
+interval = "15s"
+timeout = "2s"
+method = "GET"
+path = "/repos"
 
 [[vm]]
 size = "shared-cpu-1x"

@@ -13,9 +13,17 @@ PORT="${PORT:-4000}"
 export HOME="${THADDEUS_HOME:-$DATA/.home}"
 mkdir -p "$HOME" "$DATA"
 
+# Run as the unprivileged `thaddeus` user. We start as root only to take
+# ownership of the (often root-owned) mounted volume, then re-exec dropped.
+if [ "$(id -u)" = 0 ]; then
+  chown -R thaddeus:thaddeus "$DATA"
+  exec gosu thaddeus "$0" "$@"
+fi
+
 # A persistent host identity on the volume, minted once (idempotent) so
-# attestations stay stable across restarts.
-thaddeus init >/dev/null 2>&1 || true
+# attestations stay stable across restarts. Errors are NOT swallowed — a real
+# failure (e.g. an unwritable volume) surfaces and stops the container.
+thaddeus init >/dev/null
 
 set -- serve --port "$PORT" --data "$DATA"
 case "${THADDEUS_HOST:-}" in
