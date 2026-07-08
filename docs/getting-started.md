@@ -96,9 +96,11 @@ thaddeus push -m "add the token refresh path"        # commit + upload + land, w
 The `-m` message becomes a **signed provenance record** bound to the op — the
 "why" travels with the code to every clone.
 
-Thaddeus honors your `.gitignore` (and an optional `.thaddeusignore`) and always
-skips `.git`, `.thaddeus`, and `node_modules` — so `status`/`push` stay fast and
-never upload dependency or build trees.
+Thaddeus keeps its own ignore file, `.thaddeusignore` — on first use it seeds
+one from your `.gitignore` (if present), then reads only `.thaddeusignore`. It
+always skips `.git`, `.thaddeus`, and `node_modules`, so `status`/`push` stay
+fast and never upload dependency or build trees. Edit `.thaddeusignore` to
+change what Thaddeus ignores.
 
 ## 5. Read the history and the why
 

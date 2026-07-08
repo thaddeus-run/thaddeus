@@ -1,5 +1,12 @@
 import { afterAll, describe, expect, test } from 'bun:test';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -10,17 +17,19 @@ const tmp = mkdtempSync(join(tmpdir(), 'thaddeus-ignore-'));
 afterAll(() => rmSync(tmp, { recursive: true, force: true }));
 
 describe('loadIgnore', () => {
-  test('always prunes .git, .thaddeus, node_modules even with no ignore file', () => {
+  test('always prunes .git/.thaddeus/node_modules with no ignore files', () => {
     const root = mkdtempSync(join(tmp, 'always-'));
     const ig = loadIgnore(root);
     expect(ig.ignored('.git', true)).toBe(true);
     expect(ig.ignored('.thaddeus', true)).toBe(true);
     expect(ig.ignored('node_modules', true)).toBe(true);
     expect(ig.ignored('src/index.ts', false)).toBe(false);
+    // Nothing to seed from → no .thaddeusignore created.
+    expect(existsSync(join(root, '.thaddeusignore'))).toBe(false);
   });
 
-  test('gitignore patterns: names, dir/, globs, anchoring, negation', () => {
-    const root = mkdtempSync(join(tmp, 'patterns-'));
+  test('seeds .thaddeusignore from .gitignore, then matches its rules', () => {
+    const root = mkdtempSync(join(tmp, 'seed-'));
     writeFileSync(
       join(root, '.gitignore'),
       [
@@ -33,6 +42,12 @@ describe('loadIgnore', () => {
       ].join('\n')
     );
     const ig = loadIgnore(root);
+    // A .thaddeusignore was created from the .gitignore's content.
+    expect(existsSync(join(root, '.thaddeusignore'))).toBe(true);
+    expect(readFileSync(join(root, '.thaddeusignore'), 'utf8')).toContain(
+      'dist/'
+    );
+    // Its rules apply with common gitignore semantics.
     expect(ig.ignored('dist', true)).toBe(true); // dir-only
     expect(ig.ignored('sub/dist', true)).toBe(true); // unanchored → any depth
     expect(ig.ignored('a/b.log', false)).toBe(true); // *.log at any depth
@@ -44,18 +59,22 @@ describe('loadIgnore', () => {
     expect(ig.ignored('src/main.ts', false)).toBe(false);
   });
 
-  test('.thaddeusignore layers on top of .gitignore (later rules win)', () => {
-    const root = mkdtempSync(join(tmp, 'layered-'));
-    writeFileSync(join(root, '.gitignore'), 'secret.txt\n');
-    writeFileSync(join(root, '.thaddeusignore'), '!secret.txt\n*.big\n');
+  test('an existing .thaddeusignore wins; .gitignore is not read or overwritten', () => {
+    const root = mkdtempSync(join(tmp, 'own-'));
+    writeFileSync(join(root, '.gitignore'), 'fromgit\n');
+    writeFileSync(join(root, '.thaddeusignore'), 'fromthad\n');
     const ig = loadIgnore(root);
-    expect(ig.ignored('secret.txt', false)).toBe(false); // re-included by .thaddeusignore
-    expect(ig.ignored('data.big', false)).toBe(true);
+    expect(ig.ignored('fromthad', false)).toBe(true);
+    expect(ig.ignored('fromgit', false)).toBe(false); // .gitignore ignored
+    // The user's .thaddeusignore is left untouched (not re-seeded).
+    expect(readFileSync(join(root, '.thaddeusignore'), 'utf8')).toBe(
+      'fromthad\n'
+    );
   });
 });
 
 describe('listWorkingFiles', () => {
-  test('skips node_modules and gitignored files/dirs, keeps source', () => {
+  test('skips node_modules and ignored files/dirs, keeps source', () => {
     const root = mkdtempSync(join(tmp, 'walk-'));
     writeFileSync(join(root, '.gitignore'), 'node_modules\n*.log\ndist/\n');
     writeFileSync(join(root, 'a.ts'), 'x');
@@ -69,7 +88,6 @@ describe('listWorkingFiles', () => {
 
     const files = listWorkingFiles(root);
     expect(files).toContain('a.ts');
-    expect(files).toContain('.gitignore');
     expect(files).toContain('src/main.ts');
     expect(files).not.toContain('debug.log');
     expect(files.some((f) => f.startsWith('node_modules'))).toBe(false);

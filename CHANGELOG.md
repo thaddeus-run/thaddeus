@@ -17,13 +17,17 @@ All notable changes to Thaddeus. Format follows
   `thaddeus use --hosted` opts in to `https://ams1.thaddeus.run` — surfaced in
   the hint, `thaddeus help`, the release notes, and the docs, but always the
   user's explicit choice.
-- **The working tree honors `.gitignore` and `.thaddeusignore`.** `status`,
-  `diff`, and `push` no longer walk or upload ignored paths, and always prune
-  `.git`, `.thaddeus`, and `node_modules` — so versioning a real project (e.g. a
-  vite app) no longer tries to bundle hundreds of MB of dependencies (which was
-  both the slow `status` and the `413 Payload Too Large` on `push`). Root-level
-  ignore files are read with common gitignore semantics (names, `dir/`, `*.ext`,
-  `/anchored`, `!negation`); nested ignore files are a later refinement.
+- **The working tree uses a `.thaddeusignore`, seeded from `.gitignore`.** On
+  first use in a repo, if there's a `.gitignore` and no `.thaddeusignore`,
+  Thaddeus creates a `.thaddeusignore` from it; from then on it reads **only**
+  `.thaddeusignore` (edit that to change what Thaddeus ignores — a post-Git tool
+  owns its own ignore file). `.git`, `.thaddeus`, and `node_modules` are always
+  pruned regardless. `status`/`diff`/`push` skip ignored paths with common
+  gitignore semantics (names, `dir/`, `*.ext`, `/anchored`, `!negation`) — so
+  versioning a real project (e.g. a vite app) no longer bundles hundreds of MB
+  of dependencies (the cause of the slow `status` and the
+  `413 Payload Too Large` on `push`). Nested ignore files are a later
+  refinement.
 - **`lazythad` uses your default server.** With no argument it falls back to the
   CLI's saved default (`thaddeus use`), then to `http://localhost:4000` — so
   `thaddeus use --hosted` points the TUI at the hosted server too.

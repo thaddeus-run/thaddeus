@@ -1,4 +1,4 @@
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 // Directory names never walked into, whatever the ignore files say — VCS
@@ -76,15 +76,41 @@ function parse(text: string): Rule[] {
   return rules;
 }
 
-// Load the ignore rules for a working copy: the repo-root `.gitignore` then
-// `.thaddeusignore` (later rules win, so `.thaddeusignore` can re-include a path
-// with `!`). `.git`, `.thaddeus`, and `node_modules` are always pruned. Only the
-// root-level ignore files are read — nested ignore files are a later refinement.
+// Header written atop a `.thaddeusignore` that was seeded from a `.gitignore`,
+// so it's clear where the rules came from and that Thaddeus reads THIS file.
+const SEED_HEADER =
+  '# Created by Thaddeus from .gitignore. Thaddeus reads this file (not\n' +
+  '# .gitignore) — edit it to change what Thaddeus ignores.\n\n';
+
+// Ensure the working copy has a `.thaddeusignore` and return its path, or null
+// if there is none to use. Thaddeus keeps its OWN ignore file; as a one-time
+// migration aid, if `.thaddeusignore` is absent but a `.gitignore` exists, seed
+// the former from the latter's content. After that Thaddeus reads only
+// `.thaddeusignore` — a later `.gitignore` change does not propagate. A failed
+// read/write just yields no ignore file (the always-pruned dirs still apply).
+function ensureThaddeusIgnore(root: string): string | null {
+  const thaddeusIgnore = join(root, '.thaddeusignore');
+  if (existsSync(thaddeusIgnore)) return thaddeusIgnore;
+  const gitignore = join(root, '.gitignore');
+  if (!existsSync(gitignore)) return null;
+  try {
+    const content = readFileSync(gitignore, 'utf8');
+    const trailing = content.endsWith('\n') ? '' : '\n';
+    writeFileSync(thaddeusIgnore, `${SEED_HEADER}${content}${trailing}`);
+    return thaddeusIgnore;
+  } catch {
+    return null;
+  }
+}
+
+// Load the ignore rules for a working copy from its `.thaddeusignore` (seeded
+// from `.gitignore` on first use — see ensureThaddeusIgnore). `.git`,
+// `.thaddeus`, and `node_modules` are always pruned regardless. Only the
+// root-level file is read; nested ignore files are a later refinement.
 export function loadIgnore(root: string): Ignore {
   const rules: Rule[] = [];
-  for (const name of ['.gitignore', '.thaddeusignore']) {
-    const path = join(root, name);
-    if (!existsSync(path)) continue;
+  const path = ensureThaddeusIgnore(root);
+  if (path !== null) {
     try {
       rules.push(...parse(readFileSync(path, 'utf8')));
     } catch {
