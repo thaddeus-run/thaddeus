@@ -6,7 +6,7 @@ why, vetoes, and reputation. Distributed as a prebuilt binary. Installs the
 `lazythad` command.
 
 ```sh
-npm i -g @thaddeus.run/lazythad
+npm i -g @thaddeus.run/lazythad@alpha
 lazythad http://localhost:4000
 ```
 
