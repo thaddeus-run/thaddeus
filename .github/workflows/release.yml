@@ -177,8 +177,22 @@ jobs:
             exit 1
           fi
           version="${tag#v}"
+          # A prerelease version (e.g. 0.1.0-alpha) must not become the default
+          # `latest` dist-tag; publish it under a channel tag derived from the
+          # prerelease id (alpha/beta/rc/…), else `next`. A stable version
+          # (no `-`) publishes to `latest` normally.
+          case "$version" in
+            *-*)
+              channel="${version#*-}"
+              channel="${channel%%.*}"
+              channel="$(printf '%s' "$channel" | tr -d '0-9')"
+              [ -n "$channel" ] || channel="next"
+              dist="--tag $channel"
+              ;;
+            *) dist="" ;;
+          esac
           for pkg in thaddeus lazythad; do
             ( cd "npm/$pkg" \
               && npm version "$version" --no-git-tag-version --allow-same-version \
-              && npm publish --access public )
+              && npm publish --access public $dist )
           done
