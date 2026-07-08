@@ -5,6 +5,8 @@ All notable changes to Thaddeus. Format follows
 
 ## [Unreleased]
 
+## [0.1.1-alpha] - 2026-07-08
+
 ### Added
 
 - **A default server + `thaddeus use`.** Set a per-user default server once

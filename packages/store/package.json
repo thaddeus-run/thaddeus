@@ -1,6 +1,6 @@
 {
   "name": "@thaddeus.run/store",
-  "version": "0.1.0-alpha",
+  "version": "0.1.1-alpha",
   "description": "Encrypted, content-addressed objects with per-object capabilities — secrets are ciphertext at rest, access is a key sealed to an identity, revocation is key rotation.",
   "keywords": [
     "blake3",

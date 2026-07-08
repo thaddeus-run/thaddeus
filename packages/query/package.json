@@ -1,6 +1,6 @@
 {
   "name": "@thaddeus.run/query",
-  "version": "0.1.0-alpha",
+  "version": "0.1.1-alpha",
   "description": "The live query surface — cross-cutting queries and --why over the semantic graph, operation-log history, provenance, and capabilities. Pillar 11 (query slice).",
   "keywords": [
     "live-database",
