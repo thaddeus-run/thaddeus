@@ -21,6 +21,9 @@ source = "thaddeus_data"
 destination = "/data"
 
 [http_service]
+# MUST match the container's port (Dockerfile EXPOSE + the PORT env, both 4000).
+# A bare `fly launch` regenerates this file with Fly's default 8080 — keep it
+# 4000, or fly-proxy can't reach the app ("not listening on the expected address").
 internal_port = 4000
 force_https = true # Fly terminates TLS at the edge
 auto_stop_machines = "off" # the server is stateful — keep it running
@@ -29,7 +32,9 @@ min_machines_running = 1
 
 # HTTP health check — restart the machine if the server stops answering
 # (a TCP-only check misses a crashed HTTP handler). /repos always returns 200.
+# grace_period lets the server boot + mint its identity before checks count.
 [[http_service.checks]]
+grace_period = "10s"
 interval = "15s"
 timeout = "2s"
 method = "GET"
