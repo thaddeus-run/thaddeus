@@ -6,6 +6,8 @@ export {
   requirePassingChecks,
   requireReputationTier,
   requireVerifiedProvenance,
+  restrictPaths,
+  standingQuery,
 } from './policy';
 export type {
   LandDecision,

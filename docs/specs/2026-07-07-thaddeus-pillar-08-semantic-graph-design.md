@@ -641,8 +641,8 @@ deterministic via injected identities/seeds. Three acts:
   the order renames were applied, so `history()` reads as a real sequence. Once
   `SymbolOp`s are ingested over a wire out of order, insertion order no longer
   reflects causality; convergent cross-peer ordering wants the `SymbolOp.base`
-  chain (each rename references the prior `SymbolOp.id`). `base` is carried on the
-  record but always `null` this release, so cross-peer temporal ordering is
+  chain (each rename references the prior `SymbolOp.id`). `base` is carried on
+  the record but always `null` this release, so cross-peer temporal ordering is
   deferred.
 - **`callersOf` is best-effort and single-language** over the decryptable view;
   no whole-program resolution.

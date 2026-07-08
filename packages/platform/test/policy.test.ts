@@ -19,6 +19,8 @@ import {
   requirePassingChecks,
   requireReputationTier,
   requireVerifiedProvenance,
+  restrictPaths,
+  standingQuery,
 } from '../src/policy';
 
 beforeAll(async () => {
@@ -443,5 +445,112 @@ describe('policy — blockOnVeto', () => {
   test('an empty reviewers allowlist is rejected at construction', () => {
     const vetoes = new VetoLog();
     expect(() => blockOnVeto(vetoes, [])).toThrow(RangeError);
+  });
+});
+
+describe('policy — standing queries (Pillar 11)', () => {
+  test('restrictPaths: an untrusted author modifying auth code is rejected', async () => {
+    const log = new OpLog(new MemoryStore());
+    const owner = Identity.create();
+    const stranger = Identity.create();
+    const authOp = await log.write(
+      'main',
+      'src/auth/login.rs',
+      enc('x'),
+      stranger
+    );
+    const policy = restrictPaths({
+      protect: ['src/auth/**'],
+      allow: [owner.did],
+      name: 'no untrusted agent may modify auth code',
+    });
+    const d = await policy(proposal({ incomingOps: [authOp] }));
+    expect(d.allow).toBe(false);
+    expect(d.reason).toContain('no untrusted agent may modify auth code');
+    expect(d.reason).toContain('1 op(s)');
+  });
+
+  test('restrictPaths: a trusted author may modify the protected path', async () => {
+    const log = new OpLog(new MemoryStore());
+    const owner = Identity.create();
+    const authOp = await log.write(
+      'main',
+      'src/auth/login.rs',
+      enc('x'),
+      owner
+    );
+    const policy = restrictPaths({
+      protect: ['src/auth/**'],
+      allow: [owner.did],
+    });
+    expect(await policy(proposal({ incomingOps: [authOp] }))).toEqual({
+      allow: true,
+    });
+  });
+
+  test('restrictPaths: an untrusted author may modify a non-protected path', async () => {
+    const log = new OpLog(new MemoryStore());
+    const owner = Identity.create();
+    const stranger = Identity.create();
+    const op = await log.write('main', 'src/ui/button.rs', enc('x'), stranger);
+    const policy = restrictPaths({
+      protect: ['src/auth/**'],
+      allow: [owner.did],
+    });
+    expect(await policy(proposal({ incomingOps: [op] }))).toEqual({
+      allow: true,
+    });
+  });
+
+  test('standingQuery: a bespoke invariant rejects a violating op, names the query', async () => {
+    const log = new OpLog(new MemoryStore());
+    const author = Identity.create();
+    const gen = await log.write(
+      'main',
+      'src/schema.generated.rs',
+      enc('x'),
+      author
+    );
+    const ok = await log.write('main', 'src/app.rs', enc('x'), author);
+    const policy = standingQuery({
+      name: 'no hand-edits to generated files',
+      forbid: (op) => op.path.endsWith('.generated.rs'),
+    });
+    expect(await policy(proposal({ incomingOps: [ok] }))).toEqual({
+      allow: true,
+    });
+    const d = await policy(proposal({ incomingOps: [gen, ok] }));
+    expect(d.allow).toBe(false);
+    expect(d.reason).toContain('no hand-edits to generated files');
+  });
+
+  test('restrictPaths fails closed on a `..` traversal path (no fail-open bypass)', async () => {
+    const log = new OpLog(new MemoryStore());
+    const owner = Identity.create();
+    const stranger = Identity.create();
+    // A traversal path that could normalize into src/auth/ downstream.
+    const sneaky = await log.write(
+      'main',
+      'src/auth/../auth/login.rs',
+      enc('x'),
+      stranger
+    );
+    const policy = restrictPaths({
+      protect: ['src/auth/**'],
+      allow: [owner.did],
+    });
+    const d = await policy(proposal({ incomingOps: [sneaky] }));
+    expect(d.allow).toBe(false); // blocked, not silently allowed
+  });
+
+  test('misconfiguration is rejected at construction', () => {
+    expect(() => standingQuery({ name: '', forbid: () => false })).toThrow(
+      RangeError
+    );
+    expect(() => restrictPaths({ protect: [], allow: [] })).toThrow(RangeError);
+    // A `..` in a protect glob would silently protect nothing → rejected.
+    expect(() =>
+      restrictPaths({ protect: ['src/../etc/**'], allow: [] })
+    ).toThrow(RangeError);
   });
 });

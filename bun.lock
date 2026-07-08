@@ -212,6 +212,19 @@
         "@types/bun": "catalog:",
       },
     },
+    "examples/standing-policy": {
+      "name": "@thaddeus.run/example-standing-policy",
+      "version": "0.0.0",
+      "dependencies": {
+        "@thaddeus.run/fs": "workspace:*",
+        "@thaddeus.run/identity": "workspace:*",
+        "@thaddeus.run/platform": "workspace:*",
+        "@thaddeus.run/store": "workspace:*",
+      },
+      "devDependencies": {
+        "@types/bun": "catalog:",
+      },
+    },
     "examples/watch": {
       "name": "@thaddeus.run/example-watch",
       "version": "0.0.0",
@@ -945,6 +958,8 @@
     "@thaddeus.run/example-semantic-graph": ["@thaddeus.run/example-semantic-graph@workspace:examples/semantic-graph"],
 
     "@thaddeus.run/example-server": ["@thaddeus.run/example-server@workspace:examples/server"],
+
+    "@thaddeus.run/example-standing-policy": ["@thaddeus.run/example-standing-policy@workspace:examples/standing-policy"],
 
     "@thaddeus.run/example-watch": ["@thaddeus.run/example-watch@workspace:examples/watch"],
 
