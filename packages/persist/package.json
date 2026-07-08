@@ -1,6 +1,6 @@
 {
   "name": "@thaddeus.run/persist",
-  "version": "0.0.0",
+  "version": "0.1.0-alpha",
   "description": "Durable backends for the Thaddeus substrate: a pluggable key→bytes Backend with filesystem and in-memory implementations (the code.store cold tier).",
   "keywords": [
     "backend",

@@ -1,6 +1,6 @@
 {
   "name": "@thaddeus.run/theme",
-  "version": "0.0.0",
+  "version": "0.1.0-alpha",
   "description": "Shared design tokens for thaddeus.run apps and packages.",
   "keywords": [
     "css",

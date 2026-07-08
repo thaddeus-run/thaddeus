@@ -1,6 +1,6 @@
 {
   "name": "@thaddeus.run/cli",
-  "version": "0.0.0",
+  "version": "0.1.0-alpha",
   "description": "The Thaddeus CLI (thaddeus / thad): clone, edit, and publish over the untrusted remote with a git-like working tree.",
   "keywords": [
     "cli",
