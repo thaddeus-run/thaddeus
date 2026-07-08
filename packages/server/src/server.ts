@@ -134,7 +134,13 @@ export function createServer(config: ServerConfig): Server {
   function registryFor(name: string): Promise<AgentRegistry> {
     let p = registries.get(name);
     if (p === undefined) {
-      p = buildRegistry(name);
+      // Evict a REJECTED build so a transient load error self-heals on the next
+      // request instead of poisoning the repo until restart (the success promise
+      // stays cached for single-flight).
+      p = buildRegistry(name).catch((e: unknown) => {
+        registries.delete(name);
+        throw e;
+      });
       registries.set(name, p);
     }
     return p;
@@ -155,7 +161,12 @@ export function createServer(config: ServerConfig): Server {
   function provenanceFor(name: string): Promise<ProvenanceLog> {
     let p = provenances.get(name);
     if (p === undefined) {
-      p = buildProvenance(name);
+      // Evict a REJECTED load so a transient backend error self-heals next call
+      // rather than caching the failure forever (same fix as registryFor).
+      p = buildProvenance(name).catch((e: unknown) => {
+        provenances.delete(name);
+        throw e;
+      });
       provenances.set(name, p);
     }
     return p;

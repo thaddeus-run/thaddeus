@@ -87,6 +87,27 @@ function opsOnView(repo: Repo, view: string): Op[] {
     );
 }
 
+// The ops reachable from local `main` but not from `base` — i.e. every
+// committed-but-unpublished op, newest-first. `push -m` annotates these when no
+// new op was committed this invocation (so the why is never silently dropped).
+function opsAhead(repo: Repo, base: readonly string[]): Op[] {
+  const byId = new Map(repo.log.ops().map((o) => [o.id, o]));
+  const closure = (heads: readonly string[]): Set<string> => {
+    const seen = new Set<string>();
+    const stack = [...heads];
+    while (stack.length > 0) {
+      const id = stack.pop();
+      if (id === undefined || seen.has(id)) continue;
+      seen.add(id);
+      const op = byId.get(id);
+      if (op !== undefined) stack.push(...op.parents);
+    }
+    return seen;
+  };
+  const baseClosure = closure(base);
+  return opsOnView(repo, 'main').filter((o) => !baseClosure.has(o.id));
+}
+
 // How many ops are reachable from local `main` but not from `base` (the last
 // synced server heads) — i.e. committed-but-unpublished.
 function headsAhead(repo: Repo, base: readonly string[]): number {
@@ -262,16 +283,23 @@ export async function run(
           return 0;
         }
         // A `-m "<why>"` attaches a signed provenance record (the reason for the
-        // change) to each op just committed, persisted locally and shipped with
-        // the push — so the server and every clone carry the why, not just code.
+        // change) to the op(s) this push publishes — the ops just committed, or
+        // (when nothing new was staged) the already-committed-but-unpublished
+        // ops — persisted locally and shipped with the push, so the why is never
+        // silently dropped and every clone carries it.
         const message = values.message;
         const provenance: Provenance[] = [];
-        if (message !== undefined && message.length > 0 && ops.length > 0) {
+        const whyTarget = ops.length > 0 ? ops : opsAhead(local, cfg.base);
+        if (
+          message !== undefined &&
+          message.length > 0 &&
+          whyTarget.length > 0
+        ) {
           const provLog = new ProvenanceLog(
             local.store,
             repoScope(root, cfg.repo)
           );
-          for (const op of ops) {
+          for (const op of whyTarget) {
             provenance.push(
               await provLog.record(
                 op,
