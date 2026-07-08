@@ -18,8 +18,11 @@ import { readFileSync } from 'node:fs';
 import { isAbsolute, join } from 'node:path';
 import { parseArgs } from 'node:util';
 
+import { type FileDiff, fileDiff } from './diff';
+import { HELP, USAGE } from './help';
 import { initIdentity, loadIdentity } from './identity';
 import { startServer } from './serve';
+import { VERSION } from './version';
 import {
   baseSnapshot,
   type Config,
@@ -43,24 +46,11 @@ export interface CliEnv {
   out?: (line: string) => void;
 }
 
-const USAGE = `thaddeus — the Thaddeus CLI
-  init                              create a self-owned identity
-  create <server> <repo>           create a repo on a server
-  clone  <server> <repo> [dir]     clone a repo to a working tree
-  status                           show working-tree changes
-  push   [-m "<why>"] [--no-land]  commit + upload (+ a signed why) + land
-  log                              show main's history with the why per change
-  why    <op>                      show the signed why for one op
-  veto   <op> [-m "<reason>"]      lodge a standing veto that blocks a land
-  vetoes <op>                      list the standing vetoes on one op
-  rename <old> <new> [-m "<why>"]  rename a symbol as one signed SymbolOp
-  history <symbol>                 show a symbol's signed rename chain
-  land                             land uploaded-but-unmerged commits
-  grant  <did> [--paths a,b] [--max-changes N]    grant push to a DID/agent
-  revoke <did>                                     revoke a grant
-  grants                                           list active grants
-  reputation <did>                                 show a DID's server-wide reputation
-  serve  [--port 4000] [--data ./dir] [--host] [--min-merges N]   run a server`;
+// Detect the `--json` flag a read verb offers for scripting/TUI. Kept simple so
+// verbs that take a bare positional don't all need full parseArgs plumbing.
+function wantsJson(rest: readonly string[]): boolean {
+  return rest.includes('--json');
+}
 
 // Re-open the local durable repo for a working copy at `root`.
 async function openLocal(root: string, repoName: string): Promise<Repo> {
@@ -206,6 +196,27 @@ export async function run(
   const out = env.out ?? ((l: string): void => console.log(l));
   const [command, ...rest] = argv;
 
+  // Global flags, handled before dispatch so they work with or without a repo.
+  if (command === '--version' || command === '-v' || command === 'version') {
+    out(VERSION);
+    return 0;
+  }
+  // `thaddeus help [<cmd>]`, bare `thaddeus`, and `thaddeus --help` show the
+  // overview or a specific command's detailed help.
+  if (command === undefined || command === 'help' || command === '--help') {
+    const topic = command === 'help' ? rest[0] : undefined;
+    out(topic !== undefined && HELP[topic] !== undefined ? HELP[topic] : USAGE);
+    return 0;
+  }
+  // `thaddeus <cmd> --help/-h` prints that command's detailed help.
+  if (
+    (rest.includes('--help') || rest.includes('-h')) &&
+    HELP[command] !== undefined
+  ) {
+    out(HELP[command]);
+    return 0;
+  }
+
   try {
     switch (command) {
       case 'init': {
@@ -216,6 +227,13 @@ export async function run(
         });
         const { did, created } = initIdentity(env.home, values.force === true);
         out(created ? `created identity ${did}` : `identity ${did}`);
+        return 0;
+      }
+      case 'whoami': {
+        const identity = loadIdentity(env.home);
+        out(
+          wantsJson(rest) ? JSON.stringify({ did: identity.did }) : identity.did
+        );
         return 0;
       }
       case 'create': {
@@ -268,10 +286,13 @@ export async function run(
         const snap = await baseSnapshot(local, 'main', identity);
         const { added, modified, deleted } = diffWorkingTree(root, snap);
         const ahead = headsAhead(local, cfg.base);
-        if (
-          added.length + modified.length + deleted.length === 0 &&
-          ahead === 0
-        ) {
+        const clean =
+          added.length + modified.length + deleted.length === 0 && ahead === 0;
+        if (wantsJson(rest)) {
+          out(JSON.stringify({ clean, added, modified, deleted, ahead }));
+          return 0;
+        }
+        if (clean) {
           out('clean');
           return 0;
         }
@@ -282,6 +303,74 @@ export async function run(
           out(
             `(${ahead} commit(s) not published — run 'thaddeus push' or 'land')`
           );
+        return 0;
+      }
+      case 'diff': {
+        const { values, positionals } = parseArgs({
+          args: [...rest],
+          options: {
+            staged: { type: 'boolean' },
+            json: { type: 'boolean' },
+          },
+          allowPositionals: true,
+        });
+        const root = findRoot(env.cwd);
+        if (root === undefined) {
+          out("not a thaddeus working copy — run 'thaddeus clone' first");
+          return 2;
+        }
+        const cfg = loadConfig(root);
+        const identity = loadIdentity(env.home);
+        const local = await openLocal(root, cfg.repo);
+        // Two modes. Default: the base 'main' snapshot vs the working tree on
+        // disk. --staged: the last-synced base heads vs local 'main' — i.e. the
+        // committed-but-unpublished changes.
+        let base: Map<string, Uint8Array>;
+        let target: Map<string, Uint8Array>;
+        if (values.staged === true) {
+          local.log.view('_diffbase', cfg.base);
+          base = await baseSnapshot(local, '_diffbase', identity);
+          target = await baseSnapshot(local, 'main', identity);
+        } else {
+          base = await baseSnapshot(local, 'main', identity);
+          target = new Map<string, Uint8Array>();
+          for (const p of listWorkingFiles(root)) {
+            target.set(p, new Uint8Array(readFileSync(join(root, p))));
+          }
+        }
+        const only = new Set(positionals);
+        const changed: FileDiff[] = [];
+        for (const p of [
+          ...new Set([...base.keys(), ...target.keys()]),
+        ].sort()) {
+          if (only.size > 0 && !only.has(p)) {
+            continue;
+          }
+          const b = base.get(p);
+          const t = target.get(p);
+          if (b !== undefined && t !== undefined && equalBytes(b, t)) {
+            continue; // unchanged
+          }
+          changed.push(fileDiff(p, b, t));
+        }
+        if (values.json === true) {
+          out(JSON.stringify(changed));
+          return 0;
+        }
+        if (changed.length === 0) {
+          out('no changes');
+          return 0;
+        }
+        for (const fd of changed) {
+          out(`diff ${fd.path} (${fd.status})`);
+          if (fd.binary) {
+            out('  binary file differs');
+            continue;
+          }
+          for (const line of fd.lines) {
+            out(`${line.tag}${line.text}`);
+          }
+        }
         return 0;
       }
       case 'push': {
@@ -526,7 +615,7 @@ export async function run(
         return 0;
       }
       case 'history': {
-        const arg = rest[0];
+        const arg = rest.find((a) => !a.startsWith('-'));
         if (arg === undefined) {
           out('usage: thaddeus history <symbol>');
           return 2;
@@ -566,6 +655,20 @@ export async function run(
           symbolId = matches.length === 1 ? matches[0] : arg;
         }
         const chain = symopLog.forSymbol(symbolId);
+        if (wantsJson(rest)) {
+          out(
+            JSON.stringify({
+              symbol: symbolId,
+              renames: chain.map((op) => ({
+                from: op.from,
+                to: op.to,
+                verified: symopLog.verify(op),
+                author: op.author,
+              })),
+            })
+          );
+          return 0;
+        }
         if (chain.length === 0) {
           out(`no rename history for ${arg}`);
           return 0;
@@ -578,6 +681,15 @@ export async function run(
         return 0;
       }
       case 'log': {
+        const { values } = parseArgs({
+          args: [...rest],
+          options: {
+            since: { type: 'string' },
+            until: { type: 'string' },
+            json: { type: 'boolean' },
+          },
+          allowPositionals: true,
+        });
         const root = findRoot(env.cwd);
         if (root === undefined) {
           out("not a thaddeus working copy — run 'thaddeus clone' first");
@@ -590,7 +702,36 @@ export async function run(
           repoScope(root, cfg.repo)
         );
         const vetoLog = await VetoLog.load(repoScope(root, cfg.repo));
-        const ops = opsOnView(local, 'main');
+        // --since/--until filter by the op's signed wall-clock timestamp
+        // (op.at). ISO 8601 strings sort lexically, so a string compare IS a
+        // time compare; both bounds are inclusive.
+        const { since, until } = values;
+        const ops = opsOnView(local, 'main').filter(
+          (op) =>
+            (since === undefined || op.at >= since) &&
+            (until === undefined || op.at <= until)
+        );
+        const isVetoed = (op: Op): boolean =>
+          vetoLog.forOp(op.id).some((v) => vetoLog.status(v) === 'verified');
+        if (values.json === true) {
+          out(
+            JSON.stringify(
+              ops.map((op) => ({
+                id: op.id,
+                at: op.at,
+                path: op.path,
+                author: op.author,
+                vetoed: isVetoed(op),
+                why: provLog.forOp(op.id).map((p) => ({
+                  status: provLog.status(p),
+                  actor_kind: p.actor_kind,
+                  intent: p.intent,
+                })),
+              }))
+            )
+          );
+          return 0;
+        }
         if (ops.length === 0) {
           out('no history');
           return 0;
@@ -599,11 +740,8 @@ export async function run(
           const why = provLog.forOp(op.id);
           // A ⛔ marker flags an op under a verified standing veto — the reader
           // sees at a glance which changes a reviewer has blocked.
-          const vetoed = vetoLog
-            .forOp(op.id)
-            .some((v) => vetoLog.status(v) === 'verified');
           out(
-            `${op.id.slice(0, 10)}  ${op.at}  ${op.path}${vetoed ? '  ⛔ vetoed' : ''}`
+            `${op.id.slice(0, 10)}  ${op.at}  ${op.path}${isVetoed(op) ? '  ⛔ vetoed' : ''}`
           );
           out(
             `    ${why.length > 0 ? why.map((p) => p.intent).join('; ') : '(no why)'}`
@@ -612,7 +750,7 @@ export async function run(
         return 0;
       }
       case 'why': {
-        const prefix = rest[0];
+        const prefix = rest.find((a) => !a.startsWith('-'));
         if (prefix === undefined) {
           out('usage: thaddeus why <op>');
           return 2;
@@ -641,8 +779,22 @@ export async function run(
           return 2;
         }
         const op = matches[0];
-        out(`op ${op.id.slice(0, 10)}  ${op.at}  ${op.path}  by ${op.author}`);
         const records = provLog.forOp(op.id);
+        if (wantsJson(rest)) {
+          out(
+            JSON.stringify({
+              op: { id: op.id, at: op.at, path: op.path, author: op.author },
+              records: records.map((p) => ({
+                status: provLog.status(p),
+                actor_kind: p.actor_kind,
+                intent: p.intent,
+                reasoning: p.reasoning,
+              })),
+            })
+          );
+          return 0;
+        }
+        out(`op ${op.id.slice(0, 10)}  ${op.at}  ${op.path}  by ${op.author}`);
         if (records.length === 0) {
           out('  (no why recorded)');
           return 0;
@@ -712,7 +864,7 @@ export async function run(
         return 0;
       }
       case 'vetoes': {
-        const prefix = rest[0];
+        const prefix = rest.find((a) => !a.startsWith('-'));
         if (prefix === undefined) {
           out('usage: thaddeus vetoes <op>');
           return 2;
@@ -738,6 +890,20 @@ export async function run(
         }
         const op = matches[0];
         const records = vetoLog.forOp(op.id);
+        if (wantsJson(rest)) {
+          out(
+            JSON.stringify({
+              op: { id: op.id, path: op.path },
+              vetoes: records.map((v) => ({
+                status: vetoLog.status(v),
+                reviewer: v.reviewer,
+                reason: v.reason,
+                at: v.at,
+              })),
+            })
+          );
+          return 0;
+        }
         if (records.length === 0) {
           out('no vetoes');
           return 0;
@@ -823,6 +989,19 @@ export async function run(
         const identity = loadIdentity(env.home);
         const client = new Client(cfg.server, identity, env.fetchImpl);
         const grants = await client.listGrants(cfg.repo);
+        if (wantsJson(rest)) {
+          out(
+            JSON.stringify(
+              grants.map((g) => ({
+                agent: g.agent,
+                paths: [...g.paths],
+                maxChanges: g.maxChanges,
+                maxSpend: g.maxSpend,
+              }))
+            )
+          );
+          return 0;
+        }
         if (grants.length === 0) {
           out('no grants');
           return 0;
@@ -835,7 +1014,7 @@ export async function run(
         return 0;
       }
       case 'reputation': {
-        const did = rest[0];
+        const did = rest.find((a) => !a.startsWith('-'));
         if (did === undefined) {
           out('usage: thaddeus reputation <did>');
           return 2;
@@ -849,6 +1028,10 @@ export async function run(
         const identity = loadIdentity(env.home);
         const client = new Client(cfg.server, identity, env.fetchImpl);
         const profile = await client.reputation(did);
+        if (wantsJson(rest)) {
+          out(JSON.stringify(profile));
+          return 0;
+        }
         out(profile.subject);
         out(`  attested: ${profile.attested}  claimed: ${profile.claimed}`);
         const kinds = Object.entries(profile.byKind)
@@ -902,11 +1085,6 @@ export async function run(
         await new Promise<never>(() => {}); // block until interrupted
         return 0; // unreachable
       }
-      case undefined:
-      case 'help':
-      case '--help':
-        out(USAGE);
-        return 0;
       default:
         out(`unknown command: ${command}\n\n${USAGE}`);
         return 2;

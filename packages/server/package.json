@@ -1,12 +1,11 @@
 {
   "name": "@thaddeus.run/server",
   "version": "0.0.0",
-  "description": "The untrusted API-first remote for Strata: a Bun.serve HTTP server over the durable Platform that verifies, never decrypts, and serves ciphertext.",
+  "description": "The untrusted API-first remote for Thaddeus: a Bun.serve HTTP server over the durable Platform that verifies, never decrypts, and serves ciphertext.",
   "keywords": [
     "http",
     "remote",
     "server",
-    "strata",
     "substrate"
   ],
   "homepage": "https://thaddeus.run",

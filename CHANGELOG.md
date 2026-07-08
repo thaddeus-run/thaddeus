@@ -200,6 +200,20 @@ All notable changes to Thaddeus. Format follows
   across a new `createServer` over the same durable dir. The server now
   carries + persists the whole substrate (code + why + veto + reputation +
   symbol-ops), optionally attesting.
+- **`@thaddeus.run/cli` — a real, installable tool.** `bun build --compile`
+  (moon task `cli:compile`) emits a self-contained `thaddeus` executable that
+  needs no Bun at runtime — output to `release/` (gitignored, never in the npm
+  tarball); cross-platform binaries via `--target`. New surface: `--version`
+  (read from `package.json` at build time), structured per-command help
+  (`thaddeus help <cmd>` / `<cmd> --help`), `whoami`, `thaddeus diff` (an LCS
+  line diff of the working tree vs base, or `--staged` for committed-but-
+  unpublished), and `log --since/--until` filtering on the signed `op.at`. A
+  `--json` mode on the read verbs (`status`, `diff`, `log`, `why`, `vetoes`,
+  `grants`, `reputation`, `whoami`) makes the CLI scriptable / TUI-ready. A
+  smoke test compiles the binary and runs `--version`/`--help`. Publish-metadata
+  pass across `@thaddeus.run/*` (dropped the retired `strata` keyword,
+  de-Strata'd two descriptions). Still deferred: multiple remotes and a
+  per-platform release matrix (the commands are documented in `cli:compile`).
 
 ### Changed
 

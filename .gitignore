@@ -13,6 +13,9 @@ dist
 .vinxi
 dist-ssr
 
+# Compiled standalone CLI binaries (bun build --compile output).
+release/
+
 # TanStack Start generates this from src/routes/ on dev/build.
 apps/landing/src/routeTree.gen.ts
 *.local
