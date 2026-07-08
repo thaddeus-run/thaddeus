@@ -1,12 +1,11 @@
 {
   "name": "@thaddeus.run/persist",
   "version": "0.0.0",
-  "description": "Durable backends for the Strata substrate: a pluggable key→bytes Backend with filesystem and in-memory implementations (the code.store cold tier).",
+  "description": "Durable backends for the Thaddeus substrate: a pluggable key→bytes Backend with filesystem and in-memory implementations (the code.store cold tier).",
   "keywords": [
     "backend",
     "persistence",
     "storage",
-    "strata",
     "substrate"
   ],
   "homepage": "https://thaddeus.run",
