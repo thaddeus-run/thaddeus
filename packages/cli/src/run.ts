@@ -1,6 +1,11 @@
 import { signDelegation } from '@thaddeus.run/agent';
 import { Client } from '@thaddeus.run/client';
 import { Workspace } from '@thaddeus.run/fs';
+import {
+  HeuristicExtractor,
+  SymbolGraph,
+  SymbolOpLog,
+} from '@thaddeus.run/graph';
 import type { Identity } from '@thaddeus.run/identity';
 import type { Op } from '@thaddeus.run/log';
 import { FileBackend } from '@thaddeus.run/persist';
@@ -48,6 +53,8 @@ const USAGE = `thaddeus — the Thaddeus CLI
   why    <op>                      show the signed why for one op
   veto   <op> [-m "<reason>"]      lodge a standing veto that blocks a land
   vetoes <op>                      list the standing vetoes on one op
+  rename <old> <new> [-m "<why>"]  rename a symbol as one signed SymbolOp
+  history <symbol>                 show a symbol's signed rename chain
   land                             land uploaded-but-unmerged commits
   grant  <did> [--paths a,b] [--max-changes N]    grant push to a DID/agent
   revoke <did>                                     revoke a grant
@@ -404,6 +411,164 @@ export async function run(
         } else {
           out(
             'published, but the remote has changes not in your clone — re-clone to sync'
+          );
+        }
+        return 0;
+      }
+      case 'rename': {
+        const { values, positionals } = parseArgs({
+          args: [...rest],
+          options: {
+            message: { type: 'string', short: 'm' },
+            'no-land': { type: 'boolean' },
+          },
+          allowPositionals: true,
+        });
+        const [oldName, newName] = positionals;
+        if (oldName === undefined || newName === undefined) {
+          out('usage: thaddeus rename <old> <new> [-m "<why>"]');
+          return 2;
+        }
+        const root = findRoot(env.cwd);
+        if (root === undefined) {
+          out("not a thaddeus working copy — run 'thaddeus clone' first");
+          return 2;
+        }
+        const cfg = loadConfig(root);
+        const identity = loadIdentity(env.home);
+        const local = await openLocal(root, cfg.repo);
+        // Fold any pending disk edits into main first, so the rename operates on
+        // the latest committed code.
+        await commitDiff(root, local, identity);
+        // Open a workspace over main and resolve the symbol by its current name.
+        const ws = Workspace.open(local.log, local.store, {
+          source: 'main',
+          reader: identity,
+          name: 'rename',
+        });
+        const graph = SymbolGraph.over(ws, {
+          extractor: new HeuristicExtractor(),
+        });
+        const symbolId = await graph.resolve(oldName);
+        if (symbolId === null) {
+          out(`no symbol named ${oldName}`);
+          return 1;
+        }
+        // rename mints one signed SymbolOp + rewrites the text as P03 ops.
+        const { symbolOp, ops } = await graph.rename(
+          symbolId,
+          newName,
+          identity
+        );
+        if (ops.length === 0) {
+          out('nothing renamed');
+          return 0;
+        }
+        // Advance local main to the rename commit and write the renamed code to
+        // disk so the working tree reflects it.
+        const heads = [...local.log.heads('rename')];
+        await local.log.repoint('main', heads);
+        await materializeToDisk(local, 'main', identity, root);
+        // Persist the SymbolOp locally so `history` reads it offline.
+        const symopLog = new SymbolOpLog(repoScope(root, cfg.repo));
+        await symopLog.ingest(symbolOp);
+        // A `-m "<why>"` attaches a signed provenance record to each rendered op.
+        const provenance: Provenance[] = [];
+        const message = values.message;
+        if (message !== undefined && message.length > 0) {
+          const provLog = new ProvenanceLog(
+            local.store,
+            repoScope(root, cfg.repo)
+          );
+          for (const op of ops) {
+            provenance.push(
+              await provLog.record(
+                op,
+                { intent: message, reasoning: message, actorKind: 'human' },
+                identity
+              )
+            );
+          }
+        }
+        const client = new Client(cfg.server, identity, env.fetchImpl);
+        const pushed = await client.push(cfg.repo, local, heads, provenance, [
+          symbolOp,
+        ]);
+        out(
+          `renamed ${oldName} → ${newName} (symbol ${symbolOp.symbol.slice(0, 10)}, ${ops.length} edit(s), ${pushed.accepted.symop} symbol op)`
+        );
+        if (values['no-land'] === true) {
+          out("uploaded (not landed — run 'thaddeus land' to publish)");
+          return 0;
+        }
+        const landed = await client.land(
+          cfg.repo,
+          heads,
+          'main',
+          mergeClaims(cfg.repo, ops, identity)
+        );
+        if (!landed.landed) {
+          out(
+            `not landed: ${landed.reason ?? 'blocked by policy'} (content uploaded)`
+          );
+          return 1;
+        }
+        const localOps = new Set(local.log.ops().map((o) => o.id));
+        if (landed.heads.every((h) => localOps.has(h))) {
+          await local.log.repoint('main', landed.heads);
+          saveConfig(root, { ...cfg, base: [...landed.heads] });
+          out(`published to main (${landed.heads.length} head(s))`);
+        } else {
+          out(
+            'published, but the remote has changes not in your clone — re-clone to sync'
+          );
+        }
+        return 0;
+      }
+      case 'history': {
+        const arg = rest[0];
+        if (arg === undefined) {
+          out('usage: thaddeus history <symbol>');
+          return 2;
+        }
+        const root = findRoot(env.cwd);
+        if (root === undefined) {
+          out("not a thaddeus working copy — run 'thaddeus clone' first");
+          return 2;
+        }
+        const cfg = loadConfig(root);
+        const identity = loadIdentity(env.home);
+        const local = await openLocal(root, cfg.repo);
+        const symopLog = await SymbolOpLog.load(repoScope(root, cfg.repo));
+        // Resolve `arg` as a current symbol name (via the graph); fall back to
+        // treating it as a raw symbol id (e.g. an old, now-renamed name's id).
+        const ws = Workspace.open(local.log, local.store, {
+          source: 'main',
+          reader: identity,
+          name: 'history',
+        });
+        const graph = SymbolGraph.over(ws, {
+          extractor: new HeuristicExtractor(),
+        });
+        // Resolve `arg` to a symbol id. A rename changes a symbol's name, so its
+        // id (content-addressed from the OLD name) is not recoverable from the
+        // current name in a fresh session — cross-peer id convergence is deferred
+        // (spec §11). So resolve in three ways: a live symbol NAME, a full symbol
+        // id, or an id PREFIX (as `rename` prints), matched against known records.
+        let symbolId = await graph.resolve(arg);
+        if (symbolId === null) {
+          const ids = [...new Set(symopLog.all().map((o) => o.symbol))];
+          const matches = ids.filter((id) => id.startsWith(arg));
+          symbolId = matches.length === 1 ? matches[0] : arg;
+        }
+        const chain = symopLog.forSymbol(symbolId);
+        if (chain.length === 0) {
+          out(`no rename history for ${arg}`);
+          return 0;
+        }
+        for (const op of chain) {
+          out(
+            `  ${op.from} → ${op.to}  [${symopLog.verify(op) ? 'verified' : 'unverified'}]  by ${op.author}`
           );
         }
         return 0;

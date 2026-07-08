@@ -4,6 +4,7 @@ import {
   delegationPolicy,
   verifyDelegation,
 } from '@thaddeus.run/agent';
+import { SymbolOpLog } from '@thaddeus.run/graph';
 import { type Identity, PublicIdentity } from '@thaddeus.run/identity';
 import type { Op } from '@thaddeus.run/log';
 import {
@@ -208,6 +209,22 @@ export function createServer(config: ServerConfig): Server {
     return p;
   }
 
+  // Durable per-repo SymbolOpLog cache — the signed semantic-graph ops (P08)
+  // alongside the code. Single-flight + evict-on-reject like vetoFor.
+  const symops = new Map<string, Promise<SymbolOpLog>>();
+
+  function symopFor(name: string): Promise<SymbolOpLog> {
+    let p = symops.get(name);
+    if (p === undefined) {
+      p = SymbolOpLog.load(metaBackend(name)).catch((e: unknown) => {
+        symops.delete(name);
+        throw e;
+      });
+      symops.set(name, p);
+    }
+    return p;
+  }
+
   // The durable server-wide ReputationLog (P07). Reputation spans repos, so it is
   // held ONCE over the un-scoped backend (top-level `rep/` prefix), not a per-repo
   // scope. Single-flight so concurrent callers share one instance; evict a
@@ -387,10 +404,14 @@ export function createServer(config: ServerConfig): Server {
     const prov = ops.flatMap((op) => [...provLog.forOp(op.id)]);
     const vetoLog = await vetoFor(name);
     const veto = ops.flatMap((op) => [...vetoLog.forOp(op.id)]);
+    // The semantic-graph ops (P08) are keyed by symbol, not by a P03 op, so a
+    // clone carries the repo's whole structural history (e.g. rename chains).
+    const symopLog = await symopFor(name);
+    const symop = [...symopLog.all()];
     return json(200, {
       view,
       heads: [...repo.log.heads(view)],
-      ...encodeBundle(ops, objects, caps, prov, veto),
+      ...encodeBundle(ops, objects, caps, prov, veto, symop),
     });
   }
 
@@ -520,6 +541,23 @@ export function createServer(config: ServerConfig): Server {
           rejected.push({ kind: 'veto', id: v.op ?? '?', reason: String(err) });
         }
       }
+      // Ingest the signed semantic-graph ops (P08) the same way, so a restarted
+      // server still serves a symbol's rename chain. Keep-and-label — an
+      // unverifiable structural claim is kept and rendered unverifiable.
+      let symopOk = 0;
+      const symopLog = await symopFor(name);
+      for (const s of bundle.symop) {
+        try {
+          await symopLog.ingest(s);
+          symopOk += 1;
+        } catch (err) {
+          rejected.push({
+            kind: 'symop',
+            id: s.id ?? '?',
+            reason: String(err),
+          });
+        }
+      }
       return json(200, {
         accepted: {
           objects: objectsOk,
@@ -527,6 +565,7 @@ export function createServer(config: ServerConfig): Server {
           caps: capsOk,
           prov: provOk,
           veto: vetoOk,
+          symop: symopOk,
         },
         rejected,
       });

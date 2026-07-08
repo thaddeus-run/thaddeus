@@ -1,4 +1,5 @@
 import type { Delegation } from '@thaddeus.run/agent';
+import { type SymbolOp, SymbolOpLog } from '@thaddeus.run/graph';
 import type { Identity } from '@thaddeus.run/identity';
 import { Platform, type Repo } from '@thaddeus.run/platform';
 import { type Provenance, ProvenanceLog } from '@thaddeus.run/provenance';
@@ -23,6 +24,7 @@ export interface PushResult {
     caps: number;
     prov: number;
     veto: number;
+    symop: number;
   };
   rejected: { kind: string; id: string; reason: string }[];
 }
@@ -85,6 +87,7 @@ export class Client {
     heads: readonly string[];
     provenance: ProvenanceLog;
     vetoes: VetoLog;
+    symbols: SymbolOpLog;
   }> {
     const enc = encodeURIComponent;
     const res = await this.#fetch(
@@ -119,7 +122,11 @@ export class Client {
     for (const v of bundle.veto) {
       await vetoes.ingest(v);
     }
-    return { repo, heads: body.heads, provenance, vetoes };
+    const symbols = new SymbolOpLog(metaScope);
+    for (const s of bundle.symop) {
+      await symbols.ingest(s);
+    }
+    return { repo, heads: body.heads, provenance, vetoes, symbols };
   }
 
   async listRepos(): Promise<readonly string[]> {
@@ -136,13 +143,14 @@ export class Client {
     name: string,
     repo: Repo,
     heads: readonly string[],
-    provenance: readonly Provenance[] = []
+    provenance: readonly Provenance[] = [],
+    symops: readonly SymbolOp[] = []
   ): Promise<PushResult> {
     const { ops, objects, caps } = bundleFor(repo, heads);
     const res = await this.#signed(
       'POST',
       `/repos/${encodeURIComponent(name)}/push`,
-      encodeBundle(ops, objects, caps, provenance)
+      encodeBundle(ops, objects, caps, provenance, [], symops)
     );
     return (await this.#ok(res)) as PushResult;
   }

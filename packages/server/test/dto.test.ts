@@ -49,6 +49,7 @@ describe('wire bundle codec', () => {
       caps: [],
       prov: [],
       veto: [],
+      symop: [],
     });
   });
 });

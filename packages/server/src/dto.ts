@@ -1,4 +1,5 @@
 import type { Delegation } from '@thaddeus.run/agent';
+import type { SymbolOp } from '@thaddeus.run/graph';
 import type { Op } from '@thaddeus.run/log';
 import type { Provenance } from '@thaddeus.run/provenance';
 import type { ContributionClaim } from '@thaddeus.run/reputation';
@@ -13,14 +14,16 @@ import {
 // The wire reuses the persistence record codec (JSON + {$u8: base64}) per item,
 // so byte fields (sig/nonce/ciphertext/wrapped_key) survive JSON transport. Each
 // item rides as a base64 string; the bundle is plain JSON. `prov` carries the
-// signed "why" (P04) and `veto` the standing human "no" (P10) alongside the
-// code; both optional so an older client still round-trips.
+// signed "why" (P04), `veto` the standing human "no" (P10), and `symop` the
+// signed semantic-graph operations (P08) alongside the code; all optional so an
+// older client still round-trips.
 export interface Bundle {
   ops: string[];
   objects: string[];
   caps: string[];
   prov?: string[];
   veto?: string[];
+  symop?: string[];
 }
 
 const toWire = (value: unknown): string =>
@@ -34,7 +37,8 @@ export function encodeBundle(
   objects: readonly EncryptedObject[],
   caps: readonly Capability[],
   prov: readonly Provenance[] = [],
-  veto: readonly Veto[] = []
+  veto: readonly Veto[] = [],
+  symop: readonly SymbolOp[] = []
 ): Bundle {
   return {
     ops: ops.map(toWire),
@@ -42,6 +46,7 @@ export function encodeBundle(
     caps: caps.map(toWire),
     prov: prov.map(toWire),
     veto: veto.map(toWire),
+    symop: symop.map(toWire),
   };
 }
 
@@ -51,6 +56,7 @@ export function decodeBundle(b: Bundle): {
   caps: Capability[];
   prov: Provenance[];
   veto: Veto[];
+  symop: SymbolOp[];
 } {
   return {
     ops: (b.ops ?? []).map((s) => fromWire(s) as Op),
@@ -58,6 +64,7 @@ export function decodeBundle(b: Bundle): {
     caps: (b.caps ?? []).map((s) => fromWire(s) as Capability),
     prov: (b.prov ?? []).map((s) => fromWire(s) as Provenance),
     veto: (b.veto ?? []).map((s) => fromWire(s) as Veto),
+    symop: (b.symop ?? []).map((s) => fromWire(s) as SymbolOp),
   };
 }
 

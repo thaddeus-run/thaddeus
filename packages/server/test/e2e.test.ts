@@ -1,4 +1,5 @@
 import { Workspace } from '@thaddeus.run/fs';
+import { signSymbolOp } from '@thaddeus.run/graph';
 import { Identity, ready } from '@thaddeus.run/identity';
 import { OpLog } from '@thaddeus.run/log';
 import { FileBackend } from '@thaddeus.run/persist';
@@ -317,6 +318,67 @@ describe('server e2e', () => {
         )
       ).json()) as { landed: boolean; reason?: string };
       expect(landed.landed).toBe(true);
+    } finally {
+      await http2.stop(true);
+    }
+  });
+
+  test("a rename's SymbolOp (P08) travels in the bundle and survives a restart", async () => {
+    const root = mkdtempSync(join(tmp, 'symop-'));
+    const a = Identity.create();
+    const srv1 = createServer({ backend: new FileBackend(root) });
+    const http1 = Bun.serve({ port: 0, fetch: srv1.fetch });
+    const c1 = client(`http://localhost:${http1.port}`);
+    try {
+      await c1.post('/repos', { name: 'r' }, a);
+      const committed = await commitLocally(
+        a,
+        'src/auth.rs',
+        'fn refresh() {}'
+      );
+      // Sign a rename SymbolOp and ship it alongside the code.
+      const symop = signSymbolOp(
+        {
+          kind: 'rename-symbol',
+          symbol: 'sym-refresh',
+          from: 'refresh',
+          to: 'refreshToken',
+          base: null,
+        },
+        a
+      );
+      const withSymop: Bundle = {
+        ...committed.bundle,
+        symop: encodeBundle([], [], [], [], [], [symop]).symop,
+      };
+      const pushed = (await (
+        await c1.post('/repos/r/push', withSymop, a)
+      ).json()) as { accepted: { symop: number } };
+      expect(pushed.accepted.symop).toBe(1);
+      await c1.post(
+        '/repos/r/land',
+        { fromHeads: committed.heads, into: 'main' },
+        a
+      );
+
+      const pulled = decodeBundle(
+        (await (await c1.get('/repos/r/pull?view=main')).json()) as Bundle
+      );
+      expect(pulled.symop.map((s) => s.to)).toContain('refreshToken');
+    } finally {
+      await http1.stop(true);
+    }
+
+    // Restart: a fresh server over the SAME dir still serves the SymbolOp.
+    const srv2 = createServer({ backend: new FileBackend(root) });
+    const http2 = Bun.serve({ port: 0, fetch: srv2.fetch });
+    const c2 = client(`http://localhost:${http2.port}`);
+    try {
+      const repull = decodeBundle(
+        (await (await c2.get('/repos/r/pull?view=main')).json()) as Bundle
+      );
+      expect(repull.symop.map((s) => s.to)).toContain('refreshToken');
+      expect(repull.symop.map((s) => s.symbol)).toContain('sym-refresh');
     } finally {
       await http2.stop(true);
     }
