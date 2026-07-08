@@ -45,7 +45,8 @@ export class VetoLog {
 
   // Build + sign a veto for `op` and record it. `at` is the caller's timestamp
   // (ISO 8601); the log takes no clock so it stays deterministic and testable.
-  // Persists write-through when durable (no-op without a backend).
+  // Write-through FIRST (same contract as `ingest`) so a failed backend write
+  // leaves no visible-but-non-durable veto; then keep in memory.
   async record(
     op: Op,
     fields: { reason: string; at: string },
@@ -55,8 +56,8 @@ export class VetoLog {
       { op: op.id, reason: fields.reason, at: fields.at },
       reviewer
     );
-    this.#insert(v);
     await this.#persist(v);
+    this.#insert(v);
     return v;
   }
 

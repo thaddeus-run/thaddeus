@@ -660,17 +660,19 @@ export function createServer(config: ServerConfig): Server {
       // veto pushed for any incoming op is the ceiling that blocks the land. With
       // no vetoes recorded, blockOnVeto allows, so this is a safe always-on gate.
       const vetoLog = await vetoFor(name);
-      const reps = await reputationLog();
-      // When configured with a reputation floor, add a durable tier gate: every
-      // incoming op's author must clear `minMerges` ATTESTED merges. Self-claimed
-      // reputation never counts, so the gate honors only host-vouched history.
       const gates: LandPolicy[] = [
         policy,
         delegationPolicy(reg, (a) => a === meta.owner),
         blockOnVeto(vetoLog),
       ];
+      // When configured with a reputation floor, add a durable tier gate: every
+      // incoming op's author must clear `minMerges` ATTESTED merges. Self-claimed
+      // reputation never counts, so the gate honors only host-vouched history.
+      // Loaded lazily — a server with no host and no floor never touches `rep/`.
       if (config.minMerges !== undefined) {
-        gates.push(requireReputationTier(reps, config.minMerges));
+        gates.push(
+          requireReputationTier(await reputationLog(), config.minMerges)
+        );
       }
       const result = await repo.land({
         from: src,
@@ -712,6 +714,7 @@ export function createServer(config: ServerConfig): Server {
         // claim credit for another's merge, and a claim for an unlanded op is
         // ignored. The result is a host-vouched, durable Contribution.
         if (config.host !== undefined && claims.length > 0) {
+          const reps = await reputationLog();
           const byId = new Map(incoming.map((o) => [o.id, o]));
           for (const claim of claims) {
             const op = byId.get(claim.ref);

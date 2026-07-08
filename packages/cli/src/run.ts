@@ -559,6 +559,10 @@ export async function run(
         if (symbolId === null) {
           const ids = [...new Set(symopLog.all().map((o) => o.symbol))];
           const matches = ids.filter((id) => id.startsWith(arg));
+          if (matches.length > 1) {
+            out(`ambiguous symbol prefix ${arg} (${matches.length} matches)`);
+            return 2;
+          }
           symbolId = matches.length === 1 ? matches[0] : arg;
         }
         const chain = symopLog.forSymbol(symbolId);
