@@ -10,6 +10,13 @@ thaddeus --version
 thaddeus help
 ```
 
+Point it at a server (your choice — never pre-filled):
+
+```sh
+thaddeus use --hosted            # the official https://ams1.thaddeus.run
+thaddeus use https://your-host   # or your own / a local `thaddeus serve`
+```
+
 Installing fetches the `thaddeus` binary for your platform from the
 [GitHub releases](https://github.com/thaddeus-run/thaddeus/releases) (with a
 download-on-first-run fallback if install scripts are disabled). No Bun or Node

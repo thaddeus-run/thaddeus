@@ -23,10 +23,31 @@ use client::Remote;
 
 const DEFAULT_SERVER: &str = "http://localhost:4000";
 
+/// The server to browse when none is given on the command line: the CLI's saved
+/// default (`thaddeus use`), else the local default. This lets
+/// `thaddeus use --hosted` point lazythad at the same server as the CLI.
+fn default_server() -> String {
+    config_default_server().unwrap_or_else(|| DEFAULT_SERVER.to_string())
+}
+
+/// Read `defaultServer` from the CLI's global config file
+/// (`~/.config/thaddeus/config.json`, matching the CLI's home resolution — HOME,
+/// or USERPROFILE on Windows). A missing file or parse error yields None.
+fn config_default_server() -> Option<String> {
+    let home = std::env::var_os("HOME").or_else(|| std::env::var_os("USERPROFILE"))?;
+    let path = std::path::Path::new(&home)
+        .join(".config")
+        .join("thaddeus")
+        .join("config.json");
+    let text = std::fs::read_to_string(path).ok()?;
+    let cfg: serde_json::Value = serde_json::from_str(&text).ok()?;
+    cfg.get("defaultServer")?.as_str().map(str::to_string)
+}
+
 fn print_help() {
     println!(
         "lazythad — a terminal UI for Thaddeus\n\n\
-         Usage: lazythad [server]        (default {DEFAULT_SERVER})\n\
+         Usage: lazythad [server]        (default: your 'thaddeus use' server, else {DEFAULT_SERVER})\n\
          \x20      lazythad --dump [server]   print repos + logs as text (no TTY)\n\n\
          Keys:\n\
          \x20 q / Esc   quit\n\
@@ -90,19 +111,13 @@ fn main() -> Result<()> {
         // Headless: print repos + logs as text (no TTY) — scriptable, and the
         // path an integration/CI check can drive without a terminal.
         Some("--dump") => {
-            let server = args
-                .get(1)
-                .cloned()
-                .unwrap_or_else(|| DEFAULT_SERVER.to_string());
+            let server = args.get(1).cloned().unwrap_or_else(default_server);
             return dump(&Remote::new(&server));
         }
         _ => {}
     }
 
-    let server = args
-        .into_iter()
-        .next()
-        .unwrap_or_else(|| DEFAULT_SERVER.to_string());
+    let server = args.into_iter().next().unwrap_or_else(default_server);
     let mut app = App::new(Remote::new(&server), server.clone());
 
     let mut terminal = setup_terminal()?;

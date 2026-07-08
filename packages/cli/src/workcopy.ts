@@ -9,6 +9,8 @@ import {
 } from 'node:fs';
 import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 
+import { loadIgnore } from './ignore';
+
 export interface Config {
   server: string;
   repo: string;
@@ -44,19 +46,21 @@ export function saveConfig(root: string, cfg: Config): void {
   );
 }
 
-// Relative POSIX paths of every file under `root`, excluding `.thaddeus/`.
+// Relative POSIX paths of every file under `root` that is not ignored. Honors
+// the repo's `.gitignore`/`.thaddeusignore` and always prunes `.git`,
+// `.thaddeus`, and `node_modules` — so `status`/`diff`/`push` never walk or
+// upload dependency/build trees (the source of the pre-ignore slowness + 413s).
 export function listWorkingFiles(root: string): string[] {
+  const ig = loadIgnore(root);
   const out: string[] = [];
   const walk = (dir: string): void => {
     for (const entry of readdirSync(dir, { withFileTypes: true })) {
-      if (entry.name === '.thaddeus') {
-        continue;
-      }
       const full = join(dir, entry.name);
+      const rel = relative(root, full).split(sep).join('/');
       if (entry.isDirectory()) {
-        walk(full);
-      } else if (entry.isFile()) {
-        out.push(relative(root, full).split(sep).join('/'));
+        if (!ig.ignored(rel, true)) walk(full); // prune ignored subtrees
+      } else if (entry.isFile() && !ig.ignored(rel, false)) {
+        out.push(rel);
       }
     }
   };

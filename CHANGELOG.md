@@ -7,6 +7,30 @@ All notable changes to Thaddeus. Format follows
 
 ### Added
 
+- **A default server + `thaddeus use`.** Set a per-user default server once
+  (`thaddeus use <url>`, stored in `~/.config/thaddeus/config.json`) instead of
+  repeating it on every `create`/`clone`; bare `thaddeus use` shows it,
+  `--clear` removes it. `create`/`clone` now resolve the server as
+  `--server <url>` flag → a leading `https://` argument (back-compat with
+  `create <server> <repo>`) → the saved default, and print a first-run hint when
+  none is set. An **optional** official host is offered but never pre-filled:
+  `thaddeus use --hosted` opts in to `https://ams1.thaddeus.run` — surfaced in
+  the hint, `thaddeus help`, the release notes, and the docs, but always the
+  user's explicit choice.
+- **The working tree uses a `.thaddeusignore`, seeded from `.gitignore`.** On
+  first use in a repo, if there's a `.gitignore` and no `.thaddeusignore`,
+  Thaddeus creates a `.thaddeusignore` from it; from then on it reads **only**
+  `.thaddeusignore` (edit that to change what Thaddeus ignores — a post-Git tool
+  owns its own ignore file). `.git`, `.thaddeus`, and `node_modules` are always
+  pruned regardless. `status`/`diff`/`push` skip ignored paths with common
+  gitignore semantics (names, `dir/`, `*.ext`, `/anchored`, `!negation`) — so
+  versioning a real project (e.g. a vite app) no longer bundles hundreds of MB
+  of dependencies (the cause of the slow `status` and the
+  `413 Payload Too Large` on `push`). Nested ignore files are a later
+  refinement.
+- **`lazythad` uses your default server.** With no argument it falls back to the
+  CLI's saved default (`thaddeus use`), then to `http://localhost:4000` — so
+  `thaddeus use --hosted` points the TUI at the hosted server too.
 - **Release automation & distribution.** A `release.yml` workflow (on a `v*`
   tag) cross-builds the `thaddeus` CLI (bun `--compile`, every OS/arch from one
   runner) and the `lazythad` TUI (cargo, one native runner per target) and
@@ -16,6 +40,19 @@ All notable changes to Thaddeus. Format follows
   launcher packages that fetch the prebuilt binary (postinstall, with a
   download-on-first-run fallback); npm publishing is gated on an `NPM_TOKEN`
   secret.
+
+### Fixed
+
+- **CLI output no longer truncates on Windows.** The entrypoint returned its
+  exit code via `process.exit()`, which can cut off buffered stdout/stderr on
+  terminals whose stdio is an async pipe (e.g. an IDE's integrated PowerShell) —
+  so a `status`/`push` that printed its result appeared to "do nothing". It now
+  sets `process.exitCode` and lets the process end naturally, flushing all
+  output first.
+- **`push` no longer fails on Windows with `EPERM` during commit.** The
+  `FileBackend`'s atomic temp+rename now retries on a transient lock
+  (`EPERM`/`EBUSY`/`EACCES`) — a virus scanner or the Windows Search indexer
+  briefly holding the destination no longer aborts a write.
 
 ## [0.1.0-alpha] - 2026-07-08
 
@@ -390,7 +427,10 @@ CLI, and the lazythad TUI.
   provenance (P04), veto (P10), reputation (P07), and symbol-ops (P08) all write
   through their backend and reload; the agent registry was already durable.
   Still deferred: **SQLite/S3 backends**, **compaction/GC**, and **multi-process
-  concurrency/locking/WAL** (durable, not concurrent).
+  concurrency/locking/WAL** (durable, not concurrent). **Planned next: an
+  S3-compatible `Backend`** (AWS S3 / Cloudflare R2 / MinIO) so the server's
+  state moves off local disk — the portability + scale lever that lets the same
+  container run against any object store and behind multiple replicas.
 - **Server / network API — shipped** as `@thaddeus.run/server` (single node).
   Still deferred: **multi-node concurrency** (optimistic-concurrency on the
   `land` re-point + the `scope()` delimiter-encode), a **grant list / richer

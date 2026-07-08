@@ -6,8 +6,10 @@ export const USAGE = `thaddeus — the Thaddeus CLI
 Working tree
   init                          create a self-owned identity
   whoami                        print the current identity's DID
-  create <server> <repo>        create a repo on a server
-  clone  <server> <repo> [dir]  clone a repo to a working tree
+  use    [<url>] [--hosted]     set (or show) your default server
+  create <repo> [--server URL]  create a repo on a server
+  clone  <repo> [dir] [--server URL]
+                                clone a repo to a working tree
   status                        show working-tree changes
   diff   [--staged] [path...]   show a line diff of working-tree changes
   push   [-m "<why>"]           commit + upload (+ a signed why) + land
@@ -33,7 +35,12 @@ Server
 Global flags
   --version, -v                 print the version
   --help,    -h                 print help (per command when after a command)
-  --json                        machine-readable output (read commands)`;
+  --json                        machine-readable output (read commands)
+
+Hosted server (optional)
+  There is an official server at https://ams1.thaddeus.run. It is never set for
+  you — opt in with 'thaddeus use --hosted', or point at your own with
+  'thaddeus use <url>' (or per command, 'create/clone --server <url>').`;
 
 // Per-command detailed help, shown by `thaddeus <cmd> --help` or
 // `thaddeus help <cmd>`. Each entry is a self-contained usage block.
@@ -47,15 +54,24 @@ export const HELP: Record<string, string> = {
 
   Print the current identity's DID (the key every write is signed with).`,
 
-  create: `thaddeus create <server> <repo>
+  use: `thaddeus use [<url>] [--hosted] [--clear] [--json]
 
-  Create a repo you own on <server>. You become its owner; only you (or a
-  delegate you grant) may push or land.`,
+  Set your default server — the one create/clone use when you don't pass one.
+  With no argument, print the current default. --hosted sets the official server
+  (https://ams1.thaddeus.run); --clear removes the default. The server is always
+  your explicit choice — nothing is pre-filled.`,
 
-  clone: `thaddeus clone <server> <repo> [dir]
+  create: `thaddeus create <repo> [--server <url>]
 
-  Clone <repo> from <server> into [dir] (defaults to the repo's last path
-  segment). Materializes the current 'main' view and records the remote.`,
+  Create a repo you own on a server. The server is, in order: --server, else a
+  leading https:// argument (create <url> <repo>), else your default
+  ('thaddeus use'). You become its owner; only you (or a delegate) may push.`,
+
+  clone: `thaddeus clone <repo> [dir] [--server <url>]
+
+  Clone <repo> into [dir] (defaults to the repo's last path segment) from a
+  server resolved like 'create' (--server, else a leading https:// argument,
+  else your default). Materializes 'main' and records the remote.`,
 
   status: `thaddeus status [--json]
 

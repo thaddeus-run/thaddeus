@@ -65,13 +65,27 @@ thaddeus serve --port 4000 --data ./thaddeus-data
 # add --host to make it attest reputation; --min-merges N to gate landings
 ```
 
-Leave it running in another terminal (or use a remote you trust).
+Leave it running in another terminal (or use a remote you trust). Then save a
+default server so you don't repeat it on every command:
+
+```sh
+thaddeus use http://localhost:4000    # your default for create/clone
+thaddeus use                          # show the current default
+```
+
+There's also an **official hosted server** — but it's never set for you; opt in
+explicitly if you want it:
+
+```sh
+thaddeus use --hosted                 # use https://ams1.thaddeus.run
+```
 
 ## 4. Create, clone, edit, publish
 
 ```sh
-thaddeus create http://localhost:4000 acme/web      # you own it
-thaddeus clone  http://localhost:4000 acme/web       # → ./acme/web
+thaddeus create acme/web             # you own it (uses your default server)
+thaddeus clone  acme/web              # → ./acme/web
+# point at a different server just this once with --server https://host
 cd acme/web
 echo 'fn refresh() {}' > src/auth.rs
 thaddeus status                                      # what changed
@@ -81,6 +95,12 @@ thaddeus push -m "add the token refresh path"        # commit + upload + land, w
 
 The `-m` message becomes a **signed provenance record** bound to the op — the
 "why" travels with the code to every clone.
+
+Thaddeus keeps its own ignore file, `.thaddeusignore` — on first use it seeds
+one from your `.gitignore` (if present), then reads only `.thaddeusignore`. It
+always skips `.git`, `.thaddeus`, and `node_modules`, so `status`/`push` stay
+fast and never upload dependency or build trees. Edit `.thaddeusignore` to
+change what Thaddeus ignores.
 
 ## 5. Read the history and the why
 

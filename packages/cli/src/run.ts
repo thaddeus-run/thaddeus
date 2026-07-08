@@ -18,6 +18,13 @@ import { readFileSync } from 'node:fs';
 import { isAbsolute, join } from 'node:path';
 import { parseArgs } from 'node:util';
 
+import {
+  HOSTED_SERVER,
+  isServerUrl,
+  loadCliConfig,
+  noServerHint,
+  saveCliConfig,
+} from './config';
 import { type FileDiff, fileDiff } from './diff';
 import { HELP, USAGE } from './help';
 import { initIdentity, loadIdentity } from './identity';
@@ -188,6 +195,30 @@ async function commitDiff(
   return { heads, committed: true, ops };
 }
 
+// Resolve the server for create/clone and strip it from the positionals.
+// Precedence: an explicit --server flag (validated by the caller) > a leading
+// `https://` positional (back-compat with `create <server> <repo>`) > the saved
+// default (`thaddeus use`). Returns null when none is available — the caller
+// prints noServerHint. Since every provided path is an http(s) URL, a null here
+// unambiguously means "no server set", not "invalid server".
+function resolveServer(
+  flag: string | undefined,
+  positionals: string[],
+  home: string
+): { server: string; rest: string[] } | null {
+  let server = flag;
+  let rest = positionals;
+  if (server === undefined && isServerUrl(positionals[0])) {
+    server = positionals[0];
+    rest = positionals.slice(1);
+  }
+  server ??= loadCliConfig(home).defaultServer;
+  if (server === undefined || !isServerUrl(server)) {
+    return null;
+  }
+  return { server, rest };
+}
+
 // The injectable entry point. Returns a process exit code.
 export async function run(
   argv: readonly string[],
@@ -236,10 +267,68 @@ export async function run(
         );
         return 0;
       }
+      case 'use': {
+        const { values, positionals } = parseArgs({
+          args: [...rest],
+          options: {
+            hosted: { type: 'boolean' },
+            clear: { type: 'boolean' },
+            json: { type: 'boolean' },
+          },
+          allowPositionals: true,
+        });
+        const cfg = loadCliConfig(env.home);
+        if (values.clear === true) {
+          saveCliConfig(env.home, { ...cfg, defaultServer: undefined });
+          out('cleared the default server');
+          return 0;
+        }
+        // `use --hosted` opts in to the official server; `use <url>` sets a
+        // custom one; bare `use` shows the current default (never pre-filled).
+        // Passing both is ambiguous — reject rather than silently pick one.
+        if (values.hosted === true && positionals[0] !== undefined) {
+          out('use either --hosted or a <url>, not both');
+          return 2;
+        }
+        const url = values.hosted === true ? HOSTED_SERVER : positionals[0];
+        if (url === undefined) {
+          if (values.json === true) {
+            out(JSON.stringify({ defaultServer: cfg.defaultServer ?? null }));
+            return 0;
+          }
+          out(
+            cfg.defaultServer ??
+              `no default server — set one with 'thaddeus use <url>', or the hosted server with 'thaddeus use --hosted' (${HOSTED_SERVER})`
+          );
+          return 0;
+        }
+        if (!isServerUrl(url)) {
+          out(`invalid server url: ${url}`);
+          return 2;
+        }
+        saveCliConfig(env.home, { ...cfg, defaultServer: url });
+        out(`default server set to ${url}`);
+        return 0;
+      }
       case 'create': {
-        const [server, repo] = rest;
-        if (server === undefined || repo === undefined) {
-          out('usage: thaddeus create <server> <repo>');
+        const { values, positionals } = parseArgs({
+          args: [...rest],
+          options: { server: { type: 'string' } },
+          allowPositionals: true,
+        });
+        if (values.server !== undefined && !isServerUrl(values.server)) {
+          out(`invalid --server url: ${values.server}`);
+          return 2;
+        }
+        const resolved = resolveServer(values.server, positionals, env.home);
+        if (resolved === null) {
+          out(noServerHint('create'));
+          return 2;
+        }
+        const { server, rest: args } = resolved;
+        const repo = args[0];
+        if (repo === undefined) {
+          out('usage: thaddeus create <repo> [--server <url>]');
           return 2;
         }
         const client = new Client(
@@ -252,9 +341,24 @@ export async function run(
         return 0;
       }
       case 'clone': {
-        const [server, repo, dirArg] = rest;
-        if (server === undefined || repo === undefined) {
-          out('usage: thaddeus clone <server> <repo> [dir]');
+        const { values, positionals } = parseArgs({
+          args: [...rest],
+          options: { server: { type: 'string' } },
+          allowPositionals: true,
+        });
+        if (values.server !== undefined && !isServerUrl(values.server)) {
+          out(`invalid --server url: ${values.server}`);
+          return 2;
+        }
+        const resolved = resolveServer(values.server, positionals, env.home);
+        if (resolved === null) {
+          out(noServerHint('clone'));
+          return 2;
+        }
+        const { server, rest: args } = resolved;
+        const [repo, dirArg] = args;
+        if (repo === undefined) {
+          out('usage: thaddeus clone <repo> [dir] [--server <url>]');
           return 2;
         }
         const dir = dirArg ?? repo.split('/').pop() ?? repo;
