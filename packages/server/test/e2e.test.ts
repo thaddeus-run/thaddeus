@@ -1,15 +1,23 @@
 import { Workspace } from '@thaddeus.run/fs';
+import { signSymbolOp } from '@thaddeus.run/graph';
 import { Identity, ready } from '@thaddeus.run/identity';
 import { OpLog } from '@thaddeus.run/log';
 import { FileBackend } from '@thaddeus.run/persist';
 import { signProvenance } from '@thaddeus.run/provenance';
+import { signClaim } from '@thaddeus.run/reputation';
+import { signVeto } from '@thaddeus.run/review';
 import { AccessDenied, MemoryStore } from '@thaddeus.run/store';
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import { type Bundle, decodeBundle, encodeBundle } from '../src/dto';
+import {
+  type Bundle,
+  decodeBundle,
+  encodeBundle,
+  encodeClaim,
+} from '../src/dto';
 import { createServer } from '../src/server';
 import { signRequest } from '../src/sign';
 import { expectRejects } from './reject';
@@ -228,6 +236,202 @@ describe('server e2e', () => {
       );
       expect(repull.prov.map((p) => p.intent)).toContain('fix race in refresh');
       expect(repull.prov.map((p) => p.op)).toContain(opId);
+    } finally {
+      await http2.stop(true);
+    }
+  });
+
+  test('landing mints an attested merge (P07) that survives a restart and honors the tier gate', async () => {
+    const root = mkdtempSync(join(tmp, 'rep-'));
+    const a = Identity.create();
+    const host = Identity.create(); // the attesting host key
+
+    // Phase 1: an attesting server (host, no tier gate). A lands op1 with a
+    // subject-signed merge claim; the host co-signs it into an attested merge.
+    const srv1 = createServer({ backend: new FileBackend(root), host });
+    const http1 = Bun.serve({ port: 0, fetch: srv1.fetch });
+    const c1 = client(`http://localhost:${http1.port}`);
+    try {
+      await c1.post('/repos', { name: 'r' }, a);
+      const committed = await commitLocally(a, 'src/a.rs', 'fn a() {}');
+      const op1 = committed.log.ops()[0];
+      await c1.post('/repos/r/push', committed.bundle, a);
+      const claim = signClaim(
+        { repo: 'r', ref: op1.id, kind: 'merge', at: new Date().toISOString() },
+        a
+      );
+      const landed = (await (
+        await c1.post(
+          '/repos/r/land',
+          {
+            fromHeads: committed.heads,
+            into: 'main',
+            contrib: [encodeClaim(claim)],
+          },
+          a
+        )
+      ).json()) as { landed: boolean };
+      expect(landed.landed).toBe(true);
+
+      const profile = (await (
+        await c1.get(`/reputation/${encodeURIComponent(a.did)}`)
+      ).json()) as { attested: number; byKind: { merge: number } };
+      expect(profile.attested).toBe(1);
+      expect(profile.byKind.merge).toBe(1);
+    } finally {
+      await http1.stop(true);
+    }
+
+    // Phase 2: restart WITH a reputation floor. The attested merge survives, and
+    // it clears the tier gate so A can still land.
+    const srv2 = createServer({
+      backend: new FileBackend(root),
+      host,
+      minMerges: 1,
+    });
+    const http2 = Bun.serve({ port: 0, fetch: srv2.fetch });
+    const c2 = client(`http://localhost:${http2.port}`);
+    try {
+      const profile = (await (
+        await c2.get(`/reputation/${encodeURIComponent(a.did)}`)
+      ).json()) as { attested: number; byKind: { merge: number } };
+      expect(profile.attested).toBe(1); // survived the restart
+      expect(profile.byKind.merge).toBe(1);
+
+      // A (1 attested merge) clears minMerges=1 and lands op2.
+      const committed = await commitLocally(a, 'src/b.rs', 'fn b() {}');
+      const op2 = committed.log.ops()[0];
+      await c2.post('/repos/r/push', committed.bundle, a);
+      const claim = signClaim(
+        { repo: 'r', ref: op2.id, kind: 'merge', at: new Date().toISOString() },
+        a
+      );
+      const landed = (await (
+        await c2.post(
+          '/repos/r/land',
+          {
+            fromHeads: committed.heads,
+            into: 'main',
+            contrib: [encodeClaim(claim)],
+          },
+          a
+        )
+      ).json()) as { landed: boolean; reason?: string };
+      expect(landed.landed).toBe(true);
+    } finally {
+      await http2.stop(true);
+    }
+  });
+
+  test("a rename's SymbolOp (P08) travels in the bundle and survives a restart", async () => {
+    const root = mkdtempSync(join(tmp, 'symop-'));
+    const a = Identity.create();
+    const srv1 = createServer({ backend: new FileBackend(root) });
+    const http1 = Bun.serve({ port: 0, fetch: srv1.fetch });
+    const c1 = client(`http://localhost:${http1.port}`);
+    try {
+      await c1.post('/repos', { name: 'r' }, a);
+      const committed = await commitLocally(
+        a,
+        'src/auth.rs',
+        'fn refresh() {}'
+      );
+      // Sign a rename SymbolOp and ship it alongside the code.
+      const symop = signSymbolOp(
+        {
+          kind: 'rename-symbol',
+          symbol: 'sym-refresh',
+          from: 'refresh',
+          to: 'refreshToken',
+          base: null,
+        },
+        a
+      );
+      const withSymop: Bundle = {
+        ...committed.bundle,
+        symop: encodeBundle([], [], [], [], [], [symop]).symop,
+      };
+      const pushed = (await (
+        await c1.post('/repos/r/push', withSymop, a)
+      ).json()) as { accepted: { symop: number } };
+      expect(pushed.accepted.symop).toBe(1);
+      await c1.post(
+        '/repos/r/land',
+        { fromHeads: committed.heads, into: 'main' },
+        a
+      );
+
+      const pulled = decodeBundle(
+        (await (await c1.get('/repos/r/pull?view=main')).json()) as Bundle
+      );
+      expect(pulled.symop.map((s) => s.to)).toContain('refreshToken');
+    } finally {
+      await http1.stop(true);
+    }
+
+    // Restart: a fresh server over the SAME dir still serves the SymbolOp.
+    const srv2 = createServer({ backend: new FileBackend(root) });
+    const http2 = Bun.serve({ port: 0, fetch: srv2.fetch });
+    const c2 = client(`http://localhost:${http2.port}`);
+    try {
+      const repull = decodeBundle(
+        (await (await c2.get('/repos/r/pull?view=main')).json()) as Bundle
+      );
+      expect(repull.symop.map((s) => s.to)).toContain('refreshToken');
+      expect(repull.symop.map((s) => s.symbol)).toContain('sym-refresh');
+    } finally {
+      await http2.stop(true);
+    }
+  });
+
+  test('a pushed veto (P10) blocks a subsequent land across a restart', async () => {
+    const root = mkdtempSync(join(tmp, 'veto-'));
+    const a = Identity.create();
+    const srv1 = createServer({ backend: new FileBackend(root) });
+    const http1 = Bun.serve({ port: 0, fetch: srv1.fetch });
+    const c1 = client(`http://localhost:${http1.port}`);
+    let heads: string[] = [];
+    try {
+      await c1.post('/repos', { name: 'r' }, a);
+      const committed = await commitLocally(
+        a,
+        'src/auth.rs',
+        'fn refresh() {}'
+      );
+      heads = committed.heads;
+      const op = committed.log.ops()[0];
+      // Push the code but do NOT land it yet.
+      await c1.post('/repos/r/push', committed.bundle, a);
+      // A reviewer (here the owner) signs a standing veto and pushes it alone.
+      const veto = signVeto(
+        { op: op.id, reason: 'ships a secret', at: new Date().toISOString() },
+        a
+      );
+      const pushed = (await (
+        await c1.post('/repos/r/push', encodeBundle([], [], [], [], [veto]), a)
+      ).json()) as { accepted: { veto: number } };
+      expect(pushed.accepted.veto).toBe(1);
+
+      // The verified veto blocks the land — main is untouched.
+      const blocked = (await (
+        await c1.post('/repos/r/land', { fromHeads: heads, into: 'main' }, a)
+      ).json()) as { landed: boolean; reason?: string };
+      expect(blocked.landed).toBe(false);
+      expect(blocked.reason).toContain('veto');
+    } finally {
+      await http1.stop(true);
+    }
+
+    // Restart: a fresh server over the SAME dir still honors the durable veto.
+    const srv2 = createServer({ backend: new FileBackend(root) });
+    const http2 = Bun.serve({ port: 0, fetch: srv2.fetch });
+    const c2 = client(`http://localhost:${http2.port}`);
+    try {
+      const stillBlocked = (await (
+        await c2.post('/repos/r/land', { fromHeads: heads, into: 'main' }, a)
+      ).json()) as { landed: boolean; reason?: string };
+      expect(stillBlocked.landed).toBe(false);
+      expect(stillBlocked.reason).toContain('veto');
     } finally {
       await http2.stop(true);
     }

@@ -280,7 +280,7 @@ describe('Repo.land — human veto (Pillar 10)', () => {
     if (risky == null) {
       throw new Error('expected a committed op');
     }
-    vetoes.record(
+    await vetoes.record(
       risky,
       { reason: 'ships a secret in cleartext', at: '2026-07-01T00:00:00Z' },
       reviewer

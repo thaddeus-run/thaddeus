@@ -44,10 +44,13 @@
   "dependencies": {
     "@noble/hashes": "catalog:",
     "@thaddeus.run/agent": "workspace:*",
+    "@thaddeus.run/graph": "workspace:*",
     "@thaddeus.run/identity": "workspace:*",
     "@thaddeus.run/log": "workspace:*",
     "@thaddeus.run/platform": "workspace:*",
     "@thaddeus.run/provenance": "workspace:*",
+    "@thaddeus.run/reputation": "workspace:*",
+    "@thaddeus.run/review": "workspace:*",
     "@thaddeus.run/store": "workspace:*"
   },
   "devDependencies": {

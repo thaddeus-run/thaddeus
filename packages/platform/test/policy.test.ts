@@ -385,7 +385,11 @@ describe('policy — blockOnVeto', () => {
     const reviewer = Identity.create();
     const vetoes = new VetoLog();
     const op = await log.write('main', 'b.rs', enc('fn b() {}'), author);
-    vetoes.record(op, { reason: 'ships a secret', at: VETO_AT }, reviewer);
+    await vetoes.record(
+      op,
+      { reason: 'ships a secret', at: VETO_AT },
+      reviewer
+    );
 
     const d = await blockOnVeto(vetoes)(proposal({ incomingOps: [op] }));
     expect(d.allow).toBe(false);
@@ -401,7 +405,11 @@ describe('policy — blockOnVeto', () => {
     const outsider = Identity.create();
     const vetoes = new VetoLog();
     const op = await log.write('main', 'c.rs', enc('fn c() {}'), author);
-    vetoes.record(op, { reason: 'i dislike this', at: VETO_AT }, outsider);
+    await vetoes.record(
+      op,
+      { reason: 'i dislike this', at: VETO_AT },
+      outsider
+    );
 
     // Only `authorized` may veto; the outsider's verified veto is ignored.
     const d = await blockOnVeto(vetoes, [authorized.did])(
@@ -433,7 +441,7 @@ describe('policy — blockOnVeto', () => {
     const vetoes = new VetoLog();
     const clean = await log.write('main', 'e.rs', enc('fn e() {}'), author);
     const vetoed = await log.write('main', 'f.rs', enc('fn f() {}'), author);
-    vetoes.record(vetoed, { reason: 'unsafe', at: VETO_AT }, reviewer);
+    await vetoes.record(vetoed, { reason: 'unsafe', at: VETO_AT }, reviewer);
 
     const d = await blockOnVeto(vetoes)(
       proposal({ incomingOps: [clean, vetoed] })

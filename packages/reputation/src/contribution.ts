@@ -27,6 +27,17 @@ export interface Verification {
   readonly attested: boolean; // host_sig valid for `host`
 }
 
+// A subject's UNATTESTED claim: the subject-signed half of a contribution, with
+// no host yet. A subject can mint this alone (it never needs the host key,
+// because the subject core deliberately excludes `host`); an attesting instance
+// then co-signs it with `attest` to produce a full, attested Contribution. This
+// is how reputation travels the wire: the client ships a claim, the host (if it
+// holds a key) attests on land.
+export interface ContributionClaim extends ContributionFields {
+  readonly subject: string; // = subject.did
+  readonly subj_sig: Uint8Array;
+}
+
 // Domain tag prefixed into the signed tuple so a contribution signature can
 // never be confused with an op (thaddeus.log.op.v1) or provenance
 // (thaddeus.provenance.v1) signature.
@@ -168,5 +179,59 @@ export function verifyContribution(c: Contribution): Verification {
       c.subj_sig
     ),
     attested: verifySide(c.host, () => canonicalContribution(c), c.host_sig),
+  };
+}
+
+// Build a subject-signed claim (no host). The subject signs the five-field
+// subject core; `host` is irrelevant to those bytes, so the subject mints this
+// with its key alone. The subject's own did stands in for `host` only to satisfy
+// the shared core type — it never enters the signed bytes.
+export function signClaim(
+  fields: ContributionFields,
+  subject: Identity
+): ContributionClaim {
+  const core: ContributionCore = {
+    ...fields,
+    subject: subject.did,
+    host: subject.did,
+  };
+  return {
+    ...fields,
+    subject: subject.did,
+    subj_sig: subject.sign(canonicalSubjContribution(core)),
+  };
+}
+
+// Verify a claim's subject signature, fail-soft: a non-canonical field, a
+// malformed did, or a wrong-length sig yields false rather than throwing.
+export function verifyClaim(claim: ContributionClaim): boolean {
+  return verifySide(
+    claim.subject,
+    () => canonicalSubjContribution({ ...claim, host: claim.subject }),
+    claim.subj_sig
+  );
+}
+
+// Co-sign a claim with the host key to produce a full, attested Contribution.
+// The claim's subject signature is carried through unchanged (so `authentic`
+// still holds) and the host signs the six-field core (so `attested` holds).
+export function attest(claim: ContributionClaim, host: Identity): Contribution {
+  const core: ContributionCore = {
+    repo: claim.repo,
+    ref: claim.ref,
+    kind: claim.kind,
+    at: claim.at,
+    subject: claim.subject,
+    host: host.did,
+  };
+  return {
+    repo: claim.repo,
+    ref: claim.ref,
+    kind: claim.kind,
+    at: claim.at,
+    subject: claim.subject,
+    host: host.did,
+    subj_sig: claim.subj_sig,
+    host_sig: host.sign(canonicalContribution(core)),
   };
 }

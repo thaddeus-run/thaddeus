@@ -22,7 +22,7 @@ describe('VetoLog', () => {
     const op = await log.write('main', 'a.rs', enc('fn a() {}'), author);
 
     const vetoes = new VetoLog();
-    const v = vetoes.record(op, { reason: 'unsafe', at: AT }, reviewer);
+    const v = await vetoes.record(op, { reason: 'unsafe', at: AT }, reviewer);
     expect(v.op).toBe(op.id);
     const found = vetoes.forOp(op.id);
     expect(found).toHaveLength(1);

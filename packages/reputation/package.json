@@ -43,9 +43,12 @@
     "prepublishOnly": "moon run reputation:prepublish"
   },
   "dependencies": {
-    "@thaddeus.run/identity": "workspace:*"
+    "@noble/hashes": "catalog:",
+    "@thaddeus.run/identity": "workspace:*",
+    "@thaddeus.run/store": "workspace:*"
   },
   "devDependencies": {
+    "@thaddeus.run/persist": "workspace:*",
     "@types/bun": "catalog:",
     "@typescript/native-preview": "catalog:",
     "tsdown": "catalog:",

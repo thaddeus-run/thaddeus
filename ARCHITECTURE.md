@@ -54,9 +54,9 @@ The substrate is now optionally **durable** behind a pluggable `Backend`
 take an optional backend (hot-cache write-through + static `open`/`load`); with
 none, behavior is unchanged. `Platform.createDurable`/`openDurable` compose a
 backend-backed repo, so **a repo survives a process restart** — the code.store
-"in-memory writes, cold storage" split. Server/network and a Git gateway are the
-next steps toward runnable; signed-record-log persistence and SQLite/S3 backends
-are deferred.
+"in-memory writes, cold storage" split. Signed-record-log persistence now ships
+too (provenance, veto, reputation, symbol-ops — see the Server section).
+SQLite/S3 backends, compaction/GC, and a Git gateway are the next steps.
 
 ## Server (infrastructure, not a pillar)
 
@@ -64,8 +64,15 @@ The durable `Platform` is reachable over HTTP via `@thaddeus.run/server` — a
 `Bun.serve` remote that is **untrusted** (no keys, verifies-don't-trust, serves
 ciphertext): reads are a public mirror, writes are owner-signed, `land` is
 key-free and policy-gated. It is stateless over the shared `Backend`, so a node
-restart serves the same repos. Multi-node concurrency and the Git gateway are
-the next steps.
+restart serves the same repos. It now carries **and persists the whole
+substrate** — not just code (P01 objects, P03 ops) but the meaning around it:
+the signed "why" (P04), the standing human veto (P10), server-wide reputation
+(P07), and semantic-graph ops (P08), each write-through under its own
+content-addressed key and rebuilt on load. The server may **optionally attest**:
+given a `host` identity it co-signs a client's reputation claim on a successful
+land (minting a host-vouched merge) and can gate land on that durable reputation
+(`--min-merges`). Multi-node concurrency, cross-instance federation, and the Git
+gateway are the next steps.
 
 ## Client & CLI (infrastructure, not a pillar)
 

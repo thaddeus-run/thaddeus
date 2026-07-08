@@ -1,11 +1,18 @@
 import { signDelegation } from '@thaddeus.run/agent';
 import { Client } from '@thaddeus.run/client';
 import { Workspace } from '@thaddeus.run/fs';
+import {
+  HeuristicExtractor,
+  SymbolGraph,
+  SymbolOpLog,
+} from '@thaddeus.run/graph';
 import type { Identity } from '@thaddeus.run/identity';
 import type { Op } from '@thaddeus.run/log';
 import { FileBackend } from '@thaddeus.run/persist';
 import { Platform, type Repo } from '@thaddeus.run/platform';
 import { type Provenance, ProvenanceLog } from '@thaddeus.run/provenance';
+import { type ContributionClaim, signClaim } from '@thaddeus.run/reputation';
+import { signVeto, VetoLog } from '@thaddeus.run/review';
 import { type Backend, scoped } from '@thaddeus.run/store';
 import { readFileSync } from 'node:fs';
 import { isAbsolute, join } from 'node:path';
@@ -44,11 +51,16 @@ const USAGE = `thaddeus — the Thaddeus CLI
   push   [-m "<why>"] [--no-land]  commit + upload (+ a signed why) + land
   log                              show main's history with the why per change
   why    <op>                      show the signed why for one op
+  veto   <op> [-m "<reason>"]      lodge a standing veto that blocks a land
+  vetoes <op>                      list the standing vetoes on one op
+  rename <old> <new> [-m "<why>"]  rename a symbol as one signed SymbolOp
+  history <symbol>                 show a symbol's signed rename chain
   land                             land uploaded-but-unmerged commits
   grant  <did> [--paths a,b] [--max-changes N]    grant push to a DID/agent
   revoke <did>                                     revoke a grant
   grants                                           list active grants
-  serve  [--port 4000] [--data ./thaddeus-data]   run a server`;
+  reputation <did>                                 show a DID's server-wide reputation
+  serve  [--port 4000] [--data ./dir] [--host] [--min-merges N]   run a server`;
 
 // Re-open the local durable repo for a working copy at `root`.
 async function openLocal(root: string, repoName: string): Promise<Repo> {
@@ -131,6 +143,23 @@ function headsAhead(repo: Repo, base: readonly string[]): number {
     if (!baseClosure.has(id)) n += 1;
   }
   return n;
+}
+
+// Build a subject-signed merge claim (P07) for each op the author is publishing,
+// so an attesting host can co-sign it on land. Only the author's own ops earn a
+// merge (the server re-checks subject === op.author before attesting), and a
+// non-attesting server simply ignores the claims — so this is always safe to send.
+function mergeClaims(
+  repoName: string,
+  ops: readonly Op[],
+  identity: Identity
+): ContributionClaim[] {
+  const at = new Date().toISOString();
+  return ops
+    .filter((op) => op.author === identity.did)
+    .map((op) =>
+      signClaim({ repo: repoName, ref: op.id, kind: 'merge', at }, identity)
+    );
 }
 
 // Stage the working-tree diff into a workspace over local main and commit it,
@@ -325,7 +354,13 @@ export async function run(
           out("uploaded (not landed — run 'thaddeus land' to publish)");
           return 0;
         }
-        const landed = await client.land(cfg.repo, heads, 'main');
+        // Ship a merge claim per published op; an attesting host co-signs it.
+        const landed = await client.land(
+          cfg.repo,
+          heads,
+          'main',
+          mergeClaims(cfg.repo, whyTarget, identity)
+        );
         if (!landed.landed) {
           out(
             `not landed: ${landed.reason ?? 'blocked by policy'} (content uploaded)`
@@ -356,7 +391,13 @@ export async function run(
         const local = await openLocal(root, cfg.repo);
         const heads = [...local.log.heads('main')];
         const client = new Client(cfg.server, identity, env.fetchImpl);
-        const landed = await client.land(cfg.repo, heads, 'main');
+        // Mint a merge claim for each committed-but-unpublished op being landed.
+        const claims = mergeClaims(
+          cfg.repo,
+          opsAhead(local, cfg.base),
+          identity
+        );
+        const landed = await client.land(cfg.repo, heads, 'main', claims);
         if (!landed.landed) {
           out(`not landed: ${landed.reason ?? 'nothing to land'}`);
           return 1;
@@ -374,6 +415,168 @@ export async function run(
         }
         return 0;
       }
+      case 'rename': {
+        const { values, positionals } = parseArgs({
+          args: [...rest],
+          options: {
+            message: { type: 'string', short: 'm' },
+            'no-land': { type: 'boolean' },
+          },
+          allowPositionals: true,
+        });
+        const [oldName, newName] = positionals;
+        if (oldName === undefined || newName === undefined) {
+          out('usage: thaddeus rename <old> <new> [-m "<why>"]');
+          return 2;
+        }
+        const root = findRoot(env.cwd);
+        if (root === undefined) {
+          out("not a thaddeus working copy — run 'thaddeus clone' first");
+          return 2;
+        }
+        const cfg = loadConfig(root);
+        const identity = loadIdentity(env.home);
+        const local = await openLocal(root, cfg.repo);
+        // Fold any pending disk edits into main first, so the rename operates on
+        // the latest committed code.
+        await commitDiff(root, local, identity);
+        // Open a workspace over main and resolve the symbol by its current name.
+        const ws = Workspace.open(local.log, local.store, {
+          source: 'main',
+          reader: identity,
+          name: 'rename',
+        });
+        const graph = SymbolGraph.over(ws, {
+          extractor: new HeuristicExtractor(),
+        });
+        const symbolId = await graph.resolve(oldName);
+        if (symbolId === null) {
+          out(`no symbol named ${oldName}`);
+          return 1;
+        }
+        // rename mints one signed SymbolOp + rewrites the text as P03 ops.
+        const { symbolOp, ops } = await graph.rename(
+          symbolId,
+          newName,
+          identity
+        );
+        if (ops.length === 0) {
+          out('nothing renamed');
+          return 0;
+        }
+        // Advance local main to the rename commit and write the renamed code to
+        // disk so the working tree reflects it.
+        const heads = [...local.log.heads('rename')];
+        await local.log.repoint('main', heads);
+        await materializeToDisk(local, 'main', identity, root);
+        // Persist the SymbolOp locally so `history` reads it offline.
+        const symopLog = new SymbolOpLog(repoScope(root, cfg.repo));
+        await symopLog.ingest(symbolOp);
+        // A `-m "<why>"` attaches a signed provenance record to each rendered op.
+        const provenance: Provenance[] = [];
+        const message = values.message;
+        if (message !== undefined && message.length > 0) {
+          const provLog = new ProvenanceLog(
+            local.store,
+            repoScope(root, cfg.repo)
+          );
+          for (const op of ops) {
+            provenance.push(
+              await provLog.record(
+                op,
+                { intent: message, reasoning: message, actorKind: 'human' },
+                identity
+              )
+            );
+          }
+        }
+        const client = new Client(cfg.server, identity, env.fetchImpl);
+        const pushed = await client.push(cfg.repo, local, heads, provenance, [
+          symbolOp,
+        ]);
+        out(
+          `renamed ${oldName} → ${newName} (symbol ${symbolOp.symbol.slice(0, 10)}, ${ops.length} edit(s), ${pushed.accepted.symop} symbol op)`
+        );
+        if (values['no-land'] === true) {
+          out("uploaded (not landed — run 'thaddeus land' to publish)");
+          return 0;
+        }
+        const landed = await client.land(
+          cfg.repo,
+          heads,
+          'main',
+          mergeClaims(cfg.repo, ops, identity)
+        );
+        if (!landed.landed) {
+          out(
+            `not landed: ${landed.reason ?? 'blocked by policy'} (content uploaded)`
+          );
+          return 1;
+        }
+        const localOps = new Set(local.log.ops().map((o) => o.id));
+        if (landed.heads.every((h) => localOps.has(h))) {
+          await local.log.repoint('main', landed.heads);
+          saveConfig(root, { ...cfg, base: [...landed.heads] });
+          out(`published to main (${landed.heads.length} head(s))`);
+        } else {
+          out(
+            'published, but the remote has changes not in your clone — re-clone to sync'
+          );
+        }
+        return 0;
+      }
+      case 'history': {
+        const arg = rest[0];
+        if (arg === undefined) {
+          out('usage: thaddeus history <symbol>');
+          return 2;
+        }
+        const root = findRoot(env.cwd);
+        if (root === undefined) {
+          out("not a thaddeus working copy — run 'thaddeus clone' first");
+          return 2;
+        }
+        const cfg = loadConfig(root);
+        const identity = loadIdentity(env.home);
+        const local = await openLocal(root, cfg.repo);
+        const symopLog = await SymbolOpLog.load(repoScope(root, cfg.repo));
+        // Resolve `arg` as a current symbol name (via the graph); fall back to
+        // treating it as a raw symbol id (e.g. an old, now-renamed name's id).
+        const ws = Workspace.open(local.log, local.store, {
+          source: 'main',
+          reader: identity,
+          name: 'history',
+        });
+        const graph = SymbolGraph.over(ws, {
+          extractor: new HeuristicExtractor(),
+        });
+        // Resolve `arg` to a symbol id. A rename changes a symbol's name, so its
+        // id (content-addressed from the OLD name) is not recoverable from the
+        // current name in a fresh session — cross-peer id convergence is deferred
+        // (spec §11). So resolve in three ways: a live symbol NAME, a full symbol
+        // id, or an id PREFIX (as `rename` prints), matched against known records.
+        let symbolId = await graph.resolve(arg);
+        if (symbolId === null) {
+          const ids = [...new Set(symopLog.all().map((o) => o.symbol))];
+          const matches = ids.filter((id) => id.startsWith(arg));
+          if (matches.length > 1) {
+            out(`ambiguous symbol prefix ${arg} (${matches.length} matches)`);
+            return 2;
+          }
+          symbolId = matches.length === 1 ? matches[0] : arg;
+        }
+        const chain = symopLog.forSymbol(symbolId);
+        if (chain.length === 0) {
+          out(`no rename history for ${arg}`);
+          return 0;
+        }
+        for (const op of chain) {
+          out(
+            `  ${op.from} → ${op.to}  [${symopLog.verify(op) ? 'verified' : 'unverified'}]  by ${op.author}`
+          );
+        }
+        return 0;
+      }
       case 'log': {
         const root = findRoot(env.cwd);
         if (root === undefined) {
@@ -386,6 +589,7 @@ export async function run(
           local.store,
           repoScope(root, cfg.repo)
         );
+        const vetoLog = await VetoLog.load(repoScope(root, cfg.repo));
         const ops = opsOnView(local, 'main');
         if (ops.length === 0) {
           out('no history');
@@ -393,7 +597,14 @@ export async function run(
         }
         for (const op of ops) {
           const why = provLog.forOp(op.id);
-          out(`${op.id.slice(0, 10)}  ${op.at}  ${op.path}`);
+          // A ⛔ marker flags an op under a verified standing veto — the reader
+          // sees at a glance which changes a reviewer has blocked.
+          const vetoed = vetoLog
+            .forOp(op.id)
+            .some((v) => vetoLog.status(v) === 'verified');
+          out(
+            `${op.id.slice(0, 10)}  ${op.at}  ${op.path}${vetoed ? '  ⛔ vetoed' : ''}`
+          );
           out(
             `    ${why.length > 0 ? why.map((p) => p.intent).join('; ') : '(no why)'}`
           );
@@ -441,6 +652,99 @@ export async function run(
           if (p.reasoning.length > 0 && p.reasoning !== p.intent) {
             out(`    reasoning: ${p.reasoning}`);
           }
+        }
+        return 0;
+      }
+      case 'veto': {
+        const { values, positionals } = parseArgs({
+          args: [...rest],
+          options: { message: { type: 'string', short: 'm' } },
+          allowPositionals: true,
+        });
+        const prefix = positionals[0];
+        if (prefix === undefined) {
+          out('usage: thaddeus veto <op> [-m "<reason>"]');
+          return 2;
+        }
+        const root = findRoot(env.cwd);
+        if (root === undefined) {
+          out("not a thaddeus working copy — run 'thaddeus clone' first");
+          return 2;
+        }
+        const cfg = loadConfig(root);
+        const identity = loadIdentity(env.home);
+        const local = await openLocal(root, cfg.repo);
+        // Resolve a short op-id prefix (as printed by `log`) to a full op.
+        const matches = opsOnView(local, 'main').filter((o) =>
+          o.id.startsWith(prefix)
+        );
+        if (matches.length === 0) {
+          out(`no op matching ${prefix}`);
+          return 1;
+        }
+        if (matches.length > 1) {
+          out(`ambiguous op prefix ${prefix} (${matches.length} matches)`);
+          return 2;
+        }
+        const op = matches[0];
+        const reason = values.message ?? 'vetoed';
+        const veto = signVeto(
+          { op: op.id, reason, at: new Date().toISOString() },
+          identity
+        );
+        // Persist locally (so `log`/`vetoes` show it offline) then push a
+        // veto-only bundle. A verified veto blocks any subsequent land of the op.
+        const vetoLog = new VetoLog(repoScope(root, cfg.repo));
+        await vetoLog.ingest(veto);
+        const client = new Client(cfg.server, identity, env.fetchImpl);
+        const pushed = await client.pushVetoes(cfg.repo, [veto]);
+        if (pushed.accepted.veto === 0) {
+          out(
+            `veto not accepted${
+              pushed.rejected.length > 0
+                ? `: ${pushed.rejected.map((r) => r.reason).join('; ')}`
+                : ''
+            }`
+          );
+          return 1;
+        }
+        out(`vetoed ${op.id.slice(0, 10)}: ${reason}`);
+        return 0;
+      }
+      case 'vetoes': {
+        const prefix = rest[0];
+        if (prefix === undefined) {
+          out('usage: thaddeus vetoes <op>');
+          return 2;
+        }
+        const root = findRoot(env.cwd);
+        if (root === undefined) {
+          out("not a thaddeus working copy — run 'thaddeus clone' first");
+          return 2;
+        }
+        const cfg = loadConfig(root);
+        const local = await openLocal(root, cfg.repo);
+        const vetoLog = await VetoLog.load(repoScope(root, cfg.repo));
+        const matches = opsOnView(local, 'main').filter((o) =>
+          o.id.startsWith(prefix)
+        );
+        if (matches.length === 0) {
+          out(`no op matching ${prefix}`);
+          return 1;
+        }
+        if (matches.length > 1) {
+          out(`ambiguous op prefix ${prefix} (${matches.length} matches)`);
+          return 2;
+        }
+        const op = matches[0];
+        const records = vetoLog.forOp(op.id);
+        if (records.length === 0) {
+          out('no vetoes');
+          return 0;
+        }
+        out(`op ${op.id.slice(0, 10)}  ${op.path}`);
+        for (const v of records) {
+          out(`  [${vetoLog.status(v)}] ${v.reviewer}: ${v.reason}`);
         }
         return 0;
       }
@@ -530,10 +834,39 @@ export async function run(
         }
         return 0;
       }
+      case 'reputation': {
+        const did = rest[0];
+        if (did === undefined) {
+          out('usage: thaddeus reputation <did>');
+          return 2;
+        }
+        const root = findRoot(env.cwd);
+        if (root === undefined) {
+          out("not a thaddeus working copy — run 'thaddeus clone' first");
+          return 2;
+        }
+        const cfg = loadConfig(root);
+        const identity = loadIdentity(env.home);
+        const client = new Client(cfg.server, identity, env.fetchImpl);
+        const profile = await client.reputation(did);
+        out(profile.subject);
+        out(`  attested: ${profile.attested}  claimed: ${profile.claimed}`);
+        const kinds = Object.entries(profile.byKind)
+          .filter(([, n]) => n > 0)
+          .map(([k, n]) => `${k}=${n}`)
+          .join(', ');
+        out(`  by kind: ${kinds.length > 0 ? kinds : '(none)'}`);
+        return 0;
+      }
       case 'serve': {
         const { values } = parseArgs({
           args: [...rest],
-          options: { port: { type: 'string' }, data: { type: 'string' } },
+          options: {
+            port: { type: 'string' },
+            data: { type: 'string' },
+            host: { type: 'boolean' },
+            'min-merges': { type: 'string' },
+          },
           allowPositionals: true,
         });
         const dataDir = values.data ?? join(env.cwd, 'thaddeus-data');
@@ -542,8 +875,24 @@ export async function run(
           out(`invalid --port: ${values.port}`);
           return 2;
         }
-        const server = startServer({ dataDir, port });
-        out(`thaddeus serving on ${server.url} (data: ${dataDir})`);
+        // `--host` makes this an attesting instance, co-signing reputation
+        // claims with the operator's own identity; `--min-merges` gates land on
+        // that many attested merges per op author.
+        const host = values.host === true ? loadIdentity(env.home) : undefined;
+        let minMerges: number | undefined;
+        if (values['min-merges'] !== undefined) {
+          minMerges = Number(values['min-merges']);
+          if (!Number.isInteger(minMerges) || minMerges < 0) {
+            out(`invalid --min-merges: ${values['min-merges']}`);
+            return 2;
+          }
+        }
+        const server = startServer({ dataDir, port, host, minMerges });
+        out(
+          `thaddeus serving on ${server.url} (data: ${dataDir}${
+            host !== undefined ? `, attesting as ${host.did}` : ''
+          })`
+        );
         process.on('SIGINT', () => {
           server
             .stop()
