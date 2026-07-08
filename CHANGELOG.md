@@ -181,6 +181,25 @@ All notable changes to Thaddeus. Format follows
   north-star now rejects a stranger's landing to `src/auth/**` while allowing
   the owner's. **With this, all three Pillar 11 slices — query, subscriptions,
   standing-query policy — are complete.**
+- **The meaning layers now travel the wire, durably.** Beyond the code (P01
+  objects, P03 ops) and the signed "why" (P04, the template), the substrate's
+  full meaning now persists and transmits: the standing human **veto** (P10), a
+  server-wide **reputation** of attested contributions (P07), and the signed
+  **semantic-graph ops** (P08). Each log gained the same four-part seam — a
+  durable `Backend` (write-through under a content-addressed key + a static
+  `load` that skips torn records), an optional array on the wire `Bundle` (or
+  the land body, for reputation claims), a per-repo single-flight server cache
+  that ingests on push and returns on pull, and client/CLI verbs. The server can
+  now **attest**: given an optional `host` identity it co-signs a client's
+  reputation claim on land (minting a host-vouched `'merge'`), and
+  `--min-merges` gates a land on that durable, server-wide reputation. New CLI
+  verbs: `veto`/`vetoes`, `reputation`, `serve --host`/`--min-merges`, and
+  `rename`/`history` (a signed `SymbolOp` that rewrites the code and travels to
+  a fresh clone). Restart proofs for each layer: a pushed veto still blocks a
+  land, an attested merge still counts, a rename's `SymbolOp` still serves — all
+  across a new `createServer` over the same durable dir. The server now
+  carries + persists the whole substrate (code + why + veto + reputation +
+  symbol-ops), optionally attesting.
 
 ### Changed
 
@@ -251,9 +270,12 @@ All notable changes to Thaddeus. Format follows
 - **Per-symbol capability scope (P08 × P01/P02)** — the brief's "hide one
   function inside a public file"; capability-scoping at symbol granularity is a
   later integration pass.
-- **`SymbolOp` durability / federation (P08)** — the `SymbolLedger` and
-  `SymbolOpLog` are in-memory only (like `ProvenanceLog`); Backend persistence
-  and wire ingest are deferred.
+- **`SymbolOp` durability / federation (P08) — shipped.** `SymbolOpLog` now
+  persists write-through under a content-addressed `symop/` key and ingests over
+  the wire (a rename's `SymbolOp` travels to a clone and survives a restart).
+  Still deferred: the `SymbolLedger` is rebuilt per session, so a renamed
+  symbol's content-addressed id is not recoverable from its new name across
+  peers (causal id convergence needs a sequence field — spec §11).
 - **Structural conflict-as-function (P08→P10)** — only staleness (`from`
   mismatch) is checked; real "conflict iff a contract broke" (signature
   compatibility across callers) is P10 territory.
@@ -320,9 +342,11 @@ All notable changes to Thaddeus. Format follows
 - **Release / event triggers for reveal** — only `timestamp` + `manual` planned
   for the P02 spike; `release(tag)` and `event` triggers come later.
 - **Persistence backends (Store + OpLog) — shipped** as `@thaddeus.run/persist`
-  (filesystem + in-memory). Still deferred: **signed-record-log persistence**
-  (provenance/reputation/agent), **SQLite/S3 backends**, **compaction/GC**, and
-  **multi-process concurrency/locking/WAL** (durable, not concurrent).
+  (filesystem + in-memory). **Signed-record-log persistence** now ships too:
+  provenance (P04), veto (P10), reputation (P07), and symbol-ops (P08) all write
+  through their backend and reload; the agent registry was already durable.
+  Still deferred: **SQLite/S3 backends**, **compaction/GC**, and **multi-process
+  concurrency/locking/WAL** (durable, not concurrent).
 - **Server / network API — shipped** as `@thaddeus.run/server` (single node).
   Still deferred: **multi-node concurrency** (optimistic-concurrency on the
   `land` re-point + the `scope()` delimiter-encode), a **grant list / richer
@@ -335,20 +359,24 @@ All notable changes to Thaddeus. Format follows
   `log`/`diff`/`--json`, and a published-binary install story.
 - **Git gateway** — emit a Git history (commits/blobs/branches) for
   compatibility, over the durable/served substrate. The optional on-ramp, later.
-- **Reputation network transport / federation wire (P07→later).** Cross-instance
-  honoring is demonstrated with two in-memory `ReputationLog`s; the wire that
-  ships contribution records (and P06's deferred view/op mirror) between real
-  hosts is not built.
+- **Reputation network transport / federation wire (P07→later) — shipped.** The
+  server holds a durable, server-wide `ReputationLog`; a client ships a
+  subject-signed contribution claim in the land body and an attesting `host`
+  co-signs it on land, minting a host-vouched merge that survives a restart and
+  gates a land via `--min-merges`. Still deferred: cross-INSTANCE federation
+  (honoring another host's records over a peer wire) and a host allowlist /
+  web-of-trust.
 - **Two-party co-sign handshake (P07→later).** `signContribution` holds both the
   subject and host keys; the protocol by which a host proposes a record and the
   subject co-signs over the wire is deferred.
 - **Reputation scoring / tiers (P07→P09/P10).** `profile` yields the attested
   set and per-kind counts; a derived score or trust tier a merge policy (P10) or
   agent gate (P09) would consume is deferred.
-- **Auto-minting contributions from landings (P07).** Reputation stays decoupled
-  (depends only on `identity`); wiring a P06 landing to emit a `'merge'`
-  contribution is a platform/integration concern, shown only in the north-star
-  and demo.
+- **Auto-minting contributions from landings (P07) — shipped.** An attesting
+  server mints a host-vouched `'merge'` for each landed op whose author pushed a
+  matching claim (it checks `subject === op.author`). The reputation package
+  stays decoupled (depends only on `identity` + `store`); the land→mint wiring
+  lives in the server.
 - **Contribution revocation, host allowlist / web-of-trust (P07).** No signed
   retraction; the spike treats every valid `host_sig` as attestation rather than
   distinguishing instances a verifier recognizes.
