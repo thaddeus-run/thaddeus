@@ -39,11 +39,15 @@ export function storePath(root: string, cfg: Config): string {
   return cfg.store ?? join(root, '.thaddeus', 'store');
 }
 
-// Walk up from `cwd` to the nearest directory containing a `.thaddeus/` dir.
+// Walk up from `cwd` to the nearest working copy — a directory holding a
+// `.thaddeus/config.json`. The CONFIG, not the bare `.thaddeus/` directory, is
+// the marker: install.sh puts the binaries in `~/.thaddeus/bin`, so matching the
+// directory alone makes every user's $HOME look like a working copy, and repo
+// commands run outside a repo die on a missing config instead of saying so.
 export function findRoot(cwd: string): string | undefined {
   let dir = cwd;
   for (;;) {
-    if (existsSync(join(dir, '.thaddeus'))) {
+    if (existsSync(join(dir, '.thaddeus', 'config.json'))) {
       return dir;
     }
     const parent = dirname(dir);

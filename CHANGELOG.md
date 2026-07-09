@@ -5,6 +5,21 @@ All notable changes to Thaddeus. Format follows
 
 ## [Unreleased]
 
+### Fixed
+
+- **`$HOME` no longer masquerades as a working copy.** `install.sh` installs the
+  binaries into `~/.thaddeus/bin`, and `findRoot` matched any ancestor holding a
+  `.thaddeus` _entry_ — so for everyone who installed with the official script,
+  every directory under `$HOME` looked like a working copy. Repo commands run
+  outside a real repo died on a raw `ENOENT … /.thaddeus/config.json` instead of
+  saying "not a thaddeus working copy". A working copy is now identified by its
+  `.thaddeus/config.json`, which is what actually defines one.
+- **`thaddeus reputation` works from anywhere.** Reputation is _server_-wide, not
+  repo-scoped, but the command demanded a working copy and ignored `--server`. It
+  now resolves the server as `--server`, else the working copy you're standing in,
+  else your saved default. (Only an attesting server — `serve --host` — co-signs
+  merges, so a non-attesting one reports `attested: 0`.)
+
 ## [0.1.2-alpha] - 2026-07-09
 
 ### Added
