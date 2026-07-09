@@ -1,0 +1,623 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Thaddeus — A Gen 3 Source-Control Design Brief</title>
+<meta name="description" content="A concrete diagnosis of why Git and GitHub are the wrong primitives for how we build now, and a full architecture for the source-control system that replaces them." />
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Geist+Mono:wght@400;500;600&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --bg:#0d0e0f; --text:#ededed; --prose:#bdbbb6; --muted:#8a8a8a;
+    --faint:#2a2a2a; --surface:#1a1a1a; --accent:#fa8c38; --accent-hover:#fca85f;
+    --code-bg:#08090a; --code-text:#e8e6df; --selbg:#fa8c38; --seltext:#0d0e0f;
+    --mono:"Geist Mono",ui-monospace,"SFMono-Regular",Menlo,monospace;
+    --sans:"Inter",-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
+    --col:720px;
+  }
+
+  *{box-sizing:border-box;}
+  html{scroll-behavior:smooth;}
+  body{
+    margin:0;background:var(--bg);color:var(--prose);
+    font-family:var(--sans);font-size:18px;line-height:1.72;
+    -webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility;
+  }
+  ::selection{background:var(--selbg);color:var(--seltext);}
+
+  a{color:var(--accent);text-decoration:none;transition:color .15s;}
+  a:hover{color:var(--accent-hover);}
+
+  /* scroll progress */
+  #progress{position:fixed;top:0;left:0;height:2px;width:0%;background:var(--accent);z-index:50;transition:width .08s linear;}
+
+  .wrap{max-width:1180px;margin:0 auto;padding:0 32px;}
+
+  /* ---------- cover ---------- */
+  header.cover{padding:104px 0 54px;border-bottom:1px solid var(--faint);}
+  .eyebrow{font-family:var(--mono);font-size:12.5px;font-weight:500;letter-spacing:.06em;
+    text-transform:uppercase;color:var(--accent);margin:0 0 26px;}
+  .wordmark{font-family:var(--mono);font-weight:600;font-size:clamp(46px,8vw,86px);
+    line-height:.96;letter-spacing:-.03em;margin:0;color:var(--text);}
+  .deck{font-family:var(--sans);font-style:italic;font-weight:400;
+    font-size:clamp(20px,2.8vw,26px);line-height:1.4;color:var(--text);max-width:760px;margin:24px 0 0;}
+  .thesis{font-family:var(--sans);max-width:var(--col);margin:32px 0 0;font-size:18px;color:var(--prose);}
+  .metarow{font-family:var(--mono);font-size:12.5px;color:var(--muted);margin-top:38px;
+    display:flex;flex-wrap:wrap;gap:8px 16px;align-items:center;}
+  .metarow .dot{width:3px;height:3px;border-radius:50%;background:var(--muted);opacity:.6;}
+  .metarow b{color:var(--text);font-weight:500;}
+
+  /* ---------- layout ---------- */
+  .layout{display:grid;grid-template-columns:230px minmax(0,1fr);gap:64px;padding:56px 0 40px;}
+  main{max-width:var(--col);min-width:0;}
+
+  /* ---------- toc ---------- */
+  nav.toc{position:sticky;top:34px;align-self:start;font-family:var(--mono);}
+  nav.toc .toc-title{font-size:11.5px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;
+    color:var(--muted);margin:0 0 14px;}
+  nav.toc ol{list-style:none;margin:0;padding:0;}
+  nav.toc li{margin:0;}
+  nav.toc a{display:block;padding:5px 0 5px 14px;border-left:2px solid var(--faint);
+    color:var(--muted);font-size:13px;line-height:1.4;transition:color .15s,border-color .15s;}
+  nav.toc a.sub{padding-left:28px;font-size:12px;}
+  nav.toc a:hover{color:var(--text);}
+  nav.toc a.active{color:var(--accent);border-left-color:var(--accent);font-weight:500;}
+  .toc-toggle{display:none;}
+
+  /* ---------- typography ---------- */
+  section{margin:0 0 18px;scroll-margin-top:30px;}
+  .part-label{font-family:var(--mono);font-size:12px;font-weight:500;letter-spacing:.06em;
+    text-transform:uppercase;color:var(--muted);margin:64px 0 12px;}
+  h2{font-family:var(--mono);font-weight:600;font-size:clamp(26px,3.8vw,36px);
+    line-height:1.16;letter-spacing:-.02em;color:var(--text);margin:0 0 8px;}
+  h2 .num{color:var(--accent);font-weight:500;margin-right:.5em;}
+  .lede{font-family:var(--sans);font-size:19px;color:var(--prose);margin:14px 0 30px;}
+  h3{font-family:var(--mono);font-weight:600;font-size:21px;line-height:1.22;
+    color:var(--text);margin:46px 0 4px;letter-spacing:-.01em;}
+  .h3-tag{font-family:var(--mono);font-size:11.5px;font-weight:500;letter-spacing:.05em;
+    text-transform:uppercase;color:var(--muted);margin:0 0 14px;}
+  p{margin:0 0 20px;}
+  strong{font-weight:600;color:var(--text);}
+  em{font-style:italic;}
+
+  blockquote{margin:34px 0;padding:4px 0 4px 24px;border-left:2px solid var(--accent);
+    font-family:var(--sans);font-style:italic;font-size:22px;line-height:1.44;color:var(--text);}
+  blockquote cite{display:block;font-style:normal;font-family:var(--mono);font-size:12px;
+    font-weight:500;letter-spacing:.02em;color:var(--muted);margin-top:14px;}
+
+  /* problem block */
+  .prob{margin:22px 0;padding:20px 24px;background:var(--surface);border:1px solid var(--faint);border-radius:8px;}
+  .prob-head{display:flex;align-items:baseline;gap:13px;margin-bottom:4px;}
+  .pid{font-family:var(--mono);font-size:11.5px;font-weight:600;color:var(--muted);
+    border:1px solid var(--faint);padding:2px 7px;border-radius:5px;flex:none;letter-spacing:.02em;}
+  .prob h4,.pillar h4{font-family:var(--mono);font-weight:600;font-size:18px;line-height:1.3;
+    color:var(--text);margin:0;letter-spacing:-.01em;}
+  .prob p{font-family:var(--sans);margin:10px 0 0;font-size:17px;color:var(--prose);}
+
+  /* root-cause callout */
+  .callout{margin:28px 0;padding:22px 24px;background:var(--surface);border:1px solid var(--faint);
+    border-left:2px solid var(--accent);border-radius:8px;}
+  .callout .k{font-family:var(--mono);font-size:11.5px;font-weight:600;letter-spacing:.06em;
+    text-transform:uppercase;color:var(--accent);margin:0 0 8px;}
+  .callout p{font-family:var(--sans);margin:0;font-size:17px;color:var(--prose);}
+
+  /* pillar block */
+  .pillar{margin:24px 0;padding:22px 24px;background:var(--surface);border:1px solid var(--faint);
+    border-left:2px solid var(--accent);border-radius:8px;}
+  .pillar-head{display:flex;align-items:baseline;gap:13px;margin-bottom:2px;}
+  .pnum{font-family:var(--mono);font-size:13px;font-weight:600;color:var(--accent);flex:none;}
+  .pillar p{font-family:var(--sans);margin:10px 0 0;font-size:17px;color:var(--prose);}
+  .pillar .mech b{font-family:var(--mono);font-size:11px;font-weight:600;letter-spacing:.05em;
+    text-transform:uppercase;color:var(--accent);}
+  .resolves{margin-top:16px;display:flex;flex-wrap:wrap;align-items:center;gap:8px;
+    padding-top:14px;border-top:1px solid var(--faint);}
+  .resolves .rlabel{font-family:var(--mono);font-size:10.5px;font-weight:600;letter-spacing:.07em;
+    text-transform:uppercase;color:var(--muted);margin-right:2px;}
+  .rid{font-family:var(--mono);font-size:11.5px;font-weight:600;color:var(--accent);
+    border:1px solid var(--accent);padding:1px 7px;border-radius:4px;opacity:.92;}
+
+  /* keep list */
+  ul.keep{list-style:none;margin:24px 0;padding:0;}
+  ul.keep li{font-family:var(--sans);position:relative;padding:14px 0 14px 32px;
+    border-bottom:1px solid var(--faint);font-size:17px;color:var(--prose);}
+  ul.keep li:last-child{border-bottom:none;}
+  ul.keep li::before{content:"";position:absolute;left:2px;top:21px;width:9px;height:9px;
+    border:1.5px solid var(--accent);border-radius:50%;}
+  ul.keep b{color:var(--text);}
+
+  /* code */
+  pre{font-family:var(--mono);font-size:13.5px;line-height:1.7;background:var(--code-bg);color:var(--code-text);
+    border:1px solid var(--faint);border-radius:8px;padding:18px 20px;overflow-x:auto;margin:22px 0;}
+  pre .c{color:var(--muted);}
+  pre .g{color:var(--text);}
+  pre .o{color:var(--accent);}
+  code{font-family:var(--mono);font-size:.84em;background:var(--surface);
+    border:1px solid var(--faint);border-radius:4px;padding:1px 5px;color:var(--text);}
+  pre code{background:none;border:none;padding:0;color:inherit;font-size:13.5px;}
+
+  /* tables */
+  .tablewrap{margin:26px 0;overflow-x:auto;}
+  table{border-collapse:collapse;width:100%;font-family:var(--sans);font-size:15.5px;}
+  th{font-family:var(--mono);font-size:11px;font-weight:600;letter-spacing:.05em;
+    text-transform:uppercase;color:var(--muted);text-align:left;
+    padding:0 16px 10px 0;border-bottom:1px solid var(--faint);vertical-align:bottom;}
+  td{padding:13px 16px 13px 0;border-bottom:1px solid var(--faint);vertical-align:top;
+    color:var(--prose);line-height:1.5;}
+  td.id{font-family:var(--mono);font-size:12px;font-weight:600;color:var(--muted);white-space:nowrap;}
+  td.pill{font-family:var(--mono);font-size:12px;font-weight:600;color:var(--accent);white-space:nowrap;}
+  table.bench td{font-family:var(--sans);}
+  table.bench td.t{font-family:var(--mono);font-weight:600;color:var(--text);white-space:nowrap;}
+  .tcap{font-family:var(--sans);font-size:13.5px;color:var(--muted);margin-top:10px;line-height:1.5;}
+
+  /* references */
+  .ref{padding:18px 0;border-top:1px solid var(--faint);display:grid;grid-template-columns:170px 1fr;gap:24px;}
+  .ref:last-child{border-bottom:1px solid var(--faint);}
+  .ref .name{font-family:var(--mono);font-weight:600;font-size:15px;color:var(--accent);}
+  .ref .name small{display:block;font-family:var(--mono);font-weight:400;font-size:11px;
+    color:var(--muted);margin-top:5px;letter-spacing:.02em;text-transform:none;}
+  .ref p{font-family:var(--sans);margin:0;font-size:16.5px;color:var(--prose);}
+  .ref .ties{font-family:var(--mono);font-size:11px;color:var(--muted);margin-top:8px;}
+
+  .risk{margin:18px 0;padding-left:22px;border-left:1px solid var(--faint);}
+  .risk h4{font-family:var(--mono);font-weight:600;font-size:17px;color:var(--text);margin:0 0 4px;letter-spacing:-.01em;}
+  .risk p{font-family:var(--sans);margin:0 0 4px;font-size:16.5px;color:var(--prose);}
+
+  hr.div{border:none;border-top:1px solid var(--faint);margin:54px 0;}
+
+  .close-quote{font-family:var(--sans);font-style:italic;font-size:clamp(22px,3.4vw,29px);
+    line-height:1.38;color:var(--text);margin:30px 0;letter-spacing:-.01em;}
+
+  /* appendix glossary */
+  dl.gloss{margin:22px 0;}
+  dl.gloss dt{font-family:var(--mono);font-weight:600;font-size:15px;color:var(--accent);margin:20px 0 4px;}
+  dl.gloss dd{font-family:var(--sans);margin:0;font-size:16.5px;color:var(--prose);}
+
+  footer{border-top:1px solid var(--faint);padding:36px 0 80px;font-family:var(--mono);
+    font-size:12.5px;color:var(--muted);line-height:1.7;}
+  footer .wrap{max-width:var(--col);margin:0;padding-left:294px;}
+
+  /* responsive */
+  @media(max-width:1040px){
+    .layout{grid-template-columns:1fr;gap:0;padding-top:20px;}
+    nav.toc{position:static;margin:0 0 18px;border:1px solid var(--faint);border-radius:8px;
+      padding:14px 18px;background:var(--surface);}
+    .toc-toggle{display:block;width:100%;text-align:left;background:none;border:none;cursor:pointer;
+      font-family:var(--mono);font-size:12px;font-weight:600;letter-spacing:.07em;text-transform:uppercase;
+      color:var(--muted);padding:0;}
+    nav.toc ol{margin-top:14px;display:none;}
+    nav.toc.open ol{display:block;}
+    footer .wrap{padding-left:32px;}
+    .ref{grid-template-columns:1fr;gap:6px;}
+  }
+  @media(max-width:560px){
+    body{font-size:16.5px;}
+    .wrap{padding:0 20px;}
+    header.cover{padding:60px 0 40px;}
+    .prob,.pillar,.callout{padding:18px;}
+    blockquote{font-size:20px;}
+  }
+</style>
+</head>
+<body>
+<div id="progress"></div>
+
+<header class="cover">
+  <div class="wrap">
+    <p class="eyebrow">A Gen 3 Source-Control Design Brief</p>
+    <h1 class="wordmark">Thaddeus</h1>
+    <p class="deck">Rebuilding Git and GitHub for an age of secrets, coordinated security, private-by-default work, and a million agents writing code in parallel.</p>
+    <p class="thesis">Git won the last generation of source control by being so much better than what came before. But it was built for one job — Linux-kernel development — and that job's assumptions are now load-bearing walls in every repository on earth: the project is one thing, it is fully public, and the <em>repository</em> is the unit of permission. In an age of secrets, in-flight work, coordinated security disclosure, private monorepos, cross-platform performance traps, and agents reading and writing code at machine scale, those assumptions are the root cause of nearly everything that hurts. GitHub inherited all of it and is now buckling under load it was never designed for. This brief diagnoses both — concretely — then specifies the system that fixes them at the level of the primitive.</p>
+    <div class="metarow">
+      <span>Working name: <b>Thaddeus</b></span><span class="dot"></span>
+      <span>22 June 2026</span><span class="dot"></span>
+      <span>Synthesis &amp; design brief — a foundation to build from</span>
+    </div>
+  </div>
+</header>
+
+<div class="wrap">
+<div class="layout">
+
+  <nav class="toc" id="toc">
+    <button class="toc-toggle" id="tocToggle" aria-expanded="true">Contents</button>
+    <p class="toc-title">Contents</p>
+    <ol>
+      <li><a href="#why">Why now: the third generation</a></li>
+      <li><a href="#diagnosis">I · The diagnosis</a></li>
+      <li><a class="sub" href="#primitive">— The primitive (Git)</a></li>
+      <li><a class="sub" href="#platform">— The platform (GitHub)</a></li>
+      <li><a href="#keep">II · What we must not lose</a></li>
+      <li><a href="#design-git">III · Design — a better Git</a></li>
+      <li><a href="#design-github">IV · Design — a better GitHub</a></li>
+      <li><a href="#matrix">V · Traceability</a></li>
+      <li><a href="#buildable">VI · Buildable now + risks</a></li>
+      <li><a href="#close">Closing</a></li>
+      <li><a href="#appendix">Appendix — primitives</a></li>
+    </ol>
+  </nav>
+
+  <main>
+
+    <!-- ============ WHY NOW ============ -->
+    <p class="part-label" id="why">Orientation</p>
+    <section>
+      <h2><span class="num">00</span>Why now: the third generation</h2>
+      <p class="lede">Source control moves in generations, and we are standing at the seam between the second and the third.</p>
+      <p><strong>Generation one</strong> was centralized: SVN, Perforce, the world of Phabricator and managed source servers. <strong>Generation two</strong> began when Git proved good enough to start a new lineage, and a family of platforms grew on top of it — GitHub, then GitLab, Bitbucket, Gitea, Forgejo/Codeberg. The crucial thing about Gen 2 is that none of its members are trying to be <em>different</em>. They are the same idea executed better, cheaper, or more open. GitLab is an open, enterprise-priced GitHub with worse UX. Bitbucket is a cheaper GitHub that integrates with Jira. Forgejo is a fast, genuinely free, self-hostable GitHub clone — and a lovely one — but still a clone. Each is to GitHub roughly what Atom was to Sublime: a sideways step, not a leap.</p>
+      <p><strong>Generation three has not been built.</strong> Two forces make it both necessary and, for the first time, affordable. The first is <strong>agents</strong>: software that reads every public patch the instant it lands, generates hundreds or thousands of lines per session, and wants its own working copy of the code — many of them at once, in parallel, in stripped-down sandboxes. Tooling designed for one human typing in one place is a poor fit for that world. The second is that <strong>GitHub itself is unfurling</strong> — reverting merges, posting downtime measured in days rather than minutes, and visibly straining under agent-driven traffic. The platform that became everyone's home no longer feels like stable infrastructure.</p>
+      <p>Rebuilding something as large as Git and GitHub used to be economically absurd: too expensive to build, too unlikely to win users away from the incumbent. Agents have collapsed that cost. The constraint that kept Gen 3 theoretical has lifted — which is exactly why this is worth specifying in full.</p>
+      <blockquote>GitHub is dying and Git is not the right primitive.<cite>— the argument this brief builds on</cite></blockquote>
+    </section>
+
+    <!-- ============ DIAGNOSIS ============ -->
+    <p class="part-label" id="diagnosis">Part I</p>
+    <section>
+      <h2><span class="num">01</span>The diagnosis</h2>
+      <p class="lede">The problem has two layers. The <em>primitive</em> — Git — encodes the wrong assumptions. The <em>platform</em> — GitHub — is failing at the scale and shape of work we now do. Each complaint below carries an ID so the design in Parts III–V can answer it by name.</p>
+
+      <h3 id="primitive">The primitive is wrong — Git</h3>
+      <p class="h3-tag">P1–P8 · the abstraction itself</p>
+
+      <div class="prob">
+        <div class="prob-head"><span class="pid">P1</span><h4>Permission is the repository, not the content</h4></div>
+        <p>Git has no concept of permission below the level of the whole repository. Access is all-or-nothing: clone the repo and you hold every byte in it, including every byte it ever contained. The canonical wedge is the question everyone is trained not to ask — <em>why can't you commit a <code>.env</code> file?</em> The honest answer isn't security; it's "that's just how Git works." Once a secret is in the tree, everyone with access has it; once it's in history, it's there forever. Open-source the project later and the secrets ship with it. Fire someone and they keep the keys — you probably never handed them the file properly anyway. Lend the repo to another team and they get secrets they never needed. An entire industry of secret managers exists to paper over this, and every one of them ultimately resolves to "a random file on your computer." That industry is the symptom; the missing primitive is the disease.</p>
+      </div>
+
+      <div class="prob">
+        <div class="prob-head"><span class="pid">P2</span><h4>Visibility is a repo flag, not a per-change option</h4></div>
+        <p>There is no private file inside a shared repo, no private branch, no pull request that stays hidden until it merges, no way to delay when a merge becomes visible to the rest of the team. Public-versus-private is a property of the whole repository instead of a property of a change. Treating it as a repo-level setting rather than a change-level option is, bluntly, insane — and it is wired so deeply into Git that none of the above can be bolted on.</p>
+      </div>
+
+      <div class="prob">
+        <div class="prob-head"><span class="pid">P3</span><h4>Public-on-merge manufactures zero-days</h4></div>
+        <p>Because everything is visible the instant it lands, anyone — increasingly, agents — can read every patch as it appears. For a project like Linux, people now run agents over every commit looking for anything that smells like a security fix and derive the exploit before the fix is even announced. The patch <em>is</em> the disclosure. So fixes sit unpublished. We are, in the sharpest line of the argument, "in the middle of a security crisis and bickering over where to store files." There is no way in Git to merge a fix, cut a release, ship it to vulnerable downstreams, and patch the world <em>before</em> the code becomes public.</p>
+      </div>
+
+      <div class="prob">
+        <div class="prob-head"><span class="pid">P4</span><h4>"Open source" shouldn't mean 100% public, 100% of the time</h4></div>
+        <p>A great deal of software would be open if developers weren't forced into total, permanent transparency. You should be able to hide in-flight work that may never ship — half of it gets abandoned, and no one wants their dead ends on display. You should be able to keep some sub-packages of a monorepo private without shattering the project into many repositories just to draw a visibility boundary. Having to shape your work around what you want to share — instead of using the tool to shape what gets shared — is backwards. "Open source" should be able to mean <em>open enough</em>.</p>
+      </div>
+
+      <div class="prob">
+        <div class="prob-head"><span class="pid">P5</span><h4>Commits are a mediocre base unit; branches are worse</h4></div>
+        <p>Commits are a reasonable unit but a poor fit for how we build now, and branches compound the problem by forcing you to hold the shape of your history in your head at all times. You are made to decide <em>how to record history</em> at the exact moment you are trying to think about <em>the code</em>. Jujutsu (jj) already shows the way out: the working copy is tracked and snapshotted automatically, history captures itself as a side effect of any command, and you simply edit — how it's recorded is a later concern. That it feels so much better is proof of how much attention Git's model quietly taxes.</p>
+      </div>
+
+      <div class="prob">
+        <div class="prob-head"><span class="pid">P6</span><h4>Worktrees are atrocious</h4></div>
+        <p>Worktrees are Git's answer to "I need two checkouts at once" — exactly what parallel agents demand — and they are miserable. You arrange copy-on-write by hand though the filesystem could do it for free. You cannot check out the same branch in two places: in one real incident an agent checked out <code>main</code> in a worktree and held it hostage, so <code>main</code> could no longer be checked out in the main directory. Keeping worktrees synced against <code>main</code> is constant manual toil. As the substrate for many agents each needing their own working copy, this stops being an annoyance and becomes a hard blocker.</p>
+      </div>
+
+      <div class="prob">
+        <div class="prob-head"><span class="pid">P7</span><h4>It demands a real OS and a real filesystem</h4></div>
+        <p>Interfacing with source control through a CLI against real files on a real kernel looks outdated next to tools like just-bash — a JavaScript/TypeScript layer that emulates bash so an agent can run entirely in memory, with no real Linux kernel and no real filesystem, none the wiser. Reading and writing files should be plain API calls. It is far cheaper to clone things around in memory than to physically move piles of files around a disk — and agents increasingly live in exactly the lightweight sandboxes where standing up a full OS just to talk to source control is pure waste.</p>
+      </div>
+
+      <div class="prob">
+        <div class="prob-head"><span class="pid">P8</span><h4>The filesystem itself is a platform-specific performance trap</h4></div>
+        <p>Even with elite hardware, the disk is a minefield. A widely-cited benchmark recreates a fully-cached <code>pnpm install</code> — pure file creation, no network — and measures how long it takes to write the files:</p>
+        <div class="tablewrap">
+          <table class="bench">
+            <thead><tr><th>Machine &amp; OS</th><th>Same cached install</th></tr></thead>
+            <tbody>
+              <tr><td>Older mid-range AMD, ample RAM, ordinary WD SSD — <strong>Ubuntu</strong></td><td class="t">~6.8 s</td></tr>
+              <tr><td><strong>M4</strong> + Apple's fancy SSD — <strong>macOS</strong></td><td class="t">~31 s</td></tr>
+              <tr><td><strong>M1 Ultra</strong> — <strong>macOS</strong></td><td class="t">up to ~140 s</td></tr>
+            </tbody>
+          </table>
+          <p class="tcap">Pure file creation from cache, no network access. APFS falls apart on many small files (<code>fsync</code> is the suspected culprit) — and spinning up small agent environments is precisely the small-file workload it handles worst. A task an Ubuntu box finishes in seconds can take an M1 Ultra over two minutes. In-memory representations sidestep the entire rat's nest.</p>
+        </div>
+      </div>
+
+      <div class="callout">
+        <p class="k">Root cause</p>
+        <p>Why is all of this missing? Because Git was built for Linux-kernel development: one open project, fully public, where the repository is the unit that carries permission, and where a real machine with a real filesystem is always present. Those assumptions sit so deep in the architecture that the missing capabilities can't be patched in later — they would require rethinking the primitive itself. P1–P8 are not bugs. They are the foundation showing through.</p>
+      </div>
+
+      <h3 id="platform">The platform is failing — GitHub</h3>
+      <p class="h3-tag">P9–P13 · the layer built on top</p>
+
+      <div class="prob">
+        <div class="prob-head"><span class="pid">P9</span><h4>Reliability and scale collapse under agent throughput</h4></div>
+        <p>GitHub is reverting merges and posting downtime measured in days. Underneath, it is Ruby that horizontally scales barely, now buckling under a surge in commits, pull requests, and new repositories — on the order of twenty million new repos — driven by agents. It was built for orders of magnitude less traffic than agents now generate. This is not a law of nature: Pierre's <code>code.store</code> absorbed roughly 9 million repos in thirty days and peaked at about 15,000 repos per minute for three hours straight with no downtime, because it was built for that load.</p>
+      </div>
+
+      <div class="prob">
+        <div class="prob-head"><span class="pid">P10</span><h4>Discoverability and navigation are broken</h4></div>
+        <p>The data model doesn't surface what people actually need. Try to find a commit from last year: infinite scroll, no date filter, and your best option is to clone the repo and search locally. Release pages bury the date at the bottom beneath a changelog and show a meaningless "% complete"; you can navigate to a commit's parent but not its child. READMEs sit below the file list on essentially every one of these platforms. You refresh constantly for fear of losing state on navigation. The information architecture is an afterthought layered on a model that was never designed to answer these questions.</p>
+      </div>
+
+      <div class="prob">
+        <div class="prob-head"><span class="pid">P11</span><h4>Onboarding and the CLI are a generational embarrassment</h4></div>
+        <p>Creating a repository with the GitHub CLI is nine separate prompts with four loading blockers — and a six-year-old bug that crashes the entire flow if you hit an escape sequence while editing your input. The generational alternative is a single line of code:</p>
+        <pre><span class="c">// GitHub CLI: 9 prompts, 4 loading stalls, a 6-year-old crash bug</span>
+$ gh repo create
+
+<span class="c">// code.store</span>
+<span class="o">const</span> store = <span class="o">new</span> <span class="g">GitStorage</span>()
+<span class="o">const</span> repo = <span class="o">await</span> store.<span class="g">createRepo</span>()</pre>
+        <p>Forgejo simply lets you push to a remote and creates the repo on the fly, so an agent can just push. Friction this basic is fatal when the primary author is an agent doing it thousands of times a day.</p>
+      </div>
+
+      <div class="prob">
+        <div class="prob-head"><span class="pid">P12</span><h4>History records <em>what</em> changed, not <em>why</em></h4></div>
+        <p>Git preserves what changed and nothing about why. When an agent generates hundreds or thousands of lines per session, that lost context compounds: agents retrace steps and duplicate reasoning because the intent behind a change was never durably recorded. Entire — founded by GitHub's former CEO, off a $60M seed — is building a context layer for exactly this. Zed's Delta DB records and synchronizes changes as <em>operations</em> via CRDTs, capturing the how-and-why in real time rather than as after-the-fact snapshots. The "why" is missing from the primitive, and that gap is widening fast.</p>
+      </div>
+
+      <div class="prob">
+        <div class="prob-head"><span class="pid">P13</span><h4>Community and identity are the crown jewel — and the real casualty</h4></div>
+        <p>The thing GitHub does best isn't Git hosting; it's being the <em>home</em>. Click a username and you see twenty years of who someone is and what they've built; an npm package leads to its source, its author, its issues — all in one place, the way email and phone numbers became defaults. As major projects scatter to Forgejo, GitLab, and self-hosted instances, that single shared identity graph fractures, and you cannot tool your way back to it. Any Gen 3 system that ignores identity and reputation doesn't merely miss a feature — it forfeits the one thing that made the old home worth living in.</p>
+      </div>
+    </section>
+
+    <!-- ============ KEEP ============ -->
+    <p class="part-label" id="keep">Part II</p>
+    <section>
+      <h2><span class="num">02</span>What we must not lose</h2>
+      <p class="lede">A replacement that fixes Git's primitive but abandons what GitHub got right is not an upgrade. Before designing the new, fix the floor: these are non-negotiable.</p>
+      <ul class="keep">
+        <li><b>A server-backed remote with real collaboration.</b> A place that holds the code and lets many people — and agents — work on it at once.</li>
+        <li><b>A change-proposal → review → merge workflow.</b> The pull request, reimagined, but recognizably the same social contract for contributing and integrating change.</li>
+        <li><b>Community and discoverable identity.</b> Profiles, contribution history, feeds, stars — the ability to click a name and understand a person. This is the hardest thing to keep and the most valuable.</li>
+        <li><b>CI/CD.</b> First-class continuous integration and delivery, not an afterthought or a bolt-on.</li>
+        <li><b>Operational stability + an open, self-hostable core.</b> The Forgejo/Codeberg lesson: a genuinely free, self-hostable engine <em>and</em> a dependable hosted option, with transparency when things break.</li>
+      </ul>
+    </section>
+
+    <!-- ============ DESIGN GIT ============ -->
+    <p class="part-label" id="design-git">Part III</p>
+    <section>
+      <h2><span class="num">03</span>Design — a better Git</h2>
+      <p class="lede">Five primitives replace Git's core. Each names the problems it resolves. The unifying move: take the burdens Git pushes onto the developer — managing secrets, managing history, managing copies, managing the environment — and absorb them into smarter primitives.</p>
+
+      <div class="pillar">
+        <div class="pillar-head"><span class="pnum">01</span><h4>Content-addressed objects with per-object capabilities and encryption</h4></div>
+        <p>Keep Git's best idea — content-addressed, immutable objects (blobs, trees) identified by their hash — and attach to every object a <em>policy</em>: who may see it, who may decrypt it, and from when. Visibility becomes a property of <code>(object × identity × time)</code> rather than of the repository.</p>
+        <p class="mech"><b>Mechanics —</b> Objects are stored encrypted (envelope encryption). A <em>capability</em> is the object's content key, wrapped for a specific identity's public key. To grant access is to wrap the key for that identity; to revoke is to rotate the key and re-wrap only for the remaining grantees. A secret committed to the tree is just an object whose decryption capability was granted to two people: history holds ciphertext, never plaintext, so "it's in history forever" stops meaning "everyone has it forever." Firing someone becomes a key rotation, not a doomed scramble. Private files, private sub-packages, and private branches are the same mechanism applied at different scopes.</p>
+        <div class="resolves"><span class="rlabel">resolves</span><span class="rid">P1</span><span class="rid">P2</span><span class="rid">P4</span></div>
+      </div>
+
+      <div class="pillar">
+        <div class="pillar-head"><span class="pnum">02</span><h4>Visibility as a time-varying policy — "the membrane"</h4></div>
+        <p>Because the policy includes time and audience, visibility can change on a schedule or an event. A single change can live in a private plane visible only to its author (an in-flight PR), be shared with a review group, be merged and released to a named set of downstream identities (the vulnerable distributions), and only then flip to public — at a chosen timestamp or trigger.</p>
+        <p class="mech"><b>Mechanics —</b> This delivers the coordinated-disclosure flow Git cannot: merge the fix, cut and sign the release, push it to everyone who needs patching, and reveal the source after the disclosure window closes. "Open enough" becomes directly expressible — most of the tree public, some paths private, some private only <em>for now</em> — all inside one repository, with no splitting and no out-of-band secret channel.</p>
+        <div class="resolves"><span class="rlabel">resolves</span><span class="rid">P2</span><span class="rid">P3</span><span class="rid">P4</span></div>
+      </div>
+
+      <div class="pillar">
+        <div class="pillar-head"><span class="pnum">03</span><h4>Snapshots over an operation-based (CRDT) change model</h4></div>
+        <p>Replace the commit-and-branch ritual with continuous, automatic snapshots over an operation log. As in jj, the working copy is tracked the moment you touch it and a snapshot is captured as a side effect of any command — you never stop to "stage" or curate a commit just to think about code.</p>
+        <p class="mech"><b>Mechanics —</b> Underneath, changes are <em>operations</em> merged with CRDT semantics (the Delta DB approach), so many agents editing the same tree converge without merge-conflict ceremony, and history is recorded as it happens, in real time. "Branches" degrade to cheap named pointers and tags over snapshots; the obligation to hold your history's shape in your head disappears.</p>
+        <div class="resolves"><span class="rlabel">resolves</span><span class="rid">P5</span><span class="rid">P12</span></div>
+      </div>
+
+      <div class="pillar">
+        <div class="pillar-head"><span class="pnum">04</span><h4>A first-class "why" layer</h4></div>
+        <p>Every operation carries structured provenance: the acting identity (a human, or a specific named agent), the intent or prompt that produced it, the reasoning, and links to the task or issue it serves. The "why" is stored and queryable alongside the "what."</p>
+        <p class="mech"><b>Mechanics —</b> An agent picking up work reads <em>why</em> a line exists instead of re-deriving it, and provenance is signed so the record is trustworthy rather than a vector for fabricated history. This is the durable context Entire and Delta DB are reaching for — made native to the primitive rather than bolted on beside it.</p>
+        <div class="resolves"><span class="rlabel">resolves</span><span class="rid">P12</span></div>
+      </div>
+
+      <div class="pillar">
+        <div class="pillar-head"><span class="pnum">05</span><h4>A virtual, in-memory, API-first filesystem</h4></div>
+        <p>The canonical interface is an API — read, write, list, grep an object tree — not a CLI shoved against a real disk. A virtual filesystem (the just-bash model) materializes only the paths you actually touch, lazily, in memory; nothing forces a storm of small-file writes onto APFS.</p>
+        <p class="mech"><b>Mechanics —</b> Working copies become cheap, unlimited, copy-on-write views: every agent gets its own instantly, with no worktree to hijack a branch and no manual sync against <code>main</code>. A FUSE-style mount can still present "real files" to humans who want them, but the substrate is the API, so source control runs natively inside the stripped-down sandboxes where agents already live. This is exactly what <code>code.store</code> demonstrates in production — in-memory writes, ephemeral branches, grep, cold storage, and repo creation in a single call.</p>
+        <div class="resolves"><span class="rlabel">resolves</span><span class="rid">P6</span><span class="rid">P7</span><span class="rid">P8</span><span class="rid">P11</span></div>
+      </div>
+    </section>
+
+    <!-- ============ DESIGN GITHUB ============ -->
+    <p class="part-label" id="design-github">Part IV</p>
+    <section>
+      <h2><span class="num">04</span>Design — a better GitHub</h2>
+      <p class="lede">Two more primitives carry the design up to the platform layer — the parts that made GitHub a home, rebuilt for agent scale and for an ecosystem that will live in many places at once.</p>
+
+      <div class="pillar">
+        <div class="pillar-head"><span class="pnum">06</span><h4>A platform built for agent throughput and real discoverability</h4></div>
+        <p>The remote is API-first and engineered for the load agents actually generate — the <code>code.store</code> numbers are the existence proof — not a human-era monolith. Repo creation is one call or a bare push. CI/CD runs against ephemeral in-memory checkouts, so a clean environment is cheap instead of a 140-second APFS tax.</p>
+        <p class="mech"><b>Mechanics —</b> Because the underlying model is <em>structured</em> — typed snapshots, releases, signed provenance — discoverability becomes query, not scroll. "The commit from last March that touched this file," "every change between these two releases," "the change immediately after this tag" are answerable directly. Release pages, search, and history stop being infinite-scroll exercises layered on a model that can't answer the question.</p>
+        <div class="resolves"><span class="rlabel">resolves</span><span class="rid">P9</span><span class="rid">P10</span><span class="rid">P11</span></div>
+      </div>
+
+      <div class="pillar">
+        <div class="pillar-head"><span class="pnum">07</span><h4>Portable identity and federated reputation as a protocol</h4></div>
+        <p>The one thing you cannot rebuild as a walled garden is the home. So identity is a portable, self-owned cryptographic identity — the same identity that signs your changes and holds your decryption capabilities — and contribution history is a signed, aggregatable graph that travels across instances.</p>
+        <p class="mech"><b>Mechanics —</b> Self-hosted and hosted instances federate a shared identity and reputation layer, so "click a username, see everything they've built" survives even though the code itself lives in many places. This will not undo the fracturing already underway — graduation is graduation — but it is the only design that lets a scattered ecosystem still share one social graph instead of dissolving into mutually-illegible islands.</p>
+        <div class="resolves"><span class="rlabel">resolves</span><span class="rid">P13</span></div>
+      </div>
+    </section>
+
+    <!-- ============ MATRIX ============ -->
+    <p class="part-label" id="matrix">Part V</p>
+    <section>
+      <h2><span class="num">05</span>Traceability</h2>
+      <p class="lede">Every complaint, mapped to the exact design decision that fulfills it. If a problem isn't answered here, the design is incomplete — that is the test this table exists to enforce.</p>
+      <div class="tablewrap">
+        <table>
+          <thead>
+            <tr><th>ID</th><th>The complaint</th><th>The design decision that fulfills it</th><th>Pillar</th></tr>
+          </thead>
+          <tbody>
+            <tr><td class="id">P1</td><td>Permission is the whole repo; secrets leak forever</td><td>Per-object capabilities + envelope encryption; revoke = key rotation</td><td class="pill">01</td></tr>
+            <tr><td class="id">P2</td><td>No private files / branches / PRs; public is a repo flag</td><td>Visibility = <code>(object × identity × time)</code>; the time-varying membrane</td><td class="pill">01 · 02</td></tr>
+            <tr><td class="id">P3</td><td>Public-on-merge manufactures zero-days</td><td>Private merge → release to named downstreams → scheduled public reveal</td><td class="pill">02</td></tr>
+            <tr><td class="id">P4</td><td>Open source forced to mean 100% public, always</td><td>"Open enough": per-path, time-varying visibility within one repo</td><td class="pill">01 · 02</td></tr>
+            <tr><td class="id">P5</td><td>Commits tax attention; branches worse</td><td>Automatic snapshots over an operation log; branches become cheap tags</td><td class="pill">03</td></tr>
+            <tr><td class="id">P6</td><td>Worktrees: manual COW, branch hostage, sync toil</td><td>Cheap unlimited copy-on-write views from the virtual FS</td><td class="pill">05</td></tr>
+            <tr><td class="id">P7</td><td>Requires a real OS and filesystem</td><td>API-first object store + in-memory virtual FS (just-bash model)</td><td class="pill">05</td></tr>
+            <tr><td class="id">P8</td><td>APFS small-file performance trap</td><td>Lazy in-memory materialization; never a small-file write storm</td><td class="pill">05</td></tr>
+            <tr><td class="id">P9</td><td>Reliability/scale collapse under agent load</td><td>API-first remote engineered for throughput (the code.store proof)</td><td class="pill">06</td></tr>
+            <tr><td class="id">P10</td><td>Discoverability/navigation/search broken</td><td>Structured model → discoverability as query, not infinite scroll</td><td class="pill">06</td></tr>
+            <tr><td class="id">P11</td><td>CLI/onboarding friction (9-step repo create)</td><td>One-call / bare-push repo creation against the API</td><td class="pill">05 · 06</td></tr>
+            <tr><td class="id">P12</td><td>History records what, not why</td><td>First-class signed "why" layer on every operation</td><td class="pill">03 · 04</td></tr>
+            <tr><td class="id">P13</td><td>Community/identity fractures when leaving GitHub</td><td>Portable cryptographic identity + federated reputation graph</td><td class="pill">07</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- ============ BUILDABLE ============ -->
+    <p class="part-label" id="buildable">Part VI</p>
+    <section>
+      <h2><span class="num">06</span>Buildable now — and the honest risks</h2>
+      <p class="lede">This is not a green-field fantasy. Every pillar already has a working proof-point in the wild; the contribution here is composing them around the right primitive instead of around Git's.</p>
+
+      <div class="refgrid">
+        <div class="ref">
+          <div class="name">jj (Jujutsu)<small>auto-snapshot working model</small></div>
+          <div><p>The working copy is tracked and snapshotted automatically; the stage-then-commit ritual is gone. Demonstrates Pillar 03's ergonomics are real and loved today.</p><div class="ties">→ Pillar 03</div></div>
+        </div>
+        <div class="ref">
+          <div class="name">Delta DB (Zed)<small>CRDT operation log</small></div>
+          <div><p>Records and synchronizes changes as operations via CRDTs, supporting real-time interaction Git's snapshots can't — and interoperating with Git. The change model under Pillars 03 and 04.</p><div class="ties">→ Pillars 03 · 04</div></div>
+        </div>
+        <div class="ref">
+          <div class="name">Entire<small>durable agent context</small></div>
+          <div><p>Founded by GitHub's former CEO on a $60M seed to track <em>why</em> code changed, because "git preserves what changed, but nothing about why." The thesis behind Pillar 04.</p><div class="ties">→ Pillar 04</div></div>
+        </div>
+        <div class="ref">
+          <div class="name">code.store (Pierre)<small>in-memory, API-first git cloud</small></div>
+          <div><p>Ultra-low-latency Git cloud: in-memory writes, ephemeral branches, grep, cold storage, one-call repo creation — and ~9M repos in 30 days, peaking ~15K repos/min for 3 hours with no downtime. The substrate for Pillars 05 and 06.</p><div class="ties">→ Pillars 05 · 06</div></div>
+        </div>
+        <div class="ref">
+          <div class="name">just-bash<small>OS-less, in-memory FS</small></div>
+          <div><p>A JS/TS layer emulating bash so an agent runs entirely in memory with no real kernel or filesystem. Proves the virtual-FS interface of Pillar 05 is practical.</p><div class="ties">→ Pillar 05</div></div>
+        </div>
+        <div class="ref">
+          <div class="name">Forgejo / Codeberg<small>open, fast, self-hostable, transparent</small></div>
+          <div><p>A Go-based, genuinely free, self-hostable, nonprofit-governed platform that is fast and pleasant to use. Proof the open + self-hostable + stable floor (Part II, Pillar 07 governance) is achievable.</p><div class="ties">→ Part II · Pillar 07</div></div>
+        </div>
+        <div class="ref">
+          <div class="name">FS2<small>"file system two"</small></div>
+          <div><p>An abandoned starting point that began at the filesystem layer — evidence the substrate is the right place to begin, and that the ambition has to go further than the FS alone.</p><div class="ties">→ the whole brief</div></div>
+        </div>
+      </div>
+
+      <h3>Open questions and honest risks</h3>
+      <p class="h3-tag">where this is hard, stated plainly</p>
+
+      <div class="risk">
+        <h4>The community problem may not be solvable by tooling alone</h4>
+        <p>Federated identity (Pillar 07) is the best available answer, but the shared home GitHub provided is partly a network effect, not a feature. The fracturing has already begun; a protocol can preserve the social graph without recreating the gravity. Be realistic about what is recoverable.</p>
+      </div>
+      <div class="risk">
+        <h4>CRDTs and per-object encryption fight each other</h4>
+        <p>Merging operations you may not be allowed to decrypt, and defining conflict semantics that cross visibility boundaries, is genuinely hard research territory. This is the riskiest interface in the design and deserves a prototype before anything else.</p>
+      </div>
+      <div class="risk">
+        <h4>Key management at human scale is the usual landmine</h4>
+        <p>Rotation, recovery, device loss, and onboarding all become security-critical. Any crypto-centric system lives or dies on whether this UX can be made invisible. Treat it as a product problem, not just a cryptographic one.</p>
+      </div>
+      <div class="risk">
+        <h4>Is Gen 3 even still Git underneath?</h4>
+        <p>Gen 1 → Gen 2 was SVN → Git: a clean break in the primitive. Gen 2 → Gen 3 may keep Git's content-addressed object model (for compatibility and migration) or discard it for an operation-first core. Compatibility versus a clean break is a real, early fork in the road.</p>
+      </div>
+      <div class="risk">
+        <h4>Trust and audit of agent-authored change</h4>
+        <p>The "why" layer is only as good as it is verifiable. Provenance must be signed and auditable — by third parties, the way release auditing is emerging elsewhere — or a durable history of intent becomes a durable history of plausible lies.</p>
+      </div>
+    </section>
+
+    <!-- ============ CLOSING ============ -->
+    <section id="close">
+      <hr class="div" />
+      <p class="part-label" style="margin-top:0">Closing</p>
+      <h2><span class="num">07</span>The cracks we stopped noticing</h2>
+      <p>Git won because it crushed what came before, and we have lived inside its assumptions long enough to mistake them for laws of nature. They aren't. "Open source" need not mean 100% public 100% of the time. Permission belongs on the change, not the repository. History should record <em>why</em>, not just <em>what</em>. Working copies should be free and unlimited. Identity should be yours and portable across whatever homes the ecosystem scatters into.</p>
+      <p>None of this was worth building when rebuilding Git and GitHub was economically absurd — and that is exactly the constraint agents just removed. The job of this brief is to make the cracks visible and the replacement concrete enough to start building. The diagnosis is specific, the design answers it line by line, and the proof-points already exist. What remains is to compose them around the right primitive.</p>
+      <p class="close-quote">Git isn't perfect — it's barely even good. We've dealt with it for decades, so it's hard to see the cracks. Be more introspective. We can do so much better.</p>
+    </section>
+
+    <!-- ============ APPENDIX ============ -->
+    <section id="appendix">
+      <hr class="div" />
+      <p class="part-label" style="margin-top:0">Appendix</p>
+      <h2><span class="num">A</span>The primitives, named</h2>
+      <p class="lede">A quick glossary of the building blocks referenced throughout — both the ones this design introduces and the existing systems it stands on.</p>
+      <dl class="gloss">
+        <dt>Capability</dt>
+        <dd>An object's content-encryption key, wrapped for one identity's public key. Holding it = the right to decrypt that object. Granting and revoking access is wrapping and re-wrapping keys, not editing a repo-wide ACL.</dd>
+        <dt>The membrane</dt>
+        <dd>The visibility policy expressed as <code>(object × identity × time)</code>. Selectively permeable: it controls what passes through, per path and per moment, instead of toggling the whole repository public or private.</dd>
+        <dt>Snapshot</dt>
+        <dd>An automatically-captured state of the working tree, taken as a side effect of any command. Replaces the manual commit. Named pointers over snapshots replace branches.</dd>
+        <dt>Operation log</dt>
+        <dd>The CRDT-merged stream of changes-as-operations beneath the snapshots, enabling real-time multi-agent convergence and recording history as it happens.</dd>
+        <dt>The "why" layer</dt>
+        <dd>Signed, structured provenance — identity, intent, reasoning, task links — attached to every operation, queryable alongside the diff.</dd>
+        <dt>Virtual filesystem</dt>
+        <dd>An in-memory, API-first file interface that materializes only touched paths lazily, gives every agent a cheap copy-on-write view, and never requires a real OS or disk.</dd>
+        <dt>code.store · jj · Delta DB · just-bash · Forgejo · Entire</dt>
+        <dd>Existing systems cited as proof the pieces are real today: an in-memory git cloud, an auto-snapshot VCS, a CRDT change engine, an OS-less bash/FS layer, an open self-hostable platform, and an agent-context layer, respectively.</dd>
+      </dl>
+    </section>
+
+  </main>
+</div>
+</div>
+
+<footer>
+  <div class="wrap">
+    <strong style="color:var(--text);font-weight:600">Thaddeus</strong> — a Gen 3 source-control design brief. Working name; rename freely.<br>
+    Synthesized from the source argument across a talk, a thread, and a teardown of the GitHub alternatives, then specified as a buildable architecture. Figures and product claims (APFS benchmark, code.store throughput, the gh-CLI bug) are reported from that argument, not independently verified — confirm before relying on them in a build.
+  </div>
+</footer>
+
+<script>
+(function(){
+  var bar=document.getElementById('progress');
+  var links=Array.prototype.slice.call(document.querySelectorAll('nav.toc a'));
+  var map={};
+  links.forEach(function(a){
+    var id=a.getAttribute('href').slice(1);
+    if(document.getElementById(id)) map[id]=a;
+  });
+
+  function onScroll(){
+    var h=document.documentElement;
+    var scrolled=h.scrollTop||document.body.scrollTop;
+    var height=(h.scrollHeight-h.clientHeight)||1;
+    bar.style.width=(scrolled/height*100)+'%';
+  }
+  window.addEventListener('scroll',onScroll,{passive:true});
+  onScroll();
+
+  // active section highlight in the ToC
+  if('IntersectionObserver' in window){
+    var io=new IntersectionObserver(function(entries){
+      entries.forEach(function(e){
+        var a=map[e.target.id];
+        if(!a) return;
+        if(e.isIntersecting){
+          links.forEach(function(l){l.classList.remove('active');});
+          a.classList.add('active');
+        }
+      });
+    },{rootMargin:'-12% 0px -78% 0px',threshold:0});
+    Object.keys(map).forEach(function(id){io.observe(document.getElementById(id));});
+  }
+
+  // mobile ToC toggle
+  var toc=document.getElementById('toc');
+  var btn=document.getElementById('tocToggle');
+  if(btn){
+    var titleEl=toc.querySelector('.toc-title');
+    if(titleEl) titleEl.style.display='none';
+    toc.classList.remove('open');
+    btn.setAttribute('aria-expanded','false');
+    btn.addEventListener('click',function(){
+      var open=toc.classList.toggle('open');
+      btn.setAttribute('aria-expanded',open?'true':'false');
+    });
+    links.forEach(function(a){
+      a.addEventListener('click',function(){
+        if(window.matchMedia('(max-width:1040px)').matches) toc.classList.remove('open');
+      });
+    });
+  }
+})();
+</script>
+</body>
+</html>
