@@ -1596,6 +1596,8 @@ export async function run(
           args: [...rest],
           options: {
             server: { type: 'string' },
+            // Declared so parseArgs accepts the flag rather than throwing on it;
+            // the JSON path below reads it via wantsJson, like every other verb.
             json: { type: 'boolean' },
           },
           allowPositionals: true,
