@@ -2068,10 +2068,11 @@ export async function run(
         for (const pathArg of values.artifact ?? []) {
           const path = isAbsolute(pathArg) ? pathArg : join(env.cwd, pathArg);
           const bytes = new Uint8Array(readFileSync(path));
+          const sha256 = createHash('sha256').update(bytes).digest('hex');
           artifacts.push({
             name: basename(pathArg),
-            uri: pathArg,
-            sha256: createHash('sha256').update(bytes).digest('hex'),
+            uri: `urn:sha256:${sha256}`,
+            sha256,
             size: bytes.byteLength,
             mediaType: null,
           });
