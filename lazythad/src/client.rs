@@ -87,11 +87,21 @@ struct PullResponse {
     veto: Vec<String>,
 }
 
+#[derive(Debug, Deserialize)]
+struct WireRecord<T> {
+    v: String,
+    d: T,
+}
+
 /// Decode one base64 wire record into `T`, or `None` if it is torn/invalid — a
 /// single bad record never sinks the whole view (keep-and-label, like the logs).
 fn decode_record<T: DeserializeOwned>(wire: &str) -> Option<T> {
     let bytes = STANDARD.decode(wire).ok()?;
-    serde_json::from_slice(&bytes).ok()
+    match serde_json::from_slice::<WireRecord<T>>(&bytes) {
+        Ok(record) if record.v == "tplv1" => Some(record.d),
+        Ok(_) => None,
+        Err(_) => serde_json::from_slice(&bytes).ok(),
+    }
 }
 
 fn decode_all<T: DeserializeOwned>(wire: &[String]) -> Vec<T> {
@@ -205,6 +215,10 @@ mod tests {
         STANDARD.encode(json.as_bytes())
     }
 
+    fn wire_record(json: &str) -> String {
+        STANDARD.encode(format!(r#"{{"v":"tplv1","d":{json}}}"#).as_bytes())
+    }
+
     #[test]
     fn decodes_an_op_and_ignores_the_signature() {
         let op = wire(
@@ -217,6 +231,18 @@ mod tests {
         assert_eq!(decoded.path, "src/a.rs");
         assert_eq!(decoded.lamport, 3);
         assert_eq!(decoded.author, "did:key:zA");
+    }
+
+    #[test]
+    fn decodes_the_server_record_envelope() {
+        let op = wire_record(
+            r#"{"id":"abc123","path":"src/a.rs","at":"2026-07-01T00:00:00Z",
+                "author":"did:key:zA","lamport":3,"parents":["p"],
+                "sig":{"$u8":"AAAA"},"payload":null}"#,
+        );
+        let decoded: Op = decode_record(&op).expect("decodes");
+        assert_eq!(decoded.id, "abc123");
+        assert_eq!(decoded.path, "src/a.rs");
     }
 
     #[test]
@@ -233,13 +259,13 @@ mod tests {
         let resp = PullResponse {
             heads: vec!["h".into()],
             ops: vec![
-                wire(r#"{"id":"op1","path":"a","at":"t1","author":"d","lamport":1}"#),
-                wire(r#"{"id":"op2","path":"b","at":"t2","author":"d","lamport":2}"#),
+                wire_record(r#"{"id":"op1","path":"a","at":"t1","author":"d","lamport":1}"#),
+                wire_record(r#"{"id":"op2","path":"b","at":"t2","author":"d","lamport":2}"#),
             ],
-            prov: vec![wire(
+            prov: vec![wire_record(
                 r#"{"op":"op2","actor_kind":"human","intent":"fix","reasoning":"fix"}"#,
             )],
-            veto: vec![wire(
+            veto: vec![wire_record(
                 r#"{"op":"op1","reviewer":"did:key:zR","reason":"unsafe","at":"t"}"#,
             )],
         };
