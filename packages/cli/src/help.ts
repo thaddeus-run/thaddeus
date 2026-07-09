@@ -16,9 +16,10 @@ Working tree
   branch [<name>]               list branches, or create one here
   workspace <branch> [dir]      open a branch as its own working copy (COW)
   status                        show working-tree changes
-  diff   [--staged] [path...]   show a line diff of working-tree changes
+  show   [--view B] [path...]   inspect a committed view without touching files
+  diff   [--staged] [path...]   show line diffs (or --from/--to views)
   push   [-m "<why>"]           commit + upload (+ a signed why) + land
-  land   [<branch>]             land commits — or a branch — under policy
+  land   [<branch>] [--dry-run] land commits — or a branch — under policy
 
 History & meaning
   log    [--since D] [--until D]  main's history with the why per change
@@ -119,11 +120,23 @@ export const HELP: Record<string, string> = {
   deleted) and how many commits are unpublished. Files your identity holds no
   decryption capability for are skipped and reported, not an error.`,
 
+  show: `thaddeus show [--view <branch>] [--json] [path...]
+
+  Inspect committed content without touching the working tree. With no --view,
+  reads this working copy's current branch. With --view, fetches that remote
+  branch into an internal read-only cache view, never into a real branch view.
+  With no path, lists readable files. With paths, prints text content and
+  reports binary files by size. Missing or unreadable requested paths exit 1.`,
+
   diff: `thaddeus diff [--staged] [path...]
+thaddeus diff [--from <branch>] [--to <branch>] [path...] [--json]
 
   Show a line-level diff of the working tree against the base snapshot. With
   [path...], limit the diff to those repo paths. --staged diffs the committed-
-  but-unpublished ops against the last synced base instead of the disk.`,
+  but-unpublished ops against the last synced base instead of the disk.
+  --from/--to diff committed branch views without touching files; an omitted
+  side means this working copy's current branch. --staged cannot be combined
+  with --from/--to.`,
 
   push: `thaddeus push [-m "<why>"] [--no-land]
 
@@ -131,14 +144,16 @@ export const HELP: Record<string, string> = {
   signed provenance "why" to each published op. --no-land uploads without
   landing (finish later with 'thaddeus land').`,
 
-  land: `thaddeus land [<branch>]
+  land: `thaddeus land [<branch>] [--dry-run] [--json]
 
   With no argument: land your already-uploaded but unmerged commits onto the
   current branch, under the server's policy. With a branch: land THAT branch's
   ops into the branch you're on — this is not a 3-way merge and there is no
   merge ceremony; the ops were signed at commit, and landing is one re-point
   gated by policy (conflict, delegation scope, standing veto, any reputation
-  floor). A blocked land reports the reason and leaves your branch untouched.`,
+  floor). A blocked land reports the reason and leaves your branch untouched.
+  --dry-run previews a branch land locally — incoming ops and conflicts — without
+  requiring a clean tree, calling server land, re-pointing, or writing files.`,
 
   log: `thaddeus log [--since <ISO>] [--until <ISO>] [--json]
 

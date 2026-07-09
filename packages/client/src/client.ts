@@ -1,6 +1,7 @@
 import type { Delegation } from '@thaddeus.run/agent';
 import { type SymbolOp, SymbolOpLog } from '@thaddeus.run/graph';
 import type { Identity } from '@thaddeus.run/identity';
+import type { Conflict } from '@thaddeus.run/log';
 import { Platform, type Repo } from '@thaddeus.run/platform';
 import { type Provenance, ProvenanceLog } from '@thaddeus.run/provenance';
 import type { ContributionClaim } from '@thaddeus.run/reputation';
@@ -33,6 +34,7 @@ export interface LandOutcome {
   landed: boolean;
   into: string;
   heads: string[];
+  conflicts: Conflict[];
   reason?: string;
 }
 
@@ -137,16 +139,20 @@ export class Client {
     name: string,
     repo: Repo,
     backend: Backend,
-    view = 'main'
+    remoteView = 'main',
+    localView?: string
   ): Promise<{
     heads: readonly string[];
     provenance: ProvenanceLog;
     vetoes: VetoLog;
     symbols: SymbolOpLog;
   }> {
+    const targetView = localView ?? remoteView;
     const enc = encodeURIComponent;
     const res = await this.#fetch(
-      new Request(`${this.#server}/repos/${enc(name)}/pull?view=${enc(view)}`)
+      new Request(
+        `${this.#server}/repos/${enc(name)}/pull?view=${enc(remoteView)}`
+      )
     );
     const body = (await this.#ok(res)) as { heads: string[] } & Parameters<
       typeof decodeBundle
@@ -161,7 +167,7 @@ export class Client {
     for (const op of bundle.ops) {
       await repo.log.ingest(op);
     }
-    await repo.log.repoint(view, body.heads);
+    await repo.log.repoint(targetView, body.heads);
     const metaScope = scoped(backend, `repo/${name}/`);
     const provenance = new ProvenanceLog(repo.store, metaScope);
     for (const p of bundle.prov) {

@@ -5,6 +5,25 @@ All notable changes to Thaddeus. Format follows
 
 ## [Unreleased]
 
+## [0.1.3-alpha] - 2026-07-09
+
+### Added
+
+- **P3 conflict UX: views to look, workspaces to touch.** New
+  `thaddeus show [--view <branch>] [path...]` inspects committed content without
+  touching the working tree: no path lists readable files, paths print text
+  content, and binary files are reported by size. `thaddeus diff` now supports
+  read-only branch comparisons with explicit view flags (`--from <branch>` /
+  `--to <branch>`, either side omitted = the current working copy's branch)
+  while preserving the existing working-tree and `--staged` modes.
+  `thaddeus land <branch> --dry-run [--json]` previews incoming ops and path
+  conflicts without requiring a clean tree, calling server `land`, re-pointing a
+  branch, or writing files. Remote views fetched for show/diff/dry-run are
+  cached under an internal `land/inspect/...` view, so looking at a branch can
+  never clobber the real branch view in a shared store; actual `land <branch>`
+  now uses the same inspect cache for its source branch before asking the server
+  to re-point.
+
 ### Fixed
 
 - **`$HOME` no longer masquerades as a working copy.** `install.sh` installs the
@@ -14,11 +33,12 @@ All notable changes to Thaddeus. Format follows
   outside a real repo died on a raw `ENOENT … /.thaddeus/config.json` instead of
   saying "not a thaddeus working copy". A working copy is now identified by its
   `.thaddeus/config.json`, which is what actually defines one.
-- **`thaddeus reputation` works from anywhere.** Reputation is _server_-wide, not
-  repo-scoped, but the command demanded a working copy and ignored `--server`. It
-  now resolves the server as `--server`, else the working copy you're standing in,
-  else your saved default. (Only an attesting server — `serve --host` — co-signs
-  merges, so a non-attesting one reports `attested: 0`.)
+- **`thaddeus reputation` works from anywhere.** Reputation is _server_-wide,
+  not repo-scoped, but the command demanded a working copy and ignored
+  `--server`. It now resolves the server as `--server`, else the working copy
+  you're standing in, else your saved default. (Only an attesting server —
+  `serve --host` — co-signs merges, so a non-attesting one reports
+  `attested: 0`.)
 
 ## [0.1.2-alpha] - 2026-07-09
 
