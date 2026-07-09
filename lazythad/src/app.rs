@@ -91,8 +91,9 @@ impl App {
         self.pull.ops.get(self.op_sel)
     }
 
-    // Moving the repos cursor is pure state (instant) — the (blocking) pull only
-    // happens on an explicit Enter, so arrowing the list never freezes the UI.
+    // Moving the cursor is pure state; `on_key` decides whether a move in the
+    // Repos pane should also (blockingly) reload that repo's log. Keeping the
+    // network out of here keeps the navigation unit-tests offline.
     fn move_down(&mut self) {
         match self.focus {
             Focus::Repos => {
@@ -150,10 +151,22 @@ impl App {
                     Focus::Log => Focus::Repos,
                 };
             }
-            KeyCode::Down | KeyCode::Char('j') => self.move_down(),
-            KeyCode::Up | KeyCode::Char('k') => self.move_up(),
-            // Enter on the repos pane loads that repo's log and focuses it — the
-            // one place a (blocking) pull is triggered by navigation.
+            // The log follows the repos cursor, so arrowing the list shows each
+            // repo's log without an extra keypress. The pull is blocking; a
+            // debounce (and then a background fetch) is the fast-follow.
+            KeyCode::Down | KeyCode::Char('j') => {
+                self.move_down();
+                if self.focus == Focus::Repos {
+                    self.load_selected_repo();
+                }
+            }
+            KeyCode::Up | KeyCode::Char('k') => {
+                self.move_up();
+                if self.focus == Focus::Repos {
+                    self.load_selected_repo();
+                }
+            }
+            // Enter on the repos pane loads that repo's log and focuses it.
             KeyCode::Enter | KeyCode::Char('l') if self.focus == Focus::Repos => {
                 self.load_selected_repo();
                 self.focus = Focus::Log;

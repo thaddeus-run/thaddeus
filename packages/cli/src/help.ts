@@ -12,6 +12,7 @@ Working tree
                                 clone a repo to a working tree
   repos  [--mine]               list server repos (--mine = owned by you)
   delete <repo> --yes           delete a repo you own (irreversible)
+  pull                          fetch landed changes into this working copy
   status                        show working-tree changes
   diff   [--staged] [path...]   show a line diff of working-tree changes
   push   [-m "<why>"]           commit + upload (+ a signed why) + land
@@ -85,10 +86,18 @@ export const HELP: Record<string, string> = {
   Delete a repo you own. Irreversible — there is no undo or GC yet — so --yes is
   required. The server rejects a delete from anyone but the repo's owner.`,
 
+  pull: `thaddeus pull
+
+  Fetch the landed changes on 'main' into this working copy: ingest the ops,
+  objects and capabilities, advance the base, and update the files on disk
+  (removing what was deleted upstream). Refuses when the working tree is dirty
+  or you hold unpublished commits — commit and push (or discard) first.`,
+
   status: `thaddeus status [--json]
 
   Show working-tree changes against the base snapshot (added / modified /
-  deleted) and how many commits are unpublished.`,
+  deleted) and how many commits are unpublished. Files your identity holds no
+  decryption capability for are skipped and reported, not an error.`,
 
   diff: `thaddeus diff [--staged] [path...]
 
@@ -141,12 +150,17 @@ export const HELP: Record<string, string> = {
   grant: `thaddeus grant <did> [--paths a,b] [--max-changes N]
 
   Grant <did> push access to the repo, scoped to --paths (globs, default **)
-  and capped at --max-changes ops (default 1,000,000).`,
+  and capped at --max-changes ops (default 1,000,000). Also shares the
+  decryption capability for every object this working copy can read, so the
+  delegate can clone and read the repo — run 'thaddeus pull' first if your copy
+  is stale, since you can only share what you can decrypt.`,
 
   revoke: `thaddeus revoke <did>
 
   Revoke a delegate's access. Revocation is terminal — issue a fresh identity
-  to re-grant.`,
+  to re-grant. Future pushes stop sharing keys with the revoked did, but content
+  already shared with it is NOT recalled (revocation cannot un-read); key
+  rotation is a later addition.`,
 
   grants: `thaddeus grants [--json]
 

@@ -1,5 +1,6 @@
 import type { Identity } from '@thaddeus.run/identity';
 import type { Repo } from '@thaddeus.run/platform';
+import { AccessDenied } from '@thaddeus.run/store';
 import {
   existsSync,
   mkdirSync,
@@ -68,16 +69,27 @@ export function listWorkingFiles(root: string): string[] {
   return out.sort();
 }
 
-// The decrypted snapshot of `view` (path -> bytes) the reader can read.
+// The decrypted snapshot of `view` (path -> bytes) the reader can read. Reads
+// are decryption-bounded: a member holding no capability for an object simply
+// cannot see it, so such a path is SKIPPED (as `Workspace.read` does) rather
+// than failing the whole status/diff/materialize. `onDenied` observes the skips.
 export async function baseSnapshot(
   repo: Repo,
   view: string,
-  reader: Identity
+  reader: Identity,
+  onDenied?: (path: string) => void
 ): Promise<Map<string, Uint8Array>> {
   const snap = new Map<string, Uint8Array>();
   for (const [path, entry] of repo.log.materialize(view, reader)) {
     if (entry.ref !== null) {
-      snap.set(path, await repo.store.get(entry.ref, reader));
+      try {
+        snap.set(path, await repo.store.get(entry.ref, reader));
+      } catch (err) {
+        if (!(err instanceof AccessDenied)) {
+          throw err;
+        }
+        onDenied?.(path);
+      }
     }
   }
   return snap;

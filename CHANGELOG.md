@@ -7,11 +7,34 @@ All notable changes to Thaddeus. Format follows
 
 ### Added
 
-- **Server-side repo management: `thaddeus repos` + `thaddeus delete`.** `repos
-  [--mine]` lists a server's repos — the mirror's `GET /repos` now includes each
-  repo's owner DID (public info), and `--mine` filters to repos your identity
-  owns. `delete <repo> --yes` removes a repo you own via an owner-gated
-  `DELETE /repos/:name` (drops the repo's keys + evicts its caches).
+- **Collaboration actually works: capability-sharing + `thaddeus pull`.** A
+  `Delegation` conveyed _write_ authority only, so a granted collaborator cloned
+  ciphertext it could not decrypt — and because `store.put` seals a new object's
+  content key **only to its author**, the owner could not read a delegate's push
+  either. Now `thaddeus grant` also re-wraps every object this working copy can
+  read for the new member (`store.grant` + `PublicIdentity.fromDid` — a did:key
+  embeds the public key, so no key exchange is needed), and every
+  `push`/`rename` reshares its new objects to all members (owner + non-revoked
+  delegates) before uploading. The server's `push` now **unions** pushed
+  capabilities with the ones it already serves — but only when the ciphertext is
+  unchanged, since a new ciphertext means a rotated content key — so a stale
+  push can never erase a capability granted meanwhile. New `thaddeus pull`
+  fetches landed changes into an **existing** working copy (previously the only
+  way to get a teammate's work was to re-`clone`); it fast-forwards a clean,
+  not-ahead copy, mirrors upstream deletions, and refuses otherwise. Reads are
+  now **fail-soft**: a file your identity holds no capability for is skipped and
+  reported by `status` instead of aborting `clone`/`status`/`diff` with
+  `access denied`. `revoke` stops sharing keys with the revoked did going
+  forward; already-shared content is not recalled (revocation cannot un-read —
+  key rotation is a later addition).
+- **`lazythad`: the log follows the repo cursor.** Arrowing the repo list now
+  loads that repo's op log instead of requiring `Enter`. (An empty Log pane
+  still means the selected repo has nothing landed on `main`.)
+- **Server-side repo management: `thaddeus repos` + `thaddeus delete`.**
+  `repos [--mine]` lists a server's repos — the mirror's `GET /repos` now
+  includes each repo's owner DID (public info), and `--mine` filters to repos
+  your identity owns. `delete <repo> --yes` removes a repo you own via an
+  owner-gated `DELETE /repos/:name` (drops the repo's keys + evicts its caches).
   Irreversible — no GC/undo yet, and the server-wide reputation log is left
   intact; `--yes` is required so a fat-fingered name can't wipe a repo.
 

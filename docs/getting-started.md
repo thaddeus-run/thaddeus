@@ -103,7 +103,8 @@ fast and never upload dependency or build trees. Edit `.thaddeusignore` to
 change what Thaddeus ignores.
 
 List what's on a server with `thaddeus repos` (`--mine` for repos your identity
-owns), and remove one you own with `thaddeus delete <repo> --yes` (irreversible).
+owns), and remove one you own with `thaddeus delete <repo> --yes`
+(irreversible).
 
 ## 5. Read the history and the why
 
@@ -115,7 +116,41 @@ thaddeus why <op>                  # the signed why for one op (id prefix from `
 
 Every read verb also has `--json` for scripting or a TUI.
 
-## 6. Meaning layers
+## 6. Collaborate with someone else
+
+Reads are **decryption-bounded**: the server only ever holds ciphertext, and you
+can read exactly what your identity holds a capability for. So sharing a repo
+means sharing _keys_, not just permissions — `grant` does both:
+
+```sh
+# owner, inside the working copy:
+thaddeus grant did:key:z6Mk…               # write access AND the read capability
+```
+
+The collaborator can then clone, read, edit and publish; every `push` re-wraps
+its new objects for all members, so the owner can read their work too:
+
+```sh
+# collaborator:
+thaddeus clone acme/web && cd web
+echo 'fn login() {}' >> src/auth.rs
+thaddeus push -m "add login"
+
+# owner: fetch their landed work into the existing checkout
+thaddeus pull
+```
+
+`thaddeus pull` fast-forwards a **clean** working copy (commit and push your own
+work first). Files you hold no key for are skipped and reported by `status`, not
+an error. `thaddeus revoke <did>` stops sharing keys going forward — it cannot
+un-read what was already shared.
+
+> **Secrets are first-class.** Because objects are encrypted before they leave
+> your machine, you can version a `.env` and share it only with the DIDs you
+> choose. `.thaddeusignore` is seeded from `.gitignore`, which usually ignores
+> `.env` — un-ignore it with a `!.env` line to track it.
+
+## 7. Meaning layers
 
 - **Veto (a standing human "no"):** a reviewer blocks a landing, even a green
   one. `thaddeus veto <op> -m "ships a secret"`; list with
@@ -130,7 +165,7 @@ Every read verb also has `--json` for scripting or a TUI.
   `thaddeus grant <did> --paths 'src/**' --max-changes 50`; `thaddeus grants`;
   `thaddeus revoke <did>`.
 
-## 7. Browse it in a TUI
+## 8. Browse it in a TUI
 
 [`lazythad`](../lazythad/README.md) is a lazygit-style terminal UI over a
 server's public mirror (repos, the op log, the why, vetoes, reputation):
