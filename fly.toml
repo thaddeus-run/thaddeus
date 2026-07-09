@@ -1,23 +1,20 @@
-# Fly.io deploy for `thaddeus serve`. `fly launch --copy-config` (first time) or
-# `fly deploy` builds the Dockerfile; a volume holds the durable substrate.
-# Rename `app` and pick a region before deploying.
-# Set a UNIQUE app name before deploying — `thaddeus` is taken, so `fly deploy`
-# as-is will fail. Use `fly launch` (which picks/creates a name) or edit this.
-app = "thaddeus-changeme"
-primary_region = "fra"
+# Fly.io deploy for the live `thaddeus` app. A volume holds the durable
+# substrate; keep this config aligned with the existing volume in Amsterdam.
+app = "thaddeus"
+primary_region = "ams"
 
 [build]
 
 [env]
 PORT = "4000"
 THADDEUS_DATA = "/data"
-# THADDEUS_HOST = "1"          # uncomment to run an attesting instance (P07)
+THADDEUS_HOST = "1"
 # THADDEUS_MIN_MERGES = "0"    # gate land on N attested merges per author
 
-# One durable volume, mounted where the FileBackend + host identity live.
-# Create it once: `fly volumes create thaddeus_data --size 3 --region fra`.
+# Existing durable volume, mounted where the FileBackend + host identity live.
+# Do not create, rename, or migrate it: `data` is attached in `ams`.
 [[mounts]]
-source = "thaddeus_data"
+source = "data"
 destination = "/data"
 
 [http_service]
