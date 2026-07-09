@@ -2,6 +2,8 @@ import { signDelegation } from '@thaddeus.run/agent';
 import {
   Client,
   reachablePids,
+  type Release,
+  type ReleaseArtifact,
   type RepoPolicyRecord,
   reshareObjects,
   revokeObjects,
@@ -15,11 +17,12 @@ import {
 import { type Identity, PublicIdentity } from '@thaddeus.run/identity';
 import type { Conflict, Op } from '@thaddeus.run/log';
 import { FileBackend } from '@thaddeus.run/persist';
-import { Platform, type Repo } from '@thaddeus.run/platform';
+import { Platform, type Repo, signRelease } from '@thaddeus.run/platform';
 import { type Provenance, ProvenanceLog } from '@thaddeus.run/provenance';
 import { type ContributionClaim, signClaim } from '@thaddeus.run/reputation';
 import { signVeto, VetoLog } from '@thaddeus.run/review';
 import { type Backend, scoped } from '@thaddeus.run/store';
+import { createHash } from 'node:crypto';
 import { mkdirSync, readFileSync, rmSync } from 'node:fs';
 import { basename, dirname, isAbsolute, join, relative } from 'node:path';
 import { parseArgs } from 'node:util';
@@ -154,6 +157,7 @@ function defaultRepoPolicy(): RepoPolicyRecord {
     standingQueries: [],
     requireVerifiedProvenance: false,
     requirePassingChecks: null,
+    release: { creators: 'owner', allow: [] },
   };
 }
 
@@ -162,7 +166,9 @@ function policyIsDefault(policy: RepoPolicyRecord): boolean {
     policy.restrictPaths.length === 0 &&
     policy.standingQueries.length === 0 &&
     !policy.requireVerifiedProvenance &&
-    policy.requirePassingChecks === null
+    policy.requirePassingChecks === null &&
+    policy.release.creators === 'owner' &&
+    policy.release.allow.length === 0
   );
 }
 
@@ -197,7 +203,58 @@ function describePolicy(policy: RepoPolicyRecord): string[] {
       lines.push(`  standing query: forbid paths ${spec.paths.join(', ')}`);
     }
   }
+  if (policy.release.creators !== 'owner' || policy.release.allow.length > 0) {
+    lines.push(
+      `  release creators: ${policy.release.creators}${
+        policy.release.allow.length > 0
+          ? ` (${policy.release.allow.join(', ')})`
+          : ''
+      }`
+    );
+  }
   return lines;
+}
+
+function releaseJson(release: Release): Record<string, unknown> {
+  return {
+    ...release,
+    sig: Buffer.from(release.sig).toString('base64'),
+  };
+}
+
+function parseArtifactUri(value: string): ReleaseArtifact | null {
+  const hashMarker = ',sha256=';
+  const hashAt = value.lastIndexOf(hashMarker);
+  const nameEnd = value.indexOf('=');
+  if (nameEnd <= 0 || hashAt <= nameEnd + 1) return null;
+  const name = value.slice(0, nameEnd);
+  const uri = value.slice(nameEnd + 1, hashAt);
+  const sha256 = value.slice(hashAt + hashMarker.length);
+  if (uri.length === 0 || !/^[0-9a-fA-F]{64}$/.test(sha256)) return null;
+  return {
+    name,
+    uri,
+    sha256: sha256.toLowerCase(),
+    size: null,
+    mediaType: null,
+  };
+}
+
+function outRelease(release: Release, out: (line: string) => void): void {
+  out(`tag: ${release.tag}`);
+  out(`date: ${release.at}`);
+  out(`signer: ${release.signed_by}`);
+  out(`id: ${release.id}`);
+  out(`view: ${release.view}`);
+  out(`heads: ${release.heads.length}`);
+  out(`commits: ${release.commits.length}`);
+  out(`notes: ${release.notes ?? '(none)'}`);
+  out(`artifacts: ${release.artifacts.length}`);
+  for (const artifact of release.artifacts) {
+    out(
+      `  ${artifact.name}  ${artifact.size === null ? 'external' : `${artifact.size} bytes`}  ${artifact.sha256}  ${artifact.uri}`
+    );
+  }
 }
 
 function mergeHeads(
@@ -1964,6 +2021,162 @@ export async function run(
         }
         return 0;
       }
+      case 'release': {
+        const { values, positionals } = parseArgs({
+          args: [...rest],
+          options: {
+            view: { type: 'string' },
+            notes: { type: 'string' },
+            'notes-file': { type: 'string' },
+            artifact: { type: 'string', multiple: true },
+            'artifact-uri': { type: 'string', multiple: true },
+            json: { type: 'boolean' },
+          },
+          allowPositionals: true,
+        });
+        const tag = positionals[0];
+        if (tag === undefined || tag.length === 0 || positionals.length > 1) {
+          out(
+            'usage: thaddeus release <tag> [--view <branch>] [--notes <text>] [--notes-file <path>] [--artifact <path>]... [--artifact-uri <name=uri,sha256=<hex>>]... [--json]'
+          );
+          return 2;
+        }
+        if (values.notes !== undefined && values['notes-file'] !== undefined) {
+          out('use either --notes or --notes-file, not both');
+          return 2;
+        }
+        const root = findRoot(env.cwd);
+        if (root === undefined) {
+          out("not a thaddeus working copy — run 'thaddeus clone' first");
+          return 2;
+        }
+        const cfg = loadConfig(root);
+        const view = values.view ?? viewOf(cfg) ?? 'main';
+        let notes = values.notes ?? null;
+        if (values['notes-file'] !== undefined) {
+          const path = isAbsolute(values['notes-file'])
+            ? values['notes-file']
+            : join(env.cwd, values['notes-file']);
+          notes = readFileSync(path, 'utf8');
+        }
+        if (notes !== null && notes.length === 0) {
+          out('release notes must not be empty');
+          return 2;
+        }
+
+        const artifacts: ReleaseArtifact[] = [];
+        for (const pathArg of values.artifact ?? []) {
+          const path = isAbsolute(pathArg) ? pathArg : join(env.cwd, pathArg);
+          const bytes = new Uint8Array(readFileSync(path));
+          artifacts.push({
+            name: basename(pathArg),
+            uri: pathArg,
+            sha256: createHash('sha256').update(bytes).digest('hex'),
+            size: bytes.byteLength,
+            mediaType: null,
+          });
+        }
+        for (const value of values['artifact-uri'] ?? []) {
+          const artifact = parseArtifactUri(value);
+          if (artifact === null) {
+            out(
+              `invalid --artifact-uri: ${value} (expected name=uri,sha256=<64 hex>)`
+            );
+            return 2;
+          }
+          artifacts.push(artifact);
+        }
+
+        const identity = loadIdentity(env.home);
+        const client = new Client(cfg.server, identity, env.fetchImpl);
+        const backend = new FileBackend(storePath(root, cfg));
+        const local = await new Platform().openDurable(cfg.repo, backend);
+        const inspect = await fetchInspectView({
+          client,
+          repoName: cfg.repo,
+          local,
+          backend,
+          remoteView: view,
+          out,
+        });
+        if (inspect === null) return 1;
+        try {
+          const at = new Date().toISOString();
+          const release = signRelease(
+            {
+              repo: cfg.repo,
+              tag,
+              view,
+              at,
+              heads: [...local.log.heads(inspect)],
+              commits: opsOnView(local, inspect).map((op) => op.id),
+              notes,
+              artifacts,
+            },
+            identity
+          );
+          const claim = signClaim(
+            { repo: cfg.repo, ref: release.id, kind: 'release', at },
+            identity
+          );
+          const created = await client.createRelease(cfg.repo, release, claim);
+          if (values.json === true) {
+            out(JSON.stringify(releaseJson(created)));
+          } else {
+            out(
+              `released ${created.tag} from ${created.view} (${created.commits.length} commit(s), ${created.artifacts.length} artifact(s))`
+            );
+            out(`  id ${created.id}`);
+          }
+          return 0;
+        } finally {
+          await dropInspectViews(local, [inspect]);
+        }
+      }
+      case 'releases': {
+        const { values, positionals } = parseArgs({
+          args: [...rest],
+          options: { json: { type: 'boolean' } },
+          allowPositionals: true,
+        });
+        if (positionals.length > 1) {
+          out('usage: thaddeus releases [tag] [--json]');
+          return 2;
+        }
+        const root = findRoot(env.cwd);
+        if (root === undefined) {
+          out("not a thaddeus working copy — run 'thaddeus clone' first");
+          return 2;
+        }
+        const cfg = loadConfig(root);
+        const identity = loadIdentity(env.home);
+        const client = new Client(cfg.server, identity, env.fetchImpl);
+        const tag = positionals[0];
+        if (tag !== undefined) {
+          const release = await client.getRelease(cfg.repo, tag);
+          if (values.json === true) {
+            out(JSON.stringify(releaseJson(release)));
+          } else {
+            outRelease(release, out);
+          }
+          return 0;
+        }
+        const releases = await client.listReleases(cfg.repo);
+        if (values.json === true) {
+          out(JSON.stringify(releases.map(releaseJson)));
+          return 0;
+        }
+        if (releases.length === 0) {
+          out('no releases');
+          return 0;
+        }
+        for (const release of releases) {
+          out(
+            `${release.tag}  ${release.at}  ${release.view}  ${release.commits.length} commit(s)`
+          );
+        }
+        return 0;
+      }
       case 'policy': {
         const { values, positionals } = parseArgs({
           args: [...rest],
@@ -1975,6 +2188,8 @@ export async function run(
             allow: { type: 'string' },
             'forbid-deletes': { type: 'boolean' },
             'forbid-paths': { type: 'string' },
+            'release-creators': { type: 'string' },
+            'release-allow': { type: 'string' },
           },
           allowPositionals: true,
         });
@@ -1985,7 +2200,9 @@ export async function run(
           values.protect !== undefined ||
           values.allow !== undefined ||
           values['forbid-deletes'] === true ||
-          values['forbid-paths'] !== undefined;
+          values['forbid-paths'] !== undefined ||
+          values['release-creators'] !== undefined ||
+          values['release-allow'] !== undefined;
         const root = findRoot(env.cwd);
         if (root === undefined) {
           out("not a thaddeus working copy — run 'thaddeus clone' first");
@@ -2032,6 +2249,8 @@ export async function run(
         const allow = csv(values.allow);
         const forbidPaths = csv(values['forbid-paths']);
         const checkerKinds = csv(values['require-checks']);
+        const releaseAllow = csv(values['release-allow']);
+        const releaseCreators = values['release-creators'];
         if (values.protect !== undefined && protect.length === 0) {
           out('invalid --protect: expected comma-separated path globs');
           return 2;
@@ -2055,6 +2274,31 @@ export async function run(
           out(
             'invalid --require-checks: expected comma-separated checker kinds'
           );
+          return 2;
+        }
+        if (
+          releaseCreators !== undefined &&
+          releaseCreators !== 'owner' &&
+          releaseCreators !== 'delegates' &&
+          releaseCreators !== 'allowList'
+        ) {
+          out(
+            'invalid --release-creators: expected owner, delegates, or allowList'
+          );
+          return 2;
+        }
+        if (
+          values['release-allow'] !== undefined &&
+          releaseAllow.length === 0
+        ) {
+          out('invalid --release-allow: expected comma-separated dids');
+          return 2;
+        }
+        if (
+          values['release-allow'] !== undefined &&
+          releaseCreators !== 'allowList'
+        ) {
+          out('--release-allow requires --release-creators allowList');
           return 2;
         }
 
@@ -2087,10 +2331,14 @@ export async function run(
           requireVerifiedProvenance: values['require-provenance'] === true,
           requirePassingChecks:
             checkerKinds.length > 0 ? { checkerKinds } : null,
+          release: {
+            creators: releaseCreators ?? 'owner',
+            allow: releaseAllow,
+          },
         };
         if (policyIsDefault(policy)) {
           out(
-            'policy set needs at least one gate — use --require-provenance, --require-checks, --protect, --forbid-deletes, or --forbid-paths'
+            'policy set needs at least one non-default rule — use --require-provenance, --require-checks, --protect, --forbid-deletes, --forbid-paths, or --release-creators'
           );
           return 2;
         }

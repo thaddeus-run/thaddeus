@@ -7,7 +7,7 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Clear, List, ListItem, ListState, Paragraph, Wrap};
 use ratatui::Frame;
 
-use crate::app::{App, Focus};
+use crate::app::{Activity, App, Focus};
 use crate::client::Reputation;
 
 const ACCENT: Color = Color::Cyan;
@@ -41,7 +41,7 @@ pub fn render(frame: &mut Frame, app: &App) {
     .split(root[0]);
 
     render_repos(frame, app, panes[0]);
-    render_log(frame, app, panes[1]);
+    render_activity(frame, app, panes[1]);
     render_detail(frame, app, panes[2]);
     render_status(frame, app, root[1]);
 
@@ -65,6 +65,13 @@ fn render_repos(frame: &mut Frame, app: &App, area: Rect) {
         state.select(Some(app.repo_sel));
     }
     frame.render_stateful_widget(list, area, &mut state);
+}
+
+fn render_activity(frame: &mut Frame, app: &App, area: Rect) {
+    match app.activity {
+        Activity::Log => render_log(frame, app, area),
+        Activity::Releases => render_releases(frame, app, area),
+    }
 }
 
 fn render_log(frame: &mut Frame, app: &App, area: Rect) {
@@ -103,7 +110,42 @@ fn render_log(frame: &mut Frame, app: &App, area: Rect) {
     frame.render_stateful_widget(list, area, &mut state);
 }
 
+fn render_releases(frame: &mut Frame, app: &App, area: Rect) {
+    let items: Vec<ListItem> = app
+        .releases
+        .iter()
+        .map(|release| {
+            ListItem::new(Line::from(vec![
+                Span::styled(
+                    release.tag.clone(),
+                    Style::new().fg(Color::Yellow).add_modifier(Modifier::BOLD),
+                ),
+                Span::raw("  "),
+                Span::styled(release.at.clone(), Style::new().fg(Color::DarkGray)),
+                Span::raw("  "),
+                Span::raw(release.view.clone()),
+            ]))
+        })
+        .collect();
+    let list = List::new(items)
+        .block(pane_block("Releases", app.focus == Focus::Log))
+        .highlight_style(selected_style())
+        .highlight_symbol("▌ ");
+    let mut state = ListState::default();
+    if !app.releases.is_empty() {
+        state.select(Some(app.release_sel));
+    }
+    frame.render_stateful_widget(list, area, &mut state);
+}
+
 fn render_detail(frame: &mut Frame, app: &App, area: Rect) {
+    match app.activity {
+        Activity::Log => render_op_detail(frame, app, area),
+        Activity::Releases => render_release_detail(frame, app, area),
+    }
+}
+
+fn render_op_detail(frame: &mut Frame, app: &App, area: Rect) {
     let mut lines: Vec<Line> = Vec::new();
     if let Some(op) = app.selected_op() {
         let id = op.id.chars().take(10).collect::<String>();
@@ -165,8 +207,69 @@ fn render_detail(frame: &mut Frame, app: &App, area: Rect) {
     frame.render_widget(para, area);
 }
 
+fn render_release_detail(frame: &mut Frame, app: &App, area: Rect) {
+    let mut lines: Vec<Line> = Vec::new();
+    if let Some(release) = app.selected_release() {
+        lines.push(Line::from(release.tag.clone().yellow().bold()));
+        lines.push(Line::from(Span::styled(
+            release.at.clone(),
+            Style::new().fg(Color::DarkGray),
+        )));
+        lines.push(Line::raw(""));
+        lines.push(Line::from(format!("signer: {}", release.signed_by)));
+        lines.push(Line::from(format!("id: {}", release.id)));
+        lines.push(Line::from(format!("view: {}", release.view)));
+        lines.push(Line::from(format!("heads: {}", release.heads.len())));
+        lines.push(Line::from(format!("commits: {}", release.commits.len())));
+        lines.push(Line::raw(""));
+        lines.push(Line::from("Notes".bold()));
+        lines.push(Line::from(
+            release
+                .notes
+                .as_deref()
+                .unwrap_or("(no release notes)")
+                .to_string(),
+        ));
+        lines.push(Line::raw(""));
+        lines.push(Line::from("Artifacts".bold()));
+        if release.artifacts.is_empty() {
+            lines.push(Line::from(Span::styled(
+                "  (none)",
+                Style::new().fg(Color::DarkGray),
+            )));
+        } else {
+            for artifact in &release.artifacts {
+                let size = artifact
+                    .size
+                    .map(|n| format!("{n} bytes"))
+                    .unwrap_or_else(|| "size unknown".to_string());
+                let media = artifact.media_type.as_deref().unwrap_or("media unknown");
+                lines.push(Line::from(format!("  {} ({size}, {media})", artifact.name)));
+                lines.push(Line::from(Span::styled(
+                    format!("    {}", artifact.uri),
+                    Style::new().fg(Color::DarkGray),
+                )));
+                lines.push(Line::from(Span::styled(
+                    format!("    sha256 {}", artifact.sha256),
+                    Style::new().fg(Color::DarkGray),
+                )));
+            }
+        }
+    } else {
+        lines.push(Line::from(Span::styled(
+            "select a release",
+            Style::new().fg(Color::DarkGray),
+        )));
+    }
+    let para = Paragraph::new(lines)
+        .block(pane_block("Release detail", false))
+        .wrap(Wrap { trim: false });
+    frame.render_widget(para, area);
+}
+
 fn render_status(frame: &mut Frame, app: &App, area: Rect) {
-    let hints = "q quit · Tab focus · j/k move · Enter open · r refresh · R reputation";
+    let hints =
+        "q quit · Tab focus · j/k move · Enter open · t log/releases · r refresh · R reputation";
     let left = if app.status.is_empty() {
         app.server_label.clone()
     } else {
@@ -232,7 +335,7 @@ fn render_reputation(frame: &mut Frame, rep: &Reputation, area: Rect) {
 mod tests {
     use super::*;
     use crate::app::App;
-    use crate::client::{Op, Pull, Remote};
+    use crate::client::{Op, Pull, Release, ReleaseArtifact, Remote};
     use ratatui::backend::TestBackend;
     use ratatui::Terminal;
     use std::collections::HashMap;
@@ -257,6 +360,9 @@ mod tests {
                 veto: HashMap::new(),
             },
             op_sel: 0,
+            releases: Vec::new(),
+            release_sel: 0,
+            activity: Activity::Log,
             focus: Focus::Log,
             status: String::new(),
             reputation: None,
@@ -293,5 +399,38 @@ mod tests {
         app.repos.clear();
         app.pull = Pull::default();
         let _ = rendered_text(&app); // must not panic
+    }
+
+    #[test]
+    fn renders_release_list_and_detail_mode() {
+        let mut app = app_with_ops();
+        app.activity = Activity::Releases;
+        app.releases = vec![Release {
+            tag: "v0.1.5-alpha".into(),
+            view: "main".into(),
+            at: "2026-07-09T12:00:00.000Z".into(),
+            heads: vec!["h1".into()],
+            commits: vec!["c1".into(), "c2".into()],
+            notes: Some("Signed metadata release".into()),
+            artifacts: vec![ReleaseArtifact {
+                name: "thaddeus.tar.gz".into(),
+                uri: "https://cdn.example/thaddeus.tar.gz".into(),
+                sha256: "0123456789abcdef".repeat(4),
+                size: Some(42),
+                media_type: Some("application/gzip".into()),
+            }],
+            id: "release0123456789".into(),
+            signed_by: "did:key:zAlice".into(),
+        }];
+
+        let text = rendered_text(&app);
+        assert!(text.contains("Releases"));
+        assert!(text.contains("v0.1.5-alpha"));
+        assert!(text.contains("did:key:zAlice"));
+        assert!(text.contains("view: main"));
+        assert!(text.contains("heads: 1"));
+        assert!(text.contains("commits: 2"));
+        assert!(text.contains("Signed metadata release"));
+        assert!(text.contains("thaddeus.tar.gz"));
     }
 }

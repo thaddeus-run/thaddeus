@@ -1,6 +1,6 @@
 //! `lazythad` — a lazygit-style terminal UI for Thaddeus. Read-mostly: browse a
-//! remote's repos, the op log, the signed why, vetoes, and reputation over the
-//! untrusted HTTP mirror (no keys, no decryption).
+//! remote's repos, op log, releases, signed why, vetoes, and reputation over
+//! the untrusted HTTP mirror (no keys, no decryption).
 
 mod app;
 mod client;
@@ -51,9 +51,10 @@ fn print_help() {
          \x20      lazythad --dump [server]   print repos + logs as text (no TTY)\n\n\
          Keys:\n\
          \x20 q / Esc   quit\n\
-         \x20 Tab       switch pane (repos ↔ log)\n\
+         \x20 Tab       switch pane (repos ↔ activity)\n\
          \x20 j / k     move selection (↑/↓ also)\n\
          \x20 Enter     open the selected repo's log\n\
+         \x20 t         toggle log / releases\n\
          \x20 r         refresh from the remote\n\
          \x20 R         reputation of the selected op's author"
     );

@@ -2,16 +2,23 @@ import type { Delegation } from '@thaddeus.run/agent';
 import { type SymbolOp, SymbolOpLog } from '@thaddeus.run/graph';
 import type { Identity } from '@thaddeus.run/identity';
 import type { Conflict } from '@thaddeus.run/log';
-import { Platform, type Repo } from '@thaddeus.run/platform';
+import {
+  Platform,
+  type Release,
+  type Repo,
+  verifyRelease,
+} from '@thaddeus.run/platform';
 import { type Provenance, ProvenanceLog } from '@thaddeus.run/provenance';
 import type { ContributionClaim } from '@thaddeus.run/reputation';
 import { type Veto, VetoLog } from '@thaddeus.run/review';
 import {
   decodeBundle,
   decodeDelegation,
+  decodeRelease,
   encodeBundle,
   encodeClaim,
   encodeDelegation,
+  encodeRelease,
   type RepoPolicyRecord,
   signRequest,
 } from '@thaddeus.run/server';
@@ -65,6 +72,22 @@ export interface ReputationProfile {
 // constructs a Request before calling fetchImpl, so the narrower signature is
 // compatible with both the injected server handler and the global fetch.
 type FetchLike = (req: Request) => Promise<Response>;
+
+function verifiedRelease(
+  wire: string,
+  expectedRepo: string,
+  expectedTag?: string
+): Release {
+  const release = decodeRelease(wire);
+  if (
+    !verifyRelease(release) ||
+    release.repo !== expectedRepo ||
+    (expectedTag !== undefined && release.tag !== expectedTag)
+  ) {
+    throw new Error('invalid release record');
+  }
+  return release;
+}
 
 // A small client over the Thaddeus HTTP remote. Holds one Identity, signs every
 // write request, and does all crypto client-side. `fetchImpl` is injectable so
@@ -244,6 +267,53 @@ export class Client {
     );
     const body = (await this.#ok(res)) as { policy: RepoPolicyRecord };
     return body.policy;
+  }
+
+  async createRelease(
+    name: string,
+    release: Release,
+    claim?: ContributionClaim
+  ): Promise<Release> {
+    const res = await this.#signed(
+      'POST',
+      `/repos/${encodeURIComponent(name)}/releases`,
+      {
+        release: encodeRelease(release),
+        ...(claim === undefined ? {} : { claim: encodeClaim(claim) }),
+      }
+    );
+    const body = (await this.#ok(res)) as { release: string };
+    const created = verifiedRelease(body.release, name, release.tag);
+    if (created.id !== release.id) {
+      throw new Error('server returned a different release record');
+    }
+    return created;
+  }
+
+  async listReleases(name: string): Promise<Release[]> {
+    const res = await this.#fetch(
+      new Request(`${this.#server}/repos/${encodeURIComponent(name)}/releases`)
+    );
+    const body = (await this.#ok(res)) as { releases: string[] };
+    const releases: Release[] = [];
+    for (const wire of body.releases) {
+      try {
+        releases.push(verifiedRelease(wire, name));
+      } catch {
+        // A malicious/torn record is never returned as a trusted release.
+      }
+    }
+    return releases;
+  }
+
+  async getRelease(name: string, tag: string): Promise<Release> {
+    const res = await this.#fetch(
+      new Request(
+        `${this.#server}/repos/${encodeURIComponent(name)}/releases/${encodeURIComponent(tag)}`
+      )
+    );
+    const body = (await this.#ok(res)) as { release: string };
+    return verifiedRelease(body.release, name, tag);
   }
 
   // Create a branch at an already-ingested head-set. Creating a branch adds no

@@ -1,6 +1,7 @@
 import type { Delegation } from '@thaddeus.run/agent';
 import type { SymbolOp } from '@thaddeus.run/graph';
 import type { Op } from '@thaddeus.run/log';
+import type { Release } from '@thaddeus.run/platform';
 import type { Provenance } from '@thaddeus.run/provenance';
 import type { ContributionClaim } from '@thaddeus.run/reputation';
 import type { Veto } from '@thaddeus.run/review';
@@ -88,4 +89,14 @@ export function decodeClaim(s: string): ContributionClaim {
   return decodeRecord(
     new Uint8Array(Buffer.from(s, 'base64'))
   ) as ContributionClaim;
+}
+
+// A signed release record on the wire. Reuse the persistence codec so `sig`
+// remains a Uint8Array after the JSON/base64 transport round trip.
+export function encodeRelease(release: Release): string {
+  return Buffer.from(encodeRecord(release)).toString('base64');
+}
+
+export function decodeRelease(s: string): Release {
+  return decodeRecord(new Uint8Array(Buffer.from(s, 'base64'))) as Release;
 }

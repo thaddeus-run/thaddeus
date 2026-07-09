@@ -1,6 +1,6 @@
 {
   "name": "@thaddeus.run/graph",
-  "version": "0.1.4-alpha",
+  "version": "0.1.5-alpha",
   "description": "The semantic graph — code as a queryable graph of symbols, definitions, references, and call edges over a Workspace, with rename as a first-class signed SymbolOp. Pillar 08.",
   "keywords": [
     "rename",

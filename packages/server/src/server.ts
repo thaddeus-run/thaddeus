@@ -13,8 +13,10 @@ import {
   INTERNAL_VIEW_PREFIX,
   type LandPolicy,
   Platform,
+  type Release,
   type Repo,
   requireReputationTier,
+  verifyRelease,
 } from '@thaddeus.run/platform';
 import { ProvenanceLog } from '@thaddeus.run/provenance';
 import {
@@ -38,8 +40,10 @@ import {
   decodeBundle,
   decodeClaim,
   decodeDelegation,
+  decodeRelease,
   encodeBundle,
   encodeDelegation,
+  encodeRelease,
 } from './dto';
 import {
   DEFAULT_REPO_POLICY,
@@ -113,6 +117,13 @@ function reachableOps(all: readonly Op[], heads: readonly string[]): Op[] {
     .sort((x, y) =>
       x.lamport !== y.lamport ? x.lamport - y.lamport : x.id < y.id ? -1 : 1
     );
+}
+
+function sameStringSet(a: readonly string[], b: readonly string[]): boolean {
+  if (a.length !== b.length) return false;
+  const left = [...a].sort();
+  const right = [...b].sort();
+  return left.every((value, index) => value === right[index]);
 }
 
 // Compose LandPolicies: allow only if every policy allows; the first rejection
@@ -478,6 +489,179 @@ export function createServer(config: ServerConfig): Server {
       views[branch] = [...repo.log.heads(branch)];
     }
     return json(200, { views });
+  }
+
+  // Public immutable release reads. Corrupt records are skipped from the list;
+  // a direct lookup reports the stored corruption instead of serving it.
+  async function listReleases(name: string): Promise<Response> {
+    if ((await readMeta(name)) === undefined) {
+      return json(404, { error: `no repo ${name}` });
+    }
+    const releases: Release[] = [];
+    const backend = metaBackend(name);
+    for (const key of await backend.list('meta/releases/')) {
+      const bytes = await backend.get(key);
+      if (bytes === undefined) continue;
+      try {
+        const release = decodeRecord(bytes) as Release;
+        if (verifyRelease(release) && release.repo === name) {
+          releases.push(release);
+        }
+      } catch {
+        // Keep a single torn metadata record from sinking the public list.
+      }
+    }
+    releases.sort((a, b) => {
+      const newestFirst = b.at.localeCompare(a.at);
+      return newestFirst !== 0 ? newestFirst : a.tag.localeCompare(b.tag);
+    });
+    return json(200, { releases: releases.map(encodeRelease) });
+  }
+
+  async function getRelease(name: string, tag: string): Promise<Response> {
+    if ((await readMeta(name)) === undefined) {
+      return json(404, { error: `no repo ${name}` });
+    }
+    const bytes = await metaBackend(name).get(
+      `meta/releases/${encodeURIComponent(tag)}`
+    );
+    if (bytes === undefined) {
+      return json(404, { error: `no release tag ${tag}` });
+    }
+    try {
+      const release = decodeRecord(bytes) as Release;
+      if (
+        !verifyRelease(release) ||
+        release.repo !== name ||
+        release.tag !== tag
+      ) {
+        throw new Error('invalid release record');
+      }
+      return json(200, { release: encodeRelease(release) });
+    } catch {
+      return json(500, { error: `stored release ${tag} is invalid` });
+    }
+  }
+
+  // Signed create under the repo lock: policy, active delegation, current view
+  // snapshot, duplicate tag, persistence, and optional attestation are one
+  // serialized decision against server-side committed history.
+  async function createRelease(
+    name: string,
+    req: Request,
+    body: Uint8Array
+  ): Promise<Response> {
+    const signer = verifyRequest(
+      'POST',
+      new URL(req.url).pathname,
+      body,
+      headers(req),
+      Date.parse(now())
+    );
+    if (signer === null) {
+      return json(401, { error: 'unsigned or invalid request' });
+    }
+    const parsed = safeParseJson(body);
+    if (parsed === undefined || parsed === null || typeof parsed !== 'object') {
+      return json(400, { error: 'invalid JSON body' });
+    }
+    const { release: wire, claim: claimWire } = parsed as {
+      release?: unknown;
+      claim?: unknown;
+    };
+    if (typeof wire !== 'string') {
+      return json(400, { error: 'missing release' });
+    }
+    let release: Release;
+    try {
+      release = decodeRelease(wire);
+    } catch {
+      return json(400, { error: 'malformed release' });
+    }
+    if (!verifyRelease(release)) {
+      return json(400, { error: 'invalid release signature' });
+    }
+    if (release.signed_by !== signer) {
+      return json(403, {
+        error: 'release signer does not match request signer',
+      });
+    }
+    if (release.repo !== name) {
+      return json(400, { error: `release repo must be ${name}` });
+    }
+    let claim: ContributionClaim | undefined;
+    if (typeof claimWire === 'string') {
+      try {
+        claim = decodeClaim(claimWire);
+      } catch {
+        // A malformed optional claim never invalidates the signed release.
+      }
+    }
+
+    return withRepoLock(name, async () => {
+      const meta = await readMeta(name);
+      if (meta === undefined) {
+        return json(404, { error: `no repo ${name}` });
+      }
+      let repoPolicy: RepoPolicyRecord;
+      try {
+        repoPolicy = await readRepoPolicy(name);
+      } catch (err) {
+        return policyReadFailure(err);
+      }
+      let authorized = signer === meta.owner;
+      if (!authorized && repoPolicy.release.creators === 'delegates') {
+        const registry = await registryFor(name);
+        authorized =
+          registry.delegationFor(signer) !== undefined &&
+          !registry.isRevoked(signer);
+      }
+      if (!authorized && repoPolicy.release.creators === 'allowList') {
+        authorized = repoPolicy.release.allow.includes(signer);
+      }
+      if (!authorized) {
+        return json(403, { error: 'not authorized to create releases' });
+      }
+
+      const backend = metaBackend(name);
+      const key = `meta/releases/${encodeURIComponent(release.tag)}`;
+      if ((await backend.get(key)) !== undefined) {
+        return json(409, {
+          error: `release tag ${release.tag} already exists`,
+        });
+      }
+      const repo = await getRepo(name);
+      if (repo === undefined) {
+        return json(404, { error: `no repo ${name}` });
+      }
+      if (!repo.log.hasView(release.view)) {
+        return json(404, { error: `no branch ${release.view}` });
+      }
+      const heads = [...repo.log.heads(release.view)];
+      const commits = reachableOps(repo.log.ops(), heads).map((op) => op.id);
+      if (
+        !sameStringSet(release.heads, heads) ||
+        !sameStringSet(release.commits, commits)
+      ) {
+        return json(409, {
+          error: `view ${release.view} changed; refresh and retry release`,
+        });
+      }
+
+      await backend.put(key, encodeRecord(release));
+      if (
+        config.host !== undefined &&
+        claim !== undefined &&
+        claim.repo === name &&
+        claim.ref === release.id &&
+        claim.kind === 'release' &&
+        claim.subject === release.signed_by &&
+        verifyClaim(claim)
+      ) {
+        await (await reputationLog()).ingest(attest(claim, config.host));
+      }
+      return json(201, { release: encodeRelease(release) });
+    });
   }
 
   // GET /repos/:name/policy — public read of the repo's active land policy.
@@ -1224,6 +1408,32 @@ export function createServer(config: ServerConfig): Server {
           return json(400, { error: 'malformed path' });
         }
         return setPolicy(repoName, req, body);
+      }
+      // /repos/:name/releases and /repos/:name/releases/:tag — immutable
+      // signed release metadata. Match detail first so it is not a collection.
+      const releaseMatch = path.match(/^\/repos\/(.+)\/releases\/([^/]+)$/);
+      if (releaseMatch !== null && req.method === 'GET') {
+        const repoName = safeDecode(releaseMatch[1]);
+        const tag = safeDecode(releaseMatch[2]);
+        if (repoName === undefined || tag === undefined) {
+          return json(400, { error: 'malformed path' });
+        }
+        return getRelease(repoName, tag);
+      }
+      const releasesMatch = path.match(/^\/repos\/(.+)\/releases$/);
+      if (releasesMatch !== null && req.method === 'GET') {
+        const repoName = safeDecode(releasesMatch[1]);
+        if (repoName === undefined) {
+          return json(400, { error: 'malformed path' });
+        }
+        return listReleases(repoName);
+      }
+      if (releasesMatch !== null && req.method === 'POST') {
+        const repoName = safeDecode(releasesMatch[1]);
+        if (repoName === undefined) {
+          return json(400, { error: 'malformed path' });
+        }
+        return createRelease(repoName, req, body);
       }
       // /repos/:name/views — list the branches, or create one.
       const viewsMatch = path.match(/^\/repos\/(.+)\/views$/);

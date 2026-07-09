@@ -423,12 +423,13 @@
       "name": "@thaddeus.run/platform",
       "version": "0.0.0",
       "dependencies": {
+        "@noble/hashes": "catalog:",
+        "@thaddeus.run/identity": "workspace:*",
         "@thaddeus.run/log": "workspace:*",
         "@thaddeus.run/store": "workspace:*",
       },
       "devDependencies": {
         "@thaddeus.run/fs": "workspace:*",
-        "@thaddeus.run/identity": "workspace:*",
         "@thaddeus.run/provenance": "workspace:*",
         "@thaddeus.run/reputation": "workspace:*",
         "@thaddeus.run/review": "workspace:*",

@@ -15,3 +15,10 @@ export type {
   LandProposal,
   LandResult,
 } from './policy';
+export {
+  canonicalRelease,
+  releaseId,
+  signRelease,
+  verifyRelease,
+} from './release';
+export type { Release, ReleaseArtifact, ReleaseFields } from './release';

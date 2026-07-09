@@ -1,6 +1,6 @@
 {
   "name": "@thaddeus.run/reputation",
-  "version": "0.1.4-alpha",
+  "version": "0.1.5-alpha",
   "description": "Portable federated reputation: dual-signed Contribution records and an untrusted aggregator — reputation as a verifiable set of signed records, honored across instances. Pillar 07.",
   "keywords": [
     "contribution",
