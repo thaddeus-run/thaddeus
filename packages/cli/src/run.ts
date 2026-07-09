@@ -598,11 +598,17 @@ export async function run(
         // A branch is a name over the current head-set — copy-on-write, never a
         // copy of files. It carries no new ops, so it needs no land policy.
         const local = await openLocal(root, cfg);
+        // The server only accepts heads it has ingested; local-only commits
+        // would fail with a cryptic "unknown head". Ask for a push instead.
+        if (headsAhead(local, cfg.base, view) > 0) {
+          out("unpublished commits — run 'thaddeus push' first");
+          return 2;
+        }
         const heads = [...local.log.heads(view)];
         const created = await client.createView(cfg.repo, name, heads);
         await local.log.repoint(name, created.heads);
         out(
-          `created branch ${name} at ${created.heads.length} head(s) — 'thaddeus checkout ${name}' to switch`
+          `created branch ${name} at ${created.heads.length} head(s) — open it with 'thaddeus workspace ${name}'`
         );
         return 0;
       }
