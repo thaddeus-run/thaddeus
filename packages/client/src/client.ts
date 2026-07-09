@@ -183,10 +183,14 @@ export class Client {
   // a caller derives each member's public key with `PublicIdentity.fromDid` —
   // no key exchange is needed to share a decryption capability with them.
   async members(name: string): Promise<string[]> {
-    const owner = (await this.listReposWithOwners()).find(
-      (r) => r.name === name
-    )?.owner;
-    const delegates = (await this.listGrants(name)).map((g) => g.agent);
+    // The two reads are independent, so issue them concurrently — `push` calls
+    // this on every publish and a serial pair doubles the round-trip latency.
+    const [repos, grants] = await Promise.all([
+      this.listReposWithOwners(),
+      this.listGrants(name),
+    ]);
+    const owner = repos.find((r) => r.name === name)?.owner;
+    const delegates = grants.map((g) => g.agent);
     const dids =
       owner === null || owner === undefined ? delegates : [owner, ...delegates];
     return [...new Set(dids)].sort();

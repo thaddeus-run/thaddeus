@@ -87,9 +87,15 @@ describe('reshareObjects', () => {
     // Before sharing, b holds no capability.
     const bClient = new Client('http://t', b, fetchImpl);
     const before = await bClient.clone('r', new MemoryBackend());
-    expect(readAsMember(before.repo, b, 'a.txt')).rejects.toThrow(
-      /access denied/
-    );
+    // b holds no capability, so the read must fail. Assert it explicitly: an
+    // un-awaited `.rejects` never runs, and awaiting it trips `await-thenable`.
+    let denied: unknown;
+    try {
+      await readAsMember(before.repo, b, 'a.txt');
+    } catch (err) {
+      denied = err;
+    }
+    expect(String(denied)).toContain('access denied');
 
     const pids = reachablePids(repo, heads);
     const shared = await reshareObjects(

@@ -152,17 +152,21 @@ impl App {
                 };
             }
             // The log follows the repos cursor, so arrowing the list shows each
-            // repo's log without an extra keypress. The pull is blocking; a
-            // debounce (and then a background fetch) is the fast-follow.
+            // repo's log without an extra keypress. Only reload when the cursor
+            // actually moved — at a list boundary the selection is unchanged and
+            // a refetch would just freeze the UI on the same repo. The pull is
+            // blocking; a debounce (then a background fetch) is the fast-follow.
             KeyCode::Down | KeyCode::Char('j') => {
+                let prev = self.repo_sel;
                 self.move_down();
-                if self.focus == Focus::Repos {
+                if self.focus == Focus::Repos && self.repo_sel != prev {
                     self.load_selected_repo();
                 }
             }
             KeyCode::Up | KeyCode::Char('k') => {
+                let prev = self.repo_sel;
                 self.move_up();
-                if self.focus == Focus::Repos {
+                if self.focus == Focus::Repos && self.repo_sel != prev {
                     self.load_selected_repo();
                 }
             }

@@ -199,23 +199,26 @@ async function commitDiff(
 // Share read-capabilities for everything reachable from `heads` with the repo's
 // OTHER members (owner + non-revoked delegates). `store.put` seals a new object
 // only to its author, so without this nobody else — not even the repo owner —
-// can decrypt what we are about to publish. A failure to reach the server must
-// not silently skip the reshare (the push would be unreadable), so it warns.
+// can decrypt what we are about to publish.
+//
+// Fails CLOSED: if the member list can't be read we throw rather than upload
+// objects sealed to us alone, which would publish content no collaborator can
+// decrypt while `push` still reported success. Nothing is uploaded; retry.
 async function reshareToMembers(
   client: Client,
   repoName: string,
   local: Repo,
   heads: readonly string[],
-  identity: Identity,
-  out: (line: string) => void
+  identity: Identity
 ): Promise<number> {
   let dids: string[];
   try {
     dids = await client.members(repoName);
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
-    out(`warning: could not read repo members (${msg}) — not sharing keys`);
-    return 0;
+    throw new Error(
+      `could not read the repo's members (${msg}) — refusing to publish content collaborators could not decrypt; nothing was uploaded, please retry`
+    );
   }
   const members = dids
     .filter((did) => did !== identity.did)
@@ -496,9 +499,19 @@ export async function run(
         const local = await new Platform().openDurable(cfg.repo, backend);
         // Safe v1: only fast-forward a clean, not-ahead working copy. Merging a
         // divergent local history is a branches-era concern.
-        const before = await baseSnapshot(local, 'main', identity);
+        // A path we hold no key for is never materialized, so it must not be
+        // mistaken for a local addition — a copy left on disk from before a key
+        // rotation would otherwise wedge `pull` on a phantom dirty tree.
+        const denied = new Set<string>();
+        const before = await baseSnapshot(local, 'main', identity, (p) =>
+          denied.add(p)
+        );
         const { added, modified, deleted } = diffWorkingTree(root, before);
-        if (added.length + modified.length + deleted.length > 0) {
+        const dirty =
+          added.filter((p) => !denied.has(p)).length +
+          modified.length +
+          deleted.length;
+        if (dirty > 0) {
           out('uncommitted changes — commit and push (or discard) before pull');
           return 2;
         }
@@ -698,7 +711,7 @@ export async function run(
         const client = new Client(cfg.server, identity, env.fetchImpl);
         // Give every other member a key to what we publish, before uploading —
         // the bundle carries whatever caps the store holds at build time.
-        await reshareToMembers(client, cfg.repo, local, heads, identity, out);
+        await reshareToMembers(client, cfg.repo, local, heads, identity);
         const pushed = await client.push(cfg.repo, local, heads, provenance);
         out(
           `uploaded ${pushed.accepted.ops} op(s), ${pushed.accepted.objects} object(s)${
@@ -852,7 +865,7 @@ export async function run(
         }
         const client = new Client(cfg.server, identity, env.fetchImpl);
         // The rewritten files are new objects, sealed to us alone — share them.
-        await reshareToMembers(client, cfg.repo, local, heads, identity, out);
+        await reshareToMembers(client, cfg.repo, local, heads, identity);
         const pushed = await client.push(cfg.repo, local, heads, provenance, [
           symbolOp,
         ]);

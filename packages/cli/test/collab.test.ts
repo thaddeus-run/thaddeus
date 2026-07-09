@@ -131,5 +131,17 @@ describe('owner ⇄ delegate collaboration', () => {
     // Clean tree → pull succeeds.
     writeFileSync(join(dir, 'x.txt'), 'v1');
     expect(await run(['pull'], quiet(home, dir))).toBe(0);
+
+    // Uploaded-but-unlanded commits → refused (tree is clean, but we're ahead).
+    writeFileSync(join(dir, 'y.txt'), 'later');
+    expect(await run(['push', '--no-land'], quiet(home, dir))).toBe(0);
+    const ahead: string[] = [];
+    expect(
+      await run(
+        ['pull'],
+        env(home, dir, (l) => ahead.push(l))
+      )
+    ).toBe(2);
+    expect(ahead.join('\n')).toContain('unpublished commits');
   });
 });
