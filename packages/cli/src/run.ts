@@ -1589,19 +1589,43 @@ export async function run(
         return 0;
       }
       case 'reputation': {
-        const did = rest.find((a) => !a.startsWith('-'));
+        // Reputation is SERVER-wide, not repo-scoped, so it resolves the server
+        // like `repos`/`delete` (--server, else your default) and needs no
+        // working copy — ask any server about any DID from anywhere.
+        const { values, positionals } = parseArgs({
+          args: [...rest],
+          options: {
+            server: { type: 'string' },
+            json: { type: 'boolean' },
+          },
+          allowPositionals: true,
+        });
+        const did = positionals[0];
         if (did === undefined) {
-          out('usage: thaddeus reputation <did>');
+          out('usage: thaddeus reputation <did> [--server <url>]');
           return 2;
         }
-        const root = findRoot(env.cwd);
-        if (root === undefined) {
-          out("not a thaddeus working copy — run 'thaddeus clone' first");
+        if (values.server !== undefined && !isServerUrl(values.server)) {
+          out(`invalid --server url: ${values.server}`);
           return 2;
         }
-        const cfg = loadConfig(root);
+        // --server, else the server of the working copy you're standing in,
+        // else your saved default.
+        let repServer = values.server;
+        if (repServer === undefined) {
+          const root = findRoot(env.cwd);
+          if (root !== undefined) repServer = loadConfig(root).server;
+        }
+        if (repServer === undefined) {
+          const resolved = resolveServer(undefined, [], env.home);
+          if (resolved === null) {
+            out(noServerHint('reputation'));
+            return 2;
+          }
+          repServer = resolved.server;
+        }
         const identity = loadIdentity(env.home);
-        const client = new Client(cfg.server, identity, env.fetchImpl);
+        const client = new Client(repServer, identity, env.fetchImpl);
         const profile = await client.reputation(did);
         if (wantsJson(rest)) {
           out(JSON.stringify(profile));

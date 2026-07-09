@@ -190,10 +190,14 @@ export const HELP: Record<string, string> = {
 
   List the repo's active (non-revoked) delegations.`,
 
-  reputation: `thaddeus reputation <did> [--json]
+  reputation: `thaddeus reputation <did> [--server <url>] [--json]
 
   Show a DID's server-wide reputation: attested (host-vouched) vs claimed
-  (self-asserted) contributions, and the attested tally by kind.`,
+  (self-asserted) contributions, and the attested tally by kind. Reputation is
+  server-wide, not repo-scoped: the server is resolved like 'repos' (--server,
+  else your default), so this works from anywhere — no working copy needed.
+  Only an attesting server ('serve --host') co-signs merges, so a non-attesting
+  server reports attested: 0.`,
 
   serve: `thaddeus serve [--port N] [--data DIR] [--host] [--min-merges N]
 
