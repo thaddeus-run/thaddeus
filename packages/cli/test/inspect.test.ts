@@ -1,8 +1,15 @@
 import { ready } from '@thaddeus.run/identity';
-import { MemoryBackend } from '@thaddeus.run/persist';
+import { FileBackend, MemoryBackend } from '@thaddeus.run/persist';
+import { Platform } from '@thaddeus.run/platform';
 import { createServer } from '@thaddeus.run/server';
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  existsSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -117,5 +124,107 @@ describe('thaddeus diff / status --json / log filters', () => {
     out.length = 0;
     await run(['log', '--since', '2999-01-01T00:00:00Z', '--json'], e(a));
     expect(JSON.parse(out.join(''))).toEqual([]);
+  });
+
+  test('show, cross-branch diff, and land dry-run are read-only branch views', async () => {
+    const srv = createServer({ backend: new MemoryBackend() });
+    const fetchImpl = srv.fetch.bind(srv);
+    const home = await clientHome(fetchImpl, 'p3');
+    const out: string[] = [];
+    const e = (cwd: string) => ({
+      cwd,
+      home,
+      fetchImpl,
+      out: (l: string) => out.push(l),
+    });
+
+    await run(['create', 'http://t', 'proj'], e(home));
+    const mainDir = mkdtempSync(join(tmp, 'p3-main-'));
+    await run(['clone', 'http://t', 'proj', mainDir], e(mainDir));
+    writeFileSync(join(mainDir, 'a.txt'), 'base\n');
+    expect(await run(['push', '-m', 'base'], e(mainDir))).toBe(0);
+    expect(await run(['branch', 'feature'], e(mainDir))).toBe(0);
+
+    const featureDir = join(
+      tmp,
+      `p3-feature-${Date.now()}-${Math.random().toString(16).slice(2)}`
+    );
+    expect(await run(['workspace', 'feature', featureDir], e(mainDir))).toBe(0);
+    writeFileSync(join(featureDir, 'a.txt'), 'feature\n');
+    writeFileSync(join(featureDir, 'new.txt'), 'feature file\n');
+    expect(await run(['push', '-m', 'feature'], e(featureDir))).toBe(0);
+
+    writeFileSync(join(mainDir, 'a.txt'), 'main\n');
+    expect(await run(['push', '-m', 'main'], e(mainDir))).toBe(0);
+
+    const backend = new FileBackend(join(mainDir, '.thaddeus', 'store'));
+    let local = await new Platform().openDurable('proj', backend);
+    const staleFeatureHeads = [...local.log.heads('main')];
+    await local.log.repoint('feature', staleFeatureHeads);
+
+    writeFileSync(join(mainDir, 'dirty.txt'), 'dirty');
+
+    out.length = 0;
+    expect(
+      await run(['show', '--view', 'feature', 'new.txt'], e(mainDir))
+    ).toBe(0);
+    expect(out.join('\n')).toContain('feature file');
+    expect(existsSync(join(mainDir, 'new.txt'))).toBe(false);
+
+    out.length = 0;
+    expect(await run(['show', '--view', 'feature', '--json'], e(mainDir))).toBe(
+      0
+    );
+    const shown = JSON.parse(out.join('')) as {
+      files: { path: string; text?: string }[];
+    };
+    expect(shown.files.map((f) => f.path).sort()).toEqual(['a.txt', 'new.txt']);
+
+    out.length = 0;
+    expect(
+      await run(['diff', '--from', 'main', '--to', 'feature'], e(mainDir))
+    ).toBe(0);
+    const branchDiff = out.join('\n');
+    expect(branchDiff).toContain('a.txt (modified)');
+    expect(branchDiff).toContain('-main');
+    expect(branchDiff).toContain('+feature');
+    expect(branchDiff).toContain('new.txt (added)');
+
+    out.length = 0;
+    expect(await run(['diff', '--to', 'feature', 'new.txt'], e(mainDir))).toBe(
+      0
+    );
+    const filteredDiff = out.join('\n');
+    expect(filteredDiff).toContain('new.txt (added)');
+    expect(filteredDiff).not.toContain('a.txt (modified)');
+
+    out.length = 0;
+    expect(await run(['diff', '--staged', '--to', 'feature'], e(mainDir))).toBe(
+      2
+    );
+    expect(out.join('\n')).toContain('cannot be combined');
+
+    out.length = 0;
+    expect(await run(['show', '--view', 'ghost'], e(mainDir))).toBe(1);
+    expect(out.join('\n')).toContain('no branch ghost');
+
+    out.length = 0;
+    expect(await run(['land', 'feature', '--dry-run'], e(mainDir))).toBe(0);
+    const preview = out.join('\n');
+    expect(preview).toContain('dry-run: feature into main');
+    expect(preview).toContain('conflict: a.txt');
+    expect(readFileSync(join(mainDir, 'dirty.txt'), 'utf8')).toBe('dirty');
+
+    rmSync(join(mainDir, 'dirty.txt'));
+    out.length = 0;
+    expect(await run(['land', 'feature'], e(mainDir))).toBe(1);
+    const blocked = out.join('\n');
+    expect(blocked).toContain('not landed');
+    expect(blocked).toContain('conflict');
+    expect(blocked).toContain('a.txt');
+
+    local = await new Platform().openDurable('proj', backend);
+    expect([...local.log.heads('feature')]).toEqual(staleFeatureHeads);
+    expect(existsSync(join(mainDir, 'new.txt'))).toBe(false);
   });
 });

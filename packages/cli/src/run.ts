@@ -25,7 +25,7 @@ import {
   noServerHint,
   saveCliConfig,
 } from './config';
-import { type FileDiff, fileDiff } from './diff';
+import { type FileDiff, fileDiff, isBinary } from './diff';
 import { HELP, USAGE } from './help';
 import { initIdentity, loadIdentity } from './identity';
 import { startServer } from './serve';
@@ -62,6 +62,12 @@ function wantsJson(rest: readonly string[]): boolean {
   return rest.includes('--json');
 }
 
+// Read-only remote view inspection is cached under the land/ internal prefix
+// so it can never masquerade as a real branch or clobber one in a shared store.
+function inspectViewName(view: string): string {
+  return `land/inspect/${encodeURIComponent(view)}`;
+}
+
 // Re-open the durable repo for a working copy — over its own store, or the
 // shared one a `workspace` points at.
 async function openLocal(root: string, cfg: Config): Promise<Repo> {
@@ -75,6 +81,76 @@ async function openLocal(root: string, cfg: Config): Promise<Repo> {
 // openDurable uses — so a ProvenanceLog reads/writes the "why" alongside the code.
 function repoScope(root: string, cfg: Config): Backend {
   return scoped(new FileBackend(storePath(root, cfg)), `repo/${cfg.repo}/`);
+}
+
+async function readableSnapshot(
+  repo: Repo,
+  view: string,
+  identity: Identity
+): Promise<{ snap: Map<string, Uint8Array>; skipped: string[] }> {
+  const skipped: string[] = [];
+  const snap = await baseSnapshot(repo, view, identity, (p) => skipped.push(p));
+  skipped.sort();
+  return { snap, skipped };
+}
+
+async function fetchInspectView(opts: {
+  client: Client;
+  repoName: string;
+  local: Repo;
+  backend: Backend;
+  remoteView: string;
+  views?: Record<string, string[]>;
+  out: (line: string) => void;
+}): Promise<string | null> {
+  const views = opts.views ?? (await opts.client.listViews(opts.repoName));
+  if (views[opts.remoteView] === undefined) {
+    opts.out(
+      `no branch ${opts.remoteView} — create it with 'thaddeus branch ${opts.remoteView}'`
+    );
+    return null;
+  }
+  const localView = inspectViewName(opts.remoteView);
+  await opts.client.pull(
+    opts.repoName,
+    opts.local,
+    opts.backend,
+    opts.remoteView,
+    localView
+  );
+  return localView;
+}
+
+function mergeHeads(
+  a: readonly string[],
+  b: readonly string[]
+): readonly string[] {
+  return [...new Set([...a, ...b])].sort();
+}
+
+function previewLand(
+  repo: Repo,
+  into: string,
+  from: string
+): {
+  incoming: Op[];
+  conflicts: ReturnType<Repo['conflicts']>;
+} {
+  const tmp = `land/preview/${encodeURIComponent(into)}/${encodeURIComponent(from)}`;
+  repo.log.view(tmp, mergeHeads(repo.log.heads(into), repo.log.heads(from)));
+  return {
+    incoming: opsAhead(repo, repo.log.heads(into), from),
+    conflicts: repo.conflicts(tmp),
+  };
+}
+
+function outConflicts(
+  conflicts: ReturnType<Repo['conflicts']>,
+  out: (line: string) => void
+): void {
+  for (const c of conflicts) {
+    out(`conflict: ${c.path} (${c.ops.length} op(s), winner ${c.winner})`);
+  }
 }
 
 // Ops reachable from a view's heads, newest-first (descending lamport, id).
@@ -709,6 +785,115 @@ export async function run(
         );
         return 2;
       }
+      case 'show': {
+        const { values, positionals } = parseArgs({
+          args: [...rest],
+          options: {
+            view: { type: 'string' },
+            json: { type: 'boolean' },
+          },
+          allowPositionals: true,
+        });
+        const root = findRoot(env.cwd);
+        if (root === undefined) {
+          out("not a thaddeus working copy — run 'thaddeus clone' first");
+          return 2;
+        }
+        const cfg = loadConfig(root);
+        const current = viewOf(cfg);
+        const identity = loadIdentity(env.home);
+        const backend = new FileBackend(storePath(root, cfg));
+        const local = await new Platform().openDurable(cfg.repo, backend);
+        const client = new Client(cfg.server, identity, env.fetchImpl);
+        let view = current;
+        if (values.view !== undefined) {
+          const fetched = await fetchInspectView({
+            client,
+            repoName: cfg.repo,
+            local,
+            backend,
+            remoteView: values.view,
+            out,
+          });
+          if (fetched === null) {
+            return 1;
+          }
+          view = fetched;
+        }
+        const { snap, skipped } = await readableSnapshot(local, view, identity);
+        const skippedSet = new Set(skipped);
+        const requested = positionals;
+        const missing = requested
+          .filter((p) => !snap.has(p) && !skippedSet.has(p))
+          .sort();
+        const unreadable = requested.filter((p) => skippedSet.has(p)).sort();
+        const paths =
+          requested.length > 0
+            ? requested.filter((p) => snap.has(p))
+            : [...snap.keys()].sort();
+
+        if (values.json === true) {
+          const decoder = new TextDecoder();
+          out(
+            JSON.stringify({
+              view: values.view ?? current,
+              files: paths.map((path) => {
+                const bytes = snap.get(path);
+                if (bytes === undefined) {
+                  throw new Error(`internal show path missing: ${path}`);
+                }
+                const binary = isBinary(bytes);
+                return {
+                  path,
+                  binary,
+                  bytes: bytes.length,
+                  ...(binary ? {} : { text: decoder.decode(bytes) }),
+                };
+              }),
+              skipped,
+              missing,
+            })
+          );
+          return missing.length + unreadable.length > 0 ? 1 : 0;
+        }
+
+        if (requested.length === 0) {
+          for (const path of paths) out(path);
+          if (skipped.length > 0) {
+            out(
+              `(${skipped.length} file(s) not readable with your keys — skipped)`
+            );
+          }
+          return 0;
+        }
+
+        const decoder = new TextDecoder();
+        for (const path of paths) {
+          const bytes = snap.get(path);
+          if (bytes === undefined) {
+            continue;
+          }
+          if (paths.length > 1) {
+            out(`==> ${path} <==`);
+          }
+          if (isBinary(bytes)) {
+            out(`${path}: binary file (${bytes.length} bytes)`);
+            continue;
+          }
+          const lines = decoder.decode(bytes).split('\n');
+          if (lines.at(-1) === '') {
+            lines.pop();
+          }
+          if (lines.length === 0) {
+            out('');
+          } else {
+            for (const line of lines) out(line);
+          }
+        }
+        for (const path of unreadable) out(`not readable: ${path}`);
+        for (const path of missing) out(`missing: ${path}`);
+        return missing.length + unreadable.length > 0 ? 1 : 0;
+      }
       case 'status': {
         const root = findRoot(env.cwd);
         if (root === undefined) {
@@ -773,10 +958,19 @@ export async function run(
           args: [...rest],
           options: {
             staged: { type: 'boolean' },
+            from: { type: 'string' },
+            to: { type: 'string' },
             json: { type: 'boolean' },
           },
           allowPositionals: true,
         });
+        if (
+          values.staged === true &&
+          (values.from !== undefined || values.to !== undefined)
+        ) {
+          out('diff --staged cannot be combined with --from/--to');
+          return 2;
+        }
         const root = findRoot(env.cwd);
         if (root === undefined) {
           out("not a thaddeus working copy — run 'thaddeus clone' first");
@@ -785,7 +979,94 @@ export async function run(
         const cfg = loadConfig(root);
         const view = viewOf(cfg);
         const identity = loadIdentity(env.home);
-        const local = await openLocal(root, cfg);
+        const backend = new FileBackend(storePath(root, cfg));
+        const local = await new Platform().openDurable(cfg.repo, backend);
+        const client = new Client(cfg.server, identity, env.fetchImpl);
+        if (values.from !== undefined || values.to !== undefined) {
+          const views = await client.listViews(cfg.repo);
+          const fetched = new Map<string, string>();
+          const resolve = async (
+            remoteView: string | undefined
+          ): Promise<string | null> => {
+            if (remoteView === undefined) {
+              return view;
+            }
+            const existing = fetched.get(remoteView);
+            if (existing !== undefined) {
+              return existing;
+            }
+            const localView = await fetchInspectView({
+              client,
+              repoName: cfg.repo,
+              local,
+              backend,
+              remoteView,
+              views,
+              out,
+            });
+            if (localView !== null) {
+              fetched.set(remoteView, localView);
+            }
+            return localView;
+          };
+          const fromView = await resolve(values.from);
+          if (fromView === null) {
+            return 1;
+          }
+          const toView = await resolve(values.to);
+          if (toView === null) {
+            return 1;
+          }
+          const { snap: base, skipped: skippedBase } = await readableSnapshot(
+            local,
+            fromView,
+            identity
+          );
+          const { snap: target, skipped: skippedTarget } =
+            await readableSnapshot(local, toView, identity);
+          const skipped = new Set([...skippedBase, ...skippedTarget]);
+          const only = new Set(positionals);
+          const changed: FileDiff[] = [];
+          for (const p of [
+            ...new Set([...base.keys(), ...target.keys()]),
+          ].sort()) {
+            if (skipped.has(p)) {
+              continue;
+            }
+            if (only.size > 0 && !only.has(p)) {
+              continue;
+            }
+            const b = base.get(p);
+            const t = target.get(p);
+            if (b !== undefined && t !== undefined && equalBytes(b, t)) {
+              continue;
+            }
+            changed.push(fileDiff(p, b, t));
+          }
+          if (values.json === true) {
+            out(JSON.stringify(changed));
+            return 0;
+          }
+          if (changed.length === 0) {
+            out('no changes');
+            return 0;
+          }
+          for (const fd of changed) {
+            out(`diff ${fd.path} (${fd.status})`);
+            if (fd.binary) {
+              out('  binary file differs');
+              continue;
+            }
+            if (fd.truncated) {
+              out('  file too large to diff');
+              continue;
+            }
+            for (const line of fd.lines) {
+              out(`${line.tag}${line.text}`);
+            }
+          }
+          return 0;
+        }
         // Two modes. Default: the base 'main' snapshot vs the working tree on
         // disk. --staged: the last-synced base heads vs local 'main' — i.e. the
         // committed-but-unpublished changes.
@@ -941,6 +1222,14 @@ export async function run(
         return 0;
       }
       case 'land': {
+        const { values, positionals } = parseArgs({
+          args: [...rest],
+          options: {
+            'dry-run': { type: 'boolean' },
+            json: { type: 'boolean' },
+          },
+          allowPositionals: true,
+        });
         const root = findRoot(env.cwd);
         if (root === undefined) {
           out("not a thaddeus working copy — run 'thaddeus clone' first");
@@ -950,7 +1239,11 @@ export async function run(
         const view = viewOf(cfg);
         const identity = loadIdentity(env.home);
         const client = new Client(cfg.server, identity, env.fetchImpl);
-        const branch = rest.find((a) => !a.startsWith('-'));
+        const branch = positionals[0];
+        if (values['dry-run'] === true && branch === undefined) {
+          out('usage: thaddeus land <branch> --dry-run [--json]');
+          return 2;
+        }
         // `land <branch>`: land that branch's ops into the current view, under
         // the server's policy. There is no merge ceremony — landing IS the
         // merge; the ops were signed at commit, this is one governed re-point.
@@ -961,6 +1254,42 @@ export async function run(
           }
           const backend = new FileBackend(storePath(root, cfg));
           const local = await new Platform().openDurable(cfg.repo, backend);
+          const views = await client.listViews(cfg.repo);
+          const source = await fetchInspectView({
+            client,
+            repoName: cfg.repo,
+            local,
+            backend,
+            remoteView: branch,
+            views,
+            out,
+          });
+          if (source === null) {
+            return 1;
+          }
+          if (values['dry-run'] === true) {
+            const { incoming, conflicts } = previewLand(local, view, source);
+            if (values.json === true) {
+              out(
+                JSON.stringify({
+                  from: branch,
+                  into: view,
+                  incoming: incoming.map((op) => op.id),
+                  conflicts,
+                })
+              );
+              return 0;
+            }
+            out(
+              `dry-run: ${branch} into ${view} (${incoming.length} incoming op(s))`
+            );
+            if (conflicts.length === 0) {
+              out('no conflicts');
+            } else {
+              outConflicts(conflicts, out);
+            }
+            return 0;
+          }
           const before = await readyToSwitch(
             root,
             local,
@@ -972,24 +1301,12 @@ export async function run(
           if (before === null) {
             return 2;
           }
-          // A typo'd branch would pull as empty and exit "nothing to land" —
-          // check it exists so the failure is loud and actionable.
-          const views = await client.listViews(cfg.repo);
-          if (views[branch] === undefined) {
-            out(
-              `no branch ${branch} — create it with 'thaddeus branch ${branch}'`
-            );
-            return 1;
-          }
-          // Fetch the branch's ops so the landing (and its claims) can be
-          // computed locally — creating a branch is free, landing is governed.
-          await client.pull(cfg.repo, local, backend, branch);
-          const branchHeads = [...local.log.heads(branch)];
+          const branchHeads = [...local.log.heads(source)];
           if (branchHeads.length === 0) {
             out(`branch ${branch} has nothing to land`);
             return 0;
           }
-          const incoming = opsAhead(local, local.log.heads(view), branch);
+          const { incoming } = previewLand(local, view, source);
           const landed = await client.land(
             cfg.repo,
             branchHeads,
@@ -998,6 +1315,7 @@ export async function run(
           );
           if (!landed.landed) {
             out(`not landed: ${landed.reason ?? 'blocked by policy'}`);
+            outConflicts(landed.conflicts, out);
             return 1;
           }
           const localOps = new Set(local.log.ops().map((o) => o.id));
@@ -1024,6 +1342,7 @@ export async function run(
         const landed = await client.land(cfg.repo, heads, view, claims);
         if (!landed.landed) {
           out(`not landed: ${landed.reason ?? 'nothing to land'}`);
+          outConflicts(landed.conflicts, out);
           return 1;
         }
         const localOps = new Set(local.log.ops().map((o) => o.id));
