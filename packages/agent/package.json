@@ -1,6 +1,6 @@
 {
   "name": "@thaddeus.run/agent",
-  "version": "0.1.1-alpha",
+  "version": "0.1.2-alpha",
   "description": "Agents as first-class principals: operator-signed Delegations (scoped, budgeted authority) and a fail-closed LandPolicy enforcing scope, budget, and quarantine. Pillar 09.",
   "keywords": [
     "agent",
