@@ -13,6 +13,9 @@ Working tree
   repos  [--mine]               list server repos (--mine = owned by you)
   delete <repo> --yes           delete a repo you own (irreversible)
   pull                          fetch landed changes into this working copy
+  branch [<name>]               list branches, or create one here
+  checkout <branch>             switch the working copy to a branch
+  merge <branch>                land a branch into the current one (policy)
   status                        show working-tree changes
   diff   [--staged] [path...]   show a line diff of working-tree changes
   push   [-m "<why>"]           commit + upload (+ a signed why) + land
@@ -92,6 +95,26 @@ export const HELP: Record<string, string> = {
   objects and capabilities, advance the base, and update the files on disk
   (removing what was deleted upstream). Refuses when the working tree is dirty
   or you hold unpublished commits — commit and push (or discard) first.`,
+
+  branch: `thaddeus branch [<name>] [--json]
+
+  With no argument, list the repo's branches and mark the one you're on. With a
+  name, create a branch at your current branch's heads. A branch is a name over
+  a head-set (copy-on-write) — it copies ids, never files — so creating one adds
+  no operations and needs no land policy. Merging one back does ('merge').`,
+
+  checkout: `thaddeus checkout <branch>
+
+  Switch the working copy to <branch>: fetch it, re-point the tree (removing
+  files it doesn't have), and record it as current. Requires a clean tree with
+  no unpublished commits.`,
+
+  merge: `thaddeus merge <branch>
+
+  Land <branch> into the branch you're on, under the server's policy (conflict,
+  delegation, veto, and any reputation gate). Fetches the branch first, then
+  updates your tree on success. Requires a clean tree with no unpublished
+  commits; a blocked merge leaves your branch untouched.`,
 
   status: `thaddeus status [--json]
 

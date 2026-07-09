@@ -265,6 +265,18 @@ export class OpLog {
     this.#views.set(name, [...this.heads(fromView)]);
   }
 
+  // Every named view, sorted. A view is a name over a head-set, so this is the
+  // branch list — callers filter any names they treat as internal.
+  views(): readonly string[] {
+    return [...this.#views.keys()].sort();
+  }
+
+  // Whether a view name is known (distinguishes "no such view" from a view that
+  // exists but is empty — `heads()` returns [] for both).
+  hasView(name: string): boolean {
+    return this.#views.has(name);
+  }
+
   // A view's heads, or — with no view — the global frontier: every op that is
   // no other known op's parent (the DAG's sink nodes), deterministic given the
   // op set.

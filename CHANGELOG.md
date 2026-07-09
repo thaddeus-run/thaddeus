@@ -7,6 +7,22 @@ All notable changes to Thaddeus. Format follows
 
 ### Added
 
+- **Branches, as copy-on-write views (Pillar 05).** A branch is a name over a
+  head-set — it copies a handful of op ids, never files — so
+  `thaddeus branch <name>` is free and there is no `git worktree` dance. New
+  `branch` (list or create), `checkout <branch>` (re-points the tree, removing
+  what the branch lacks) and `merge <branch>` (lands it into the current branch
+  under the server's policy). The working copy records its branch in
+  `.thaddeus/config.json` (absent = `main`, so older copies keep working), and
+  `status` reports it. **Creating a branch introduces no operations**, so it
+  bypasses the land policy via a create-only `POST /repos/:name/views` (409 if
+  it exists — re-pointing a view must go through `land`, where the gates run);
+  merging one is fully governed. Landing into a fresh view would otherwise have
+  re-checked the entire history against a delegate's path/budget scope, making
+  branches unusable for delegates. `GET /repos/:name/views` lists branches;
+  `OpLog` gains `views()`/`hasView()`, and every internal view (`land`'s dry-run
+  and `incoming` frontiers) now lives under a reserved `land/` prefix so it can
+  never surface as a branch.
 - **Collaboration actually works: capability-sharing + `thaddeus pull`.** A
   `Delegation` conveyed _write_ authority only, so a granted collaborator cloned
   ciphertext it could not decrypt — and because `store.put` seals a new object's

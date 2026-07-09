@@ -150,7 +150,28 @@ un-read what was already shared.
 > choose. `.thaddeusignore` is seeded from `.gitignore`, which usually ignores
 > `.env` — un-ignore it with a `!.env` line to track it.
 
-## 7. Meaning layers
+## 7. Branches are free
+
+A branch is a **name over a head-set**, not a copy of files. Creating one copies
+a handful of ids — so you can keep as many as you like without touching your
+disk, and there is no `git worktree` dance.
+
+```sh
+thaddeus branch                  # list branches, * marks the current one
+thaddeus branch feature          # create one at your current heads
+thaddeus checkout feature        # switch (tree re-points; needs a clean copy)
+echo 'fn login() {}' > src/auth.rs
+thaddeus push -m "add login"     # lands on `feature`, main untouched
+
+thaddeus checkout main
+thaddeus merge feature           # land it into main, under the server's policy
+```
+
+Creating a branch adds **no operations**, so it needs no policy. **Merging** one
+does: `merge` runs the server's land gates (conflict, delegation scope, standing
+veto, any reputation floor) and leaves your branch untouched if it's blocked.
+
+## 8. Meaning layers
 
 - **Veto (a standing human "no"):** a reviewer blocks a landing, even a green
   one. `thaddeus veto <op> -m "ships a secret"`; list with
@@ -165,7 +186,7 @@ un-read what was already shared.
   `thaddeus grant <did> --paths 'src/**' --max-changes 50`; `thaddeus grants`;
   `thaddeus revoke <did>`.
 
-## 8. Browse it in a TUI
+## 9. Browse it in a TUI
 
 [`lazythad`](../lazythad/README.md) is a lazygit-style terminal UI over a
 server's public mirror (repos, the op log, the why, vetoes, reputation):

@@ -41,6 +41,7 @@ import {
   materializeToDisk,
   safeTarget,
   saveConfig,
+  viewOf,
 } from './workcopy';
 
 export interface CliEnv {
@@ -100,7 +101,7 @@ function opsOnView(repo: Repo, view: string): Op[] {
 // The ops reachable from local `main` but not from `base` — i.e. every
 // committed-but-unpublished op, newest-first. `push -m` annotates these when no
 // new op was committed this invocation (so the why is never silently dropped).
-function opsAhead(repo: Repo, base: readonly string[]): Op[] {
+function opsAhead(repo: Repo, base: readonly string[], view: string): Op[] {
   const byId = new Map(repo.log.ops().map((o) => [o.id, o]));
   const closure = (heads: readonly string[]): Set<string> => {
     const seen = new Set<string>();
@@ -115,12 +116,12 @@ function opsAhead(repo: Repo, base: readonly string[]): Op[] {
     return seen;
   };
   const baseClosure = closure(base);
-  return opsOnView(repo, 'main').filter((o) => !baseClosure.has(o.id));
+  return opsOnView(repo, view).filter((o) => !baseClosure.has(o.id));
 }
 
 // How many ops are reachable from local `main` but not from `base` (the last
 // synced server heads) — i.e. committed-but-unpublished.
-function headsAhead(repo: Repo, base: readonly string[]): number {
+function headsAhead(repo: Repo, base: readonly string[], view: string): number {
   const all = repo.log.ops();
   const byId = new Map(all.map((o) => [o.id, o]));
   const closure = (heads: readonly string[]): Set<string> => {
@@ -137,7 +138,7 @@ function headsAhead(repo: Repo, base: readonly string[]): number {
   };
   const baseClosure = closure(base);
   let n = 0;
-  for (const id of closure(repo.log.heads('main'))) {
+  for (const id of closure(repo.log.heads(view))) {
     if (!baseClosure.has(id)) n += 1;
   }
   return n;
@@ -166,10 +167,11 @@ function mergeClaims(
 async function commitDiff(
   root: string,
   repo: Repo,
-  identity: Identity
+  identity: Identity,
+  view: string
 ): Promise<{ heads: string[]; committed: boolean; ops: readonly Op[] }> {
   const ws = Workspace.open(repo.log, repo.store, {
-    source: 'main',
+    source: view,
     reader: identity,
     name: 'staging',
   });
@@ -189,10 +191,10 @@ async function commitDiff(
   }
   const ops = await ws.commit(identity);
   if (ops.length === 0) {
-    return { heads: [...repo.log.heads('main')], committed: false, ops: [] };
+    return { heads: [...repo.log.heads(view)], committed: false, ops: [] };
   }
   const heads = [...repo.log.heads('staging')];
-  await repo.log.repoint('main', heads);
+  await repo.log.repoint(view, heads);
   return { heads, committed: true, ops };
 }
 
@@ -227,6 +229,61 @@ async function reshareToMembers(
     return 0;
   }
   return reshareObjects(local, reachablePids(local, heads), members, identity);
+}
+
+// The snapshot of `view` this working copy can read, or null when the tree is
+// dirty / holds unpublished commits. `pull`, `checkout` and `merge` only ever
+// advance a clean, not-ahead copy in v1 — merging a divergent local history is
+// deferred. Paths we hold no key for are never materialized, so they must not be
+// mistaken for local additions (a copy left on disk from before a key rotation
+// would otherwise wedge these commands on a phantom dirty tree).
+async function readyToSwitch(
+  root: string,
+  local: Repo,
+  cfg: Config,
+  view: string,
+  identity: Identity,
+  out: (line: string) => void
+): Promise<Map<string, Uint8Array> | null> {
+  const denied = new Set<string>();
+  const before = await baseSnapshot(local, view, identity, (p) =>
+    denied.add(p)
+  );
+  const { added, modified, deleted } = diffWorkingTree(root, before);
+  const dirty =
+    added.filter((p) => !denied.has(p)).length +
+    modified.length +
+    deleted.length;
+  if (dirty > 0) {
+    out('uncommitted changes — commit and push (or discard) first');
+    return null;
+  }
+  if (headsAhead(local, cfg.base, view) > 0) {
+    out("unpublished commits — run 'thaddeus push' or 'land' first");
+    return null;
+  }
+  return before;
+}
+
+// Make the on-disk tree mirror `view`: drop what `before` had and `view` lacks,
+// then write out everything the reader can decrypt.
+async function retree(
+  root: string,
+  local: Repo,
+  view: string,
+  identity: Identity,
+  before: ReadonlyMap<string, Uint8Array>
+): Promise<void> {
+  const after = await baseSnapshot(local, view, identity);
+  for (const path of before.keys()) {
+    if (!after.has(path)) {
+      const full = safeTarget(root, path);
+      if (full !== null) {
+        rmSync(full, { force: true });
+      }
+    }
+  }
+  await materializeToDisk(local, view, identity, root);
 }
 
 // Resolve the server for create/clone and strip it from the positionals.
@@ -480,7 +537,7 @@ export async function run(
           new FileBackend(join(target, '.thaddeus', 'store'))
         );
         await materializeToDisk(local, 'main', identity, target);
-        const cfg: Config = { server, repo, base: [...heads] };
+        const cfg: Config = { server, repo, base: [...heads], view: 'main' };
         saveConfig(target, cfg);
         out(
           `cloned ${repo} into ${dir} (${heads.length === 0 ? 'empty' : `${heads.length} head(s)`})`
@@ -494,48 +551,163 @@ export async function run(
           return 2;
         }
         const cfg = loadConfig(root);
+        const view = viewOf(cfg);
         const identity = loadIdentity(env.home);
         const backend = new FileBackend(join(root, '.thaddeus', 'store'));
         const local = await new Platform().openDurable(cfg.repo, backend);
-        // Safe v1: only fast-forward a clean, not-ahead working copy. Merging a
-        // divergent local history is a branches-era concern.
-        // A path we hold no key for is never materialized, so it must not be
-        // mistaken for a local addition — a copy left on disk from before a key
-        // rotation would otherwise wedge `pull` on a phantom dirty tree.
-        const denied = new Set<string>();
-        const before = await baseSnapshot(local, 'main', identity, (p) =>
-          denied.add(p)
+        const before = await readyToSwitch(
+          root,
+          local,
+          cfg,
+          view,
+          identity,
+          out
         );
-        const { added, modified, deleted } = diffWorkingTree(root, before);
-        const dirty =
-          added.filter((p) => !denied.has(p)).length +
-          modified.length +
-          deleted.length;
-        if (dirty > 0) {
-          out('uncommitted changes — commit and push (or discard) before pull');
-          return 2;
-        }
-        if (headsAhead(local, cfg.base) > 0) {
-          out(
-            "unpublished commits — run 'thaddeus push' or 'land' before pull"
-          );
+        if (before === null) {
           return 2;
         }
         const client = new Client(cfg.server, identity, env.fetchImpl);
-        const { heads } = await client.pull(cfg.repo, local, backend);
-        const after = await baseSnapshot(local, 'main', identity);
-        // Mirror upstream: remove what it deleted, then write what it has.
-        for (const path of before.keys()) {
-          if (!after.has(path)) {
-            const full = safeTarget(root, path);
-            if (full !== null) {
-              rmSync(full, { force: true });
-            }
-          }
-        }
-        await materializeToDisk(local, 'main', identity, root);
+        const { heads } = await client.pull(cfg.repo, local, backend, view);
+        await retree(root, local, view, identity, before);
         saveConfig(root, { ...cfg, base: [...heads] });
-        out(`pulled ${cfg.repo} (${heads.length} head(s))`);
+        out(`pulled ${cfg.repo}@${view} (${heads.length} head(s))`);
+        return 0;
+      }
+      case 'branch': {
+        const root = findRoot(env.cwd);
+        if (root === undefined) {
+          out("not a thaddeus working copy — run 'thaddeus clone' first");
+          return 2;
+        }
+        const cfg = loadConfig(root);
+        const view = viewOf(cfg);
+        const identity = loadIdentity(env.home);
+        const client = new Client(cfg.server, identity, env.fetchImpl);
+        const name = rest.find((a) => !a.startsWith('-'));
+        if (name === undefined) {
+          const views = await client.listViews(cfg.repo);
+          const names = Object.keys(views).sort();
+          if (wantsJson(rest)) {
+            out(JSON.stringify({ current: view, branches: names }));
+            return 0;
+          }
+          for (const b of names) {
+            out(`${b === view ? '*' : ' '} ${b}`);
+          }
+          return 0;
+        }
+        // A branch is a name over the current head-set — copy-on-write, never a
+        // copy of files. It carries no new ops, so it needs no land policy.
+        const local = await openLocal(root, cfg.repo);
+        const heads = [...local.log.heads(view)];
+        const created = await client.createView(cfg.repo, name, heads);
+        await local.log.repoint(name, created.heads);
+        out(
+          `created branch ${name} at ${created.heads.length} head(s) — 'thaddeus checkout ${name}' to switch`
+        );
+        return 0;
+      }
+      case 'checkout': {
+        const name = rest.find((a) => !a.startsWith('-'));
+        if (name === undefined) {
+          out('usage: thaddeus checkout <branch>');
+          return 2;
+        }
+        const root = findRoot(env.cwd);
+        if (root === undefined) {
+          out("not a thaddeus working copy — run 'thaddeus clone' first");
+          return 2;
+        }
+        const cfg = loadConfig(root);
+        const view = viewOf(cfg);
+        if (name === view) {
+          out(`already on ${name}`);
+          return 0;
+        }
+        const identity = loadIdentity(env.home);
+        const backend = new FileBackend(join(root, '.thaddeus', 'store'));
+        const local = await new Platform().openDurable(cfg.repo, backend);
+        const before = await readyToSwitch(
+          root,
+          local,
+          cfg,
+          view,
+          identity,
+          out
+        );
+        if (before === null) {
+          return 2;
+        }
+        const client = new Client(cfg.server, identity, env.fetchImpl);
+        const { heads } = await client.pull(cfg.repo, local, backend, name);
+        await retree(root, local, name, identity, before);
+        saveConfig(root, { ...cfg, view: name, base: [...heads] });
+        out(`switched to ${name} (${heads.length} head(s))`);
+        return 0;
+      }
+      case 'merge': {
+        const name = rest.find((a) => !a.startsWith('-'));
+        if (name === undefined) {
+          out('usage: thaddeus merge <branch>');
+          return 2;
+        }
+        const root = findRoot(env.cwd);
+        if (root === undefined) {
+          out("not a thaddeus working copy — run 'thaddeus clone' first");
+          return 2;
+        }
+        const cfg = loadConfig(root);
+        const view = viewOf(cfg);
+        if (name === view) {
+          out(`cannot merge ${name} into itself`);
+          return 2;
+        }
+        const identity = loadIdentity(env.home);
+        const backend = new FileBackend(join(root, '.thaddeus', 'store'));
+        const local = await new Platform().openDurable(cfg.repo, backend);
+        const before = await readyToSwitch(
+          root,
+          local,
+          cfg,
+          view,
+          identity,
+          out
+        );
+        if (before === null) {
+          return 2;
+        }
+        const client = new Client(cfg.server, identity, env.fetchImpl);
+        // Fetch the branch's ops so the merge (and its claims) can be computed
+        // locally, then land its heads into the current view UNDER POLICY —
+        // creating a branch is free, merging one is governed.
+        await client.pull(cfg.repo, local, backend, name);
+        const branchHeads = [...local.log.heads(name)];
+        if (branchHeads.length === 0) {
+          out(`branch ${name} has nothing to merge`);
+          return 0;
+        }
+        const incoming = opsAhead(local, local.log.heads(view), name);
+        const landed = await client.land(
+          cfg.repo,
+          branchHeads,
+          view,
+          mergeClaims(cfg.repo, incoming, identity)
+        );
+        if (!landed.landed) {
+          out(`not merged: ${landed.reason ?? 'blocked by policy'}`);
+          return 1;
+        }
+        const localOps = new Set(local.log.ops().map((o) => o.id));
+        if (!landed.heads.every((h) => localOps.has(h))) {
+          out('merged, but the remote has changes not in your clone — pull');
+          return 0;
+        }
+        await local.log.repoint(view, landed.heads);
+        await retree(root, local, view, identity, before);
+        saveConfig(root, { ...cfg, base: [...landed.heads] });
+        out(
+          `merged ${name} into ${view} (${incoming.length} op(s), ${landed.heads.length} head(s))`
+        );
         return 0;
       }
       case 'status': {
@@ -545,23 +717,33 @@ export async function run(
           return 2;
         }
         const cfg = loadConfig(root);
+        const view = viewOf(cfg);
         const identity = loadIdentity(env.home);
         const local = await openLocal(root, cfg.repo);
         // Files this identity holds no capability for are skipped, not fatal.
         const skipped: string[] = [];
-        const snap = await baseSnapshot(local, 'main', identity, (p) =>
+        const snap = await baseSnapshot(local, view, identity, (p) =>
           skipped.push(p)
         );
         const { added, modified, deleted } = diffWorkingTree(root, snap);
-        const ahead = headsAhead(local, cfg.base);
+        const ahead = headsAhead(local, cfg.base, view);
         const clean =
           added.length + modified.length + deleted.length === 0 && ahead === 0;
         if (wantsJson(rest)) {
           out(
-            JSON.stringify({ clean, added, modified, deleted, ahead, skipped })
+            JSON.stringify({
+              branch: view,
+              clean,
+              added,
+              modified,
+              deleted,
+              ahead,
+              skipped,
+            })
           );
           return 0;
         }
+        out(`on branch ${view}`);
         if (clean && skipped.length === 0) {
           out('clean');
           return 0;
@@ -597,6 +779,7 @@ export async function run(
           return 2;
         }
         const cfg = loadConfig(root);
+        const view = viewOf(cfg);
         const identity = loadIdentity(env.home);
         const local = await openLocal(root, cfg.repo);
         // Two modes. Default: the base 'main' snapshot vs the working tree on
@@ -607,9 +790,9 @@ export async function run(
         if (values.staged === true) {
           local.log.view('_diffbase', cfg.base);
           base = await baseSnapshot(local, '_diffbase', identity);
-          target = await baseSnapshot(local, 'main', identity);
+          target = await baseSnapshot(local, view, identity);
         } else {
-          base = await baseSnapshot(local, 'main', identity);
+          base = await baseSnapshot(local, view, identity);
           target = new Map<string, Uint8Array>();
           for (const p of listWorkingFiles(root)) {
             target.set(p, new Uint8Array(readFileSync(join(root, p))));
@@ -669,14 +852,16 @@ export async function run(
           return 2;
         }
         const cfg = loadConfig(root);
+        const view = viewOf(cfg);
         const identity = loadIdentity(env.home);
         const local = await openLocal(root, cfg.repo);
         const { heads, committed, ops } = await commitDiff(
           root,
           local,
-          identity
+          identity,
+          view
         );
-        const ahead = headsAhead(local, cfg.base);
+        const ahead = headsAhead(local, cfg.base, view);
         if (!committed && ahead === 0) {
           out('nothing to publish');
           return 0;
@@ -688,7 +873,8 @@ export async function run(
         // silently dropped and every clone carries it.
         const message = values.message;
         const provenance: Provenance[] = [];
-        const whyTarget = ops.length > 0 ? ops : opsAhead(local, cfg.base);
+        const whyTarget =
+          ops.length > 0 ? ops : opsAhead(local, cfg.base, view);
         if (
           message !== undefined &&
           message.length > 0 &&
@@ -731,7 +917,7 @@ export async function run(
         const landed = await client.land(
           cfg.repo,
           heads,
-          'main',
+          view,
           mergeClaims(cfg.repo, whyTarget, identity)
         );
         if (!landed.landed) {
@@ -743,7 +929,7 @@ export async function run(
         const localOps = new Set(local.log.ops().map((o) => o.id));
         const allPresent = landed.heads.every((h) => localOps.has(h));
         if (allPresent) {
-          await local.log.repoint('main', landed.heads);
+          await local.log.repoint(view, landed.heads);
           saveConfig(root, { ...cfg, base: [...landed.heads] });
           out(`published to main (${landed.heads.length} head(s))`);
         } else {
@@ -760,17 +946,18 @@ export async function run(
           return 2;
         }
         const cfg = loadConfig(root);
+        const view = viewOf(cfg);
         const identity = loadIdentity(env.home);
         const local = await openLocal(root, cfg.repo);
-        const heads = [...local.log.heads('main')];
+        const heads = [...local.log.heads(view)];
         const client = new Client(cfg.server, identity, env.fetchImpl);
         // Mint a merge claim for each committed-but-unpublished op being landed.
         const claims = mergeClaims(
           cfg.repo,
-          opsAhead(local, cfg.base),
+          opsAhead(local, cfg.base, view),
           identity
         );
-        const landed = await client.land(cfg.repo, heads, 'main', claims);
+        const landed = await client.land(cfg.repo, heads, view, claims);
         if (!landed.landed) {
           out(`not landed: ${landed.reason ?? 'nothing to land'}`);
           return 1;
@@ -778,7 +965,7 @@ export async function run(
         const localOps = new Set(local.log.ops().map((o) => o.id));
         const allPresent = landed.heads.every((h) => localOps.has(h));
         if (allPresent) {
-          await local.log.repoint('main', landed.heads);
+          await local.log.repoint(view, landed.heads);
           saveConfig(root, { ...cfg, base: [...landed.heads] });
           out(`landed to main (${landed.heads.length} head(s))`);
         } else {
@@ -808,14 +995,15 @@ export async function run(
           return 2;
         }
         const cfg = loadConfig(root);
+        const view = viewOf(cfg);
         const identity = loadIdentity(env.home);
         const local = await openLocal(root, cfg.repo);
         // Fold any pending disk edits into main first, so the rename operates on
         // the latest committed code.
-        await commitDiff(root, local, identity);
+        await commitDiff(root, local, identity, view);
         // Open a workspace over main and resolve the symbol by its current name.
         const ws = Workspace.open(local.log, local.store, {
-          source: 'main',
+          source: view,
           reader: identity,
           name: 'rename',
         });
@@ -840,8 +1028,8 @@ export async function run(
         // Advance local main to the rename commit and write the renamed code to
         // disk so the working tree reflects it.
         const heads = [...local.log.heads('rename')];
-        await local.log.repoint('main', heads);
-        await materializeToDisk(local, 'main', identity, root);
+        await local.log.repoint(view, heads);
+        await materializeToDisk(local, view, identity, root);
         // Persist the SymbolOp locally so `history` reads it offline.
         const symopLog = new SymbolOpLog(repoScope(root, cfg.repo));
         await symopLog.ingest(symbolOp);
@@ -879,7 +1067,7 @@ export async function run(
         const landed = await client.land(
           cfg.repo,
           heads,
-          'main',
+          view,
           mergeClaims(cfg.repo, ops, identity)
         );
         if (!landed.landed) {
@@ -890,7 +1078,7 @@ export async function run(
         }
         const localOps = new Set(local.log.ops().map((o) => o.id));
         if (landed.heads.every((h) => localOps.has(h))) {
-          await local.log.repoint('main', landed.heads);
+          await local.log.repoint(view, landed.heads);
           saveConfig(root, { ...cfg, base: [...landed.heads] });
           out(`published to main (${landed.heads.length} head(s))`);
         } else {
@@ -912,13 +1100,14 @@ export async function run(
           return 2;
         }
         const cfg = loadConfig(root);
+        const view = viewOf(cfg);
         const identity = loadIdentity(env.home);
         const local = await openLocal(root, cfg.repo);
         const symopLog = await SymbolOpLog.load(repoScope(root, cfg.repo));
         // Resolve `arg` as a current symbol name (via the graph); fall back to
         // treating it as a raw symbol id (e.g. an old, now-renamed name's id).
         const ws = Workspace.open(local.log, local.store, {
-          source: 'main',
+          source: view,
           reader: identity,
           name: 'history',
         });
@@ -982,6 +1171,7 @@ export async function run(
           return 2;
         }
         const cfg = loadConfig(root);
+        const view = viewOf(cfg);
         const local = await openLocal(root, cfg.repo);
         const provLog = await ProvenanceLog.load(
           local.store,
@@ -1004,7 +1194,7 @@ export async function run(
           out(`invalid --until: ${values.until}`);
           return 2;
         }
-        const ops = opsOnView(local, 'main').filter((op) => {
+        const ops = opsOnView(local, view).filter((op) => {
           const t = Date.parse(op.at);
           return (
             (sinceMs === undefined || t >= sinceMs) &&
@@ -1061,13 +1251,14 @@ export async function run(
           return 2;
         }
         const cfg = loadConfig(root);
+        const view = viewOf(cfg);
         const local = await openLocal(root, cfg.repo);
         const provLog = await ProvenanceLog.load(
           local.store,
           repoScope(root, cfg.repo)
         );
         // Resolve a short op-id prefix (as printed by `log`) to a full op.
-        const matches = opsOnView(local, 'main').filter((o) =>
+        const matches = opsOnView(local, view).filter((o) =>
           o.id.startsWith(prefix)
         );
         if (matches.length === 0) {
@@ -1124,10 +1315,11 @@ export async function run(
           return 2;
         }
         const cfg = loadConfig(root);
+        const view = viewOf(cfg);
         const identity = loadIdentity(env.home);
         const local = await openLocal(root, cfg.repo);
         // Resolve a short op-id prefix (as printed by `log`) to a full op.
-        const matches = opsOnView(local, 'main').filter((o) =>
+        const matches = opsOnView(local, view).filter((o) =>
           o.id.startsWith(prefix)
         );
         if (matches.length === 0) {
@@ -1175,9 +1367,10 @@ export async function run(
           return 2;
         }
         const cfg = loadConfig(root);
+        const view = viewOf(cfg);
         const local = await openLocal(root, cfg.repo);
         const vetoLog = await VetoLog.load(repoScope(root, cfg.repo));
-        const matches = opsOnView(local, 'main').filter((o) =>
+        const matches = opsOnView(local, view).filter((o) =>
           o.id.startsWith(prefix)
         );
         if (matches.length === 0) {
@@ -1234,6 +1427,7 @@ export async function run(
           return 2;
         }
         const cfg = loadConfig(root);
+        const view = viewOf(cfg);
         const identity = loadIdentity(env.home);
         const paths =
           values.paths !== undefined
@@ -1264,7 +1458,7 @@ export async function run(
         // we can read for them and publish the new caps (reusing push). We can
         // only share what this working copy can decrypt — pull first if stale.
         const local = await openLocal(root, cfg.repo);
-        const heads = [...local.log.heads('main')];
+        const heads = [...local.log.heads(view)];
         const shared = await reshareObjects(
           local,
           reachablePids(local, heads),

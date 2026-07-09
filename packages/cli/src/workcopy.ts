@@ -16,6 +16,15 @@ export interface Config {
   server: string;
   repo: string;
   base: string[];
+  // The checked-out branch (a named view). Absent in working copies created
+  // before branches existed, which are all on `main`.
+  view?: string;
+}
+
+// The branch a working copy is on. A view is a name over a head-set, so
+// switching branches copies head ids, never files.
+export function viewOf(cfg: Config): string {
+  return cfg.view ?? 'main';
 }
 
 // Walk up from `cwd` to the nearest directory containing a `.thaddeus/` dir.

@@ -1,4 +1,4 @@
-export { Platform, Repo } from './platform';
+export { INTERNAL_VIEW_PREFIX, Platform, Repo } from './platform';
 export {
   allowAll,
   blockOnConflict,

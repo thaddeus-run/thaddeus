@@ -196,6 +196,31 @@ export class Client {
     return [...new Set(dids)].sort();
   }
 
+  // The repo's branches and their heads. A branch is a name over a head-set, so
+  // this is cheap and never touches content. Public read, like the rest.
+  async listViews(name: string): Promise<Record<string, string[]>> {
+    const res = await this.#fetch(
+      new Request(`${this.#server}/repos/${encodeURIComponent(name)}/views`)
+    );
+    const body = (await this.#ok(res)) as { views: Record<string, string[]> };
+    return body.views;
+  }
+
+  // Create a branch at an already-ingested head-set. Creating a branch adds no
+  // ops, so no land policy applies; merging it back still goes through `land`.
+  async createView(
+    name: string,
+    view: string,
+    heads: readonly string[]
+  ): Promise<{ view: string; heads: string[] }> {
+    const res = await this.#signed(
+      'POST',
+      `/repos/${encodeURIComponent(name)}/views`,
+      { view, heads: [...heads] }
+    );
+    return (await this.#ok(res)) as { view: string; heads: string[] };
+  }
+
   async listRepos(): Promise<readonly string[]> {
     // Pass a Request object so both the global fetch and an injected server
     // handler (which calls new URL(req.url)) receive a well-formed input.
