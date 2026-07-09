@@ -255,6 +255,17 @@ mod tests {
     }
 
     #[test]
+    fn an_unknown_envelope_version_is_skipped_not_fatal() {
+        let unknown = STANDARD.encode(
+            br#"{"v":"tplv2","d":{"id":"x","path":"a","at":"t","author":"d","lamport":1}}"#,
+        );
+        let good = wire_record(r#"{"id":"y","path":"b","at":"t","author":"d","lamport":2}"#);
+        let ops = decode_all::<Op>(&[unknown, good]);
+        assert_eq!(ops.len(), 1);
+        assert_eq!(ops[0].id, "y");
+    }
+
+    #[test]
     fn assembles_a_pull_newest_first_with_indexed_why_and_veto() {
         let resp = PullResponse {
             heads: vec!["h".into()],
