@@ -7,6 +7,31 @@ All notable changes to Thaddeus. Format follows
 
 ### Added
 
+- **Branches as copy-on-write workspaces — you never switch a tree (Pillar
+  05).** A branch is a name over a head-set (it copies op ids, never files), and
+  a working copy is now equally cheap: `thaddeus workspace <branch> [dir]` opens
+  a branch as its **own directory over the origin's shared object store** — the
+  new directory holds a config and materialized files, never a store copy. So
+  working copies are effectively free and unlimited, the **same branch can be
+  open in several directories at once** (what `git worktree` forbids), creating
+  one never touches the origin (no clean-tree gate, no hijacked tree), and there
+  is deliberately **no `checkout`** — `checkout`/`merge` exist only as stubs
+  that teach the model. There is no merge ceremony either: **landing is the
+  merge** — `thaddeus land <branch>` lands that branch's ops into the current
+  one as a single re-point gated by the server's policy (conflict, delegation
+  scope, standing veto, any reputation floor). New `branch` (list or create,
+  `--json`); the working copy records its branch + shared-store pointer in
+  `.thaddeus/config.json` (absent = `main` / own store, so older copies keep
+  working), and `status` reports the branch. **Creating a branch introduces no
+  operations**, so it bypasses the land policy via a create-only
+  `POST /repos/:name/views` (409 if it exists — re-pointing a view must go
+  through `land`, where the gates run); landing into a fresh view would
+  otherwise have re-checked the entire history against a delegate's path/budget
+  scope. `GET /repos/:name/views` lists branches; `OpLog` gains
+  `views()`/`hasView()`, and every internal view (`land`'s dry-run and
+  `incoming` frontiers) lives under a reserved `land/` prefix so it can never
+  surface as a branch. Caveat: the shared store is single-process — don't run
+  two thaddeus commands over it at the same instant.
 - **Collaboration actually works: capability-sharing + `thaddeus pull`.** A
   `Delegation` conveyed _write_ authority only, so a granted collaborator cloned
   ciphertext it could not decrypt — and because `store.put` seals a new object's

@@ -13,10 +13,12 @@ Working tree
   repos  [--mine]               list server repos (--mine = owned by you)
   delete <repo> --yes           delete a repo you own (irreversible)
   pull                          fetch landed changes into this working copy
+  branch [<name>]               list branches, or create one here
+  workspace <branch> [dir]      open a branch as its own working copy (COW)
   status                        show working-tree changes
   diff   [--staged] [path...]   show a line diff of working-tree changes
   push   [-m "<why>"]           commit + upload (+ a signed why) + land
-  land                          land uploaded-but-unmerged commits
+  land   [<branch>]             land commits — or a branch — under policy
 
 History & meaning
   log    [--since D] [--until D]  main's history with the why per change
@@ -93,6 +95,24 @@ export const HELP: Record<string, string> = {
   (removing what was deleted upstream). Refuses when the working tree is dirty
   or you hold unpublished commits — commit and push (or discard) first.`,
 
+  branch: `thaddeus branch [<name>] [--json]
+
+  With no argument, list the repo's branches and mark this working copy's. With
+  a name, create a branch at your current branch's heads. A branch is a name
+  over a head-set (copy-on-write) — it copies ids, never files — so creating one
+  adds no operations and needs no land policy. Open it in its own directory with
+  'thaddeus workspace <name>'; land it back with 'thaddeus land <name>'.`,
+
+  workspace: `thaddeus workspace <branch> [dir]
+
+  Open <branch> as its OWN working copy in [dir] (default: a sibling of this
+  working copy, named <copy>-<branch>, e.g. web-feature). Copy-on-write over the origin's object store: the new
+  directory holds a config and your files, never a store copy — so working
+  copies are cheap and unlimited, the same branch can be open in several at
+  once, and nothing ever switches or hijacks an existing tree. There is no
+  checkout. (The shared store is single-process: don't run two thaddeus
+  commands over it at the same instant.)`,
+
   status: `thaddeus status [--json]
 
   Show working-tree changes against the base snapshot (added / modified /
@@ -111,10 +131,14 @@ export const HELP: Record<string, string> = {
   signed provenance "why" to each published op. --no-land uploads without
   landing (finish later with 'thaddeus land').`,
 
-  land: `thaddeus land
+  land: `thaddeus land [<branch>]
 
-  Land already-uploaded but unmerged commits onto 'main' under the server's
-  policy. A blocked land reports the reason and leaves 'main' untouched.`,
+  With no argument: land your already-uploaded but unmerged commits onto the
+  current branch, under the server's policy. With a branch: land THAT branch's
+  ops into the branch you're on — this is not a 3-way merge and there is no
+  merge ceremony; the ops were signed at commit, and landing is one re-point
+  gated by policy (conflict, delegation scope, standing veto, any reputation
+  floor). A blocked land reports the reason and leaves your branch untouched.`,
 
   log: `thaddeus log [--since <ISO>] [--until <ISO>] [--json]
 

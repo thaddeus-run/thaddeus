@@ -16,6 +16,27 @@ export interface Config {
   server: string;
   repo: string;
   base: string[];
+  // The branch this working copy is pinned to (a named view). Absent in
+  // working copies created before branches existed, which are all on `main`.
+  view?: string;
+  // Absolute path to a SHARED object store. A `thaddeus workspace` is a second
+  // (third, …) working copy over the origin clone's store — copy-on-write: the
+  // workspace holds only a config + materialized files, never a store copy.
+  // Absent = this working copy owns its own `.thaddeus/store` (a clone).
+  store?: string;
+}
+
+// The branch a working copy is pinned to. A view is a name over a head-set, so
+// a working copy per branch costs ids, never files.
+export function viewOf(cfg: Config): string {
+  return cfg.view ?? 'main';
+}
+
+// The object store this working copy reads/writes — its own, or the shared one
+// a `workspace` points at. NOTE: the store is single-process (not
+// concurrency-safe); don't run two commands over the same store at once.
+export function storePath(root: string, cfg: Config): string {
+  return cfg.store ?? join(root, '.thaddeus', 'store');
 }
 
 // Walk up from `cwd` to the nearest directory containing a `.thaddeus/` dir.

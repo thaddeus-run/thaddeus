@@ -10,6 +10,7 @@ import type { Op } from '@thaddeus.run/log';
 import {
   blockOnConflict,
   blockOnVeto,
+  INTERNAL_VIEW_PREFIX,
   type LandPolicy,
   Platform,
   type Repo,
@@ -440,6 +441,84 @@ export function createServer(config: ServerConfig): Server {
     return json(200, { view, heads: [...repo.log.heads(view)] });
   }
 
+  // GET /repos/:name/views — the repo's branches and their heads. A public read,
+  // like the rest of the mirror: head ids are already public.
+  async function listViews(name: string): Promise<Response> {
+    const repo = await getRepo(name);
+    if (repo === undefined) {
+      return json(404, { error: `no repo ${name}` });
+    }
+    const views: Record<string, string[]> = {};
+    for (const branch of repo.branches()) {
+      views[branch] = [...repo.log.heads(branch)];
+    }
+    return json(200, { views });
+  }
+
+  // POST /repos/:name/views — create a branch at an already-ingested head-set.
+  // Creating a branch introduces NO new ops, so no land policy applies (landing
+  // into a fresh view would otherwise re-check the entire history against a
+  // delegate's path/budget scope). CREATE-ONLY: re-pointing an existing view
+  // must go through `land`, so its policy gates always run.
+  async function createView(
+    name: string,
+    req: Request,
+    body: Uint8Array
+  ): Promise<Response> {
+    const signer = verifyRequest(
+      'POST',
+      new URL(req.url).pathname,
+      body,
+      headers(req),
+      Date.parse(now())
+    );
+    if (signer === null) {
+      return json(401, { error: 'unsigned or invalid request' });
+    }
+    const parsed = safeParseJson(body);
+    if (parsed === undefined || parsed === null || typeof parsed !== 'object') {
+      return json(400, { error: 'invalid JSON body' });
+    }
+    const { view, heads } = parsed as { view?: unknown; heads?: unknown };
+    if (typeof view !== 'string' || view.length === 0) {
+      return json(400, { error: 'missing view name' });
+    }
+    if (view.startsWith(INTERNAL_VIEW_PREFIX)) {
+      return json(400, { error: `reserved view name ${view}` });
+    }
+    if (!Array.isArray(heads) || heads.some((h) => typeof h !== 'string')) {
+      return json(400, { error: 'heads must be an array of op ids' });
+    }
+    return withRepoLock(name, async () => {
+      const meta = await readMeta(name);
+      if (meta === undefined) {
+        return json(404, { error: `no repo ${name}` });
+      }
+      const reg = await registryFor(name);
+      if (
+        signer !== meta.owner &&
+        !(reg.delegationFor(signer) !== undefined && !reg.isRevoked(signer))
+      ) {
+        return json(403, { error: 'not authorized to write this repo' });
+      }
+      const repo = await getRepo(name);
+      if (repo === undefined) {
+        return json(404, { error: `no repo ${name}` });
+      }
+      if (repo.log.hasView(view)) {
+        return json(409, { error: `view ${view} already exists` });
+      }
+      const known = new Set(repo.log.ops().map((o) => o.id));
+      for (const head of heads as string[]) {
+        if (!known.has(head)) {
+          return json(400, { error: `unknown head ${head}` });
+        }
+      }
+      await repo.log.repoint(view, heads as string[]);
+      return json(201, { view, heads });
+    });
+  }
+
   // Returns the reachable bundle for a view: ops in lamport order, plus the
   // CURRENT ciphertext object and its served caps for each plaintext_id an
   // op's payload references. Use this for clone (pull main).
@@ -732,8 +811,9 @@ export function createServer(config: ServerConfig): Server {
       const priorInto = [...repo.log.heads(target)];
       // Ephemeral in-memory source view: reuse a constant name so the view
       // count stays bounded. Safe because withRepoLock serializes land calls
-      // per repo — each land overwrites the view before reading it.
-      const src = 'incoming';
+      // per repo — each land overwrites the view before reading it. It lives
+      // under the internal prefix so it never surfaces as a branch.
+      const src = `${INTERNAL_VIEW_PREFIX}incoming`;
       repo.log.view(src, fromHeads);
       // Compose the base policy with delegation enforcement AND the durable
       // standing veto: every non-owner op is path+budget gated (the owner is
@@ -1000,6 +1080,22 @@ export function createServer(config: ServerConfig): Server {
           return json(400, { error: 'malformed path' });
         }
         return deleteRepo(repoName, req, body);
+      }
+      // /repos/:name/views — list the branches, or create one.
+      const viewsMatch = path.match(/^\/repos\/(.+)\/views$/);
+      if (viewsMatch !== null && req.method === 'GET') {
+        const repoName = safeDecode(viewsMatch[1]);
+        if (repoName === undefined) {
+          return json(400, { error: 'malformed path' });
+        }
+        return listViews(repoName);
+      }
+      if (viewsMatch !== null && req.method === 'POST') {
+        const repoName = safeDecode(viewsMatch[1]);
+        if (repoName === undefined) {
+          return json(400, { error: 'malformed path' });
+        }
+        return createView(repoName, req, body);
       }
       // /repos/:name/views/:view  and  /repos/:name/pull
       // Names can contain '/' (e.g. "acme/web"); split on the fixed suffixes.

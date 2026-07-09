@@ -13,6 +13,12 @@ import { blockOnConflict, type LandPolicy, type LandResult } from './policy';
 // Process-local counter for unique throwaway dry-run view names.
 let landSeq = 0;
 
+// `land` dry-runs each merge on a throwaway view that is never collected (spec
+// §11), and views are persisted — so those names would otherwise appear as
+// branches. Every internal view lives under this prefix: filter it out of any
+// branch listing, and never let a caller create a view inside it.
+export const INTERNAL_VIEW_PREFIX = 'land/';
+
 // Sorted, de-duplicated union of two head-sets — the proposed merged frontier.
 // Sorted so the result is independent of which side is `into` vs `from`.
 function mergeHeads(
@@ -67,6 +73,12 @@ export class Repo {
     return this.log.conflicts(view);
   }
 
+  // The repo's branches: every named view except `land`'s internal dry-run ones.
+  // A branch is a name over a head-set (copy-on-write), never a copy of files.
+  branches(): readonly string[] {
+    return this.log.views().filter((v) => !v.startsWith(INTERNAL_VIEW_PREFIX));
+  }
+
   // Land a workspace's committed view onto a shared view, gated by policy.
   // Dry-runs the merge on a throwaway view to build the proposal, runs the
   // policy, and re-points `into` ONLY on allow (fail-closed: a rejected landing
@@ -87,7 +99,7 @@ export class Repo {
 
     // Dry-run on a throwaway view; `into` is untouched until the policy allows.
     // The tmp view is intentionally left in the log's view map (no GC — spec §11 spike non-goal).
-    const tmp = `land/${into}/${landSeq++}`;
+    const tmp = `${INTERNAL_VIEW_PREFIX}${into}/${landSeq++}`;
     this.log.view(tmp, mergedHeads);
     const conflicts = this.log.conflicts(tmp);
 

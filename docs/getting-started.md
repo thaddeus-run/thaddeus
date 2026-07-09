@@ -150,7 +150,34 @@ un-read what was already shared.
 > choose. `.thaddeusignore` is seeded from `.gitignore`, which usually ignores
 > `.env` — un-ignore it with a `!.env` line to track it.
 
-## 7. Meaning layers
+## 7. Branches are free — and you never switch
+
+A branch is a **name over a head-set**, not a copy of files. And a working copy
+is a cheap, **copy-on-write view** over one shared object store — so you don't
+_switch_ branches, you open each one in its own directory. There is no
+`checkout`, no clean-tree dance, and no `git worktree` misery: the same branch
+can be open in several directories at once, and nothing ever hijacks your tree.
+
+```sh
+thaddeus branch                   # list branches, * marks this copy's
+thaddeus branch feature           # create one at your current heads (free)
+thaddeus workspace feature        # open it as its own directory (../web-feature)
+cd ../web-feature
+echo 'fn login() {}' > src/auth.rs
+thaddeus push -m "add login"      # lands on `feature`; main's copy untouched
+
+cd ../web                         # your main working copy, exactly as you left it
+thaddeus land feature             # land the branch into main, under policy
+```
+
+The workspace directory holds a config and your files — **never a second object
+store** — which is why it's instant. Creating a branch adds **no operations**,
+so it needs no policy. **Landing** one does: there is no merge ceremony — the
+ops were signed at commit, and `land` is one re-point gated by the server's
+policy (conflict, delegation scope, standing veto, any reputation floor). A
+blocked land leaves your branch untouched.
+
+## 8. Meaning layers
 
 - **Veto (a standing human "no"):** a reviewer blocks a landing, even a green
   one. `thaddeus veto <op> -m "ships a secret"`; list with
@@ -165,7 +192,7 @@ un-read what was already shared.
   `thaddeus grant <did> --paths 'src/**' --max-changes 50`; `thaddeus grants`;
   `thaddeus revoke <did>`.
 
-## 8. Browse it in a TUI
+## 9. Browse it in a TUI
 
 [`lazythad`](../lazythad/README.md) is a lazygit-style terminal UI over a
 server's public mirror (repos, the op log, the why, vetoes, reputation):
