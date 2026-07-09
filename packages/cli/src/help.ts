@@ -28,6 +28,8 @@ History & meaning
   vetoes <op>                     list the standing vetoes on one op
   rename <old> <new> [-m "<why>"] rename a symbol as one signed SymbolOp
   history <symbol>                a symbol's signed rename chain
+  release <tag>                   sign immutable server-history metadata
+  releases [tag]                  list releases or show one
 
 Access & trust
   grant  <did> [--paths a,b] [--max-changes N]  grant push to a DID/agent
@@ -187,6 +189,21 @@ thaddeus diff [--from <branch>] [--to <branch>] [path...] [--json]
   Show a symbol's signed rename chain. <symbol> is a live name, a full symbol
   id, or an id prefix (as 'rename' prints).`,
 
+  release: `thaddeus release <tag> [--view <branch>] [--notes <text>]
+                         [--notes-file <path>] [--artifact <path>]...
+                         [--artifact-uri <name=uri,sha256=<hex>>]... [--json]
+
+  Create an immutable signed release over the server's current committed view.
+  The default view is this working copy's branch (or main). Dirty files and
+  local-only operations are ignored. --artifact hashes a local file and stores
+  only its name, path, SHA-256, and size; bytes are never uploaded.
+  --artifact-uri records externally hosted metadata with a required SHA-256.`,
+
+  releases: `thaddeus releases [tag] [--json]
+
+  List immutable releases newest-first, or show one release with its signer,
+  view snapshot, notes, and artifact metadata. JSON signatures are base64.`,
+
   grant: `thaddeus grant <did> [--paths a,b] [--max-changes N]
 
   Grant <did> push access to the repo, scoped to --paths (globs, default **)
@@ -211,7 +228,9 @@ thaddeus diff [--from <branch>] [--to <branch>] [path...] [--json]
   policy: `thaddeus policy [--json]
 thaddeus policy set [--require-provenance] [--require-checks ci,proof]
                     [--protect globs --allow dids]
-                    [--forbid-deletes] [--forbid-paths globs] [--json]
+                    [--forbid-deletes] [--forbid-paths globs]
+                    [--release-creators owner|delegates|allowList]
+                    [--release-allow dids] [--json]
 thaddeus policy clear [--json]
 
   Show or owner-select this repo's land policy. 'set' overwrites the whole
@@ -221,7 +240,9 @@ thaddeus policy clear [--json]
   checker actor kinds (default examples: ci, proof). --protect blocks changes
   to protected path globs unless authored by --allow dids; when --allow is
   omitted, your DID is allowed. --forbid-deletes and --forbid-paths add typed
-  standing queries. Changes take effect on the next land; no server restart.`,
+  standing queries. Release creation is owner-only by default; delegates admits
+  active non-revoked delegates, while allowList admits the named DIDs. Changes
+  take effect on the next land or release; no server restart.`,
 
   reputation: `thaddeus reputation <did> [--server <url>] [--json]
 

@@ -58,6 +58,7 @@ function defaultPolicy(): RepoPolicyRecord {
     standingQueries: [],
     requireVerifiedProvenance: false,
     requirePassingChecks: null,
+    release: { creators: 'owner', allow: [] },
   };
 }
 

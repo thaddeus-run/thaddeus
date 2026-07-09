@@ -4,6 +4,7 @@ export { DEFAULT_REPO_POLICY, normalizeRepoPolicy } from './repo-policy';
 export type {
   RepoPassingChecksPolicy,
   RepoPolicyRecord,
+  RepoReleasePolicy,
   RepoRestrictPathsPolicy,
   RepoStandingQueryPolicy,
 } from './repo-policy';
@@ -18,7 +19,9 @@ export {
   decodeBundle,
   decodeClaim,
   decodeDelegation,
+  decodeRelease,
   encodeBundle,
   encodeClaim,
   encodeDelegation,
+  encodeRelease,
 } from './dto';

@@ -3,7 +3,14 @@
 
 use ratatui::crossterm::event::{KeyCode, KeyEvent};
 
-use crate::client::{Op, Pull, Remote, Reputation};
+use crate::client::{Op, Pull, Release, Remote, Reputation};
+
+/// The activity shown in the middle and detail panes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Activity {
+    Log,
+    Releases,
+}
 
 /// Which pane has the keyboard.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -20,6 +27,9 @@ pub struct App {
     pub view: String,
     pub pull: Pull,
     pub op_sel: usize,
+    pub releases: Vec<Release>,
+    pub release_sel: usize,
+    pub activity: Activity,
     pub focus: Focus,
     pub status: String,
     /// When `Some`, a reputation overlay is shown for a DID.
@@ -39,6 +49,9 @@ impl App {
             view: "main".to_string(),
             pull: Pull::default(),
             op_sel: 0,
+            releases: Vec::new(),
+            release_sel: 0,
+            activity: Activity::Log,
             focus: Focus::Repos,
             status: String::new(),
             reputation: None,
@@ -62,33 +75,55 @@ impl App {
         }
     }
 
-    /// Pull the selected repo's current view into the log pane.
+    /// Pull the selected repo's current view and immutable releases together.
     pub fn load_selected_repo(&mut self) {
         self.op_sel = 0;
+        self.release_sel = 0;
         self.reputation = None;
         let Some(repo) = self.repos.get(self.repo_sel).cloned() else {
             self.pull = Pull::default();
+            self.releases.clear();
             return;
         };
-        match self.remote.pull(&repo, &self.view) {
-            Ok(pull) => {
+        let pull = self.remote.pull(&repo, &self.view);
+        let releases = self.remote.releases(&repo);
+        match (pull, releases) {
+            (Ok(pull), Ok(releases)) => {
                 self.status = format!(
-                    "{}  ·  {} op(s)  ·  {} head(s)",
+                    "{}  ·  {} op(s)  ·  {} release(s)  ·  {} head(s)",
                     repo,
                     pull.ops.len(),
+                    releases.len(),
                     pull.heads.len()
                 );
                 self.pull = pull;
+                self.releases = releases;
             }
-            Err(e) => {
+            (Err(e), Ok(releases)) => {
                 self.pull = Pull::default();
+                self.releases = releases;
                 self.status = format!("error pulling {repo}: {e}");
+            }
+            (Ok(pull), Err(e)) => {
+                self.pull = pull;
+                self.releases.clear();
+                self.status = format!("error loading releases for {repo}: {e}");
+            }
+            (Err(pull_error), Err(release_error)) => {
+                self.pull = Pull::default();
+                self.releases.clear();
+                self.status =
+                    format!("error loading {repo}: pull: {pull_error}; releases: {release_error}");
             }
         }
     }
 
     pub fn selected_op(&self) -> Option<&Op> {
         self.pull.ops.get(self.op_sel)
+    }
+
+    pub fn selected_release(&self) -> Option<&Release> {
+        self.releases.get(self.release_sel)
     }
 
     // Moving the cursor is pure state; `on_key` decides whether a move in the
@@ -101,11 +136,15 @@ impl App {
                     self.repo_sel += 1;
                 }
             }
-            Focus::Log => {
-                if self.op_sel + 1 < self.pull.ops.len() {
+            Focus::Log => match self.activity {
+                Activity::Log if self.op_sel + 1 < self.pull.ops.len() => {
                     self.op_sel += 1;
                 }
-            }
+                Activity::Releases if self.release_sel + 1 < self.releases.len() => {
+                    self.release_sel += 1;
+                }
+                _ => {}
+            },
         }
     }
 
@@ -114,14 +153,18 @@ impl App {
             Focus::Repos => {
                 self.repo_sel = self.repo_sel.saturating_sub(1);
             }
-            Focus::Log => {
-                self.op_sel = self.op_sel.saturating_sub(1);
-            }
+            Focus::Log => match self.activity {
+                Activity::Log => self.op_sel = self.op_sel.saturating_sub(1),
+                Activity::Releases => self.release_sel = self.release_sel.saturating_sub(1),
+            },
         }
     }
 
     /// Fetch and show the reputation of the selected op's author.
     fn show_reputation(&mut self) {
+        if self.activity != Activity::Log {
+            return;
+        }
         let Some(author) = self.selected_op().map(|o| o.author.clone()) else {
             return;
         };
@@ -177,6 +220,12 @@ impl App {
             }
             KeyCode::Char('r') => self.refresh(),
             KeyCode::Char('R') => self.show_reputation(),
+            KeyCode::Char('t') => {
+                self.activity = match self.activity {
+                    Activity::Log => Activity::Releases,
+                    Activity::Releases => Activity::Log,
+                };
+            }
             _ => {}
         }
     }
@@ -185,7 +234,7 @@ impl App {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::client::Op;
+    use crate::client::{Op, Release};
     use std::collections::HashMap;
 
     fn op(id: &str, lamport: i64) -> Op {
@@ -195,6 +244,20 @@ mod tests {
             at: "t".into(),
             author: "did:key:zA".into(),
             lamport,
+        }
+    }
+
+    fn release(tag: &str) -> Release {
+        Release {
+            tag: tag.into(),
+            view: "main".into(),
+            at: "2026-07-09T12:00:00.000Z".into(),
+            heads: vec![],
+            commits: vec![],
+            notes: None,
+            artifacts: vec![],
+            id: format!("id-{tag}"),
+            signed_by: "did:key:zA".into(),
         }
     }
 
@@ -213,6 +276,9 @@ mod tests {
                 veto: HashMap::new(),
             },
             op_sel: 0,
+            releases: Vec::new(),
+            release_sel: 0,
+            activity: Activity::Log,
             focus: Focus::Log,
             status: String::new(),
             reputation: None,
@@ -249,6 +315,16 @@ mod tests {
     }
 
     #[test]
+    fn t_toggles_between_log_and_releases() {
+        let mut app = fixture();
+        assert_eq!(app.activity, Activity::Log);
+        app.on_key(key(KeyCode::Char('t')));
+        assert_eq!(app.activity, Activity::Releases);
+        app.on_key(key(KeyCode::Char('t')));
+        assert_eq!(app.activity, Activity::Log);
+    }
+
+    #[test]
     fn overlay_dismisses_on_any_key_but_q_still_quits() {
         let mut app = fixture();
         app.reputation = Some(Reputation::default());
@@ -267,5 +343,15 @@ mod tests {
         assert_eq!(app.selected_op().unwrap().id, "op2");
         app.on_key(key(KeyCode::Down));
         assert_eq!(app.selected_op().unwrap().id, "op1");
+    }
+
+    #[test]
+    fn release_mode_moves_its_own_selection() {
+        let mut app = fixture();
+        app.activity = Activity::Releases;
+        app.releases = vec![release("v2"), release("v1")];
+        app.on_key(key(KeyCode::Down));
+        assert_eq!(app.selected_release().unwrap().tag, "v1");
+        assert_eq!(app.op_sel, 0);
     }
 }

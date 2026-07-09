@@ -59,6 +59,32 @@ pub struct Reputation {
     pub by_kind: HashMap<String, i64>,
 }
 
+/// Metadata for an artifact referenced by a signed release. The bytes remain
+/// at `uri`; Thaddeus stores only this digest and descriptive metadata.
+#[derive(Debug, Clone, Deserialize)]
+pub struct ReleaseArtifact {
+    pub name: String,
+    pub uri: String,
+    pub sha256: String,
+    pub size: Option<u64>,
+    #[serde(rename = "mediaType")]
+    pub media_type: Option<String>,
+}
+
+/// An immutable signed release record for a server view.
+#[derive(Debug, Clone, Deserialize)]
+pub struct Release {
+    pub tag: String,
+    pub view: String,
+    pub at: String,
+    pub heads: Vec<String>,
+    pub commits: Vec<String>,
+    pub notes: Option<String>,
+    pub artifacts: Vec<ReleaseArtifact>,
+    pub id: String,
+    pub signed_by: String,
+}
+
 /// A decoded pull of a view: its ops (newest-first) with the why + vetoes indexed
 /// by op id.
 #[derive(Debug, Clone, Default)]
@@ -85,6 +111,12 @@ struct PullResponse {
     prov: Vec<String>,
     #[serde(default)]
     veto: Vec<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct ReleasesResponse {
+    #[serde(default)]
+    releases: Vec<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -130,6 +162,10 @@ fn assemble_pull(resp: PullResponse) -> Pull {
         prov,
         veto,
     }
+}
+
+fn assemble_releases(resp: ReleasesResponse) -> Vec<Release> {
+    decode_all::<Release>(&resp.releases)
 }
 
 /// Percent-encode a path segment (repo names can contain `/`, e.g. `acme/web`),
@@ -199,6 +235,15 @@ impl Remote {
         Ok(assemble_pull(resp))
     }
 
+    /// Immutable signed releases for a repo, newest first as returned by the
+    /// server. Invalid individual records are skipped without hiding the rest.
+    pub fn releases(&self, repo: &str) -> Result<Vec<Release>> {
+        let url = format!("{}/repos/{}/releases", self.base, pct_encode(repo));
+        let body = self.get(&url)?;
+        let resp: ReleasesResponse = serde_json::from_str(&body).context("decode /releases")?;
+        Ok(assemble_releases(resp))
+    }
+
     /// A DID's server-wide reputation profile.
     pub fn reputation(&self, did: &str) -> Result<Reputation> {
         let url = format!("{}/reputation/{}", self.base, pct_encode(did));
@@ -263,6 +308,31 @@ mod tests {
         let ops = decode_all::<Op>(&[unknown, good]);
         assert_eq!(ops.len(), 1);
         assert_eq!(ops[0].id, "y");
+    }
+
+    #[test]
+    fn decodes_release_envelopes_and_skips_bad_records() {
+        let good = wire_record(
+            r#"{"repo":"acme/web","tag":"v1","view":"main",
+                "at":"2026-07-09T12:00:00.000Z","heads":["h1"],
+                "commits":["c1","c2"],"notes":"First release",
+                "artifacts":[{"name":"app.tar","uri":"https://cdn/app.tar",
+                "sha256":"abc","size":42,"mediaType":"application/x-tar"}],
+                "id":"release-id","signed_by":"did:key:zAlice",
+                "sig":{"$u8":"AAAA"}}"#,
+        );
+        let bad = STANDARD.encode(b"{not valid json");
+        let releases = assemble_releases(ReleasesResponse {
+            releases: vec![good, bad],
+        });
+        assert_eq!(releases.len(), 1);
+        assert_eq!(releases[0].tag, "v1");
+        assert_eq!(releases[0].commits.len(), 2);
+        assert_eq!(releases[0].artifacts[0].size, Some(42));
+        assert_eq!(
+            releases[0].artifacts[0].media_type.as_deref(),
+            Some("application/x-tar")
+        );
     }
 
     #[test]

@@ -1,6 +1,6 @@
 {
   "name": "@thaddeus.run/platform",
-  "version": "0.1.4-alpha",
+  "version": "0.1.5-alpha",
   "description": "The platform: named repos (scopes) with one-call creation and landing-as-policy — re-point a shared view to include a workspace's commits, gated by a pluggable policy. Pillar 06.",
   "keywords": [
     "landing",
@@ -42,12 +42,13 @@
     "prepublishOnly": "moon run platform:prepublish"
   },
   "dependencies": {
+    "@noble/hashes": "catalog:",
+    "@thaddeus.run/identity": "workspace:*",
     "@thaddeus.run/log": "workspace:*",
     "@thaddeus.run/store": "workspace:*"
   },
   "devDependencies": {
     "@thaddeus.run/fs": "workspace:*",
-    "@thaddeus.run/identity": "workspace:*",
     "@thaddeus.run/provenance": "workspace:*",
     "@thaddeus.run/reputation": "workspace:*",
     "@thaddeus.run/review": "workspace:*",

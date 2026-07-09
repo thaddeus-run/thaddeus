@@ -29,12 +29,18 @@ export interface RepoPassingChecksPolicy {
   readonly checkerKinds: readonly string[];
 }
 
+export interface RepoReleasePolicy {
+  readonly creators: 'owner' | 'delegates' | 'allowList';
+  readonly allow: readonly string[];
+}
+
 export interface RepoPolicyRecord {
   readonly version: 1;
   readonly restrictPaths: readonly RepoRestrictPathsPolicy[];
   readonly standingQueries: readonly RepoStandingQueryPolicy[];
   readonly requireVerifiedProvenance: boolean;
   readonly requirePassingChecks: RepoPassingChecksPolicy | null;
+  readonly release: RepoReleasePolicy;
 }
 
 const EMPTY_RESTRICT_PATHS: readonly RepoRestrictPathsPolicy[] = Object.freeze(
@@ -42,6 +48,10 @@ const EMPTY_RESTRICT_PATHS: readonly RepoRestrictPathsPolicy[] = Object.freeze(
 );
 const EMPTY_STANDING_QUERIES: readonly RepoStandingQueryPolicy[] =
   Object.freeze([]);
+const DEFAULT_RELEASE_POLICY: RepoReleasePolicy = Object.freeze({
+  creators: 'owner',
+  allow: Object.freeze([]),
+});
 
 export const DEFAULT_REPO_POLICY: RepoPolicyRecord = Object.freeze({
   version: 1,
@@ -49,6 +59,7 @@ export const DEFAULT_REPO_POLICY: RepoPolicyRecord = Object.freeze({
   standingQueries: EMPTY_STANDING_QUERIES,
   requireVerifiedProvenance: false,
   requirePassingChecks: null,
+  release: DEFAULT_RELEASE_POLICY,
 });
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -174,6 +185,28 @@ function normalizePassingChecks(
   };
 }
 
+function normalizeReleasePolicy(value: unknown): RepoReleasePolicy {
+  if (value === undefined) {
+    return { creators: 'owner', allow: [] };
+  }
+  if (!isRecord(value)) {
+    throw new TypeError('release must be an object');
+  }
+  if (
+    value.creators !== 'owner' &&
+    value.creators !== 'delegates' &&
+    value.creators !== 'allowList'
+  ) {
+    throw new TypeError(
+      'release.creators must be owner, delegates, or allowList'
+    );
+  }
+  return {
+    creators: value.creators,
+    allow: stringArray(value.allow ?? [], 'release.allow'),
+  };
+}
+
 export function normalizeRepoPolicy(input: unknown): RepoPolicyRecord {
   if (!isRecord(input)) {
     throw new TypeError('policy must be an object');
@@ -214,6 +247,7 @@ export function normalizeRepoPolicy(input: unknown): RepoPolicyRecord {
         ? false
         : input.requireVerifiedProvenance === true,
     requirePassingChecks: normalizePassingChecks(input.requirePassingChecks),
+    release: normalizeReleasePolicy(input.release),
   };
 }
 

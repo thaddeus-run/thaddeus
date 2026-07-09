@@ -5,6 +5,33 @@ All notable changes to Thaddeus. Format follows
 
 ## [Unreleased]
 
+## [0.1.5-alpha] - 2026-07-09
+
+### Added
+
+- **P5 immutable signed releases.** Repositories can now publish policy-gated
+  release records that bind an immutable tag to the server's committed view
+  heads and reachable commit ids. Records carry signed notes and artifact
+  metadata (URI, SHA-256, size, and media type) without uploading artifact
+  bytes. Public list/detail routes, verified client methods, `thaddeus release`
+  and `thaddeus releases`, JSON output, owner/delegate/allow-list creator
+  policy, and optional host-attested release reputation are included.
+- **`lazythad` release activity.** Press `t` to switch the middle and detail
+  panes between the operation log and signed releases; refresh now loads both,
+  and release detail shows its signer, view, history counts, notes, and
+  artifacts.
+
+### Fixed
+
+- **Hosted deployment configuration matches the live Fly volume.** `fly.toml`
+  now targets app `thaddeus` in `ams`, mounts the existing `data` volume at
+  `/data`, and keeps host attestation enabled without renaming or migrating the
+  volume.
+- **`lazythad` decodes persisted pull records.** The client now unwraps the
+  server's `tplv1` persistence envelope before decoding log entries, retains
+  raw-JSON compatibility for older fixtures, and skips corrupt or unknown
+  records without losing the rest of the view.
+
 ## [0.1.4-alpha] - 2026-07-09
 
 ### Added

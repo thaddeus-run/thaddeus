@@ -60,6 +60,7 @@ describe('Client — createRepo / listRepos', () => {
       standingQueries: [{ kind: 'forbidDeletes', name: 'no deletes' }],
       requireVerifiedProvenance: true,
       requirePassingChecks: { checkerKinds: ['ci'] },
+      release: { creators: 'owner', allow: [] },
     };
     await c.setPolicy('policy', policy);
     expect(await c.getPolicy('policy')).toEqual(policy);

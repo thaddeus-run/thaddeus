@@ -40,6 +40,33 @@ describe('thaddeus policy', () => {
     expect(out.join('\n')).toContain('policy: default');
 
     out.length = 0;
+    expect(
+      await run(
+        [
+          'policy',
+          'set',
+          '--release-creators',
+          'allowList',
+          '--release-allow',
+          'did:key:z1,did:key:z2',
+          '--json',
+        ],
+        e(wc)
+      )
+    ).toBe(0);
+    expect(JSON.parse(out.join('\n')).release).toEqual({
+      creators: 'allowList',
+      allow: ['did:key:z1', 'did:key:z2'],
+    });
+
+    out.length = 0;
+    expect(await run(['policy', '--json'], e(wc))).toBe(0);
+    expect(JSON.parse(out.join('\n')).release).toEqual({
+      creators: 'allowList',
+      allow: ['did:key:z1', 'did:key:z2'],
+    });
+
+    out.length = 0;
     expect(await run(['policy', 'set', '--forbid-deletes'], e(wc))).toBe(0);
     expect(out.join('\n')).toContain('forbid deletes');
 
@@ -58,6 +85,13 @@ describe('thaddeus policy', () => {
     out.length = 0;
     expect(await run(['policy', 'clear'], e(wc))).toBe(0);
     expect(out.join('\n')).toContain('policy cleared');
+
+    out.length = 0;
+    expect(await run(['policy', '--json'], e(wc))).toBe(0);
+    expect(JSON.parse(out.join('\n')).release).toEqual({
+      creators: 'owner',
+      allow: [],
+    });
 
     out.length = 0;
     expect(await run(['policy', 'set', '--forbid-paths', '*.env'], e(wc))).toBe(
