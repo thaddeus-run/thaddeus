@@ -171,9 +171,18 @@ jobs:
         with:
           node-version: '24'
           registry-url: 'https://registry.npmjs.org'
-      # Trusted publishing (OIDC) needs npm >= 11.5.1; ensure a current npm.
-      - name: Update npm
-        run: npm install -g npm@latest
+      # Trusted publishing (OIDC) needs npm >= 11.5.1. PINNED, not @latest: an
+      # npm@latest install on the runner shipped without its `sigstore` module,
+      # so `npm publish --provenance` died with MODULE_NOT_FOUND (v0.1.2-alpha's
+      # first publish run). Verify the install can actually load provenance
+      # support before publishing, so a broken npm fails THIS step, loudly.
+      - name: Update npm (pinned)
+        run: |
+          npm install -g npm@11.5.1
+          npm --version
+          node -e "require(process.argv[1])" \
+            "$(npm root -g)/npm/node_modules/libnpmpublish/lib/provenance.js" \
+            || { echo "npm install is missing provenance support (sigstore)"; exit 1; }
       - name: Publish thaddeus + lazythad launchers
         env:
           TAG_INPUT: ${{ github.event.inputs.tag }}
