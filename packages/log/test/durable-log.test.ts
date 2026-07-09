@@ -53,6 +53,22 @@ describe('OpLog — durable mode', () => {
     expect(log2.heads('main')).toEqual([op.id]);
   });
 
+  test('dropView removes a durable view name without deleting ops', async () => {
+    const backend = memoryBackend();
+    const author = Identity.create();
+    const store = new MemoryStore(backend);
+    const log = new OpLog(store, backend);
+    const op = await log.write('feature', 'x.rs', enc('x'), author);
+    await log.repoint('land/inspect/feature', [op.id]);
+
+    await log.dropView('land/inspect/feature');
+
+    const log2 = await OpLog.load(await MemoryStore.open(backend), backend);
+    expect(log2.heads('land/inspect/feature')).toEqual([]);
+    expect(log2.views()).not.toContain('land/inspect/feature');
+    expect(log2.verify(op.id)).toBe(true);
+  });
+
   test('no backend ⇒ unchanged behavior', async () => {
     const author = Identity.create();
     const log = new OpLog(new MemoryStore());

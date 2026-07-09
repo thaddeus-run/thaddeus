@@ -142,8 +142,9 @@ thaddeus pull
 
 `thaddeus pull` fast-forwards a **clean** working copy (commit and push your own
 work first). Files you hold no key for are skipped and reported by `status`, not
-an error. `thaddeus revoke <did>` stops sharing keys going forward — it cannot
-un-read what was already shared.
+an error. `thaddeus revoke <did>` rotates readable repo objects and stops fresh
+clones from receiving those keys; it still cannot un-read plaintext someone
+already saw.
 
 > **Secrets are first-class.** Because objects are encrypted before they leave
 > your machine, you can version a `.env` and share it only with the DIDs you
@@ -185,6 +186,12 @@ blocked land leaves your branch untouched.
 - **Reputation (attested contributions):** against an attesting server
   (`serve --host`), a landed op mints a host-vouched merge for its author.
   `thaddeus reputation <did>`.
+- **Repo policy:** owners can select durable land gates without restarting the
+  server. `thaddeus policy` shows the active record;
+  `thaddeus policy set --protect 'src/auth/**' --allow did:key:z6Mk...` protects
+  paths; `--require-provenance`, `--require-checks ci`, `--forbid-deletes`, and
+  `--forbid-paths 'secrets/**'` add the other built-in gates.
+  `thaddeus policy clear` restores the default conflict-only policy.
 - **Rename as a first-class op:** `thaddeus rename oldName newName -m "why"`
   rewrites the code as one signed `SymbolOp`; `thaddeus history <symbol>` shows
   the rename chain.

@@ -1,6 +1,9 @@
 import { ready } from '@thaddeus.run/identity';
+import { FileBackend } from '@thaddeus.run/persist';
+import { Platform } from '@thaddeus.run/platform';
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import {
+  existsSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
@@ -49,6 +52,11 @@ describe('thaddeus grant/revoke/grants', () => {
       await run(['create', s.url, 'proj'], e(ownerHome, ownerHome));
       const ownerWc = mkdtempSync(join(tmp, 'ownerwc-'));
       await run(['clone', s.url, 'proj', ownerWc], e(ownerWc, ownerHome));
+      mkdirSync(join(ownerWc, 'src'), { recursive: true });
+      writeFileSync(join(ownerWc, 'src', 'secret.rs'), 'fn secret() {}\n');
+      expect(
+        await run(['push', '-m', 'seed secret'], e(ownerWc, ownerHome))
+      ).toBe(0);
       out.length = 0;
       expect(
         await run(
@@ -61,6 +69,9 @@ describe('thaddeus grant/revoke/grants', () => {
       // Teammate clones, edits in scope → push lands.
       const mateWc = mkdtempSync(join(tmp, 'matewc-'));
       await run(['clone', s.url, 'proj', mateWc], e(mateWc, teammateHome));
+      expect(readFileSync(join(mateWc, 'src', 'secret.rs'), 'utf8')).toBe(
+        'fn secret() {}\n'
+      );
       mkdirSync(join(mateWc, 'src'), { recursive: true });
       writeFileSync(join(mateWc, 'src', 'x.rs'), 'fn x() {}');
       out.length = 0;
@@ -79,7 +90,22 @@ describe('thaddeus grant/revoke/grants', () => {
       out.length = 0;
       await run(['grants'], e(ownerWc, ownerHome));
       expect(out.join('\n')).toContain(teammateDid);
-      await run(['revoke', teammateDid], e(ownerWc, ownerHome));
+      out.length = 0;
+      expect(await run(['revoke', teammateDid], e(ownerWc, ownerHome))).toBe(0);
+      expect(out.join('\n')).toContain('rotated');
+      const ownerBackend = new FileBackend(join(ownerWc, '.thaddeus', 'store'));
+      const ownerLocal = await new Platform().openDurable('proj', ownerBackend);
+      expect(
+        ownerLocal.log.views().filter((v) => v.startsWith('land/'))
+      ).toEqual([]);
+      const postRevokeClone = mkdtempSync(join(tmp, 'mate-reclone-'));
+      expect(
+        await run(
+          ['clone', s.url, 'proj', postRevokeClone],
+          e(postRevokeClone, teammateHome)
+        )
+      ).toBe(0);
+      expect(existsSync(join(postRevokeClone, 'src', 'secret.rs'))).toBe(false);
       mkdirSync(join(mateWc, 'src'), { recursive: true });
       writeFileSync(join(mateWc, 'src', 'z.rs'), 'fn z() {}');
       out.length = 0;

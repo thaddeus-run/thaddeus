@@ -34,12 +34,19 @@ import {
 } from '@thaddeus.run/store';
 
 import {
+  type Bundle,
   decodeBundle,
   decodeClaim,
   decodeDelegation,
   encodeBundle,
   encodeDelegation,
 } from './dto';
+import {
+  DEFAULT_REPO_POLICY,
+  normalizeRepoPolicy,
+  repoPolicyGates,
+  type RepoPolicyRecord,
+} from './repo-policy';
 import { type SignedHeaders, verifyRequest } from './sign';
 
 // Parse a JSON request body, returning undefined on malformed input (so a handler
@@ -159,6 +166,24 @@ export function createServer(config: ServerConfig): Server {
   async function readMeta(name: string): Promise<RepoMeta | undefined> {
     const bytes = await metaBackend(name).get('meta/repo');
     return bytes === undefined ? undefined : (decodeRecord(bytes) as RepoMeta);
+  }
+
+  async function readRepoPolicy(name: string): Promise<RepoPolicyRecord> {
+    const bytes = await metaBackend(name).get('meta/policy');
+    if (bytes === undefined) {
+      return DEFAULT_REPO_POLICY;
+    }
+    try {
+      return normalizeRepoPolicy(decodeRecord(bytes));
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      throw new Error(`stored repo policy is invalid: ${msg}`);
+    }
+  }
+
+  function policyReadFailure(err: unknown): Response {
+    const msg = err instanceof Error ? err.message : String(err);
+    return json(500, { error: msg });
   }
 
   // Durable per-repo AgentRegistry cache, keyed by the in-flight BUILD promise
@@ -455,6 +480,67 @@ export function createServer(config: ServerConfig): Server {
     return json(200, { views });
   }
 
+  // GET /repos/:name/policy — public read of the repo's active land policy.
+  async function getPolicy(name: string): Promise<Response> {
+    if ((await readMeta(name)) === undefined) {
+      return json(404, { error: `no repo ${name}` });
+    }
+    try {
+      return json(200, { policy: await readRepoPolicy(name) });
+    } catch (err) {
+      return policyReadFailure(err);
+    }
+  }
+
+  // POST /repos/:name/policy — owner-selectable repo policy, no restart.
+  async function setPolicy(
+    name: string,
+    req: Request,
+    body: Uint8Array
+  ): Promise<Response> {
+    const signer = verifyRequest(
+      'POST',
+      new URL(req.url).pathname,
+      body,
+      headers(req),
+      Date.parse(now())
+    );
+    if (signer === null) {
+      return json(401, { error: 'unsigned or invalid request' });
+    }
+    const parsed = safeParseJson(body);
+    if (parsed === undefined || parsed === null || typeof parsed !== 'object') {
+      return json(400, { error: 'invalid JSON body' });
+    }
+    let next: RepoPolicyRecord;
+    try {
+      const candidate =
+        'policy' in parsed ? (parsed as { policy?: unknown }).policy : parsed;
+      next = normalizeRepoPolicy(candidate);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      return json(400, { error: msg });
+    }
+    const meta = await readMeta(name);
+    if (meta === undefined) {
+      return json(404, { error: `no repo ${name}` });
+    }
+    if (signer !== meta.owner) {
+      return json(403, { error: 'not the repo owner' });
+    }
+    return withRepoLock(name, async () => {
+      const lockedMeta = await readMeta(name);
+      if (lockedMeta === undefined) {
+        return json(404, { error: `no repo ${name}` });
+      }
+      if (lockedMeta.owner !== meta.owner) {
+        return json(409, { error: 'repo changed; retry policy set' });
+      }
+      await metaBackend(name).put('meta/policy', encodeRecord(next));
+      return json(200, { policy: next });
+    });
+  }
+
   // POST /repos/:name/views — create a branch at an already-ingested head-set.
   // Creating a branch introduces NO new ops, so no land policy applies (landing
   // into a fresh view would otherwise re-check the entire history against a
@@ -564,6 +650,139 @@ export function createServer(config: ServerConfig): Server {
     });
   }
 
+  async function ingestBundle(
+    name: string,
+    repo: Repo,
+    bundle: ReturnType<typeof decodeBundle>
+  ): Promise<{
+    accepted: {
+      objects: number;
+      ops: number;
+      caps: number;
+      prov: number;
+      veto: number;
+      symop: number;
+    };
+    rejected: { kind: string; id: string; reason: string }[];
+  }> {
+    const rejected: { kind: string; id: string; reason: string }[] = [];
+    let objectsOk = 0;
+    let capsOk = 0;
+    let opsOk = 0;
+    // Verify each cap at the push boundary before grouping. Caps with invalid
+    // or malformed signatures are rejected immediately so they never reach
+    // store.ingest; only valid caps are grouped and counted in accepted.caps.
+    const capsByPid = new Map<string, Capability[]>();
+    for (const cap of bundle.caps) {
+      let valid = false;
+      try {
+        valid = verifyCapability(cap);
+      } catch {
+        valid = false;
+      }
+      if (valid) {
+        const list = capsByPid.get(cap.object) ?? [];
+        list.push(cap);
+        capsByPid.set(cap.object, list);
+      } else {
+        rejected.push({
+          kind: 'cap',
+          id: cap.object ?? '?',
+          reason: 'invalid capability signature',
+        });
+      }
+    }
+    for (const object of bundle.objects) {
+      try {
+        const pushed = capsByPid.get(object.plaintext_id) ?? [];
+        // `store.ingest` is authoritative-replace, and a client only sends the
+        // caps ITS store holds — so a pusher with a stale view would silently
+        // erase a capability another member was just granted. Union the pushed
+        // caps with the ones already served, but ONLY when the ciphertext is
+        // unchanged: a new ciphertext means a new content key, and the old caps
+        // would unwrap the wrong one, so those must be replaced outright.
+        const stored = repo.store.current(object.plaintext_id);
+        const sameKey = stored !== undefined && stored.id === object.id;
+        await repo.store.ingest(
+          object,
+          sameKey
+            ? unionCaps(repo.store.caps(object.plaintext_id), pushed)
+            : pushed
+        );
+        objectsOk += 1;
+        capsOk += pushed.length;
+      } catch (err) {
+        rejected.push({
+          kind: 'object',
+          id: object.id ?? '?',
+          reason: String(err),
+        });
+      }
+    }
+    for (const op of bundle.ops) {
+      try {
+        await repo.log.ingest(op);
+        opsOk += 1;
+      } catch (err) {
+        rejected.push({ kind: 'op', id: op.id ?? '?', reason: String(err) });
+      }
+    }
+    // Ingest the signed "why" (P04): keep-and-label + durable write-through, so
+    // a restarted server still serves the reason behind each change. An
+    // unverifiable why poisons nothing (it is kept and rendered `unverified`).
+    let provOk = 0;
+    const provLog = await provenanceFor(name);
+    for (const p of bundle.prov) {
+      try {
+        await provLog.ingest(p);
+        provOk += 1;
+      } catch (err) {
+        rejected.push({ kind: 'prov', id: p.op ?? '?', reason: String(err) });
+      }
+    }
+    // Ingest the standing "no" (P10) the same way: keep-and-label + durable
+    // write-through so a restarted server still blocks a vetoed land. A forged
+    // veto is kept but rendered `unverified`, and the land gate never counts it.
+    let vetoOk = 0;
+    const vetoLog = await vetoFor(name);
+    for (const v of bundle.veto) {
+      try {
+        await vetoLog.ingest(v);
+        vetoOk += 1;
+      } catch (err) {
+        rejected.push({ kind: 'veto', id: v.op ?? '?', reason: String(err) });
+      }
+    }
+    // Ingest the signed semantic-graph ops (P08) the same way, so a restarted
+    // server still serves a symbol's rename chain. Keep-and-label — an
+    // unverifiable structural claim is kept and rendered unverifiable.
+    let symopOk = 0;
+    const symopLog = await symopFor(name);
+    for (const s of bundle.symop) {
+      try {
+        await symopLog.ingest(s);
+        symopOk += 1;
+      } catch (err) {
+        rejected.push({
+          kind: 'symop',
+          id: s.id ?? '?',
+          reason: String(err),
+        });
+      }
+    }
+    return {
+      accepted: {
+        objects: objectsOk,
+        ops: opsOk,
+        caps: capsOk,
+        prov: provOk,
+        veto: vetoOk,
+        symop: symopOk,
+      },
+      rejected,
+    };
+  }
+
   // Verify signature + owner, then ingest each object (with its caps) and each
   // op under the repo lock. Per-item failures go to rejected[] — a single bad
   // item does not abort the whole request. Views are never advanced here; only
@@ -613,122 +832,7 @@ export function createServer(config: ServerConfig): Server {
       if (repo === undefined) {
         return json(404, { error: `no repo ${name}` });
       }
-      const rejected: { kind: string; id: string; reason: string }[] = [];
-      let objectsOk = 0;
-      let capsOk = 0;
-      let opsOk = 0;
-      // Verify each cap at the push boundary before grouping. Caps with invalid
-      // or malformed signatures are rejected immediately so they never reach
-      // store.ingest; only valid caps are grouped and counted in accepted.caps.
-      const capsByPid = new Map<string, Capability[]>();
-      for (const cap of bundle.caps) {
-        let valid = false;
-        try {
-          valid = verifyCapability(cap);
-        } catch {
-          valid = false;
-        }
-        if (valid) {
-          const list = capsByPid.get(cap.object) ?? [];
-          list.push(cap);
-          capsByPid.set(cap.object, list);
-        } else {
-          rejected.push({
-            kind: 'cap',
-            id: cap.object ?? '?',
-            reason: 'invalid capability signature',
-          });
-        }
-      }
-      for (const object of bundle.objects) {
-        try {
-          const pushed = capsByPid.get(object.plaintext_id) ?? [];
-          // `store.ingest` is authoritative-replace, and a client only sends the
-          // caps ITS store holds — so a pusher with a stale view would silently
-          // erase a capability another member was just granted. Union the pushed
-          // caps with the ones already served, but ONLY when the ciphertext is
-          // unchanged: a new ciphertext means a new content key, and the old caps
-          // would unwrap the wrong one, so those must be replaced outright.
-          const stored = repo.store.current(object.plaintext_id);
-          const sameKey = stored !== undefined && stored.id === object.id;
-          await repo.store.ingest(
-            object,
-            sameKey
-              ? unionCaps(repo.store.caps(object.plaintext_id), pushed)
-              : pushed
-          );
-          objectsOk += 1;
-          capsOk += pushed.length;
-        } catch (err) {
-          rejected.push({
-            kind: 'object',
-            id: object.id ?? '?',
-            reason: String(err),
-          });
-        }
-      }
-      for (const op of bundle.ops) {
-        try {
-          await repo.log.ingest(op);
-          opsOk += 1;
-        } catch (err) {
-          rejected.push({ kind: 'op', id: op.id ?? '?', reason: String(err) });
-        }
-      }
-      // Ingest the signed "why" (P04): keep-and-label + durable write-through, so
-      // a restarted server still serves the reason behind each change. An
-      // unverifiable why poisons nothing (it is kept and rendered `unverified`).
-      let provOk = 0;
-      const provLog = await provenanceFor(name);
-      for (const p of bundle.prov) {
-        try {
-          await provLog.ingest(p);
-          provOk += 1;
-        } catch (err) {
-          rejected.push({ kind: 'prov', id: p.op ?? '?', reason: String(err) });
-        }
-      }
-      // Ingest the standing "no" (P10) the same way: keep-and-label + durable
-      // write-through so a restarted server still blocks a vetoed land. A forged
-      // veto is kept but rendered `unverified`, and the land gate never counts it.
-      let vetoOk = 0;
-      const vetoLog = await vetoFor(name);
-      for (const v of bundle.veto) {
-        try {
-          await vetoLog.ingest(v);
-          vetoOk += 1;
-        } catch (err) {
-          rejected.push({ kind: 'veto', id: v.op ?? '?', reason: String(err) });
-        }
-      }
-      // Ingest the signed semantic-graph ops (P08) the same way, so a restarted
-      // server still serves a symbol's rename chain. Keep-and-label — an
-      // unverifiable structural claim is kept and rendered unverifiable.
-      let symopOk = 0;
-      const symopLog = await symopFor(name);
-      for (const s of bundle.symop) {
-        try {
-          await symopLog.ingest(s);
-          symopOk += 1;
-        } catch (err) {
-          rejected.push({
-            kind: 'symop',
-            id: s.id ?? '?',
-            reason: String(err),
-          });
-        }
-      }
-      return json(200, {
-        accepted: {
-          objects: objectsOk,
-          ops: opsOk,
-          caps: capsOk,
-          prov: provOk,
-          veto: vetoOk,
-          symop: symopOk,
-        },
-        rejected,
-      });
+      return json(200, await ingestBundle(name, repo, bundle));
     });
   }
 
@@ -821,8 +925,16 @@ export function createServer(config: ServerConfig): Server {
       // veto pushed for any incoming op is the ceiling that blocks the land. With
       // no vetoes recorded, blockOnVeto allows, so this is a safe always-on gate.
       const vetoLog = await vetoFor(name);
+      const provLog = await provenanceFor(name);
+      let repoPolicy: RepoPolicyRecord;
+      try {
+        repoPolicy = await readRepoPolicy(name);
+      } catch (err) {
+        return policyReadFailure(err);
+      }
       const gates: LandPolicy[] = [
         policy,
+        ...repoPolicyGates(repoPolicy, provLog),
         delegationPolicy(reg, (a) => a === meta.owner),
         blockOnVeto(vetoLog),
       ];
@@ -995,15 +1107,31 @@ export function createServer(config: ServerConfig): Server {
     if (parsed === undefined || parsed === null || typeof parsed !== 'object') {
       return json(400, { error: 'invalid JSON body' });
     }
-    const { agent } = parsed as { agent?: string };
+    const { agent, recall } = parsed as { agent?: string; recall?: Bundle };
     if (typeof agent !== 'string') {
       return json(400, { error: 'missing agent' });
     }
+    let recallBundle: ReturnType<typeof decodeBundle> | undefined;
+    if (recall !== undefined) {
+      try {
+        recallBundle = decodeBundle(recall);
+      } catch {
+        return json(400, { error: 'malformed recall bundle' });
+      }
+    }
     return withRepoLock(name, async () => {
+      const repo = await getRepo(name);
+      if (repo === undefined) {
+        return json(404, { error: `no repo ${name}` });
+      }
+      const recalled =
+        recallBundle === undefined
+          ? undefined
+          : await ingestBundle(name, repo, recallBundle);
       const reg = await registryFor(name);
       reg.revoke(agent);
       await metaBackend(name).put(`revoked/${agent}`, encodeRecord(true));
-      return json(200, { agent, revoked: true });
+      return json(200, { agent, revoked: true, recalled });
     });
   }
 
@@ -1080,6 +1208,22 @@ export function createServer(config: ServerConfig): Server {
           return json(400, { error: 'malformed path' });
         }
         return deleteRepo(repoName, req, body);
+      }
+      // /repos/:name/policy — read or owner-select the active land policy.
+      const policyMatch = path.match(/^\/repos\/(.+)\/policy$/);
+      if (policyMatch !== null && req.method === 'GET') {
+        const repoName = safeDecode(policyMatch[1]);
+        if (repoName === undefined) {
+          return json(400, { error: 'malformed path' });
+        }
+        return getPolicy(repoName);
+      }
+      if (policyMatch !== null && req.method === 'POST') {
+        const repoName = safeDecode(policyMatch[1]);
+        if (repoName === undefined) {
+          return json(400, { error: 'malformed path' });
+        }
+        return setPolicy(repoName, req, body);
       }
       // /repos/:name/views — list the branches, or create one.
       const viewsMatch = path.match(/^\/repos\/(.+)\/views$/);

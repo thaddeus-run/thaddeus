@@ -77,3 +77,44 @@ export async function reshareObjects(
   }
   return granted;
 }
+
+export interface RevokeObjectsResult {
+  rotated: number;
+  skipped: string[];
+}
+
+// Rotate every readable object in `pids`, dropping `revoked` from the served and
+// pending capability sets. This is the local cryptographic half of repo revoke;
+// the server later receives the rotated ciphertexts/caps in the signed revoke
+// request and stops serving the old keys to fresh clones.
+export async function revokeObjects(
+  repo: Repo,
+  pids: Iterable<string>,
+  revoked: PublicIdentity,
+  by: Identity
+): Promise<RevokeObjectsResult> {
+  let rotated = 0;
+  const skipped: string[] = [];
+  for (const pid of pids) {
+    const current = repo.store.current(pid);
+    if (current === undefined) {
+      continue;
+    }
+    try {
+      await repo.store.revoke(
+        { id: current.id, plaintext_id: current.plaintext_id },
+        revoked,
+        by
+      );
+      rotated += 1;
+    } catch (err) {
+      if (err instanceof AccessDenied) {
+        skipped.push(pid);
+        continue;
+      }
+      throw err;
+    }
+  }
+  skipped.sort();
+  return { rotated, skipped };
+}

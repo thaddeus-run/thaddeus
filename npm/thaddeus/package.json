@@ -1,6 +1,6 @@
 {
   "name": "@thaddeus.run/cli",
-  "version": "0.1.3-alpha",
+  "version": "0.1.4-alpha",
   "description": "The Thaddeus CLI — a post-Git, agent-native source-control substrate. Installs the prebuilt `thaddeus` binary for your platform.",
   "keywords": [
     "cli",
