@@ -225,8 +225,10 @@ jobs:
                 if npm publish --provenance --access public $dist; then
                   exit 0
                 fi
-                echo "publish attempt $attempt for $name failed; retrying in 15s" >&2
-                sleep 15
+                if [ "$attempt" -lt 3 ]; then
+                  echo "publish attempt $attempt for $name failed; retrying in 15s" >&2
+                  sleep 15
+                fi
               done
               echo "giving up on $name after 3 attempts" >&2
               exit 1
