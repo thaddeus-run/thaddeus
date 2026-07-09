@@ -660,23 +660,25 @@ export async function run(
         // The branch must exist server-side ('branch' always registers it
         // there); pulling an unknown view would silently repoint to empty.
         const views = await client.listViews(cfg.repo);
-        const serverHeads = views[name];
-        if (serverHeads === undefined) {
+        if (views[name] === undefined) {
           out(`no branch ${name} — create it with 'thaddeus branch ${name}'`);
           return 1;
         }
-        await client.pull(cfg.repo, local, backend, name);
+        // `base` must be the heads the pull ACTUALLY fetched — a collaborator
+        // could land between the existence check and the pull, and a stale base
+        // would make the fresh workspace read as "ahead" of the server.
+        const { heads } = await client.pull(cfg.repo, local, backend, name);
         mkdirSync(target, { recursive: true });
         await materializeToDisk(local, name, identity, target);
         saveConfig(target, {
           server: cfg.server,
           repo: cfg.repo,
           view: name,
-          base: [...serverHeads],
+          base: [...heads],
           store,
         });
         out(
-          `workspace ${target} on ${name} (${serverHeads.length} head(s), shared store — copy-on-write)`
+          `workspace ${target} on ${name} (${heads.length} head(s), shared store — copy-on-write)`
         );
         return 0;
       }
