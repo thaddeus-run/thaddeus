@@ -1,6 +1,6 @@
 {
   "name": "@thaddeus.run/lazythad",
-  "version": "0.1.3-alpha",
+  "version": "0.1.4-alpha",
   "description": "lazythad — a lazygit-style terminal UI for Thaddeus. Installs the prebuilt `lazythad` binary for your platform.",
   "keywords": [
     "lazygit",

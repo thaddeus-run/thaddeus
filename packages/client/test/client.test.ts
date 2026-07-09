@@ -1,5 +1,6 @@
 import { Identity, ready } from '@thaddeus.run/identity';
 import { MemoryBackend } from '@thaddeus.run/persist';
+import type { RepoPolicyRecord } from '@thaddeus.run/server';
 import { createServer } from '@thaddeus.run/server';
 import { beforeAll, describe, expect, test } from 'bun:test';
 
@@ -38,5 +39,29 @@ describe('Client — createRepo / listRepos', () => {
       msg = (e as Error).message;
     }
     expect(msg).toContain('already exists');
+  });
+
+  test('getPolicy / setPolicy round-trip a repo policy', async () => {
+    const a = Identity.create();
+    const c = new Client('http://t', a, server());
+    await c.createRepo('policy');
+    const initial = await c.getPolicy('policy');
+    expect(initial.requireVerifiedProvenance).toBe(false);
+
+    const policy: RepoPolicyRecord = {
+      version: 1,
+      restrictPaths: [
+        {
+          protect: ['src/auth/**'],
+          allow: [a.did],
+          name: 'owner-only auth',
+        },
+      ],
+      standingQueries: [{ kind: 'forbidDeletes', name: 'no deletes' }],
+      requireVerifiedProvenance: true,
+      requirePassingChecks: { checkerKinds: ['ci'] },
+    };
+    await c.setPolicy('policy', policy);
+    expect(await c.getPolicy('policy')).toEqual(policy);
   });
 });

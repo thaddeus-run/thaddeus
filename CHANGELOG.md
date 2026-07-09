@@ -5,6 +5,23 @@ All notable changes to Thaddeus. Format follows
 
 ## [Unreleased]
 
+## [0.1.4-alpha] - 2026-07-09
+
+### Added
+
+- **P9 rotate-and-recall is pulled forward.** `thaddeus revoke <did>` now
+  fetches the current remote branch into an internal inspect view, rotates every
+  readable object to a new content key, uploads the recalled ciphertexts/caps in
+  the owner-signed revoke request, and quarantines the DID on the server under
+  one repo lock. Fresh clones no longer receive keys for recalled content.
+- **P4 per-repo policy is selectable over the wire.** Repos now persist a
+  versioned land policy under server metadata, readable with `thaddeus policy`
+  and owner-selectable with `thaddeus policy set`/`clear` without a server
+  restart. The server now wires the dormant policy gates into `land`: protected
+  path restrictions, typed standing queries (`forbidDeletes`, `forbidPaths`),
+  required verified provenance, and required verified checker provenance
+  (`requirePassingChecks`).
+
 ## [0.1.3-alpha] - 2026-07-09
 
 ### Added

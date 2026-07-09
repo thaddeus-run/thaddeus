@@ -194,6 +194,24 @@ function matchGlob(glob: string, path: string): boolean {
   return glob === path;
 }
 
+function assertSupportedPathGlob(glob: string, label: string): void {
+  if (!glob.includes('*')) {
+    return;
+  }
+  if (glob === '**') {
+    return;
+  }
+  if (glob.endsWith('/**')) {
+    const prefix = glob.slice(0, -3);
+    if (prefix.length > 0 && !prefix.includes('*')) {
+      return;
+    }
+  }
+  throw new RangeError(
+    `${label} supports only exact paths, **, and prefix/** globs`
+  );
+}
+
 // Policy as a standing query (Pillar 11): express an invariant as a predicate
 // over the proposed change and let the substrate enforce it AS changes converge
 // — not a CI script that runs late. `forbid` returns true for an op that
@@ -237,6 +255,9 @@ export function restrictPaths(opts: {
     throw new RangeError(
       'restrictPaths: a protect glob must not contain a ".." segment'
     );
+  }
+  for (const glob of opts.protect) {
+    assertSupportedPathGlob(glob, 'restrictPaths: protect');
   }
   const allow = new Set(opts.allow);
   const name = opts.name ?? `protect ${opts.protect.join(', ')}`;

@@ -17,7 +17,7 @@ publish. All crypto is client-side; your identity seed lives in
 ## Commands
 
 | Command                                        | Description                            |
-| ---------------------------------------------- | -------------------------------------- |
+| ---------------------------------------------- | -------------------------------------- | ------------------------------- |
 | `init`                                         | Create a self-owned `did:key` identity |
 | `create <server> <repo>`                       | Create a repo on a server              |
 | `clone <server> <repo> [dir]`                  | Clone a repo to a working tree         |
@@ -27,6 +27,7 @@ publish. All crypto is client-side; your identity seed lives in
 | `grant <did> [--paths a,b] [--max-changes N]`  | Grant push rights to a DID/agent       |
 | `revoke <did>`                                 | Revoke a previously granted delegation |
 | `grants`                                       | List active grants for this repo       |
+| `policy [set                                   | clear]`                                | Show or select repo land policy |
 | `serve [--port 4000] [--data ./thaddeus-data]` | Run a durable server                   |
 
 ## Collaboration example

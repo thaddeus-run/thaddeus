@@ -117,6 +117,15 @@ export class OpLog {
     }
   }
 
+  // Remove a named view from memory and durable storage. Ops and objects remain;
+  // this only drops the branch/inspect name over a head-set.
+  async dropView(name: string): Promise<void> {
+    this.#views.delete(name);
+    if (this.#backend !== undefined) {
+      await this.#backend.delete(`view/${name}`);
+    }
+  }
+
   // Write-through for an op + its view (no-op without a backend).
   // NOTE: the two writes (op then view) are NOT atomic — a crash between them
   // leaves the op present in the backend but the view not yet advanced, which

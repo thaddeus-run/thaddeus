@@ -1,5 +1,11 @@
 import { signDelegation } from '@thaddeus.run/agent';
-import { Client, reachablePids, reshareObjects } from '@thaddeus.run/client';
+import {
+  Client,
+  reachablePids,
+  type RepoPolicyRecord,
+  reshareObjects,
+  revokeObjects,
+} from '@thaddeus.run/client';
 import { Workspace } from '@thaddeus.run/fs';
 import {
   HeuristicExtractor,
@@ -7,7 +13,7 @@ import {
   SymbolOpLog,
 } from '@thaddeus.run/graph';
 import { type Identity, PublicIdentity } from '@thaddeus.run/identity';
-import type { Op } from '@thaddeus.run/log';
+import type { Conflict, Op } from '@thaddeus.run/log';
 import { FileBackend } from '@thaddeus.run/persist';
 import { Platform, type Repo } from '@thaddeus.run/platform';
 import { type Provenance, ProvenanceLog } from '@thaddeus.run/provenance';
@@ -121,11 +127,155 @@ async function fetchInspectView(opts: {
   return localView;
 }
 
+async function dropInspectViews(
+  repo: Repo,
+  views: Iterable<string>
+): Promise<void> {
+  for (const view of new Set(views)) {
+    if (view.startsWith('land/inspect/')) {
+      await repo.log.dropView(view);
+    }
+  }
+}
+
+function csv(value: string | undefined): string[] {
+  return value === undefined
+    ? []
+    : value
+        .split(',')
+        .map((s) => s.trim())
+        .filter(Boolean);
+}
+
+function defaultRepoPolicy(): RepoPolicyRecord {
+  return {
+    version: 1,
+    restrictPaths: [],
+    standingQueries: [],
+    requireVerifiedProvenance: false,
+    requirePassingChecks: null,
+  };
+}
+
+function policyIsDefault(policy: RepoPolicyRecord): boolean {
+  return (
+    policy.restrictPaths.length === 0 &&
+    policy.standingQueries.length === 0 &&
+    !policy.requireVerifiedProvenance &&
+    policy.requirePassingChecks === null
+  );
+}
+
+function policyEquals(a: RepoPolicyRecord, b: RepoPolicyRecord): boolean {
+  return JSON.stringify(a) === JSON.stringify(b);
+}
+
+function describePolicy(policy: RepoPolicyRecord): string[] {
+  if (policyIsDefault(policy)) {
+    return ['policy: default'];
+  }
+  const lines: string[] = ['policy:'];
+  if (policy.requireVerifiedProvenance) {
+    lines.push('  require verified provenance');
+  }
+  if (policy.requirePassingChecks !== null) {
+    lines.push(
+      `  require checks: ${policy.requirePassingChecks.checkerKinds.join(', ')}`
+    );
+  }
+  for (const spec of policy.restrictPaths) {
+    lines.push(
+      `  restrict paths: ${spec.protect.join(', ')} (allow ${
+        spec.allow.length > 0 ? spec.allow.join(', ') : '(none)'
+      })`
+    );
+  }
+  for (const spec of policy.standingQueries) {
+    if (spec.kind === 'forbidDeletes') {
+      lines.push('  standing query: forbid deletes');
+    } else {
+      lines.push(`  standing query: forbid paths ${spec.paths.join(', ')}`);
+    }
+  }
+  return lines;
+}
+
 function mergeHeads(
   a: readonly string[],
   b: readonly string[]
 ): readonly string[] {
   return [...new Set([...a, ...b])].sort();
+}
+
+function closureFromHeads(
+  byId: ReadonlyMap<string, Op>,
+  heads: readonly string[]
+): Set<string> {
+  const seen = new Set<string>();
+  const stack = [...heads];
+  while (stack.length > 0) {
+    const id = stack.pop();
+    if (id === undefined || seen.has(id)) continue;
+    seen.add(id);
+    const op = byId.get(id);
+    if (op !== undefined) stack.push(...op.parents);
+  }
+  return seen;
+}
+
+function isAncestor(
+  byId: ReadonlyMap<string, Op>,
+  maybeAncestor: string,
+  id: string
+): boolean {
+  const seen = new Set<string>();
+  const stack = [id];
+  while (stack.length > 0) {
+    const next = stack.pop();
+    if (next === undefined || seen.has(next)) continue;
+    if (next === maybeAncestor) return true;
+    seen.add(next);
+    const op = byId.get(next);
+    if (op !== undefined) stack.push(...op.parents);
+  }
+  return false;
+}
+
+function conflictsForHeads(repo: Repo, heads: readonly string[]): Conflict[] {
+  const byId = new Map(repo.log.ops().map((o) => [o.id, o]));
+  const reachable = closureFromHeads(byId, heads);
+  const ordered = repo.log.ops().filter((o) => reachable.has(o.id));
+  const byPath = new Map<string, Op[]>();
+  for (const op of ordered) {
+    byPath.set(op.path, [...(byPath.get(op.path) ?? []), op]);
+  }
+  const out: Conflict[] = [];
+  for (const [path, ops] of byPath) {
+    const concurrent = ops
+      .filter((a) =>
+        ops.some(
+          (b) =>
+            a.id !== b.id &&
+            !isAncestor(byId, a.id, b.id) &&
+            !isAncestor(byId, b.id, a.id)
+        )
+      )
+      .filter(
+        (a, _i, kept) =>
+          !kept.some((b) => a.id !== b.id && isAncestor(byId, a.id, b.id))
+      );
+    if (concurrent.length > 1) {
+      const winner = concurrent.at(-1);
+      if (winner !== undefined) {
+        out.push({
+          path,
+          ops: concurrent.map((o) => o.id),
+          winner: winner.id,
+        });
+      }
+    }
+  }
+  return out;
 }
 
 function previewLand(
@@ -136,11 +286,10 @@ function previewLand(
   incoming: Op[];
   conflicts: ReturnType<Repo['conflicts']>;
 } {
-  const tmp = `land/preview/${encodeURIComponent(into)}/${encodeURIComponent(from)}`;
-  repo.log.view(tmp, mergeHeads(repo.log.heads(into), repo.log.heads(from)));
+  const mergedHeads = mergeHeads(repo.log.heads(into), repo.log.heads(from));
   return {
     incoming: opsAhead(repo, repo.log.heads(into), from),
-    conflicts: repo.conflicts(tmp),
+    conflicts: conflictsForHeads(repo, mergedHeads),
   };
 }
 
@@ -806,6 +955,7 @@ export async function run(
         const local = await new Platform().openDurable(cfg.repo, backend);
         const client = new Client(cfg.server, identity, env.fetchImpl);
         let view = current;
+        const inspectViews: string[] = [];
         if (values.view !== undefined) {
           const fetched = await fetchInspectView({
             client,
@@ -819,6 +969,7 @@ export async function run(
             return 1;
           }
           view = fetched;
+          inspectViews.push(fetched);
         }
         const { snap, skipped } = await readableSnapshot(local, view, identity);
         const skippedSet = new Set(skipped);
@@ -851,9 +1002,11 @@ export async function run(
                 };
               }),
               skipped,
+              unreadable,
               missing,
             })
           );
+          await dropInspectViews(local, inspectViews);
           return missing.length + unreadable.length > 0 ? 1 : 0;
         }
 
@@ -864,6 +1017,7 @@ export async function run(
               `(${skipped.length} file(s) not readable with your keys — skipped)`
             );
           }
+          await dropInspectViews(local, inspectViews);
           return 0;
         }
 
@@ -892,6 +1046,7 @@ export async function run(
         }
         for (const path of unreadable) out(`not readable: ${path}`);
         for (const path of missing) out(`missing: ${path}`);
+        await dropInspectViews(local, inspectViews);
         return missing.length + unreadable.length > 0 ? 1 : 0;
       }
       case 'status': {
@@ -1011,10 +1166,12 @@ export async function run(
           };
           const fromView = await resolve(values.from);
           if (fromView === null) {
+            await dropInspectViews(local, fetched.values());
             return 1;
           }
           const toView = await resolve(values.to);
           if (toView === null) {
+            await dropInspectViews(local, fetched.values());
             return 1;
           }
           const { snap: base, skipped: skippedBase } = await readableSnapshot(
@@ -1026,6 +1183,9 @@ export async function run(
             await readableSnapshot(local, toView, identity);
           const skipped = new Set([...skippedBase, ...skippedTarget]);
           const only = new Set(positionals);
+          const skippedPaths = [...skipped]
+            .filter((p) => only.size === 0 || only.has(p))
+            .sort();
           const changed: FileDiff[] = [];
           for (const p of [
             ...new Set([...base.keys(), ...target.keys()]),
@@ -1043,12 +1203,18 @@ export async function run(
             }
             changed.push(fileDiff(p, b, t));
           }
+          await dropInspectViews(local, fetched.values());
           if (values.json === true) {
             out(JSON.stringify(changed));
             return 0;
           }
           if (changed.length === 0) {
             out('no changes');
+            if (skippedPaths.length > 0) {
+              out(
+                `(${skippedPaths.length} file(s) not readable with your keys — skipped)`
+              );
+            }
             return 0;
           }
           for (const fd of changed) {
@@ -1064,6 +1230,11 @@ export async function run(
             for (const line of fd.lines) {
               out(`${line.tag}${line.text}`);
             }
+          }
+          if (skippedPaths.length > 0) {
+            out(
+              `(${skippedPaths.length} file(s) not readable with your keys — skipped)`
+            );
           }
           return 0;
         }
@@ -1267,69 +1438,75 @@ export async function run(
           if (source === null) {
             return 1;
           }
-          if (values['dry-run'] === true) {
-            const { incoming, conflicts } = previewLand(local, view, source);
-            if (values.json === true) {
+          try {
+            if (values['dry-run'] === true) {
+              const { incoming, conflicts } = previewLand(local, view, source);
+              if (values.json === true) {
+                out(
+                  JSON.stringify({
+                    from: branch,
+                    into: view,
+                    incoming: incoming.map((op) => op.id),
+                    conflicts,
+                  })
+                );
+                return 0;
+              }
               out(
-                JSON.stringify({
-                  from: branch,
-                  into: view,
-                  incoming: incoming.map((op) => op.id),
-                  conflicts,
-                })
+                `dry-run: ${branch} into ${view} (${incoming.length} incoming op(s))`
+              );
+              if (conflicts.length === 0) {
+                out('no conflicts');
+              } else {
+                outConflicts(conflicts, out);
+              }
+              return 0;
+            }
+            const before = await readyToSwitch(
+              root,
+              local,
+              cfg,
+              view,
+              identity,
+              out
+            );
+            if (before === null) {
+              return 2;
+            }
+            const branchHeads = [...local.log.heads(source)];
+            if (branchHeads.length === 0) {
+              out(`branch ${branch} has nothing to land`);
+              return 0;
+            }
+            const { incoming } = previewLand(local, view, source);
+            const landed = await client.land(
+              cfg.repo,
+              branchHeads,
+              view,
+              mergeClaims(cfg.repo, incoming, identity)
+            );
+            if (!landed.landed) {
+              out(`not landed: ${landed.reason ?? 'blocked by policy'}`);
+              outConflicts(landed.conflicts, out);
+              return 1;
+            }
+            const localOps = new Set(local.log.ops().map((o) => o.id));
+            if (!landed.heads.every((h) => localOps.has(h))) {
+              out(
+                'landed, but the remote has changes not in your clone — pull'
               );
               return 0;
             }
+            await local.log.repoint(view, landed.heads);
+            await retree(root, local, view, identity, before);
+            saveConfig(root, { ...cfg, base: [...landed.heads] });
             out(
-              `dry-run: ${branch} into ${view} (${incoming.length} incoming op(s))`
+              `landed ${branch} into ${view} (${incoming.length} op(s), ${landed.heads.length} head(s))`
             );
-            if (conflicts.length === 0) {
-              out('no conflicts');
-            } else {
-              outConflicts(conflicts, out);
-            }
             return 0;
+          } finally {
+            await dropInspectViews(local, [source]);
           }
-          const before = await readyToSwitch(
-            root,
-            local,
-            cfg,
-            view,
-            identity,
-            out
-          );
-          if (before === null) {
-            return 2;
-          }
-          const branchHeads = [...local.log.heads(source)];
-          if (branchHeads.length === 0) {
-            out(`branch ${branch} has nothing to land`);
-            return 0;
-          }
-          const { incoming } = previewLand(local, view, source);
-          const landed = await client.land(
-            cfg.repo,
-            branchHeads,
-            view,
-            mergeClaims(cfg.repo, incoming, identity)
-          );
-          if (!landed.landed) {
-            out(`not landed: ${landed.reason ?? 'blocked by policy'}`);
-            outConflicts(landed.conflicts, out);
-            return 1;
-          }
-          const localOps = new Set(local.log.ops().map((o) => o.id));
-          if (!landed.heads.every((h) => localOps.has(h))) {
-            out('landed, but the remote has changes not in your clone — pull');
-            return 0;
-          }
-          await local.log.repoint(view, landed.heads);
-          await retree(root, local, view, identity, before);
-          saveConfig(root, { ...cfg, base: [...landed.heads] });
-          out(
-            `landed ${branch} into ${view} (${incoming.length} op(s), ${landed.heads.length} head(s))`
-          );
-          return 0;
         }
         const local = await openLocal(root, cfg);
         const heads = [...local.log.heads(view)];
@@ -1787,6 +1964,173 @@ export async function run(
         }
         return 0;
       }
+      case 'policy': {
+        const { values, positionals } = parseArgs({
+          args: [...rest],
+          options: {
+            json: { type: 'boolean' },
+            'require-provenance': { type: 'boolean' },
+            'require-checks': { type: 'string' },
+            protect: { type: 'string' },
+            allow: { type: 'string' },
+            'forbid-deletes': { type: 'boolean' },
+            'forbid-paths': { type: 'string' },
+          },
+          allowPositionals: true,
+        });
+        const action = positionals[0];
+        const mutationFlag =
+          values['require-provenance'] === true ||
+          values['require-checks'] !== undefined ||
+          values.protect !== undefined ||
+          values.allow !== undefined ||
+          values['forbid-deletes'] === true ||
+          values['forbid-paths'] !== undefined;
+        const root = findRoot(env.cwd);
+        if (root === undefined) {
+          out("not a thaddeus working copy — run 'thaddeus clone' first");
+          return 2;
+        }
+        const cfg = loadConfig(root);
+        const identity = loadIdentity(env.home);
+        const client = new Client(cfg.server, identity, env.fetchImpl);
+
+        if (action === undefined) {
+          if (mutationFlag) {
+            out("use 'thaddeus policy set ...' to change policy");
+            return 2;
+          }
+          const policy = await client.getPolicy(cfg.repo);
+          if (values.json === true) {
+            out(JSON.stringify(policy));
+          } else {
+            for (const line of describePolicy(policy)) out(line);
+          }
+          return 0;
+        }
+
+        if (action === 'clear') {
+          if (positionals.length > 1 || mutationFlag) {
+            out('usage: thaddeus policy clear [--json]');
+            return 2;
+          }
+          const policy = await client.setPolicy(cfg.repo, defaultRepoPolicy());
+          if (values.json === true) {
+            out(JSON.stringify(policy));
+          } else {
+            out('policy cleared');
+          }
+          return 0;
+        }
+
+        if (action !== 'set' || positionals.length > 1) {
+          out('usage: thaddeus policy [set|clear] [--json]');
+          return 2;
+        }
+
+        const protect = csv(values.protect);
+        const allow = csv(values.allow);
+        const forbidPaths = csv(values['forbid-paths']);
+        const checkerKinds = csv(values['require-checks']);
+        if (values.protect !== undefined && protect.length === 0) {
+          out('invalid --protect: expected comma-separated path globs');
+          return 2;
+        }
+        if (values.allow !== undefined && allow.length === 0) {
+          out('invalid --allow: expected comma-separated dids');
+          return 2;
+        }
+        if (values.allow !== undefined && protect.length === 0) {
+          out('--allow requires --protect');
+          return 2;
+        }
+        if (values['forbid-paths'] !== undefined && forbidPaths.length === 0) {
+          out('invalid --forbid-paths: expected comma-separated path globs');
+          return 2;
+        }
+        if (
+          values['require-checks'] !== undefined &&
+          checkerKinds.length === 0
+        ) {
+          out(
+            'invalid --require-checks: expected comma-separated checker kinds'
+          );
+          return 2;
+        }
+
+        const policy: RepoPolicyRecord = {
+          version: 1,
+          restrictPaths:
+            protect.length > 0
+              ? [
+                  {
+                    protect,
+                    allow: allow.length > 0 ? allow : [identity.did],
+                    name: 'protected paths',
+                  },
+                ]
+              : [],
+          standingQueries: [
+            ...(values['forbid-deletes'] === true
+              ? [{ kind: 'forbidDeletes' as const, name: 'forbid deletes' }]
+              : []),
+            ...(forbidPaths.length > 0
+              ? [
+                  {
+                    kind: 'forbidPaths' as const,
+                    paths: forbidPaths,
+                    name: 'forbid paths',
+                  },
+                ]
+              : []),
+          ],
+          requireVerifiedProvenance: values['require-provenance'] === true,
+          requirePassingChecks:
+            checkerKinds.length > 0 ? { checkerKinds } : null,
+        };
+        if (policyIsDefault(policy)) {
+          out(
+            'policy set needs at least one gate — use --require-provenance, --require-checks, --protect, --forbid-deletes, or --forbid-paths'
+          );
+          return 2;
+        }
+        const replacementWarning: string[] = [];
+        if (values.json !== true) {
+          let existing: RepoPolicyRecord;
+          try {
+            existing = await client.getPolicy(cfg.repo);
+          } catch (err) {
+            const msg = err instanceof Error ? err.message : String(err);
+            out(`policy not set: ${msg}`);
+            return 1;
+          }
+          if (!policyIsDefault(existing) && !policyEquals(existing, policy)) {
+            replacementWarning.push('replacing existing policy:');
+            for (const line of describePolicy(existing).slice(1)) {
+              replacementWarning.push(`  old ${line.trim()}`);
+            }
+            replacementWarning.push('with:');
+            for (const line of describePolicy(policy).slice(1)) {
+              replacementWarning.push(`  new ${line.trim()}`);
+            }
+          }
+        }
+        let saved: RepoPolicyRecord;
+        try {
+          saved = await client.setPolicy(cfg.repo, policy);
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : String(err);
+          out(`policy not set: ${msg}`);
+          return 1;
+        }
+        if (values.json === true) {
+          out(JSON.stringify(saved));
+        } else {
+          for (const line of replacementWarning) out(line);
+          for (const line of describePolicy(saved)) out(line);
+        }
+        return 0;
+      }
       case 'grant': {
         const { values, positionals } = parseArgs({
           args: [...rest],
@@ -1867,11 +2211,56 @@ export async function run(
           return 2;
         }
         const cfg = loadConfig(root);
+        const view = viewOf(cfg);
         const identity = loadIdentity(env.home);
+        const backend = new FileBackend(storePath(root, cfg));
+        const local = await new Platform().openDurable(cfg.repo, backend);
         const client = new Client(cfg.server, identity, env.fetchImpl);
-        await client.revoke(cfg.repo, did);
-        out(`revoked ${did}`);
-        return 0;
+        // Recall must use the server's current branch view, not a stale local
+        // branch cache. Fetch into the internal inspect view so revoking keys
+        // never touches working files or clobbers a real branch view.
+        const recallView = await fetchInspectView({
+          client,
+          repoName: cfg.repo,
+          local,
+          backend,
+          remoteView: view,
+          out,
+        });
+        if (recallView === null) {
+          return 1;
+        }
+        try {
+          const heads = [...local.log.heads(recallView)];
+          const recalled = await revokeObjects(
+            local,
+            reachablePids(local, heads),
+            PublicIdentity.fromDid(did),
+            identity
+          );
+          const result = await client.revoke(cfg.repo, did, {
+            repo: local,
+            heads,
+          });
+          out(`revoked ${did}`);
+          out(
+            `rotated ${recalled.rotated} object(s); uploaded ${result.recalled?.accepted.objects ?? 0} recalled object(s)`
+          );
+          const rejected = result.recalled?.rejected ?? [];
+          if (recalled.skipped.length > 0) {
+            out(
+              `recall incomplete: ${recalled.skipped.length} object(s) were not readable by this identity`
+            );
+          }
+          if (rejected.length > 0) {
+            out(
+              `recall rejected ${rejected.length} item(s): ${rejected.map((r) => r.reason).join('; ')}`
+            );
+          }
+          return recalled.skipped.length + rejected.length > 0 ? 1 : 0;
+        } finally {
+          await dropInspectViews(local, [recallView]);
+        }
       }
       case 'grants': {
         const root = findRoot(env.cwd);

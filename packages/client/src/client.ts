@@ -12,11 +12,18 @@ import {
   encodeBundle,
   encodeClaim,
   encodeDelegation,
+  type RepoPolicyRecord,
   signRequest,
 } from '@thaddeus.run/server';
-import { type Backend, scoped } from '@thaddeus.run/store';
+import {
+  type Backend,
+  type Capability,
+  type EncryptedObject,
+  scoped,
+} from '@thaddeus.run/store';
 
 import { bundleFor } from './bundle';
+import { reachablePids } from './share';
 
 export interface PushResult {
   accepted: {
@@ -28,6 +35,12 @@ export interface PushResult {
     symop: number;
   };
   rejected: { kind: string; id: string; reason: string }[];
+}
+
+export interface RevokeOutcome {
+  agent: string;
+  revoked: boolean;
+  recalled?: PushResult;
 }
 
 export interface LandOutcome {
@@ -212,6 +225,27 @@ export class Client {
     return body.views;
   }
 
+  async getPolicy(name: string): Promise<RepoPolicyRecord> {
+    const res = await this.#fetch(
+      new Request(`${this.#server}/repos/${encodeURIComponent(name)}/policy`)
+    );
+    const body = (await this.#ok(res)) as { policy: RepoPolicyRecord };
+    return body.policy;
+  }
+
+  async setPolicy(
+    name: string,
+    policy: RepoPolicyRecord
+  ): Promise<RepoPolicyRecord> {
+    const res = await this.#signed(
+      'POST',
+      `/repos/${encodeURIComponent(name)}/policy`,
+      { policy }
+    );
+    const body = (await this.#ok(res)) as { policy: RepoPolicyRecord };
+    return body.policy;
+  }
+
   // Create a branch at an already-ingested head-set. Creating a branch adds no
   // ops, so no land policy applies; merging it back still goes through `land`.
   async createView(
@@ -360,14 +394,32 @@ export class Client {
   // Owner: revoke a delegate (terminal).
   async revoke(
     name: string,
-    agent: string
-  ): Promise<{ agent: string; revoked: boolean }> {
+    agent: string,
+    recall?: { repo: Repo; heads: readonly string[] }
+  ): Promise<RevokeOutcome> {
+    const body: { agent: string; recall?: ReturnType<typeof encodeBundle> } = {
+      agent,
+    };
+    if (recall !== undefined) {
+      const pids = reachablePids(recall.repo, recall.heads);
+      const objects: EncryptedObject[] = [];
+      const caps: Capability[] = [];
+      for (const pid of pids) {
+        const current = recall.repo.store.current(pid);
+        if (current === undefined) {
+          continue;
+        }
+        objects.push(current);
+        caps.push(...recall.repo.store.caps(pid));
+      }
+      body.recall = encodeBundle([], objects, caps);
+    }
     const res = await this.#signed(
       'POST',
       `/repos/${encodeURIComponent(name)}/revoke`,
-      { agent }
+      body
     );
-    return (await this.#ok(res)) as { agent: string; revoked: boolean };
+    return (await this.#ok(res)) as RevokeOutcome;
   }
 
   // The repo's active (non-revoked) delegations — a public, verifiable list.

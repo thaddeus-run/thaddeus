@@ -31,8 +31,9 @@ History & meaning
 
 Access & trust
   grant  <did> [--paths a,b] [--max-changes N]  grant push to a DID/agent
-  revoke <did>                                  revoke a grant
+  revoke <did>                                  revoke a grant and rotate keys
   grants                                        list active grants
+  policy [set|clear]                            show or select repo land policy
   reputation <did>                              a DID's server-wide reputation
 
 Server
@@ -197,13 +198,30 @@ thaddeus diff [--from <branch>] [--to <branch>] [path...] [--json]
   revoke: `thaddeus revoke <did>
 
   Revoke a delegate's access. Revocation is terminal — issue a fresh identity
-  to re-grant. Future pushes stop sharing keys with the revoked did, but content
-  already shared with it is NOT recalled (revocation cannot un-read); key
-  rotation is a later addition.`,
+  to re-grant. Revoke fetches the current branch into an internal inspect view,
+  rotates every readable object to a new content key, uploads the recalled
+  ciphertexts/caps, and quarantines the DID on the server under one repo lock.
+  Fresh clones no longer receive keys for recalled content; plaintext already
+  read before revoke cannot be un-read.`,
 
   grants: `thaddeus grants [--json]
 
   List the repo's active (non-revoked) delegations.`,
+
+  policy: `thaddeus policy [--json]
+thaddeus policy set [--require-provenance] [--require-checks ci,proof]
+                    [--protect globs --allow dids]
+                    [--forbid-deletes] [--forbid-paths globs] [--json]
+thaddeus policy clear [--json]
+
+  Show or owner-select this repo's land policy. 'set' overwrites the whole
+  policy from explicit flags; 'clear' restores the default conflict-only policy.
+  --require-provenance requires every incoming op to carry a verified why.
+  --require-checks requires a verified provenance record from one of the named
+  checker actor kinds (default examples: ci, proof). --protect blocks changes
+  to protected path globs unless authored by --allow dids; when --allow is
+  omitted, your DID is allowed. --forbid-deletes and --forbid-paths add typed
+  standing queries. Changes take effect on the next land; no server restart.`,
 
   reputation: `thaddeus reputation <did> [--server <url>] [--json]
 

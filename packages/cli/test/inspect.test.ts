@@ -177,8 +177,10 @@ describe('thaddeus diff / status --json / log filters', () => {
     );
     const shown = JSON.parse(out.join('')) as {
       files: { path: string; text?: string }[];
+      unreadable: string[];
     };
     expect(shown.files.map((f) => f.path).sort()).toEqual(['a.txt', 'new.txt']);
+    expect(shown.unreadable).toEqual([]);
 
     out.length = 0;
     expect(
@@ -225,6 +227,7 @@ describe('thaddeus diff / status --json / log filters', () => {
 
     local = await new Platform().openDurable('proj', backend);
     expect([...local.log.heads('feature')]).toEqual(staleFeatureHeads);
+    expect(local.log.views().filter((v) => v.startsWith('land/'))).toEqual([]);
     expect(existsSync(join(mainDir, 'new.txt'))).toBe(false);
   });
 });

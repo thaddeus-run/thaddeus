@@ -1,6 +1,6 @@
 {
   "name": "@thaddeus.run/watch",
-  "version": "0.1.3-alpha",
+  "version": "0.1.4-alpha",
   "description": "Live semantic subscriptions — triggers that fire on meaning (a symbol renamed, a reference added, a definition moved) by diffing semantic-graph snapshots. Pillar 11 (subscriptions slice).",
   "keywords": [
     "live-database",
