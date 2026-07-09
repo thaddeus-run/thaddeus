@@ -5,6 +5,8 @@ All notable changes to Thaddeus. Format follows
 
 ## [Unreleased]
 
+## [0.1.2-alpha] - 2026-07-09
+
 ### Added
 
 - **Branches as copy-on-write workspaces — you never switch a tree (Pillar

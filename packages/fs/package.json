@@ -1,6 +1,6 @@
 {
   "name": "@thaddeus.run/fs",
-  "version": "0.1.1-alpha",
+  "version": "0.1.2-alpha",
   "description": "A virtual, API-first filesystem — a copy-on-write Workspace over the operation log, with pinned forked-view reads, overlay staging, commit, and decryption-bounded grep. Pillar 05.",
   "keywords": [
     "filesystem",
