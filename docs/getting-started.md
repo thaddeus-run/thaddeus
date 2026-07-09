@@ -150,26 +150,32 @@ un-read what was already shared.
 > choose. `.thaddeusignore` is seeded from `.gitignore`, which usually ignores
 > `.env` — un-ignore it with a `!.env` line to track it.
 
-## 7. Branches are free
+## 7. Branches are free — and you never switch
 
-A branch is a **name over a head-set**, not a copy of files. Creating one copies
-a handful of ids — so you can keep as many as you like without touching your
-disk, and there is no `git worktree` dance.
+A branch is a **name over a head-set**, not a copy of files. And a working copy
+is a cheap, **copy-on-write view** over one shared object store — so you don't
+_switch_ branches, you open each one in its own directory. There is no
+`checkout`, no clean-tree dance, and no `git worktree` misery: the same branch
+can be open in several directories at once, and nothing ever hijacks your tree.
 
 ```sh
-thaddeus branch                  # list branches, * marks the current one
-thaddeus branch feature          # create one at your current heads
-thaddeus checkout feature        # switch (tree re-points; needs a clean copy)
+thaddeus branch                   # list branches, * marks this copy's
+thaddeus branch feature           # create one at your current heads (free)
+thaddeus workspace feature        # open it as its own directory (../web-feature)
+cd ../web-feature
 echo 'fn login() {}' > src/auth.rs
-thaddeus push -m "add login"     # lands on `feature`, main untouched
+thaddeus push -m "add login"      # lands on `feature`; main's copy untouched
 
-thaddeus checkout main
-thaddeus merge feature           # land it into main, under the server's policy
+cd ../web                         # your main working copy, exactly as you left it
+thaddeus land feature             # land the branch into main, under policy
 ```
 
-Creating a branch adds **no operations**, so it needs no policy. **Merging** one
-does: `merge` runs the server's land gates (conflict, delegation scope, standing
-veto, any reputation floor) and leaves your branch untouched if it's blocked.
+The workspace directory holds a config and your files — **never a second object
+store** — which is why it's instant. Creating a branch adds **no operations**,
+so it needs no policy. **Landing** one does: there is no merge ceremony — the
+ops were signed at commit, and `land` is one re-point gated by the server's
+policy (conflict, delegation scope, standing veto, any reputation floor). A
+blocked land leaves your branch untouched.
 
 ## 8. Meaning layers
 
