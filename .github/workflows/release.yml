@@ -208,8 +208,27 @@ jobs:
               ;;
             *) dist="" ;;
           esac
+          # Idempotent per package: a re-run after a partial failure must skip
+          # what already published (npm forbids publishing over a version), and
+          # the OIDC identity-token exchange is occasionally flaky on the 2nd
+          # publish in a job (IDENTITY_TOKEN_READ_ERROR) — so retry each one.
           for pkg in thaddeus lazythad; do
-            ( cd "npm/$pkg" \
-              && npm version "$version" --no-git-tag-version --allow-same-version \
-              && npm publish --provenance --access public $dist )
+            (
+              cd "npm/$pkg"
+              name="$(node -p "require('./package.json').name")"
+              if npm view "$name@$version" version >/dev/null 2>&1; then
+                echo "$name@$version already on the registry — skipping"
+                exit 0
+              fi
+              npm version "$version" --no-git-tag-version --allow-same-version
+              for attempt in 1 2 3; do
+                if npm publish --provenance --access public $dist; then
+                  exit 0
+                fi
+                echo "publish attempt $attempt for $name failed; retrying in 15s" >&2
+                sleep 15
+              done
+              echo "giving up on $name after 3 attempts" >&2
+              exit 1
+            )
           done
