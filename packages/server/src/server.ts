@@ -658,7 +658,25 @@ export function createServer(config: ServerConfig): Server {
         claim.subject === release.signed_by &&
         verifyClaim(claim)
       ) {
-        await (await reputationLog()).ingest(attest(claim, config.host));
+        try {
+          await (await reputationLog()).ingest(attest(claim, config.host));
+        } catch {
+          // The release and its host-vouched contribution are one create from
+          // the caller's perspective. If the second durable write fails, remove
+          // the tag while still holding the repo lock so a clean retry can
+          // create and attest it instead of getting a permanent duplicate 409.
+          try {
+            await backend.delete(key);
+          } catch {
+            return json(500, {
+              error:
+                'release attestation failed and release rollback failed; inspect the stored tag before retrying',
+            });
+          }
+          return json(500, {
+            error: 'release attestation failed; release was rolled back',
+          });
+        }
       }
       return json(201, { release: encodeRelease(release) });
     });

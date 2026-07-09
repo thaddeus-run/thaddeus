@@ -9,7 +9,11 @@ import {
   signRelease,
 } from '@thaddeus.run/platform';
 import { signClaim } from '@thaddeus.run/reputation';
-import { type Capability, MemoryStore } from '@thaddeus.run/store';
+import {
+  type Backend,
+  type Capability,
+  MemoryStore,
+} from '@thaddeus.run/store';
 import { beforeAll, describe, expect, test } from 'bun:test';
 
 import {
@@ -27,6 +31,31 @@ beforeAll(async () => {
 });
 
 const enc = (value: string): Uint8Array => new TextEncoder().encode(value);
+
+class FailFirstReputationWrite implements Backend {
+  readonly #inner = new MemoryBackend();
+  #failed = false;
+
+  put(key: string, bytes: Uint8Array): Promise<void> {
+    if (!this.#failed && key.startsWith('rep/')) {
+      this.#failed = true;
+      return Promise.reject(new Error('simulated reputation write failure'));
+    }
+    return this.#inner.put(key, bytes);
+  }
+
+  get(key: string): Promise<Uint8Array | undefined> {
+    return this.#inner.get(key);
+  }
+
+  list(prefix: string): Promise<readonly string[]> {
+    return this.#inner.list(prefix);
+  }
+
+  delete(key: string): Promise<void> {
+    return this.#inner.delete(key);
+  }
+}
 
 function signed(
   method: string,
@@ -341,6 +370,43 @@ describe('server releases', () => {
     expect(
       (await createRelease(srv, release, owner, encodeClaim(claim))).status
     ).toBe(201);
+    const profile = (await (
+      await srv.fetch(
+        new Request(`http://t/reputation/${encodeURIComponent(owner.did)}`)
+      )
+    ).json()) as { byKind: Record<string, number> };
+    expect(profile.byKind.release).toBe(1);
+  });
+
+  test('an attestation write failure rolls back the tag so retry succeeds', async () => {
+    const owner = Identity.create();
+    const host = Identity.create();
+    const srv = createServer({
+      backend: new FailFirstReputationWrite(),
+      host,
+    });
+    const snapshot = await createRepoWithHistory(srv, owner);
+    const release = signRelease(releaseFields(snapshot, 'retry'), owner);
+    const claim = encodeClaim(
+      signClaim(
+        {
+          repo: 'r',
+          ref: release.id,
+          kind: 'release',
+          at: release.at,
+        },
+        owner
+      )
+    );
+
+    const failed = await createRelease(srv, release, owner, claim);
+    expect(failed.status).toBe(500);
+    expect(await failed.text()).toContain('release attestation failed');
+    expect(
+      (await srv.fetch(new Request('http://t/repos/r/releases/retry'))).status
+    ).toBe(404);
+
+    expect((await createRelease(srv, release, owner, claim)).status).toBe(201);
     const profile = (await (
       await srv.fetch(
         new Request(`http://t/reputation/${encodeURIComponent(owner.did)}`)

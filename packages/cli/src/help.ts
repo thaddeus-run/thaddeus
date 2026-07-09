@@ -196,7 +196,8 @@ thaddeus diff [--from <branch>] [--to <branch>] [path...] [--json]
   Create an immutable signed release over the server's current committed view.
   The default view is this working copy's branch (or main). Dirty files and
   local-only operations are ignored. --artifact hashes a local file and stores
-  only its name, path, SHA-256, and size; bytes are never uploaded.
+  only its name, content-addressed SHA-256 URN, digest, and size; bytes are never
+  uploaded.
   --artifact-uri records externally hosted metadata with a required SHA-256.`,
 
   releases: `thaddeus releases [tag] [--json]
