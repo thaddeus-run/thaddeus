@@ -105,8 +105,8 @@ export const HELP: Record<string, string> = {
 
   workspace: `thaddeus workspace <branch> [dir]
 
-  Open <branch> as its OWN working copy in [dir] (default: a sibling directory
-  named after the branch). Copy-on-write over the origin's object store: the new
+  Open <branch> as its OWN working copy in [dir] (default: a sibling of this
+  working copy, named <copy>-<branch>, e.g. web-feature). Copy-on-write over the origin's object store: the new
   directory holds a config and your files, never a store copy — so working
   copies are cheap and unlimited, the same branch can be open in several at
   once, and nothing ever switches or hijacks an existing tree. There is no

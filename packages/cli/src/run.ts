@@ -14,7 +14,7 @@ import { type Provenance, ProvenanceLog } from '@thaddeus.run/provenance';
 import { type ContributionClaim, signClaim } from '@thaddeus.run/reputation';
 import { signVeto, VetoLog } from '@thaddeus.run/review';
 import { type Backend, scoped } from '@thaddeus.run/store';
-import { existsSync, mkdirSync, readFileSync, rmSync } from 'node:fs';
+import { mkdirSync, readFileSync, rmSync } from 'node:fs';
 import { basename, dirname, isAbsolute, join, relative } from 'node:path';
 import { parseArgs } from 'node:util';
 
@@ -650,10 +650,6 @@ export async function run(
           );
           return 2;
         }
-        if (existsSync(target)) {
-          out(`${target} already exists`);
-          return 2;
-        }
         const backend = new FileBackend(store);
         const local = await new Platform().openDurable(cfg.repo, backend);
         const client = new Client(cfg.server, identity, env.fetchImpl);
@@ -668,7 +664,19 @@ export async function run(
         // could land between the existence check and the pull, and a stale base
         // would make the fresh workspace read as "ahead" of the server.
         const { heads } = await client.pull(cfg.repo, local, backend, name);
-        mkdirSync(target, { recursive: true });
+        // Atomic create: a non-recursive mkdir throws EEXIST instead of
+        // accepting a directory created meanwhile, so we can never materialize
+        // into someone else's path.
+        try {
+          mkdirSync(dirname(target), { recursive: true });
+          mkdirSync(target);
+        } catch (err) {
+          if ((err as NodeJS.ErrnoException).code === 'EEXIST') {
+            out(`${target} already exists`);
+            return 2;
+          }
+          throw err;
+        }
         await materializeToDisk(local, name, identity, target);
         saveConfig(target, {
           server: cfg.server,
@@ -716,7 +724,12 @@ export async function run(
         const snap = await baseSnapshot(local, view, identity, (p) =>
           skipped.push(p)
         );
-        const { added, modified, deleted } = diffWorkingTree(root, snap);
+        // A path we hold no key for is absent from the snapshot, so a leftover
+        // copy on disk would read as `added`; it is skipped, not new work.
+        const skippedSet = new Set(skipped);
+        const diff = diffWorkingTree(root, snap);
+        const added = diff.added.filter((p) => !skippedSet.has(p));
+        const { modified, deleted } = diff;
         const ahead = headsAhead(local, cfg.base, view);
         const clean =
           added.length + modified.length + deleted.length === 0 && ahead === 0;
@@ -919,7 +932,7 @@ export async function run(
         if (allPresent) {
           await local.log.repoint(view, landed.heads);
           saveConfig(root, { ...cfg, base: [...landed.heads] });
-          out(`published to main (${landed.heads.length} head(s))`);
+          out(`published to ${view} (${landed.heads.length} head(s))`);
         } else {
           out(
             'published, but the remote has changes not in your clone — re-clone to sync'
@@ -958,6 +971,15 @@ export async function run(
           );
           if (before === null) {
             return 2;
+          }
+          // A typo'd branch would pull as empty and exit "nothing to land" —
+          // check it exists so the failure is loud and actionable.
+          const views = await client.listViews(cfg.repo);
+          if (views[branch] === undefined) {
+            out(
+              `no branch ${branch} — create it with 'thaddeus branch ${branch}'`
+            );
+            return 1;
           }
           // Fetch the branch's ops so the landing (and its claims) can be
           // computed locally — creating a branch is free, landing is governed.
@@ -1119,7 +1141,7 @@ export async function run(
         if (landed.heads.every((h) => localOps.has(h))) {
           await local.log.repoint(view, landed.heads);
           saveConfig(root, { ...cfg, base: [...landed.heads] });
-          out(`published to main (${landed.heads.length} head(s))`);
+          out(`published to ${view} (${landed.heads.length} head(s))`);
         } else {
           out(
             'published, but the remote has changes not in your clone — re-clone to sync'
