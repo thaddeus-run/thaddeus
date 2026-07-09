@@ -129,6 +129,73 @@ export class Client {
     return { repo, heads: body.heads, provenance, vetoes, symbols };
   }
 
+  // Fetch a view's current bundle into an EXISTING working copy: ingest the
+  // objects (+ their capabilities) and ops, re-point the view, and refresh the
+  // meta logs. The incremental twin of `clone` — the caller owns the already
+  // opened `repo` and its `backend`, so the working copy keeps its identity.
+  async pull(
+    name: string,
+    repo: Repo,
+    backend: Backend,
+    view = 'main'
+  ): Promise<{
+    heads: readonly string[];
+    provenance: ProvenanceLog;
+    vetoes: VetoLog;
+    symbols: SymbolOpLog;
+  }> {
+    const enc = encodeURIComponent;
+    const res = await this.#fetch(
+      new Request(`${this.#server}/repos/${enc(name)}/pull?view=${enc(view)}`)
+    );
+    const body = (await this.#ok(res)) as { heads: string[] } & Parameters<
+      typeof decodeBundle
+    >[0];
+    const bundle = decodeBundle(body);
+    for (const object of bundle.objects) {
+      await repo.store.ingest(
+        object,
+        bundle.caps.filter((c) => c.object === object.plaintext_id)
+      );
+    }
+    for (const op of bundle.ops) {
+      await repo.log.ingest(op);
+    }
+    await repo.log.repoint(view, body.heads);
+    const metaScope = scoped(backend, `repo/${name}/`);
+    const provenance = new ProvenanceLog(repo.store, metaScope);
+    for (const p of bundle.prov) {
+      await provenance.ingest(p);
+    }
+    const vetoes = new VetoLog(metaScope);
+    for (const v of bundle.veto) {
+      await vetoes.ingest(v);
+    }
+    const symbols = new SymbolOpLog(metaScope);
+    for (const s of bundle.symop) {
+      await symbols.ingest(s);
+    }
+    return { heads: body.heads, provenance, vetoes, symbols };
+  }
+
+  // The repo's collaborators: its owner plus every non-revoked delegate (the
+  // server filters revoked agents out of /grants). Every member is a did:key, so
+  // a caller derives each member's public key with `PublicIdentity.fromDid` —
+  // no key exchange is needed to share a decryption capability with them.
+  async members(name: string): Promise<string[]> {
+    // The two reads are independent, so issue them concurrently — `push` calls
+    // this on every publish and a serial pair doubles the round-trip latency.
+    const [repos, grants] = await Promise.all([
+      this.listReposWithOwners(),
+      this.listGrants(name),
+    ]);
+    const owner = repos.find((r) => r.name === name)?.owner;
+    const delegates = grants.map((g) => g.agent);
+    const dids =
+      owner === null || owner === undefined ? delegates : [owner, ...delegates];
+    return [...new Set(dids)].sort();
+  }
+
   async listRepos(): Promise<readonly string[]> {
     // Pass a Request object so both the global fetch and an injected server
     // handler (which calls new URL(req.url)) receive a well-formed input.

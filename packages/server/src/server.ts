@@ -121,6 +121,26 @@ function all(...policies: LandPolicy[]): LandPolicy {
   };
 }
 
+// Merge two capability sets for one object, deduped by the fields a capability's
+// signature binds plus its granter — two caps with the same
+// (grantee, granted_by, not_before) are the same grant, so one copy suffices.
+// Used to keep a concurrent push from dropping a just-issued grant.
+function unionCaps(
+  existing: readonly Capability[],
+  incoming: readonly Capability[]
+): Capability[] {
+  const out: Capability[] = [];
+  const seen = new Set<string>();
+  for (const cap of [...existing, ...incoming]) {
+    const key = `${cap.grantee}\n${cap.granted_by}\n${cap.not_before}`;
+    if (!seen.has(key)) {
+      seen.add(key);
+      out.push(cap);
+    }
+  }
+  return out;
+}
+
 // A Bun.serve-compatible handler over a durable Platform. No keys; verifies and
 // serves ciphertext. Per-node state is just the opened-Repo cache + per-repo
 // mutation lock, both rebuildable from the backend.
@@ -543,12 +563,23 @@ export function createServer(config: ServerConfig): Server {
       }
       for (const object of bundle.objects) {
         try {
+          const pushed = capsByPid.get(object.plaintext_id) ?? [];
+          // `store.ingest` is authoritative-replace, and a client only sends the
+          // caps ITS store holds — so a pusher with a stale view would silently
+          // erase a capability another member was just granted. Union the pushed
+          // caps with the ones already served, but ONLY when the ciphertext is
+          // unchanged: a new ciphertext means a new content key, and the old caps
+          // would unwrap the wrong one, so those must be replaced outright.
+          const stored = repo.store.current(object.plaintext_id);
+          const sameKey = stored !== undefined && stored.id === object.id;
           await repo.store.ingest(
             object,
-            capsByPid.get(object.plaintext_id) ?? []
+            sameKey
+              ? unionCaps(repo.store.caps(object.plaintext_id), pushed)
+              : pushed
           );
           objectsOk += 1;
-          capsOk += (capsByPid.get(object.plaintext_id) ?? []).length;
+          capsOk += pushed.length;
         } catch (err) {
           rejected.push({
             kind: 'object',

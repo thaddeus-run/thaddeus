@@ -1,12 +1,12 @@
 import { signDelegation } from '@thaddeus.run/agent';
-import { Client } from '@thaddeus.run/client';
+import { Client, reachablePids, reshareObjects } from '@thaddeus.run/client';
 import { Workspace } from '@thaddeus.run/fs';
 import {
   HeuristicExtractor,
   SymbolGraph,
   SymbolOpLog,
 } from '@thaddeus.run/graph';
-import type { Identity } from '@thaddeus.run/identity';
+import { type Identity, PublicIdentity } from '@thaddeus.run/identity';
 import type { Op } from '@thaddeus.run/log';
 import { FileBackend } from '@thaddeus.run/persist';
 import { Platform, type Repo } from '@thaddeus.run/platform';
@@ -14,7 +14,7 @@ import { type Provenance, ProvenanceLog } from '@thaddeus.run/provenance';
 import { type ContributionClaim, signClaim } from '@thaddeus.run/reputation';
 import { signVeto, VetoLog } from '@thaddeus.run/review';
 import { type Backend, scoped } from '@thaddeus.run/store';
-import { readFileSync } from 'node:fs';
+import { readFileSync, rmSync } from 'node:fs';
 import { isAbsolute, join } from 'node:path';
 import { parseArgs } from 'node:util';
 
@@ -39,6 +39,7 @@ import {
   listWorkingFiles,
   loadConfig,
   materializeToDisk,
+  safeTarget,
   saveConfig,
 } from './workcopy';
 
@@ -193,6 +194,39 @@ async function commitDiff(
   const heads = [...repo.log.heads('staging')];
   await repo.log.repoint('main', heads);
   return { heads, committed: true, ops };
+}
+
+// Share read-capabilities for everything reachable from `heads` with the repo's
+// OTHER members (owner + non-revoked delegates). `store.put` seals a new object
+// only to its author, so without this nobody else — not even the repo owner —
+// can decrypt what we are about to publish.
+//
+// Fails CLOSED: if the member list can't be read we throw rather than upload
+// objects sealed to us alone, which would publish content no collaborator can
+// decrypt while `push` still reported success. Nothing is uploaded; retry.
+async function reshareToMembers(
+  client: Client,
+  repoName: string,
+  local: Repo,
+  heads: readonly string[],
+  identity: Identity
+): Promise<number> {
+  let dids: string[];
+  try {
+    dids = await client.members(repoName);
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    throw new Error(
+      `could not read the repo's members (${msg}) — refusing to publish content collaborators could not decrypt; nothing was uploaded, please retry`
+    );
+  }
+  const members = dids
+    .filter((did) => did !== identity.did)
+    .map((did) => PublicIdentity.fromDid(did));
+  if (members.length === 0) {
+    return 0;
+  }
+  return reshareObjects(local, reachablePids(local, heads), members, identity);
 }
 
 // Resolve the server for create/clone and strip it from the positionals.
@@ -453,6 +487,57 @@ export async function run(
         );
         return 0;
       }
+      case 'pull': {
+        const root = findRoot(env.cwd);
+        if (root === undefined) {
+          out("not a thaddeus working copy — run 'thaddeus clone' first");
+          return 2;
+        }
+        const cfg = loadConfig(root);
+        const identity = loadIdentity(env.home);
+        const backend = new FileBackend(join(root, '.thaddeus', 'store'));
+        const local = await new Platform().openDurable(cfg.repo, backend);
+        // Safe v1: only fast-forward a clean, not-ahead working copy. Merging a
+        // divergent local history is a branches-era concern.
+        // A path we hold no key for is never materialized, so it must not be
+        // mistaken for a local addition — a copy left on disk from before a key
+        // rotation would otherwise wedge `pull` on a phantom dirty tree.
+        const denied = new Set<string>();
+        const before = await baseSnapshot(local, 'main', identity, (p) =>
+          denied.add(p)
+        );
+        const { added, modified, deleted } = diffWorkingTree(root, before);
+        const dirty =
+          added.filter((p) => !denied.has(p)).length +
+          modified.length +
+          deleted.length;
+        if (dirty > 0) {
+          out('uncommitted changes — commit and push (or discard) before pull');
+          return 2;
+        }
+        if (headsAhead(local, cfg.base) > 0) {
+          out(
+            "unpublished commits — run 'thaddeus push' or 'land' before pull"
+          );
+          return 2;
+        }
+        const client = new Client(cfg.server, identity, env.fetchImpl);
+        const { heads } = await client.pull(cfg.repo, local, backend);
+        const after = await baseSnapshot(local, 'main', identity);
+        // Mirror upstream: remove what it deleted, then write what it has.
+        for (const path of before.keys()) {
+          if (!after.has(path)) {
+            const full = safeTarget(root, path);
+            if (full !== null) {
+              rmSync(full, { force: true });
+            }
+          }
+        }
+        await materializeToDisk(local, 'main', identity, root);
+        saveConfig(root, { ...cfg, base: [...heads] });
+        out(`pulled ${cfg.repo} (${heads.length} head(s))`);
+        return 0;
+      }
       case 'status': {
         const root = findRoot(env.cwd);
         if (root === undefined) {
@@ -462,18 +547,27 @@ export async function run(
         const cfg = loadConfig(root);
         const identity = loadIdentity(env.home);
         const local = await openLocal(root, cfg.repo);
-        const snap = await baseSnapshot(local, 'main', identity);
+        // Files this identity holds no capability for are skipped, not fatal.
+        const skipped: string[] = [];
+        const snap = await baseSnapshot(local, 'main', identity, (p) =>
+          skipped.push(p)
+        );
         const { added, modified, deleted } = diffWorkingTree(root, snap);
         const ahead = headsAhead(local, cfg.base);
         const clean =
           added.length + modified.length + deleted.length === 0 && ahead === 0;
         if (wantsJson(rest)) {
-          out(JSON.stringify({ clean, added, modified, deleted, ahead }));
+          out(
+            JSON.stringify({ clean, added, modified, deleted, ahead, skipped })
+          );
+          return 0;
+        }
+        if (clean && skipped.length === 0) {
+          out('clean');
           return 0;
         }
         if (clean) {
           out('clean');
-          return 0;
         }
         for (const p of added) out(`added:    ${p}`);
         for (const p of modified) out(`modified: ${p}`);
@@ -481,6 +575,10 @@ export async function run(
         if (ahead > 0)
           out(
             `(${ahead} commit(s) not published — run 'thaddeus push' or 'land')`
+          );
+        if (skipped.length > 0)
+          out(
+            `(${skipped.length} file(s) not readable with your keys — skipped)`
           );
         return 0;
       }
@@ -611,6 +709,9 @@ export async function run(
           }
         }
         const client = new Client(cfg.server, identity, env.fetchImpl);
+        // Give every other member a key to what we publish, before uploading —
+        // the bundle carries whatever caps the store holds at build time.
+        await reshareToMembers(client, cfg.repo, local, heads, identity);
         const pushed = await client.push(cfg.repo, local, heads, provenance);
         out(
           `uploaded ${pushed.accepted.ops} op(s), ${pushed.accepted.objects} object(s)${
@@ -763,6 +864,8 @@ export async function run(
           }
         }
         const client = new Client(cfg.server, identity, env.fetchImpl);
+        // The rewritten files are new objects, sealed to us alone — share them.
+        await reshareToMembers(client, cfg.repo, local, heads, identity);
         const pushed = await client.push(cfg.repo, local, heads, provenance, [
           symbolOp,
         ]);
@@ -1155,6 +1258,26 @@ export async function run(
         const g = await client.grant(cfg.repo, delegation);
         out(
           `granted ${g.agent} → ${g.paths.join(', ')} (max ${g.maxChanges} changes)`
+        );
+        // A delegation conveys WRITE authority only. To actually collaborate the
+        // delegate also needs the decryption capability, so re-wrap every object
+        // we can read for them and publish the new caps (reusing push). We can
+        // only share what this working copy can decrypt — pull first if stale.
+        const local = await openLocal(root, cfg.repo);
+        const heads = [...local.log.heads('main')];
+        const shared = await reshareObjects(
+          local,
+          reachablePids(local, heads),
+          [PublicIdentity.fromDid(did)],
+          identity
+        );
+        if (shared > 0) {
+          await client.push(cfg.repo, local, heads);
+        }
+        out(
+          shared > 0
+            ? `shared ${shared} object(s) — ${g.agent} can now read this repo`
+            : 'nothing to share yet (no landed content this copy can read)'
         );
         return 0;
       }
