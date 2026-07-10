@@ -80,7 +80,12 @@ export class SymbolLedger {
     return id;
   }
 
-  restore(id: string, birth: Binding, current: Binding): boolean {
+  restore(
+    id: string,
+    birth: Binding,
+    current: Binding,
+    projectedId: string
+  ): boolean {
     if (symbolIdFor(birth) !== id) {
       return false;
     }
@@ -92,15 +97,20 @@ export class SymbolLedger {
     ) {
       return false;
     }
-    const provisional = this.#byKey.get(currentKey);
-    if (provisional !== undefined && provisional !== id) {
-      const provisionalBinding = this.#byId.get(provisional);
+    const target = this.#byKey.get(currentKey);
+    if (target !== id && target !== projectedId) {
+      return false;
+    }
+    if (projectedId !== id) {
+      const provisionalBinding = this.#byId.get(projectedId);
       if (
-        provisionalBinding !== undefined &&
-        bindingKey(provisionalBinding) === currentKey
+        target !== projectedId ||
+        provisionalBinding === undefined ||
+        bindingKey(provisionalBinding) !== currentKey
       ) {
-        this.#byId.delete(provisional);
+        return false;
       }
+      this.#byId.delete(projectedId);
     }
     this.#byKey.set(currentKey, id);
     this.#byId.set(id, current);
@@ -171,7 +181,29 @@ interface LocalDef {
   readonly line: number;
 }
 
-// Find exactly one cycle-free rename route; zero or competing routes are not
+interface RenameStep {
+  readonly from: string;
+  readonly to: string;
+  readonly ops: readonly SymbolOp[];
+}
+
+// Collapse equivalent signed records into semantic edges so duplicate support
+// is synchronized together without manufacturing competing rename routes.
+function renameSteps(history: readonly SymbolOp[]): readonly RenameStep[] {
+  const steps = new Map<
+    string,
+    { from: string; to: string; ops: SymbolOp[] }
+  >();
+  for (const op of history) {
+    const key = JSON.stringify([op.from, op.to]);
+    const step = steps.get(key) ?? { from: op.from, to: op.to, ops: [] };
+    step.ops.push(op);
+    steps.set(key, step);
+  }
+  return [...steps.values()];
+}
+
+// Find exactly one cycle-free semantic route; zero or competing routes are not
 // authoritative enough to restore identity from an unordered peer history.
 function uniqueRenamePath(
   history: readonly SymbolOp[],
@@ -181,29 +213,47 @@ function uniqueRenamePath(
   if (from === to) {
     return [];
   }
-  const paths: SymbolOp[][] = [];
+  const steps = renameSteps(history);
+  const paths: RenameStep[][] = [];
   const visit = (
     name: string,
-    path: readonly SymbolOp[],
+    path: readonly RenameStep[],
     seen: ReadonlySet<string>
   ): void => {
     if (paths.length > 1) {
       return;
     }
-    for (const op of history) {
-      if (op.from !== name || seen.has(op.to)) {
+    for (const step of steps) {
+      if (step.from !== name || seen.has(step.to)) {
         continue;
       }
-      const nextPath = [...path, op];
-      if (op.to === to) {
+      const nextPath = [...path, step];
+      if (step.to === to) {
         paths.push(nextPath);
       } else {
-        visit(op.to, nextPath, new Set([...seen, op.to]));
+        visit(step.to, nextPath, new Set([...seen, step.to]));
       }
     }
   };
   visit(from, [], new Set([from]));
-  return paths.length === 1 ? paths[0] : null;
+  return paths.length === 1
+    ? (paths[0]?.flatMap((step) => step.ops) ?? [])
+    : null;
+}
+
+// Return only candidates whose projected binding has exactly one stable-symbol
+// claimant. Candidate selection must finish before any ledger mutation.
+function uncontended<T extends { readonly target: Binding }>(
+  candidates: readonly T[]
+): readonly T[] {
+  const counts = new Map<string, number>();
+  for (const candidate of candidates) {
+    const key = bindingKey(candidate.target);
+    counts.set(key, (counts.get(key) ?? 0) + 1);
+  }
+  return candidates.filter(
+    (candidate) => counts.get(bindingKey(candidate.target)) === 1
+  );
 }
 
 // The read/rename surface over a Workspace. Reads re-extract from decryptable
@@ -366,10 +416,18 @@ export class SymbolGraph {
         history.push(op);
         bySymbol.set(op.symbol, history);
       }
+      const selected: {
+        symbol: string;
+        birth: Binding;
+        target: Binding;
+        projectedId: string;
+        path: readonly SymbolOp[];
+      }[] = [];
       for (const [symbol, history] of bySymbol) {
         const candidates: {
           birth: Binding;
-          current: Binding;
+          target: Binding;
+          projectedId: string;
           path: readonly SymbolOp[];
         }[] = [];
         for (const definition of model.defs) {
@@ -377,14 +435,19 @@ export class SymbolGraph {
           const births = new Set(history.map((op) => op.from));
           for (const birthName of births) {
             const birth = { path: definition.path, name: birthName, kind };
-            const current = {
+            const target = {
               path: definition.path,
               name: definition.name,
               kind,
             };
             const path = uniqueRenamePath(history, birthName, definition.name);
             if (symbolIdFor(birth) === symbol && path !== null) {
-              candidates.push({ birth, current, path });
+              candidates.push({
+                birth,
+                target,
+                projectedId: definition.symbol,
+                path,
+              });
             }
           }
         }
@@ -392,9 +455,18 @@ export class SymbolGraph {
           continue;
         }
         const candidate = candidates[0];
+        if (candidate !== undefined) {
+          selected.push({ symbol, ...candidate });
+        }
+      }
+      for (const candidate of uncontended(selected)) {
         if (
-          candidate !== undefined &&
-          this.ledger.restore(symbol, candidate.birth, candidate.current)
+          this.ledger.restore(
+            candidate.symbol,
+            candidate.birth,
+            candidate.target,
+            candidate.projectedId
+          )
         ) {
           for (const op of candidate.path) {
             this.#syncedRenameOps.add(op.id);
@@ -417,6 +489,12 @@ export class SymbolGraph {
       history.push(op);
       bySymbol.set(op.symbol, history);
     }
+    const selected: {
+      symbol: string;
+      target: Binding;
+      projectedId: string;
+      path: readonly SymbolOp[];
+    }[] = [];
     for (const [symbol, history] of bySymbol) {
       const binding = this.ledger.bindingOf(symbol);
       if (binding === null) {
@@ -431,7 +509,8 @@ export class SymbolGraph {
         continue;
       }
       const candidates: {
-        definition: Definition;
+        target: Binding;
+        projectedId: string;
         path: readonly SymbolOp[];
       }[] = [];
       for (const definition of projected) {
@@ -443,19 +522,31 @@ export class SymbolGraph {
         }
         const path = uniqueRenamePath(history, binding.name, definition.name);
         if (path !== null && path.length > 0) {
-          candidates.push({ definition, path });
+          candidates.push({
+            target: {
+              path: definition.path,
+              name: definition.name,
+              kind: binding.kind,
+            },
+            projectedId: definition.symbol,
+            path,
+          });
         }
       }
       if (candidates.length !== 1) {
         continue;
       }
       const candidate = candidates[0];
+      if (candidate !== undefined) {
+        selected.push({ symbol, ...candidate });
+      }
+    }
+    for (const candidate of uncontended(selected)) {
       if (
-        candidate !== undefined &&
         this.ledger.reconcile(
-          symbol,
-          candidate.definition.name,
-          candidate.definition.symbol
+          candidate.symbol,
+          candidate.target.name,
+          candidate.projectedId
         )
       ) {
         for (const op of candidate.path) {
