@@ -35,6 +35,7 @@ tsconfig.tsbuildinfo
 .vercel
 .claude/*
 .agents/ignore/
+.worktrees/
 
 # moon (generated per-clone/worktree state)
 .moon/cache/
