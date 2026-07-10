@@ -74,6 +74,13 @@ land (minting a host-vouched merge) and can gate land on that durable reputation
 (`--min-merges`). Multi-node concurrency, cross-instance federation, and the Git
 gateway are the next steps.
 
+Timed reveal is the deliberate exception to that normal trust boundary. An owner
+uploads a public-wrapped capability before its start time so the server can
+release it while the owner is offline. Since the public identity is well-known,
+the selected host is trusted as embargo custodian for that scheduled file.
+Ordinary pulls cannot release it early, but a dishonest host can; a trustless
+unattended reveal requires the deferred time-lock design.
+
 ## Client & CLI (infrastructure, not a pillar)
 
 The remote is driven by a reusable `@thaddeus.run/client` SDK (a `Client`

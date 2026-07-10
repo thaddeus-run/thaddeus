@@ -23,7 +23,8 @@ Working tree
 
 History & meaning
   log    [--since D] [--until D]  main's history with the why per change
-  why    <op>                     the signed why for one op
+  query  <kind> ...               query why, history, callers, and references
+  why    <op>                     alias for 'query why <op>'
   veto   <op> [-m "<reason>"]     lodge a standing veto that blocks a land
   vetoes <op>                     list the standing vetoes on one op
   rename <old> <new> [-m "<why>"] rename a symbol as one signed SymbolOp
@@ -37,6 +38,8 @@ Access & trust
   grants                                        list active grants
   policy [set|clear]                            show or select repo land policy
   reputation <did>                              a DID's server-wide reputation
+  schedule-reveal <path> --at <ISO>             make committed content public later
+  reveal <path>                                 trigger a due public reveal now
 
 Server
   serve  [--port N] [--data DIR] [--host] [--min-merges N]  run a server
@@ -167,8 +170,40 @@ thaddeus diff [--from <branch>] [--to <branch>] [path...] [--json]
 
   why: `thaddeus why <op> [--json]
 
-  Show the signed provenance for one op (resolved by id prefix), each record
-  labelled [verified] or [unverified].`,
+  Compatibility alias for 'thaddeus query why <op>'. Show the signed provenance
+  for one op on the current branch (resolved by id prefix), each record labelled
+  [verified] or [unverified].`,
+
+  query: `thaddeus query why <op> [--json]
+thaddeus query touched-since <ISO> [--json]
+thaddeus query by <did> [--since <ISO>] [--until <ISO>] [--json]
+thaddeus query callers <symbol> [--json]
+thaddeus query references <name> [--json]
+
+  Interrogate the current working copy's committed branch through CodeDB. The
+  command is local and read-only: it does not pull, commit, or include dirty disk
+  edits. History queries are current-branch-only and newest-first; time bounds
+  are inclusive ISO-8601 instants. callers accepts a current name, full symbol
+  id, or unique id prefix. references accepts a current symbol name. Semantic
+  answers include only content your identity can decrypt.`,
+
+  'schedule-reveal': `thaddeus schedule-reveal <path> --at <ISO> [--json]
+
+  Schedule one committed file's content for public release. The client wraps
+  its content key to the well-known public identity and sends that signed,
+  future-dated capability; the server persists it outside normal pull responses
+  and promotes it automatically when its clock reaches --at. Because the public
+  identity is well-known, this trusts the host not to release the file early.
+  Owner-only.
+
+  This reveals file content, not hidden history: paths and operation metadata
+  are already public on the ciphertext mirror. Dirty disk edits are ignored.`,
+
+  reveal: `thaddeus reveal <path> [--json]
+
+  Manually trigger a scheduled reveal for one committed file. The server uses
+  its own trusted clock, so calling this early leaves the content private.
+  Normal servers also scan for due reveals automatically. Owner-only.`,
 
   veto: `thaddeus veto <op> [-m "<reason>"]
 

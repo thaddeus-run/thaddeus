@@ -25,6 +25,9 @@ export interface Bundle {
   prov?: string[];
   veto?: string[];
   symop?: string[];
+  // Owner-authorized recall may carry scheduled public capabilities so key
+  // rotation does not cancel a reveal. Normal pull never includes this field.
+  pending?: string[];
 }
 
 const toWire = (value: unknown): string =>
@@ -39,7 +42,8 @@ export function encodeBundle(
   caps: readonly Capability[],
   prov: readonly Provenance[] = [],
   veto: readonly Veto[] = [],
-  symop: readonly SymbolOp[] = []
+  symop: readonly SymbolOp[] = [],
+  pending: readonly Capability[] = []
 ): Bundle {
   return {
     ops: ops.map(toWire),
@@ -48,6 +52,7 @@ export function encodeBundle(
     prov: prov.map(toWire),
     veto: veto.map(toWire),
     symop: symop.map(toWire),
+    ...(pending.length > 0 ? { pending: pending.map(toWire) } : {}),
   };
 }
 
@@ -58,6 +63,7 @@ export function decodeBundle(b: Bundle): {
   prov: Provenance[];
   veto: Veto[];
   symop: SymbolOp[];
+  pending: Capability[];
 } {
   return {
     ops: (b.ops ?? []).map((s) => fromWire(s) as Op),
@@ -66,7 +72,18 @@ export function decodeBundle(b: Bundle): {
     prov: (b.prov ?? []).map((s) => fromWire(s) as Provenance),
     veto: (b.veto ?? []).map((s) => fromWire(s) as Veto),
     symop: (b.symop ?? []).map((s) => fromWire(s) as SymbolOp),
+    pending: (b.pending ?? []).map((s) => fromWire(s) as Capability),
   };
+}
+
+// Scheduled-reveal endpoints transport one capability rather than a full
+// bundle. Reuse the same binary-safe record codec as every bundle item.
+export function encodeCapability(capability: Capability): string {
+  return toWire(capability);
+}
+
+export function decodeCapability(wire: string): Capability {
+  return fromWire(wire) as Capability;
 }
 
 // A single Delegation on the wire: base64 of the persistence record encoding (so

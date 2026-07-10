@@ -2,13 +2,15 @@
 
 A lazygit-style terminal UI for [Thaddeus](https://thaddeus.run) — browse a
 remote's repos, the operation log, the signed "why", vetoes, and reputation over
-the untrusted HTTP mirror.
+the untrusted HTTP mirror, then query a matching local working copy with `/`.
 
 `lazythad` is a standalone Rust crate (ratatui + crossterm). Because Thaddeus
 reads are a public mirror — `GET /repos`, `…/pull`, `/reputation/:did` need no
 signature — the browser holds **no keys** and does **no decryption**: it shows
 the cleartext metadata (op ids, paths, authors, timestamps, the why, veto
-claims) that the server serves to anyone.
+claims) that the server serves to anyone. Decryption-bounded `callers` and
+`references` queries are delegated to the installed `thaddeus` CLI; lazythad
+never reads an identity seed or implements the capability boundary itself.
 
 ## Build & run
 
@@ -20,16 +22,37 @@ cargo build --release            # → target/release/lazythad
 
 Point it at a running `thaddeus serve`.
 
+For local query views, launch it from inside a working copy whose repo and
+server match the selected remote. Install the `thaddeus` CLI too (the official
+installer installs both); set `THADDEUS_BIN=/path/to/thaddeus` to override CLI
+discovery.
+
 ## Keys
 
 | key            | action                                 |
 | -------------- | -------------------------------------- |
 | `q` / `Esc`    | quit                                   |
-| `Tab`          | switch pane (repos ↔ log)              |
+| `Tab`          | switch pane (repos ↔ activity)         |
 | `j` / `k`, ↑/↓ | move the selection                     |
 | `Enter`        | open the selected repo's log           |
-| `r`            | refresh from the remote                |
+| `t`            | toggle log / releases                  |
+| `/`            | open the local query palette           |
+| `r`            | refresh remote / rerun active query    |
 | `R`            | reputation of the selected op's author |
+
+The query palette accepts:
+
+```text
+why <op>
+touched-since <ISO>
+by <did> [--since <ISO>] [--until <ISO>]
+callers <symbol>
+references <name>
+```
+
+Successful results replace the activity pane and remain navigable with `j`/`k`.
+In a query view, `r` reruns the expression and `t` returns to the log. Queries
+use the local committed branch: they do not pull or include dirty disk edits.
 
 ## Other modes
 
@@ -41,7 +64,9 @@ lazythad --help
 
 ## Scope
 
-Read-mostly by design. Vetoes are shown as **claimed** (signatures are not
-verified client-side yet — that needs the ed25519 `did:key` verification the
-server and TS client do). Actions that write — `land`, signing a `veto` — need
-the DID signed-request envelope reimplemented in Rust, and are a fast-follow.
+Read-mostly by design. Remote browsing remains completely keyless; local query
+views are a subprocess bridge to `thaddeus query --json`. Vetoes are shown as
+**claimed** (signatures are not verified client-side yet — that needs the
+ed25519 `did:key` verification the server and TS client do). Actions that write
+— `land`, signing a `veto` — need the DID signed-request envelope reimplemented
+in Rust, and are a fast-follow.

@@ -21,14 +21,32 @@ nameable heads and P4 if releases should be gated.
 
 Expose `CodeDB` through `thaddeus query`: `why`, `touchedSince`, `by`,
 `callers`, and `references`, plus the TUI. This is the payoff for the semantic
-graph: the rename op is already first-class, but users cannot ask questions of
-it from the CLI yet.
+graph: the rename op was already first-class, and P6 makes it interrogable from
+the CLI and TUI.
+
+**Shipped:** the CLI exposes these as `query why`, `query touched-since`,
+`query by`, `query callers`, and `query references` over the current committed
+branch, with `why` retained as an alias. Lazythad's `/` palette delegates local,
+decryption-bounded queries to the CLI without giving the untrusted server keys
+or publishing a plaintext semantic index.
 
 ## P7 - Timed Reveal
 
 Add `schedule-reveal` / `reveal`. This is the one phase with a genuine new
 server dependency: reveal currently needs a manual trigger, so the server has to
 grow a scheduled one.
+
+**Shipped:** `thaddeus schedule-reveal <path> --at <ISO>` creates a signed
+public capability locally and sends it to the owner-gated server route. Pending
+capabilities are durable, withheld from ordinary pulls, released by the server's
+scheduled scan, and immediately usable by any fresh clone after release;
+`thaddeus reveal <path>` provides an idempotent manual trigger that still obeys
+the server's clock. Recall re-wraps and transports pending reveals so a P9 key
+rotation does not break the schedule. The commands reveal committed file
+content; path and operation metadata were already visible on the ciphertext
+mirror. As specified by the P02 membrane, unattended release is store-honest:
+scheduling trusts the selected host not to unwrap or publish the well-known
+public capability early. Trustless time-lock crypto remains deferred.
 
 ## P8 - Watch / Subscriptions
 

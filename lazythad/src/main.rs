@@ -1,9 +1,11 @@
 //! `lazythad` — a lazygit-style terminal UI for Thaddeus. Read-mostly: browse a
 //! remote's repos, op log, releases, signed why, vetoes, and reputation over
-//! the untrusted HTTP mirror (no keys, no decryption).
+//! the untrusted HTTP mirror, plus decryption-bounded local queries delegated
+//! to the `thaddeus` CLI inside a matching working copy.
 
 mod app;
 mod client;
+mod query;
 mod ui;
 
 use std::io::{self, Stdout};
@@ -20,6 +22,7 @@ use ratatui::Terminal;
 
 use app::App;
 use client::Remote;
+use query::{LocalQueries, QuerySource};
 
 const DEFAULT_SERVER: &str = "http://localhost:4000";
 
@@ -55,6 +58,7 @@ fn print_help() {
          \x20 j / k     move selection (↑/↓ also)\n\
          \x20 Enter     open the selected repo's log\n\
          \x20 t         toggle log / releases\n\
+         \x20 /         query the matching local committed working copy\n\
          \x20 r         refresh from the remote\n\
          \x20 R         reputation of the selected op's author"
     );
@@ -119,7 +123,11 @@ fn main() -> Result<()> {
     }
 
     let server = args.into_iter().next().unwrap_or_else(default_server);
-    let mut app = App::new(Remote::new(&server), server.clone());
+    let local_queries = std::env::current_dir()
+        .ok()
+        .and_then(|cwd| LocalQueries::discover(&cwd).ok().flatten())
+        .map(|source| Box::new(source) as Box<dyn QuerySource>);
+    let mut app = App::new(Remote::new(&server), server.clone(), local_queries);
 
     let mut terminal = setup_terminal()?;
     let result = run(&mut terminal, &mut app);

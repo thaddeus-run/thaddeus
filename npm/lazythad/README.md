@@ -5,6 +5,11 @@ A lazygit-style terminal UI for [Thaddeus](https://thaddeus.run) (Rust ·
 why, vetoes, and reputation. Distributed as a prebuilt binary. Installs the
 `lazythad` command.
 
+When launched inside a matching Thaddeus working copy, press `/` to query its
+committed history and semantic graph through the separately installed `thaddeus`
+CLI (`why`, `touched-since`, `by`, `callers`, and `references`). The official
+installer below installs both commands.
+
 ```sh
 npm i -g @thaddeus.run/lazythad@alpha
 lazythad http://localhost:4000

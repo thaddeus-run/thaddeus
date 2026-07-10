@@ -21,6 +21,23 @@ Pure read-only joins — no new signed records. The graph half is
 **decryption-bounded** (inherited from the `Workspace` the `SymbolGraph` was
 built over); operation metadata (path, author, `at`) is cleartext by P03 design.
 
+## CLI surface
+
+Inside a durable working copy, the product CLI exposes the same joins over the
+current committed branch:
+
+```sh
+thaddeus query why <op>
+thaddeus query touched-since 2026-07-01
+thaddeus query by did:key:z6Mk... --since 2026-07-01
+thaddeus query callers refreshToken
+thaddeus query references refreshToken
+```
+
+Every form accepts `--json`. Queries are local and read-only: they do not pull,
+commit, or include dirty disk edits. `thaddeus why` remains an alias for
+`thaddeus query why`.
+
 > **Status: spike.** In-memory, single process, full re-derive per query.
 > Subscriptions that fire on semantic events (Slice 2), policy as standing
 > queries (Slice 3), incremental indexing / millisecond-scale, a durable query

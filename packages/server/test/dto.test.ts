@@ -3,7 +3,12 @@ import { OpLog } from '@thaddeus.run/log';
 import { MemoryStore } from '@thaddeus.run/store';
 import { beforeAll, describe, expect, test } from 'bun:test';
 
-import { decodeBundle, encodeBundle } from '../src/dto';
+import {
+  decodeBundle,
+  decodeCapability,
+  encodeBundle,
+  encodeCapability,
+} from '../src/dto';
 
 beforeAll(async () => {
   await ready();
@@ -20,7 +25,12 @@ describe('wire bundle codec', () => {
     const object = store.rawObject(op.payload!.id)!;
     const caps = [...store.caps(op.payload!.plaintext_id)];
 
-    const wire = encodeBundle([op], [object], caps);
+    const reveal = await store.scheduleReveal(
+      op.payload!,
+      '2030-01-01T00:00:00.000Z',
+      author
+    );
+    const wire = encodeBundle([op], [object], caps, [], [], [], [reveal]);
     // Wire form is JSON-serializable (base64 strings).
     const reparsed = JSON.parse(JSON.stringify(wire)) as typeof wire;
     const back = decodeBundle(reparsed);
@@ -38,6 +48,20 @@ describe('wire bundle codec', () => {
       expect(back.caps[0].wrapped_key).toBeInstanceOf(Uint8Array);
       expect([...back.caps[0].wrapped_key]).toEqual([...caps[0].wrapped_key]);
     }
+    expect(back.pending[0]).toEqual(reveal);
+  });
+
+  test('round-trips one reveal capability outside a bundle', async () => {
+    const author = Identity.create();
+    const store = new MemoryStore();
+    const ref = await store.put(enc('later'), author);
+    const capability = await store.scheduleReveal(
+      ref,
+      '2030-01-01T00:00:00.000Z',
+      author
+    );
+
+    expect(decodeCapability(encodeCapability(capability))).toEqual(capability);
   });
 
   test('tolerates missing arrays (decodes to empty)', () => {
@@ -50,6 +74,7 @@ describe('wire bundle codec', () => {
       prov: [],
       veto: [],
       symop: [],
+      pending: [],
     });
   });
 });

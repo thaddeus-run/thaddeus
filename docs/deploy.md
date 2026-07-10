@@ -1,7 +1,9 @@
 # Deploying a Thaddeus server
 
-`thaddeus serve` is the untrusted HTTP remote: it holds no keys, verifies what
-it ingests, and serves ciphertext. It is a **stateful, long-running process**
+`thaddeus serve` is normally an untrusted HTTP remote: it verifies what it
+ingests and serves ciphertext without decryption keys. Scheduling a timed reveal
+is the explicit exception: the host becomes the trusted embargo custodian for
+that file until its release time. It is a **stateful, long-running process**
 that keeps its durable state (the `FileBackend` and a host identity) on a
 **persistent volume** — so deploy it as a container with a mounted volume, not
 as a serverless function.
