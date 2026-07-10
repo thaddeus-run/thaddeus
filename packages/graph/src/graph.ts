@@ -5,7 +5,7 @@ import type { Identity } from '@thaddeus.run/identity';
 import type { Op } from '@thaddeus.run/log';
 
 import type { Definition, Edge, Extractor, Reference, Symbol } from './symbol';
-import { signSymbolOp, type SymbolOp } from './symbolop';
+import { signSymbolOp, type SymbolOp, verifySymbolOp } from './symbolop';
 import { SymbolOpLog } from './symboloplog';
 
 // Domain tag for the birth-mint content address, so a symbol id can never
@@ -40,6 +40,21 @@ interface Binding {
 const bindingKey = (b: Binding): string =>
   JSON.stringify([b.path, b.name, b.kind]);
 
+function symbolIdFor(binding: Binding): string {
+  return bytesToHex(
+    blake3(
+      new TextEncoder().encode(
+        JSON.stringify([
+          SYMBOL_DOMAIN,
+          binding.path,
+          binding.name,
+          binding.kind,
+        ])
+      )
+    )
+  );
+}
+
 // In-memory symbol-identity map: (path,name,kind) ⇆ Symbol.id. Mints an id at
 // first sight and RETAINS it across renames (rebind moves the key, keeps the id).
 // Spike — not durable, not concurrency-safe.
@@ -55,13 +70,7 @@ export class SymbolLedger {
     if (existing !== undefined) {
       return existing;
     }
-    const id = bytesToHex(
-      blake3(
-        new TextEncoder().encode(
-          JSON.stringify([SYMBOL_DOMAIN, b.path, b.name, b.kind])
-        )
-      )
-    );
+    const id = symbolIdFor(b);
     this.#byKey.set(key, id);
     // Do not clobber an existing id→binding (a name resurrected after a rename is
     // a known spike edge, spec §11); the first binding for an id wins.
@@ -69,6 +78,33 @@ export class SymbolLedger {
       this.#byId.set(id, b);
     }
     return id;
+  }
+
+  restore(id: string, birth: Binding, current: Binding): boolean {
+    if (symbolIdFor(birth) !== id) {
+      return false;
+    }
+    const currentKey = bindingKey(current);
+    const existingBinding = this.#byId.get(id);
+    if (
+      existingBinding !== undefined &&
+      bindingKey(existingBinding) !== currentKey
+    ) {
+      return false;
+    }
+    const provisional = this.#byKey.get(currentKey);
+    if (provisional !== undefined && provisional !== id) {
+      const provisionalBinding = this.#byId.get(provisional);
+      if (
+        provisionalBinding !== undefined &&
+        bindingKey(provisionalBinding) === currentKey
+      ) {
+        this.#byId.delete(provisional);
+      }
+    }
+    this.#byKey.set(currentKey, id);
+    this.#byId.set(id, current);
+    return true;
   }
 
   bindingOf(id: string): Binding | null {
@@ -101,6 +137,37 @@ interface LocalDef {
   readonly line: number;
 }
 
+function renamePathExists(
+  history: readonly SymbolOp[],
+  from: string,
+  to: string
+): boolean {
+  if (from === to) {
+    return true;
+  }
+  const edges = new Map<string, Set<string>>();
+  for (const op of history) {
+    const next = edges.get(op.from) ?? new Set<string>();
+    next.add(op.to);
+    edges.set(op.from, next);
+  }
+  const seen = new Set<string>([from]);
+  const queue = [from];
+  while (queue.length > 0) {
+    const name = queue.shift()!;
+    for (const next of edges.get(name) ?? []) {
+      if (next === to) {
+        return true;
+      }
+      if (!seen.has(next)) {
+        seen.add(next);
+        queue.push(next);
+      }
+    }
+  }
+  return false;
+}
+
 // The read/rename surface over a Workspace. Reads re-extract from decryptable
 // Workspace text on each call — the capability boundary is inherited from
 // Workspace (a null read ⇒ the symbol is invisible). Spike — single process.
@@ -109,6 +176,8 @@ export class SymbolGraph {
   readonly #extractor: Extractor;
   protected readonly ledger: SymbolLedger;
   readonly #ops: SymbolOpLog;
+  #renamesHydrated = false;
+  readonly #syncedRenameOps = new Set<string>();
 
   protected constructor(
     ws: Workspace,
@@ -245,6 +314,63 @@ export class SymbolGraph {
   async edges(): Promise<readonly Edge[]> {
     const { edges } = await this.#model();
     return edges;
+  }
+
+  async syncRenames(ops: readonly SymbolOp[]): Promise<void> {
+    const valid = ops.filter((op) => verifySymbolOp(op));
+    if (!this.#renamesHydrated) {
+      const model = await this.#model();
+      const bySymbol = new Map<string, SymbolOp[]>();
+      for (const op of valid) {
+        const history = bySymbol.get(op.symbol) ?? [];
+        history.push(op);
+        bySymbol.set(op.symbol, history);
+      }
+      for (const definition of model.defs) {
+        const kind = model.kinds.get(definition.symbol) ?? 'function';
+        for (const [symbol, history] of bySymbol) {
+          const births = new Set(history.map((op) => op.from));
+          for (const birthName of births) {
+            const birth = { path: definition.path, name: birthName, kind };
+            const current = {
+              path: definition.path,
+              name: definition.name,
+              kind,
+            };
+            if (
+              symbolIdFor(birth) === symbol &&
+              renamePathExists(history, birthName, definition.name) &&
+              this.ledger.restore(symbol, birth, current)
+            ) {
+              break;
+            }
+          }
+        }
+      }
+      for (const op of valid) {
+        this.#syncedRenameOps.add(op.id);
+      }
+      this.#renamesHydrated = true;
+      return;
+    }
+
+    const pending = valid.filter((op) => !this.#syncedRenameOps.has(op.id));
+    let progressed = true;
+    while (progressed) {
+      progressed = false;
+      for (let index = pending.length - 1; index >= 0; index--) {
+        const op = pending[index];
+        if (
+          op !== undefined &&
+          this.ledger.currentName(op.symbol) === op.from
+        ) {
+          this.ledger.rebind(op.symbol, op.to);
+          this.#syncedRenameOps.add(op.id);
+          pending.splice(index, 1);
+          progressed = true;
+        }
+      }
+    }
   }
 
   // Rename a symbol as ONE signed SymbolOp rendered across the def and every
