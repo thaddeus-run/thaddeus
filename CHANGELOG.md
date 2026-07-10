@@ -7,6 +7,20 @@ All notable changes to Thaddeus. Format follows
 
 ### Added
 
+- **P8 Watch / Subscriptions.**
+  `thaddeus watch [symbol] [--kind <event>]... [--interval <duration>] [--json]`
+  now polls the existing atomic public-ciphertext pull route into an isolated
+  in-memory mirror, takes a silent baseline, and streams line-oriented text or
+  JSONL semantic events derived locally within the reader's decryption boundary.
+  Optional symbol filters resolve to a stable id and follow verified signed
+  remote renames; event-kind filters are repeatable. The command never changes
+  checked-out files or the durable working-copy store, keeps diagnostics out of
+  JSON stdout, retries transient polling failures sequentially without advancing
+  the baseline, and aborts cleanly on Ctrl-C. Lazythad now refreshes public
+  remote views every two seconds in a non-blocking, single-flight worker while
+  preserving selection and last-known-good data. This is polling, not durable
+  offline delivery, SSE/WebSockets, or server-side semantic processing.
+
 - **P7 timed reveal.** Repo owners can schedule committed file content for
   public release with `thaddeus schedule-reveal <path> --at <ISO>` or trigger a
   due release with `thaddeus reveal <path>`. The client creates the signed
