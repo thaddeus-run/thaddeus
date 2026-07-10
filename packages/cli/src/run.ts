@@ -867,17 +867,31 @@ export async function run(
         return 0;
       }
       case 'watch': {
-        const { values, positionals } = parseArgs({
-          args: [...rest],
-          options: {
-            kind: { type: 'string', multiple: true },
-            interval: { type: 'string' },
-            json: { type: 'boolean' },
-          },
-          allowPositionals: true,
-        });
+        const json = wantsJson(rest);
+        const diagnostic = json ? err : out;
+        let values: {
+          kind?: string[];
+          interval?: string;
+        };
+        let positionals: string[];
+        try {
+          ({ values, positionals } = parseArgs({
+            args: [...rest],
+            options: {
+              kind: { type: 'string', multiple: true },
+              interval: { type: 'string' },
+              json: { type: 'boolean' },
+            },
+            allowPositionals: true,
+          }));
+        } catch (error) {
+          diagnostic(
+            `error: ${error instanceof Error ? error.message : String(error)}`
+          );
+          return 2;
+        }
         if (positionals.length > 1) {
-          out(
+          diagnostic(
             'usage: thaddeus watch [symbol] [--kind <event>]... [--interval <duration>] [--json]'
           );
           return 2;
@@ -886,7 +900,7 @@ export async function run(
         try {
           intervalMs = parseWatchInterval(values.interval);
         } catch (error) {
-          out(error instanceof Error ? error.message : String(error));
+          diagnostic(error instanceof Error ? error.message : String(error));
           return 2;
         }
         const allowed: readonly EventKind[] = [
@@ -901,15 +915,25 @@ export async function run(
           (kind): boolean => !allowed.includes(kind as EventKind)
         );
         if (invalid !== undefined) {
-          out(`invalid watch kind: ${invalid}`);
+          diagnostic(`invalid watch kind: ${invalid}`);
           return 2;
         }
         const root = findRoot(env.cwd);
         if (root === undefined) {
-          out("not a thaddeus working copy — run 'thaddeus clone' first");
+          diagnostic(
+            "not a thaddeus working copy — run 'thaddeus clone' first"
+          );
           return 2;
         }
-        const cfg = loadConfig(root);
+        let cfg: Config;
+        try {
+          cfg = loadConfig(root);
+        } catch (error) {
+          diagnostic(
+            `error: ${error instanceof Error ? error.message : String(error)}`
+          );
+          return 1;
+        }
         const ownedController =
           env.signal === undefined ? new AbortController() : null;
         const signal = env.signal ?? ownedController!.signal;
@@ -930,11 +954,7 @@ export async function run(
             signal,
             sleep: env.sleep,
             onEvent: (event) =>
-              out(
-                values.json === true
-                  ? JSON.stringify(event)
-                  : formatSemanticEvent(event)
-              ),
+              out(json ? JSON.stringify(event) : formatSemanticEvent(event)),
             onError: (error) => err(`watch error: ${error.message}`),
           });
           return 0;
