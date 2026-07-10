@@ -61,7 +61,6 @@ function symbolIdFor(binding: Binding): string {
 export class SymbolLedger {
   readonly #byKey: Map<string, string> = new Map();
   readonly #byId: Map<string, Binding> = new Map();
-  readonly #provisionalByKey: Map<string, Binding> = new Map();
 
   // The id for a binding, minting it on first sight. Content-addressed at birth
   // → deterministic and test-reproducible.
@@ -72,7 +71,6 @@ export class SymbolLedger {
       return existing;
     }
     const id = symbolIdFor(b);
-    this.#provisionalByKey.delete(key);
     this.#byKey.set(key, id);
     // Do not clobber an existing id→binding (a name resurrected after a rename is
     // a known spike edge, spec §11); the first binding for an id wins.
@@ -82,57 +80,38 @@ export class SymbolLedger {
     return id;
   }
 
-  // Project an unaccepted definition without granting it stable ownership.
-  // Its deterministic id is suitable for snapshots and remains retryable.
+  // The id a binding resolves to WITHOUT granting it stable ownership: its
+  // stable owner when bound, otherwise its deterministic content address. Lets
+  // snapshots show an unaccepted rename target consistently while the target
+  // stays mintable and retryable.
   project(b: Binding): string {
-    const key = bindingKey(b);
-    const stable = this.#byKey.get(key);
-    if (stable !== undefined) {
-      return stable;
-    }
-    this.#provisionalByKey.set(key, b);
-    return symbolIdFor(b);
+    return this.#byKey.get(bindingKey(b)) ?? symbolIdFor(b);
   }
 
   stableOwner(b: Binding): string | null {
     return this.#byKey.get(bindingKey(b)) ?? null;
   }
 
-  #projectedIdMatches(b: Binding, projectedId: string): boolean {
-    return symbolIdFor(b) === projectedId;
+  // Whether `bind` would succeed: the target key must be free or already owned
+  // by this id. Reconciliation preflights with this so a claim it accepts can
+  // never fail to apply.
+  canBind(id: string, target: Binding): boolean {
+    const owner = this.#byKey.get(bindingKey(target));
+    return owner === undefined || owner === id;
   }
 
-  #discardProjected(b: Binding): void {
-    this.#provisionalByKey.delete(bindingKey(b));
-  }
-
-  restore(
-    id: string,
-    birth: Binding,
-    current: Binding,
-    projectedId: string
-  ): boolean {
-    if (symbolIdFor(birth) !== id) {
+  // Bind `id` at `target`: mint an unknown id there, or move a known id off its
+  // previous key. Never seizes a key owned by a different identity.
+  bind(id: string, target: Binding): boolean {
+    if (!this.canBind(id, target)) {
       return false;
     }
-    if (!this.#projectedIdMatches(current, projectedId)) {
-      return false;
+    const existing = this.#byId.get(id);
+    if (existing !== undefined) {
+      this.#byKey.delete(bindingKey(existing));
     }
-    const currentKey = bindingKey(current);
-    const existingBinding = this.#byId.get(id);
-    if (
-      existingBinding !== undefined &&
-      bindingKey(existingBinding) !== currentKey
-    ) {
-      return false;
-    }
-    const target = this.#byKey.get(currentKey);
-    if (target !== undefined && target !== id) {
-      return false;
-    }
-    this.#discardProjected(current);
-    this.#byKey.set(currentKey, id);
-    this.#byId.set(id, current);
+    this.#byKey.set(bindingKey(target), id);
+    this.#byId.set(id, target);
     return true;
   }
 
@@ -142,33 +121,6 @@ export class SymbolLedger {
 
   currentName(id: string): string | null {
     return this.#byId.get(id)?.name ?? null;
-  }
-
-  ids(): readonly string[] {
-    return [...this.#byId.keys()];
-  }
-
-  // Replace the provisional id minted while projecting a newly landed name,
-  // but never overwrite a different identity that predated that projection.
-  reconcile(id: string, to: string, projectedId: string): boolean {
-    const binding = this.#byId.get(id);
-    if (binding === undefined) {
-      return false;
-    }
-    const next: Binding = { path: binding.path, name: to, kind: binding.kind };
-    if (!this.#projectedIdMatches(next, projectedId)) {
-      return false;
-    }
-    const nextKey = bindingKey(next);
-    const target = this.#byKey.get(nextKey);
-    if (target !== undefined && target !== id) {
-      return false;
-    }
-    this.#discardProjected(next);
-    this.#byKey.delete(bindingKey(binding));
-    this.#byKey.set(nextKey, id);
-    this.#byId.set(id, next);
-    return true;
   }
 
   // Move a symbol's binding from its current name to `to`, keeping the same id.
@@ -219,8 +171,15 @@ function renameSteps(history: readonly SymbolOp[]): readonly RenameStep[] {
   return [...steps.values()];
 }
 
-// Find exactly one cycle-free semantic route; zero or competing routes are not
-// authoritative enough to restore identity from an unordered peer history.
+// Bound the route search: a legitimate per-symbol history is a short chain,
+// but any key can sign records, so a crafted dense history could make simple-
+// path enumeration exponential. Past this many step visits the history gets
+// the same verdict as a competing route — not authoritative.
+const RENAME_ROUTE_BUDGET = 100_000;
+
+// Find exactly one cycle-free semantic route; zero, competing, or search-
+// budget-exhausting routes are not authoritative enough to restore identity
+// from an unordered peer history.
 function uniqueRenamePath(
   history: readonly SymbolOp[],
   from: string,
@@ -231,15 +190,22 @@ function uniqueRenamePath(
   }
   const steps = renameSteps(history);
   const paths: RenameStep[][] = [];
+  let visits = 0;
+  let exhausted = false;
   const visit = (
     name: string,
     path: readonly RenameStep[],
     seen: ReadonlySet<string>
   ): void => {
-    if (paths.length > 1) {
+    if (paths.length > 1 || exhausted) {
       return;
     }
     for (const step of steps) {
+      visits += 1;
+      if (visits > RENAME_ROUTE_BUDGET) {
+        exhausted = true;
+        return;
+      }
       if (step.from !== name || seen.has(step.to)) {
         continue;
       }
@@ -252,6 +218,9 @@ function uniqueRenamePath(
     }
   };
   visit(from, [], new Set([from]));
+  if (exhausted) {
+    return null;
+  }
   return paths.length === 1
     ? (paths[0]?.flatMap((step) => step.ops) ?? [])
     : null;
@@ -272,6 +241,33 @@ function uncontended<T extends { readonly target: Binding }>(
   );
 }
 
+// One symbol's claim on one projected definition, resolved during a
+// reconciliation transaction. `projectedId` is the target's content address —
+// equal to `symbol` exactly when the target sits at the symbol's birth.
+interface RenameClaim {
+  readonly symbol: string;
+  readonly target: Binding;
+  readonly projectedId: string;
+}
+
+// The birth name for `symbol` anchored at a definition's site: the history
+// `from` whose content address at (path, kind) equals the symbol id. At most
+// one name can hash to the id, so the first match is the only match.
+function birthNameAt(
+  symbol: string,
+  history: readonly SymbolOp[],
+  site: Binding
+): string | null {
+  for (const from of new Set(history.map((op) => op.from))) {
+    if (
+      symbolIdFor({ path: site.path, name: from, kind: site.kind }) === symbol
+    ) {
+      return from;
+    }
+  }
+  return null;
+}
+
 // The read/rename surface over a Workspace. Reads re-extract from decryptable
 // Workspace text on each call — the capability boundary is inherited from
 // Workspace (a null read ⇒ the symbol is invisible). Spike — single process.
@@ -280,8 +276,12 @@ export class SymbolGraph {
   readonly #extractor: Extractor;
   protected readonly ledger: SymbolLedger;
   readonly #ops: SymbolOpLog;
-  #renamesHydrated = false;
-  readonly #syncedRenameOps = new Set<string>();
+  // Verified rename records accumulated across syncRenames calls, per symbol,
+  // deduped by content-addressed op id so each signature is checked once.
+  readonly #renameHistory: Map<string, Map<string, SymbolOp>> = new Map();
+  // Binding keys of definitions claimed by live-but-unapplied renames; #model()
+  // projects these instead of minting so the claims stay retryable. Recomputed
+  // from scratch by every reconciliation — a marker cannot outlive its claim.
   readonly #provisionalRenameTargets = new Set<string>();
 
   protected constructor(
@@ -449,187 +449,120 @@ export class SymbolGraph {
     return edges;
   }
 
-  // Restore landed history on first use; later, consume only the unique unseen
-  // rename path whose terminal definition is present in the projected view.
+  // Ingest verified rename records into the accumulated per-symbol history
+  // (dedup by content-addressed op id, so each signature is checked at most
+  // once across the watch loop's repeated full-history calls), then reconcile.
+  // The first and every later call share one reconciliation transaction, so a
+  // claim rejected today — contention, an unlanded rename, an ambiguous route —
+  // stays retryable on any later call, whether or not this graph served reads
+  // before the claim arrived.
   async syncRenames(ops: readonly SymbolOp[]): Promise<void> {
-    const valid = ops.filter((op) => verifySymbolOp(op));
-    if (!this.#renamesHydrated) {
-      const definitions = await this.#projectedDefinitions();
-      const bySymbol = new Map<string, SymbolOp[]>();
-      for (const op of valid) {
-        const history = bySymbol.get(op.symbol) ?? [];
-        history.push(op);
-        bySymbol.set(op.symbol, history);
+    for (const op of ops) {
+      const history = this.#renameHistory.get(op.symbol);
+      if (history?.has(op.id) === true) {
+        continue;
       }
-      const selected: {
-        symbol: string;
-        birth: Binding;
-        target: Binding;
-        projectedId: string;
-        path: readonly SymbolOp[];
-      }[] = [];
-      for (const [symbol, history] of bySymbol) {
-        const candidates: {
-          birth: Binding;
-          target: Binding;
-          projectedId: string;
-          path: readonly SymbolOp[];
-        }[] = [];
-        for (const definition of definitions) {
-          const kind = definition.kind;
-          const births = new Set(history.map((op) => op.from));
-          for (const birthName of births) {
-            const birth = { path: definition.path, name: birthName, kind };
-            const target = {
-              path: definition.path,
-              name: definition.name,
-              kind,
-            };
-            const path = uniqueRenamePath(history, birthName, definition.name);
-            if (symbolIdFor(birth) === symbol && path !== null) {
-              candidates.push({
-                birth,
-                target,
-                projectedId: symbolIdFor(target),
-                path,
-              });
-            }
-          }
-        }
-        if (candidates.length !== 1) {
-          continue;
-        }
-        const candidate = candidates[0];
-        if (candidate !== undefined) {
-          selected.push({ symbol, ...candidate });
-        }
+      if (!verifySymbolOp(op)) {
+        continue;
       }
-      const stableClaimants = new Set(bySymbol.keys());
-      const accepted = uncontended(selected).filter((candidate) => {
-        const owner = this.ledger.stableOwner(candidate.target);
-        return (
-          (owner === null || owner === candidate.symbol) &&
-          (candidate.projectedId === candidate.symbol ||
-            !stableClaimants.has(candidate.projectedId))
-        );
-      });
-      const acceptedSet = new Set(accepted);
-      for (const candidate of selected) {
-        if (
-          !acceptedSet.has(candidate) &&
-          !stableClaimants.has(candidate.projectedId) &&
-          this.ledger.stableOwner(candidate.target) === null
-        ) {
-          this.#provisionalRenameTargets.add(bindingKey(candidate.target));
-        }
+      if (history === undefined) {
+        this.#renameHistory.set(op.symbol, new Map([[op.id, op]]));
+      } else {
+        history.set(op.id, op);
       }
-      for (const candidate of accepted) {
-        if (
-          this.ledger.restore(
-            candidate.symbol,
-            candidate.birth,
-            candidate.target,
-            candidate.projectedId
-          )
-        ) {
-          this.#provisionalRenameTargets.delete(bindingKey(candidate.target));
-          for (const op of candidate.path) {
-            this.#syncedRenameOps.add(op.id);
-          }
-        }
-      }
-      this.#renamesHydrated = true;
+    }
+    if (
+      this.#renameHistory.size === 0 &&
+      this.#provisionalRenameTargets.size === 0
+    ) {
       return;
     }
+    await this.#reconcileRenames();
+  }
 
-    const pending = valid.filter((op) => !this.#syncedRenameOps.has(op.id));
-    if (pending.length === 0) {
-      return;
-    }
-    const knownBeforeProjection = new Set(this.ledger.ids());
+  // One reconciliation transaction over the accumulated history and the
+  // current projected text. Each claimed symbol is anchored at its ledger
+  // binding when known, else at a birth reconstructed from its history; a
+  // claim applies only when exactly one authoritative route reaches exactly
+  // one viable definition, no other claim contends for that definition, and
+  // the preflighted ledger bind cannot fail. Every other live claim keeps its
+  // target provisional until a later call resolves or refutes it.
+  async #reconcileRenames(): Promise<void> {
     const definitions = await this.#projectedDefinitions();
-    const bySymbol = new Map<string, SymbolOp[]>();
-    for (const op of pending) {
-      const history = bySymbol.get(op.symbol) ?? [];
-      history.push(op);
-      bySymbol.set(op.symbol, history);
-    }
-    const selected: {
-      symbol: string;
-      target: Binding;
-      projectedId: string;
-      path: readonly SymbolOp[];
-    }[] = [];
-    for (const [symbol, history] of bySymbol) {
+    const present = new Set(definitions.map((d) => bindingKey(d)));
+    const claimed = new Set(this.#renameHistory.keys());
+
+    const selected: RenameClaim[] = [];
+    // Live claims that cannot apply this call (ambiguous routes) but whose
+    // targets must stay provisional rather than mint as fresh identities.
+    const deferred: RenameClaim[] = [];
+    for (const [symbol, records] of this.#renameHistory) {
+      const history = [...records.values()];
       const binding = this.ledger.bindingOf(symbol);
-      if (binding === null) {
-        continue;
+      if (binding !== null && present.has(bindingKey(binding))) {
+        continue; // current name still projected — its rename has not landed
       }
-      const projected = definitions.filter(
-        (definition) =>
-          definition.path === binding.path && definition.kind === binding.kind
-      );
-      if (projected.some((definition) => definition.name === binding.name)) {
-        continue;
-      }
-      const candidates: {
-        target: Binding;
-        projectedId: string;
-        path: readonly SymbolOp[];
-      }[] = [];
-      for (const definition of projected) {
-        const target = {
+      const candidates: RenameClaim[] = [];
+      for (const definition of definitions) {
+        const target: Binding = {
           path: definition.path,
           name: definition.name,
-          kind: binding.kind,
+          kind: definition.kind,
         };
-        const projectedId = symbolIdFor(target);
-        if (projectedId !== symbol && knownBeforeProjection.has(projectedId)) {
+        const anchor =
+          binding !== null
+            ? binding.path === target.path && binding.kind === target.kind
+              ? binding.name
+              : null
+            : birthNameAt(symbol, history, target);
+        if (anchor === null) {
           continue;
         }
-        const path = uniqueRenamePath(history, binding.name, definition.name);
-        if (path !== null && path.length > 0) {
-          candidates.push({
-            target,
-            projectedId,
-            path,
-          });
+        const projectedId = symbolIdFor(target);
+        // A target that is already someone else's identity — stably owned,
+        // known to the ledger under another binding, or the birth of another
+        // claimed history — can never become this symbol's binding.
+        if (
+          projectedId !== symbol &&
+          (this.ledger.bindingOf(projectedId) !== null ||
+            claimed.has(projectedId))
+        ) {
+          continue;
         }
-      }
-      if (candidates.length !== 1) {
-        continue;
+        const owner = this.ledger.stableOwner(target);
+        if (owner !== null && owner !== symbol) {
+          continue;
+        }
+        if (uniqueRenamePath(history, anchor, target.name) === null) {
+          continue;
+        }
+        candidates.push({ symbol, target, projectedId });
       }
       const candidate = candidates[0];
-      if (candidate !== undefined) {
-        selected.push({ symbol, ...candidate });
+      if (candidates.length === 1 && candidate !== undefined) {
+        selected.push(candidate);
+      } else {
+        deferred.push(...candidates);
       }
     }
-    const accepted = uncontended(selected).filter((candidate) => {
-      const owner = this.ledger.stableOwner(candidate.target);
-      return owner === null || owner === candidate.symbol;
-    });
+
+    const accepted = uncontended(selected).filter((claim) =>
+      this.ledger.canBind(claim.symbol, claim.target)
+    );
     const acceptedSet = new Set(accepted);
-    for (const candidate of selected) {
-      if (
-        !acceptedSet.has(candidate) &&
-        !knownBeforeProjection.has(candidate.projectedId) &&
-        this.ledger.stableOwner(candidate.target) === null
-      ) {
-        this.#provisionalRenameTargets.add(bindingKey(candidate.target));
-      }
+    for (const claim of accepted) {
+      this.ledger.bind(claim.symbol, claim.target);
     }
-    for (const candidate of accepted) {
-      if (
-        this.ledger.reconcile(
-          candidate.symbol,
-          candidate.target.name,
-          candidate.projectedId
-        )
-      ) {
-        this.#provisionalRenameTargets.delete(bindingKey(candidate.target));
-        for (const op of candidate.path) {
-          this.#syncedRenameOps.add(op.id);
-        }
+    // Recompute the provisional markers from the claims still live this call:
+    // an accepted, refuted, or disappeared claim releases its target, and a
+    // released ordinary definition then promotes through mintOrGet on read.
+    this.#provisionalRenameTargets.clear();
+    for (const claim of [...selected, ...deferred]) {
+      if (acceptedSet.has(claim) || claim.projectedId === claim.symbol) {
+        continue;
+      }
+      if (this.ledger.stableOwner(claim.target) === null) {
+        this.#provisionalRenameTargets.add(bindingKey(claim.target));
       }
     }
   }

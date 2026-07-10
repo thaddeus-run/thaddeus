@@ -504,6 +504,217 @@ describe('SemanticWatcher — subscriptions fire on meaning', () => {
     expect(await graph.resolve('shared')).toBe(alpha);
   });
 
+  test('cold hydration contention retries when the competing birth reappears', async () => {
+    // Production watch ordering: the first syncRenames runs on a fresh mirror
+    // BEFORE any read, so neither claimant has a ledger binding to retry from.
+    const dev = Identity.create();
+    const peer = Identity.create();
+    const birthStore = new MemoryStore();
+    const birthLog = new OpLog(birthStore);
+    const births = Workspace.open(birthLog, birthStore, {
+      source: 'main',
+      reader: dev,
+    });
+    births.write('src/shared.rs', enc('fn alpha() {}\nfn beta() {}\n'));
+    await births.commit(dev);
+    const birthGraph = SymbolGraph.over(births, {
+      extractor: new HeuristicExtractor(),
+    });
+    const alpha = (await birthGraph.resolve('alpha'))!;
+    const beta = (await birthGraph.resolve('beta'))!;
+    const claims = [
+      signSymbolOp(
+        {
+          kind: 'rename-symbol',
+          symbol: alpha,
+          from: 'alpha',
+          to: 'shared',
+          base: null,
+        },
+        dev
+      ),
+      signSymbolOp(
+        {
+          kind: 'rename-symbol',
+          symbol: beta,
+          from: 'beta',
+          to: 'shared',
+          base: null,
+        },
+        peer
+      ),
+    ];
+
+    const store = new MemoryStore();
+    const log = new OpLog(store);
+    const ws = Workspace.open(log, store, { source: 'main', reader: dev });
+    ws.write('src/shared.rs', enc('fn shared() {}\n'));
+    await ws.commit(dev);
+    const graph = SymbolGraph.over(ws, {
+      extractor: new HeuristicExtractor(),
+    });
+    await graph.syncRenames(claims); // cold: two claims contend, both rejected
+    const watcher = await SemanticWatcher.over(graph);
+    const provisional = (await graph.resolve('shared'))!;
+    expect(provisional).not.toBe(alpha);
+    expect(provisional).not.toBe(beta);
+
+    // The competing birth reappears — `shared` now has exactly one live claim.
+    ws.write('src/shared.rs', enc('fn shared() {}\nfn beta() {}\n'));
+    await ws.commit(dev);
+    await graph.syncRenames(claims);
+    const events = await watcher.poll();
+
+    expect(await graph.resolve('shared')).toBe(alpha);
+    expect(await graph.resolve('beta')).toBe(beta);
+    expect(events.filter((event) => event.kind === 'removed')).toEqual([
+      { kind: 'removed', symbol: provisional, name: 'shared' },
+    ]);
+    await graph.syncRenames(claims);
+    expect(await watcher.poll()).toEqual([]);
+    expect(await graph.resolve('shared')).toBe(alpha);
+  });
+
+  test('a rename pulled after ordinary reads keeps the stable id', async () => {
+    // A graph that served reads before its first syncRenames must reconcile a
+    // landed rename by MOVING the existing binding, not minting a new identity.
+    const store = new MemoryStore();
+    const log = new OpLog(store);
+    const dev = Identity.create();
+    const ws = Workspace.open(log, store, { source: 'main', reader: dev });
+    ws.write('src/shared.rs', enc('fn alpha() {}\n'));
+    await ws.commit(dev);
+    const graph = SymbolGraph.over(ws, {
+      extractor: new HeuristicExtractor(),
+    });
+    const alpha = (await graph.resolve('alpha'))!; // read before any sync
+    const watcher = await SemanticWatcher.over(graph);
+    const op = signSymbolOp(
+      {
+        kind: 'rename-symbol',
+        symbol: alpha,
+        from: 'alpha',
+        to: 'beta',
+        base: null,
+      },
+      dev
+    );
+    ws.write('src/shared.rs', enc('fn beta() {}\n'));
+    await ws.commit(dev);
+
+    await graph.syncRenames([op]); // FIRST sync on this graph
+    expect(await graph.resolve('beta')).toBe(alpha);
+    expect(await watcher.poll()).toEqual([
+      { kind: 'renamed', symbol: alpha, from: 'alpha', to: 'beta' },
+    ]);
+    await graph.syncRenames([op]);
+    expect(await watcher.poll()).toEqual([]);
+    expect(await graph.resolve('beta')).toBe(alpha);
+  });
+
+  test('a stale provisional target promotes once its claims are refuted', async () => {
+    // Contention marks `shared` provisional. When both claimed births reappear
+    // alongside it, the marker must not outlive the contention: `shared` is an
+    // ordinary definition again, so a local rename of it must succeed.
+    const dev = Identity.create();
+    const peer = Identity.create();
+    const store = new MemoryStore();
+    const log = new OpLog(store);
+    const ws = Workspace.open(log, store, { source: 'main', reader: dev });
+    ws.write('src/shared.rs', enc('fn alpha() {}\nfn beta() {}\n'));
+    await ws.commit(dev);
+    const graph = SymbolGraph.over(ws, {
+      extractor: new HeuristicExtractor(),
+    });
+    const alpha = (await graph.resolve('alpha'))!;
+    const beta = (await graph.resolve('beta'))!;
+    const claims = [
+      signSymbolOp(
+        {
+          kind: 'rename-symbol',
+          symbol: alpha,
+          from: 'alpha',
+          to: 'shared',
+          base: null,
+        },
+        dev
+      ),
+      signSymbolOp(
+        {
+          kind: 'rename-symbol',
+          symbol: beta,
+          from: 'beta',
+          to: 'shared',
+          base: null,
+        },
+        peer
+      ),
+    ];
+    ws.write('src/shared.rs', enc('fn shared() {}\n'));
+    await ws.commit(dev);
+    await graph.syncRenames(claims); // contention → shared stays provisional
+    await graph.symbols();
+
+    // Both births return next to shared: neither claim is live any more.
+    ws.write(
+      'src/shared.rs',
+      enc('fn alpha() {}\nfn beta() {}\nfn shared() {}\n')
+    );
+    await ws.commit(dev);
+    await graph.syncRenames(claims);
+    const shared = (await graph.resolve('shared'))!;
+    const renamed = await graph.rename(shared, 'promoted', dev);
+    expect(renamed.symbolOp.from).toBe('shared');
+    expect(await graph.resolve('promoted')).toBe(shared);
+  });
+
+  test('a dense adversarial rename history is ignored without stalling', async () => {
+    // Any key can sign rename records, so route search over a crafted history
+    // must stay bounded: past the search budget the history is treated as not
+    // authoritative and the projected definition keeps a fresh identity.
+    const dev = Identity.create();
+    const birthStore = new MemoryStore();
+    const birthLog = new OpLog(birthStore);
+    const births = Workspace.open(birthLog, birthStore, {
+      source: 'main',
+      reader: dev,
+    });
+    births.write('src/shared.rs', enc('fn alpha() {}\n'));
+    await births.commit(dev);
+    const birthGraph = SymbolGraph.over(births, {
+      extractor: new HeuristicExtractor(),
+    });
+    const alpha = (await birthGraph.resolve('alpha'))!;
+
+    const names = Array.from({ length: 20 }, (_, i) => `step${i}`);
+    const rename = (from: string, to: string) =>
+      signSymbolOp(
+        { kind: 'rename-symbol', symbol: alpha, from, to, base: null },
+        dev
+      );
+    // One real route (alpha → target) beside a dense decoy graph whose simple
+    // paths explode combinatorially without ever reaching the target.
+    const ops = [rename('alpha', 'target'), rename('alpha', 'step0')];
+    for (const [i, from] of names.entries()) {
+      for (const to of names.slice(i + 1)) {
+        ops.push(rename(from, to));
+      }
+    }
+
+    const store = new MemoryStore();
+    const log = new OpLog(store);
+    const ws = Workspace.open(log, store, { source: 'main', reader: dev });
+    ws.write('src/shared.rs', enc('fn target() {}\n'));
+    await ws.commit(dev);
+    const graph = SymbolGraph.over(ws, {
+      extractor: new HeuristicExtractor(),
+    });
+    const startedAt = Date.now();
+    await graph.syncRenames(ops);
+    expect(Date.now() - startedAt).toBeLessThan(1_000);
+    expect(await graph.resolve('target')).not.toBe(alpha);
+  }, 30_000);
+
   test('defining and removing a symbol fire defined/removed', async () => {
     const { ws, graph, dev } = await seed();
     const watcher = await SemanticWatcher.over(graph);

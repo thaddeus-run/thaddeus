@@ -533,10 +533,13 @@ CLI, and the lazythad TUI.
 - **`SymbolOp` durability / federation (P08) — shipped.** `SymbolOpLog` now
   persists write-through under a content-addressed `symop/` key and ingests over
   the wire (a rename's `SymbolOp` travels to a clone and survives a restart). A
-  fresh peer restores stable ids from verified rename chains that unambiguously
-  match its projected definitions. Still deferred: an explicit causal
-  sequence/base chain for resolving divergent or non-causal histories that
-  cannot be matched unambiguously (spec §11).
+  peer — fresh or already serving reads — restores stable ids from verified
+  rename chains that unambiguously match its projected definitions; claims that
+  cannot apply yet (contended targets, unlanded renames, ambiguous or
+  search-budget-exceeding routes) keep their targets provisional and retry on
+  later synchronization instead of minting fresh identities. Still deferred: an
+  explicit causal sequence/base chain for resolving divergent or non-causal
+  histories that cannot be matched unambiguously (spec §11).
 - **Structural conflict-as-function (P08→P10)** — only staleness (`from`
   mismatch) is checked; real "conflict iff a contract broke" (signature
   compatibility across callers) is P10 territory.
