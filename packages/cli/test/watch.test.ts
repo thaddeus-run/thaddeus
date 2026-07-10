@@ -455,6 +455,59 @@ test('retries a rename uploaded before startup after its heads land', async () =
   ]);
 });
 
+test('chained renames from separate invocations keep one stable id', async () => {
+  // Every real `thaddeus rename` is its own process. The second invocation
+  // must recover the symbol's stable id from the durable SymbolOp log instead
+  // of minting a fresh birth for the current name — otherwise the chain forks
+  // and a watcher sees removed+defined instead of the second renamed event.
+  const { fetchImpl, home, writerEnv } = await seedWatchRepo();
+  const expectedGraph = await watchGraph('auth.rs');
+  const stable = (await expectedGraph.resolveAt('auth.rs', 'refresh'))!;
+  const controller = new AbortController();
+  const events: SemanticEvent[] = [];
+  let ticks = 0;
+  await watchRemote({
+    server: 'http://t',
+    repo: 'proj',
+    view: 'main',
+    identity: loadIdentity(home),
+    fetchImpl,
+    kinds: ['renamed'],
+    intervalMs: 100,
+    signal: controller.signal,
+    sleep: async () => {
+      ticks += 1;
+      if (ticks === 1) {
+        await run(
+          ['rename', 'refresh', 'refreshToken', '-m', 'clearer'],
+          writerEnv
+        );
+      } else if (ticks === 2) {
+        await run(
+          ['rename', 'refreshToken', 'refreshFinal', '-m', 'again'],
+          writerEnv
+        );
+      } else {
+        controller.abort();
+      }
+    },
+    onEvent: (event) => events.push(event),
+    onError: (error) => {
+      throw error;
+    },
+  });
+
+  expect(events).toEqual([
+    { kind: 'renamed', symbol: stable, from: 'refresh', to: 'refreshToken' },
+    {
+      kind: 'renamed',
+      symbol: stable,
+      from: 'refreshToken',
+      to: 'refreshFinal',
+    },
+  ]);
+});
+
 test('emits all semantic event kinds without overlapping pulls', async () => {
   const { fetchImpl, home, writer, writerEnv } = await seedWatchRepo();
   const initialGraph = await watchGraph('auth.rs');

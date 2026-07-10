@@ -1739,9 +1739,16 @@ export async function run(
           reader: identity,
           name: 'rename',
         });
+        // Hydrate identity from the durable SymbolOp log first: every rename
+        // runs in its own process, so without replaying the landed chain the
+        // current name would mint a fresh birth id and the chain would fork
+        // (a watcher would see removed+defined instead of the next renamed).
+        const symopLog = await SymbolOpLog.load(repoScope(root, cfg));
         const graph = SymbolGraph.over(ws, {
           extractor: new HeuristicExtractor(),
+          ops: symopLog,
         });
+        await graph.syncRenames(symopLog.all());
         const symbolId = await graph.resolve(oldName);
         if (symbolId === null) {
           out(`no symbol named ${oldName}`);
@@ -1763,7 +1770,6 @@ export async function run(
         await local.log.repoint(view, heads);
         await materializeToDisk(local, view, identity, root);
         // Persist the SymbolOp locally so `history` reads it offline.
-        const symopLog = new SymbolOpLog(repoScope(root, cfg));
         await symopLog.ingest(symbolOp);
         // A `-m "<why>"` attaches a signed provenance record to each rendered op.
         const provenance: Provenance[] = [];
