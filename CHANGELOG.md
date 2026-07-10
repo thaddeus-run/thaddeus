@@ -537,9 +537,11 @@ CLI, and the lazythad TUI.
   rename chains that unambiguously match its projected definitions; claims that
   cannot apply yet (contended targets, unlanded renames, ambiguous or
   search-budget-exceeding routes) keep their targets provisional and retry on
-  later synchronization instead of minting fresh identities. Still deferred: an
-  explicit causal sequence/base chain for resolving divergent or non-causal
-  histories that cannot be matched unambiguously (spec §11).
+  later synchronization instead of minting fresh identities. `thaddeus rename`
+  hydrates from the durable `SymbolOp` log before resolving, so chained renames
+  across separate invocations stay one identity under the birth id. Still
+  deferred: an explicit causal sequence/base chain for resolving divergent or
+  non-causal histories that cannot be matched unambiguously (spec §11).
 - **Structural conflict-as-function (P08→P10)** — only staleness (`from`
   mismatch) is checked; real "conflict iff a contract broke" (signature
   compatibility across callers) is P10 territory.
