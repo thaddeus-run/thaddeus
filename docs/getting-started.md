@@ -250,7 +250,9 @@ Launch lazythad from inside the matching working copy and press `/` for the same
 Remote metadata refreshes every two seconds in a single-flight background
 worker, preserving the current selection and last-known-good data without
 blocking the terminal loop. Refresh errors stay visible and retry on the next
-interval; `r` requests an immediate refresh.
+interval. In log and release views, `r` requests an immediate refresh; in a
+query view it reruns the active expression. With a reputation overlay open, `r`
+only dismisses that modal overlay.
 
 ## Where to go next
 

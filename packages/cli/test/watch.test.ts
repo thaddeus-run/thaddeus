@@ -59,17 +59,58 @@ test('parses watch durations and rejects intervals below 100ms', () => {
 });
 
 test('formats every semantic event as one concise line', () => {
-  expect(
-    formatSemanticEvent({
-      kind: 'renamed',
-      symbol: 'abc123',
-      from: 'refresh',
-      to: 'refreshToken',
-    })
-  ).toBe('renamed  abc123  refresh → refreshToken');
+  const cases: { event: SemanticEvent; line: string }[] = [
+    {
+      event: {
+        kind: 'defined',
+        symbol: 'abc123',
+        name: 'refresh',
+        path: 'src/auth.rs',
+      },
+      line: 'defined  abc123  refresh at src/auth.rs',
+    },
+    {
+      event: { kind: 'removed', symbol: 'abc123', name: 'refresh' },
+      line: 'removed  abc123  refresh',
+    },
+    {
+      event: {
+        kind: 'renamed',
+        symbol: 'abc123',
+        from: 'refresh',
+        to: 'refreshToken',
+      },
+      line: 'renamed  abc123  refresh → refreshToken',
+    },
+    {
+      event: {
+        kind: 'moved',
+        symbol: 'abc123',
+        from: { path: 'src/old.rs', line: 3 },
+        to: { path: 'src/new.rs', line: 7 },
+      },
+      line: 'moved  abc123  src/old.rs:3 → src/new.rs:7',
+    },
+    {
+      event: {
+        kind: 'references-changed',
+        symbol: 'abc123',
+        added: [{ symbol: 'abc123', path: 'src/new.rs', line: 8 }],
+        removed: [{ symbol: 'abc123', path: 'src/old.rs', line: 4 }],
+      },
+      line: 'references-changed  abc123  +src/new.rs:8 -src/old.rs:4',
+    },
+  ];
+
+  for (const item of cases) {
+    expect(formatSemanticEvent(item.event)).toBe(item.line);
+  }
 });
 
-async function watchGraph(): Promise<SymbolGraph> {
+async function watchGraph(
+  path = 'src/auth.rs',
+  text = 'fn refresh() {}\nfn login() {}\n'
+): Promise<SymbolGraph> {
   const store = new MemoryStore();
   const log = new OpLog(store);
   const identity = Identity.create();
@@ -77,10 +118,7 @@ async function watchGraph(): Promise<SymbolGraph> {
     source: 'main',
     reader: identity,
   });
-  workspace.write(
-    'src/auth.rs',
-    new TextEncoder().encode('fn refresh() {}\nfn login() {}\n')
-  );
+  workspace.write(path, new TextEncoder().encode(text));
   await workspace.commit(identity);
   return SymbolGraph.over(workspace, {
     extractor: new HeuristicExtractor(),
@@ -93,12 +131,23 @@ test('resolves watch filters by name, full id, and unique prefix', async () => {
   expect(await resolveWatchSymbol(graph, 'refresh')).toBe(id);
   expect(await resolveWatchSymbol(graph, id)).toBe(id);
   expect(await resolveWatchSymbol(graph, id.slice(0, 12))).toBe(id);
-  expect(resolveWatchSymbol(graph, 'missing')).rejects.toThrow(
-    'no symbol matching missing'
-  );
-  expect(resolveWatchSymbol(graph, '')).rejects.toThrow(
-    'ambiguous symbol prefix'
-  );
+  let missing: unknown;
+  try {
+    await resolveWatchSymbol(graph, 'missing');
+  } catch (error) {
+    missing = error;
+  }
+  expect(missing).toBeInstanceOf(Error);
+  expect((missing as Error).message).toContain('no symbol matching missing');
+
+  let ambiguous: unknown;
+  try {
+    await resolveWatchSymbol(graph, '');
+  } catch (error) {
+    ambiguous = error;
+  }
+  expect(ambiguous).toBeInstanceOf(Error);
+  expect((ambiguous as Error).message).toContain('ambiguous symbol prefix');
 });
 
 async function seedWatchRepo(): Promise<{
@@ -362,8 +411,61 @@ test('keeps JSONL stdout clean while recovering from a pull failure', async () =
   expect(diagnostics[0]).toContain('temporary');
 });
 
+test('retries a rename uploaded before startup after its heads land', async () => {
+  const { fetchImpl, home, writerEnv } = await seedWatchRepo();
+  const expectedGraph = await watchGraph('auth.rs');
+  const stable = (await expectedGraph.resolveAt('auth.rs', 'refresh'))!;
+  await run(
+    ['rename', 'refresh', 'refreshToken', '--no-land', '-m', 'clearer'],
+    writerEnv
+  );
+
+  const controller = new AbortController();
+  const events: SemanticEvent[] = [];
+  let ticks = 0;
+  await watchRemote({
+    server: 'http://t',
+    repo: 'proj',
+    view: 'main',
+    identity: loadIdentity(home),
+    fetchImpl,
+    intervalMs: 100,
+    signal: controller.signal,
+    sleep: async () => {
+      ticks += 1;
+      if (ticks === 1) {
+        expect(await run(['land'], writerEnv)).toBe(0);
+      } else {
+        controller.abort();
+      }
+    },
+    onEvent: (event) => events.push(event),
+    onError: (error) => {
+      throw error;
+    },
+  });
+
+  expect(events).toEqual([
+    {
+      kind: 'renamed',
+      symbol: stable,
+      from: 'refresh',
+      to: 'refreshToken',
+    },
+  ]);
+});
+
 test('emits all semantic event kinds without overlapping pulls', async () => {
   const { fetchImpl, home, writer, writerEnv } = await seedWatchRepo();
+  const initialGraph = await watchGraph('auth.rs');
+  const refresh = (await initialGraph.resolve('refresh'))!;
+  const login = (await initialGraph.resolve('login'))!;
+  const finalGraph = await watchGraph(
+    'auth.rs',
+    'fn helper() {}\nfn refreshToken() {}\nfn retry() {\n  refreshToken();\n}\n'
+  );
+  const helper = (await finalGraph.resolve('helper'))!;
+  const retry = (await finalGraph.resolve('retry'))!;
   let activePulls = 0;
   let maxActivePulls = 0;
   const trackingFetch = async (request: Request): Promise<Response> => {
@@ -414,12 +516,44 @@ test('emits all semantic event kinds without overlapping pulls', async () => {
       throw error;
     },
   });
-  expect(new Set(events.map((event) => event.kind))).toEqual(
-    new Set(['defined', 'removed', 'renamed', 'moved', 'references-changed'])
+  expect(events).toHaveLength(6);
+  expect(events.filter((event) => event.kind === 'renamed')).toEqual([
+    {
+      kind: 'renamed',
+      symbol: refresh,
+      from: 'refresh',
+      to: 'refreshToken',
+    },
+  ]);
+  expect(
+    events
+      .filter((event) => event.kind === 'defined')
+      .sort((a, b) => a.name.localeCompare(b.name))
+  ).toEqual([
+    { kind: 'defined', symbol: helper, name: 'helper', path: 'auth.rs' },
+    { kind: 'defined', symbol: retry, name: 'retry', path: 'auth.rs' },
+  ]);
+  expect(events.filter((event) => event.kind === 'removed')).toEqual([
+    { kind: 'removed', symbol: login, name: 'login' },
+  ]);
+  expect(events.filter((event) => event.kind === 'moved')).toEqual([
+    {
+      kind: 'moved',
+      symbol: refresh,
+      from: { path: 'auth.rs', line: 1 },
+      to: { path: 'auth.rs', line: 2 },
+    },
+  ]);
+  expect(events.filter((event) => event.kind === 'references-changed')).toEqual(
+    [
+      {
+        kind: 'references-changed',
+        symbol: refresh,
+        added: [{ symbol: refresh, path: 'auth.rs', line: 4 }],
+        removed: [{ symbol: refresh, path: 'auth.rs', line: 3 }],
+      },
+    ]
   );
-  const renamed = events.find((event) => event.kind === 'renamed');
-  expect(renamed).toMatchObject({ from: 'refresh', to: 'refreshToken' });
-  expect(renamed?.symbol).toHaveLength(64);
   expect(maxActivePulls).toBe(1);
 });
 

@@ -43,11 +43,13 @@ discovery.
 ## Live refresh
 
 Interactive remote views refresh every two seconds in a single-flight background
-worker, so remote I/O never blocks keyboard handling or terminal drawing. Fresh
-results preserve the selected repo, operation, and release when those records
-still exist. A refresh error leaves the last-known-good data on screen, reports
-the error in the status line, and retries on the next interval; `r` requests the
-same worker to refresh immediately.
+worker, so automatic refresh I/O never blocks keyboard handling or terminal
+drawing. Fresh results preserve the selected repo, operation, and release when
+those records still exist. A refresh error leaves the last-known-good data on
+screen, reports the error in the status line, and retries on the next interval.
+In log and release views, `r` asks the same worker to refresh immediately; in a
+query view it reruns the expression instead. With a reputation overlay open, `r`
+dismisses the modal overlay without requesting either action.
 
 Automatic refresh reads the same public repo metadata and ciphertext pull route
 as the rest of lazythad. It remains keyless and does not derive semantic events
