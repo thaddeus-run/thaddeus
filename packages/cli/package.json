@@ -58,7 +58,8 @@
     "@thaddeus.run/reputation": "workspace:*",
     "@thaddeus.run/review": "workspace:*",
     "@thaddeus.run/server": "workspace:*",
-    "@thaddeus.run/store": "workspace:*"
+    "@thaddeus.run/store": "workspace:*",
+    "@thaddeus.run/watch": "workspace:*"
   },
   "devDependencies": {
     "@types/bun": "catalog:",
