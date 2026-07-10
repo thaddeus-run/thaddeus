@@ -13,6 +13,7 @@ Working tree
   repos  [--mine]               list server repos (--mine = owned by you)
   delete <repo> --yes           delete a repo you own (irreversible)
   pull                          fetch landed changes into this working copy
+  watch  [symbol]               stream remote semantic changes without pulling files
   branch [<name>]               list branches, or create one here
   workspace <branch> [dir]      open a branch as its own working copy (COW)
   status                        show working-tree changes
@@ -101,6 +102,19 @@ export const HELP: Record<string, string> = {
   objects and capabilities, advance the base, and update the files on disk
   (removing what was deleted upstream). Refuses when the working tree is dirty
   or you hold unpublished commits — commit and push (or discard) first.`,
+
+  watch: `thaddeus watch [symbol] [--kind <event>]... [--interval <duration>] [--json]
+
+  Stream semantic changes from this working copy's remote branch. The initial
+  pull is a silent baseline. Events are defined, removed, renamed, moved, and
+  references-changed; repeat --kind to filter them. An optional symbol may be a
+  current name, stable id, or unique id prefix and keeps following renames.
+
+  --interval accepts ms, s, or m (default 2s, minimum 100ms). --json emits one
+  SemanticEvent per line (JSONL); diagnostics use stderr. The watcher uses an
+  isolated in-memory mirror and never changes checked-out files, branch heads,
+  saved base, config, or the durable local store. Run 'thaddeus pull' explicitly
+  to update files. Ctrl-C exits cleanly.`,
 
   branch: `thaddeus branch [<name>] [--json]
 
