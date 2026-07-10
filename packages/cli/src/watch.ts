@@ -157,7 +157,12 @@ export async function watchRemote(options: WatchRemoteOptions): Promise<void> {
         options.view
       );
       await initial.repo.log.repoint(watchView, [...pulled.heads]);
-      await graph.syncRenames(pulled.symbols.all());
+      // Fold pulled records into the graph's own op log (append dedupes; the
+      // pull already persisted them) so graph.history() stays truthful.
+      for (const op of pulled.symbols.all()) {
+        initial.symbols.append(op);
+      }
+      await graph.syncRenames(initial.symbols.all());
       await watcher.poll();
       for (const event of subscription.take()) {
         options.onEvent(event);
