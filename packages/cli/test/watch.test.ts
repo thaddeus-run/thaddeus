@@ -7,9 +7,16 @@ import { createServer } from '@thaddeus.run/server';
 import { MemoryStore } from '@thaddeus.run/store';
 import type { SemanticEvent } from '@thaddeus.run/watch';
 import { afterAll, beforeAll, expect, test } from 'bun:test';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, relative } from 'node:path';
 
 import { loadIdentity } from '../src/identity';
 import { run } from '../src/run';
@@ -26,6 +33,20 @@ beforeAll(async () => {
 
 const tmp = mkdtempSync(join(tmpdir(), 'thaddeus-cli-watch-'));
 afterAll(() => rmSync(tmp, { recursive: true, force: true }));
+
+// Capture every file byte-for-byte so a watcher cannot hide durable mutations.
+function snapshotTree(root: string, dir = root): [string, Uint8Array][] {
+  const entries: [string, Uint8Array][] = [];
+  for (const name of readdirSync(dir).sort()) {
+    const path = join(dir, name);
+    if (statSync(path).isDirectory()) {
+      entries.push(...snapshotTree(root, path));
+    } else {
+      entries.push([relative(root, path), new Uint8Array(readFileSync(path))]);
+    }
+  }
+  return entries;
+}
 
 test('parses watch durations and rejects intervals below 100ms', () => {
   expect(parseWatchInterval(undefined)).toBe(2_000);
@@ -113,6 +134,158 @@ async function seedWatchRepo(): Promise<{
   await run(['push', '-m', 'initial'], writerEnv);
   return { fetchImpl, home, writer, writerEnv };
 }
+
+test('validates watch command intervals and event kinds', async () => {
+  const out: string[] = [];
+  const errors: string[] = [];
+  const invalidEnv = {
+    cwd: tmp,
+    home: tmp,
+    out: (line: string): void => {
+      out.push(line);
+    },
+    err: (line: string): void => {
+      errors.push(line);
+    },
+  };
+
+  expect(await run(['watch', '--interval', '99ms'], invalidEnv)).toBe(2);
+  expect(out).toEqual(['watch interval must be at least 100ms']);
+
+  out.length = 0;
+  expect(await run(['watch', '--kind', 'signature-changed'], invalidEnv)).toBe(
+    2
+  );
+  expect(out).toEqual(['invalid watch kind: signature-changed']);
+  expect(errors).toEqual([]);
+});
+
+test('streams JSONL without mutating the observer and cleans up SIGINT', async () => {
+  const { fetchImpl, home, writerEnv } = await seedWatchRepo();
+  const observer = mkdtempSync(join(tmp, 'observer-'));
+  await run(['clone', 'http://t', 'proj', observer], {
+    ...writerEnv,
+    cwd: observer,
+  });
+  const jsonOut: string[] = [];
+  const diagnostics: string[] = [];
+  const controller = new AbortController();
+  let ticks = 0;
+  writeFileSync(join(observer, 'dirty.txt'), 'uncommitted\n');
+  const before = snapshotTree(observer);
+  const code = await run(
+    ['watch', 'refresh', '--kind', 'renamed', '--interval', '100ms', '--json'],
+    {
+      cwd: observer,
+      home,
+      fetchImpl,
+      signal: controller.signal,
+      sleep: async () => {
+        ticks += 1;
+        if (ticks === 1) {
+          await run(
+            ['rename', 'refresh', 'refreshToken', '-m', 'clearer'],
+            writerEnv
+          );
+        } else {
+          controller.abort();
+        }
+      },
+      out: (line: string): void => {
+        jsonOut.push(line);
+      },
+      err: (line: string): void => {
+        diagnostics.push(line);
+      },
+    }
+  );
+  const after = snapshotTree(observer);
+  expect(code).toBe(0);
+  expect(after).toEqual(before);
+  expect(jsonOut).toHaveLength(1);
+  expect(JSON.parse(jsonOut[0]) as SemanticEvent).toMatchObject({
+    kind: 'renamed',
+    from: 'refresh',
+    to: 'refreshToken',
+  });
+  expect(diagnostics).toEqual([]);
+
+  const beforeListeners = process.listeners('SIGINT');
+  const lifecycleCode = await run(['watch', '--interval', '100ms'], {
+    cwd: observer,
+    home,
+    fetchImpl,
+    sleep: () => {
+      const added = process
+        .listeners('SIGINT')
+        .find((listener) => !beforeListeners.includes(listener));
+      expect(added).toBeDefined();
+      (added as () => void)();
+      return Promise.resolve();
+    },
+    out: () => {},
+    err: (line: string): void => {
+      diagnostics.push(line);
+    },
+  });
+  expect(lifecycleCode).toBe(0);
+  expect(process.listeners('SIGINT')).toEqual(beforeListeners);
+});
+
+test('keeps JSONL stdout clean while recovering from a pull failure', async () => {
+  const seeded = await seedWatchRepo();
+  const observer = mkdtempSync(join(tmp, 'observer-flaky-'));
+  await run(['clone', 'http://t', 'proj', observer], {
+    ...seeded.writerEnv,
+    cwd: observer,
+  });
+  let pullCalls = 0;
+  const flakyFetch = async (request: Request): Promise<Response> => {
+    if (new URL(request.url).pathname.endsWith('/pull')) {
+      pullCalls += 1;
+      if (pullCalls === 2) {
+        return new Response(JSON.stringify({ error: 'temporary' }), {
+          status: 503,
+          headers: { 'content-type': 'application/json' },
+        });
+      }
+    }
+    return seeded.fetchImpl(request);
+  };
+  const controller = new AbortController();
+  const jsonOut: string[] = [];
+  const diagnostics: string[] = [];
+  let ticks = 0;
+  const code = await run(['watch', '--interval', '100ms', '--json'], {
+    cwd: observer,
+    home: seeded.home,
+    fetchImpl: flakyFetch,
+    signal: controller.signal,
+    sleep: async () => {
+      ticks += 1;
+      if (ticks === 1) {
+        await run(
+          ['rename', 'refresh', 'refreshToken', '-m', 'clearer'],
+          seeded.writerEnv
+        );
+      } else if (ticks === 3) {
+        controller.abort();
+      }
+    },
+    out: (line: string): void => {
+      jsonOut.push(line);
+    },
+    err: (line: string): void => {
+      diagnostics.push(line);
+    },
+  });
+  expect(code).toBe(0);
+  expect(
+    jsonOut.map((line) => (JSON.parse(line) as SemanticEvent).kind)
+  ).toEqual(['renamed']);
+  expect(diagnostics).toHaveLength(1);
+  expect(diagnostics[0]).toContain('temporary');
+});
 
 test('emits all semantic event kinds without overlapping pulls', async () => {
   const { fetchImpl, home, writer, writerEnv } = await seedWatchRepo();

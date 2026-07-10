@@ -22,6 +22,7 @@ import { type Provenance, ProvenanceLog } from '@thaddeus.run/provenance';
 import { type ContributionClaim, signClaim } from '@thaddeus.run/reputation';
 import { signVeto, VetoLog } from '@thaddeus.run/review';
 import { type Backend, scoped } from '@thaddeus.run/store';
+import type { EventKind } from '@thaddeus.run/watch';
 import { createHash } from 'node:crypto';
 import { mkdirSync, readFileSync, rmSync } from 'node:fs';
 import { basename, dirname, isAbsolute, join, relative } from 'node:path';
@@ -40,6 +41,12 @@ import { initIdentity, loadIdentity } from './identity';
 import { runQuery } from './query';
 import { startServer } from './serve';
 import { VERSION } from './version';
+import {
+  formatSemanticEvent,
+  parseWatchInterval,
+  watchRemote,
+  type WatchSleep,
+} from './watch';
 import {
   baseSnapshot,
   type Config,
@@ -64,6 +71,9 @@ export interface CliEnv {
   // overloaded global type mismatch with createServer(...).fetch.
   fetchImpl?: (req: Request) => Promise<Response>;
   out?: (line: string) => void;
+  err?: (line: string) => void;
+  signal?: AbortSignal;
+  sleep?: WatchSleep;
 }
 
 // Detect the `--json` flag a read verb offers for scripting/TUI. Kept simple so
@@ -598,6 +608,7 @@ export async function run(
   env: CliEnv
 ): Promise<number> {
   const out = env.out ?? ((l: string): void => console.log(l));
+  const err = env.err ?? ((l: string): void => console.error(l));
   const [command, ...rest] = argv;
 
   // Global flags, handled before dispatch so they work with or without a repo.
@@ -854,6 +865,89 @@ export async function run(
         saveConfig(root, { ...cfg, base: [...heads] });
         out(`pulled ${cfg.repo}@${view} (${heads.length} head(s))`);
         return 0;
+      }
+      case 'watch': {
+        const { values, positionals } = parseArgs({
+          args: [...rest],
+          options: {
+            kind: { type: 'string', multiple: true },
+            interval: { type: 'string' },
+            json: { type: 'boolean' },
+          },
+          allowPositionals: true,
+        });
+        if (positionals.length > 1) {
+          out(
+            'usage: thaddeus watch [symbol] [--kind <event>]... [--interval <duration>] [--json]'
+          );
+          return 2;
+        }
+        let intervalMs: number;
+        try {
+          intervalMs = parseWatchInterval(values.interval);
+        } catch (error) {
+          out(error instanceof Error ? error.message : String(error));
+          return 2;
+        }
+        const allowed: readonly EventKind[] = [
+          'defined',
+          'removed',
+          'renamed',
+          'moved',
+          'references-changed',
+        ];
+        const kinds = values.kind ?? [];
+        const invalid = kinds.find(
+          (kind): boolean => !allowed.includes(kind as EventKind)
+        );
+        if (invalid !== undefined) {
+          out(`invalid watch kind: ${invalid}`);
+          return 2;
+        }
+        const root = findRoot(env.cwd);
+        if (root === undefined) {
+          out("not a thaddeus working copy — run 'thaddeus clone' first");
+          return 2;
+        }
+        const cfg = loadConfig(root);
+        const ownedController =
+          env.signal === undefined ? new AbortController() : null;
+        const signal = env.signal ?? ownedController!.signal;
+        const onSigint = (): void => ownedController?.abort();
+        if (ownedController !== null) {
+          process.once('SIGINT', onSigint);
+        }
+        try {
+          await watchRemote({
+            server: cfg.server,
+            repo: cfg.repo,
+            view: viewOf(cfg),
+            identity: loadIdentity(env.home),
+            fetchImpl: env.fetchImpl,
+            symbol: positionals[0],
+            kinds: kinds.length === 0 ? undefined : (kinds as EventKind[]),
+            intervalMs,
+            signal,
+            sleep: env.sleep,
+            onEvent: (event) =>
+              out(
+                values.json === true
+                  ? JSON.stringify(event)
+                  : formatSemanticEvent(event)
+              ),
+            onError: (error) => err(`watch error: ${error.message}`),
+          });
+          return 0;
+        } catch (error) {
+          err(
+            `error: ${error instanceof Error ? error.message : String(error)}`
+          );
+          return 1;
+        } finally {
+          if (ownedController !== null) {
+            process.removeListener('SIGINT', onSigint);
+          }
+        }
       }
       case 'branch': {
         const root = findRoot(env.cwd);
