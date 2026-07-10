@@ -8,6 +8,7 @@ import { MemoryStore } from '@thaddeus.run/store';
 import type { SemanticEvent } from '@thaddeus.run/watch';
 import { afterAll, beforeAll, expect, test } from 'bun:test';
 import {
+  mkdirSync,
   mkdtempSync,
   readdirSync,
   readFileSync,
@@ -158,6 +159,80 @@ test('validates watch command intervals and event kinds', async () => {
   );
   expect(out).toEqual(['invalid watch kind: signature-changed']);
   expect(errors).toEqual([]);
+
+  out.length = 0;
+  expect(await run(['watch', '--unknown'], invalidEnv)).toBe(2);
+  expect(out).toHaveLength(1);
+  expect(out[0]).toContain('--unknown');
+  expect(errors).toEqual([]);
+});
+
+test('routes every JSON watch preflight diagnostic to stderr', async () => {
+  const malformed = mkdtempSync(join(tmp, 'malformed-'));
+  mkdirSync(join(malformed, '.thaddeus'));
+  writeFileSync(join(malformed, '.thaddeus', 'config.json'), 'not json\n');
+  const cases: {
+    args: string[];
+    cwd: string;
+    code: number;
+    diagnostic: string;
+  }[] = [
+    {
+      args: ['watch', '--json', '--interval', '99ms'],
+      cwd: tmp,
+      code: 2,
+      diagnostic: 'watch interval must be at least 100ms',
+    },
+    {
+      args: ['watch', '--json', '--kind', 'signature-changed'],
+      cwd: tmp,
+      code: 2,
+      diagnostic: 'invalid watch kind: signature-changed',
+    },
+    {
+      args: ['watch', '--json', 'first', 'second'],
+      cwd: tmp,
+      code: 2,
+      diagnostic: 'usage: thaddeus watch',
+    },
+    {
+      args: ['watch', '--json', '--unknown'],
+      cwd: tmp,
+      code: 2,
+      diagnostic: '--unknown',
+    },
+    {
+      args: ['watch', '--json'],
+      cwd: tmp,
+      code: 2,
+      diagnostic: 'not a thaddeus working copy',
+    },
+    {
+      args: ['watch', '--json'],
+      cwd: malformed,
+      code: 1,
+      diagnostic: 'error:',
+    },
+  ];
+
+  for (const item of cases) {
+    const out: string[] = [];
+    const errors: string[] = [];
+    const code = await run(item.args, {
+      cwd: item.cwd,
+      home: tmp,
+      out: (line: string): void => {
+        out.push(line);
+      },
+      err: (line: string): void => {
+        errors.push(line);
+      },
+    });
+    expect(code).toBe(item.code);
+    expect(out).toEqual([]);
+    expect(errors).toHaveLength(1);
+    expect(errors[0]).toContain(item.diagnostic);
+  }
 });
 
 test('streams JSONL without mutating the observer and cleans up SIGINT', async () => {
