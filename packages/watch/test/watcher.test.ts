@@ -51,6 +51,57 @@ describe('SemanticWatcher — subscriptions fire on meaning', () => {
     expect(sub.take()).toEqual([expected]);
   });
 
+  test('a pulled rename keeps its stable id across a fresh watcher', async () => {
+    const store = new MemoryStore();
+    const log = new OpLog(store);
+    const dev = Identity.create();
+    const remote = Workspace.open(log, store, {
+      source: 'main',
+      reader: dev,
+      name: 'remote',
+    });
+    remote.write(
+      'src/auth.rs',
+      enc('fn refresh() {}\nfn login() {\n  refresh();\n}\n')
+    );
+    await remote.commit(dev);
+    const source = SymbolGraph.over(remote, {
+      extractor: new HeuristicExtractor(),
+    });
+    const stable = (await source.resolve('refresh'))!;
+    const first = await source.rename(stable, 'refreshToken', dev);
+
+    const mirror = Workspace.open(log, store, {
+      source: 'remote',
+      reader: dev,
+      name: 'watch/mirror',
+    });
+    const graph = SymbolGraph.over(mirror, {
+      extractor: new HeuristicExtractor(),
+    });
+    await graph.syncRenames([first.symbolOp]);
+    expect(await graph.resolve('refreshToken')).toBe(stable);
+
+    const watcher = await SemanticWatcher.over(graph);
+    const sub = watcher.watch({ symbol: stable, kinds: ['renamed'] });
+    const second = await source.rename(stable, 'refreshAgain', dev);
+    const forged = { ...second.symbolOp, to: 'forged' };
+    await graph.syncRenames([first.symbolOp, forged]);
+    expect(await graph.resolve('refreshToken')).toBe(stable);
+    await log.repoint('watch/mirror', [...log.heads('remote')]);
+    await graph.syncRenames([first.symbolOp, second.symbolOp]);
+    await watcher.poll();
+
+    expect(sub.take()).toEqual([
+      {
+        kind: 'renamed',
+        symbol: stable,
+        from: 'refreshToken',
+        to: 'refreshAgain',
+      },
+    ]);
+  });
+
   test('defining and removing a symbol fire defined/removed', async () => {
     const { ws, graph, dev } = await seed();
     const watcher = await SemanticWatcher.over(graph);
