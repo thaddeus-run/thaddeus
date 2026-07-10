@@ -4,6 +4,7 @@
 use ratatui::crossterm::event::{KeyCode, KeyEvent};
 
 use crate::client::{Op, Pull, Release, Remote, Reputation};
+use crate::live::{RefreshMessage, RefreshTarget};
 use crate::query::{same_server, QueryResult, QuerySource};
 
 /// The activity shown in the middle and detail panes.
@@ -46,17 +47,17 @@ pub struct App {
     /// When `Some`, a reputation overlay is shown for a DID.
     pub reputation: Option<Reputation>,
     pub should_quit: bool,
+    pub(crate) refresh_requested: bool,
 }
 
 impl App {
-    /// Build an app and load the remote's repos (+ the first repo's log). A
-    /// failure is surfaced in the status line rather than aborting startup.
+    /// Build an app whose first refresh will be queued by the terminal loop.
     pub fn new(
         remote: Remote,
         server_label: String,
         query_source: Option<Box<dyn QuerySource>>,
     ) -> Self {
-        let mut app = App {
+        App {
             remote,
             server_label,
             repos: Vec::new(),
@@ -68,73 +69,87 @@ impl App {
             release_sel: 0,
             activity: Activity::Log,
             focus: Focus::Repos,
-            status: String::new(),
+            status: "loading…".into(),
             query: None,
             query_input: None,
             query_source,
             reputation: None,
             should_quit: false,
-        };
-        app.refresh();
-        app
-    }
-
-    /// Re-fetch the repo list and reload the selected repo's log.
-    pub fn refresh(&mut self) {
-        match self.remote.repos() {
-            Ok(repos) => {
-                self.repos = repos;
-                if self.repo_sel >= self.repos.len() {
-                    self.repo_sel = self.repos.len().saturating_sub(1);
-                }
-                self.load_selected_repo();
-            }
-            Err(e) => self.status = format!("error listing repos: {e}"),
+            refresh_requested: true,
         }
     }
 
-    /// Pull the selected repo's current view and immutable releases together.
-    pub fn load_selected_repo(&mut self) {
+    pub fn refresh_target(&self) -> RefreshTarget {
+        RefreshTarget {
+            repo: self.repos.get(self.repo_sel).cloned(),
+            view: self.view.clone(),
+        }
+    }
+
+    pub fn request_refresh(&mut self) {
+        self.refresh_requested = true;
+    }
+
+    pub fn take_refresh_request(&mut self) -> bool {
+        std::mem::take(&mut self.refresh_requested)
+    }
+
+    /// Apply a completed refresh only if it still describes the visible target.
+    pub fn apply_refresh(&mut self, message: RefreshMessage) -> bool {
+        let current_repo = self.repos.get(self.repo_sel).cloned();
+        if message.target.view != self.view
+            || (message.target.repo.is_some() && message.target.repo != current_repo)
+        {
+            return false;
+        }
+        let snapshot = match message.result {
+            Ok(snapshot) => snapshot,
+            Err(error) => {
+                self.status = format!("live refresh error: {error}");
+                return true;
+            }
+        };
+        let selected_op = self.selected_op().map(|op| op.id.clone());
+        let selected_release = self.selected_release().map(|release| release.id.clone());
+        self.repos = snapshot.repos;
+        self.repo_sel = snapshot
+            .repo
+            .as_ref()
+            .and_then(|name| self.repos.iter().position(|repo| repo == name))
+            .unwrap_or(0);
+        self.pull = snapshot.pull;
+        self.releases = snapshot.releases;
+        self.op_sel = selected_op
+            .and_then(|id| self.pull.ops.iter().position(|op| op.id == id))
+            .unwrap_or_else(|| self.op_sel.min(self.pull.ops.len().saturating_sub(1)));
+        self.release_sel = selected_release
+            .and_then(|id| self.releases.iter().position(|release| release.id == id))
+            .unwrap_or_else(|| self.release_sel.min(self.releases.len().saturating_sub(1)));
+        let repo = snapshot.repo.as_deref().unwrap_or("(no repo)");
+        self.status = format!(
+            "{repo}  ·  {} op(s)  ·  {} release(s)  ·  {} head(s)  ·  live",
+            self.pull.ops.len(),
+            self.releases.len(),
+            self.pull.heads.len()
+        );
+        true
+    }
+
+    /// Reset repo-specific UI state and let the terminal loop perform the I/O.
+    fn queue_selected_repo(&mut self) {
+        self.pull = Pull::default();
+        self.releases.clear();
         self.op_sel = 0;
         self.release_sel = 0;
         self.query = None;
         self.reputation = None;
-        let Some(repo) = self.repos.get(self.repo_sel).cloned() else {
-            self.pull = Pull::default();
-            self.releases.clear();
-            return;
-        };
-        let pull = self.remote.pull(&repo, &self.view);
-        let releases = self.remote.releases(&repo);
-        match (pull, releases) {
-            (Ok(pull), Ok(releases)) => {
-                self.status = format!(
-                    "{}  ·  {} op(s)  ·  {} release(s)  ·  {} head(s)",
-                    repo,
-                    pull.ops.len(),
-                    releases.len(),
-                    pull.heads.len()
-                );
-                self.pull = pull;
-                self.releases = releases;
-            }
-            (Err(e), Ok(releases)) => {
-                self.pull = Pull::default();
-                self.releases = releases;
-                self.status = format!("error pulling {repo}: {e}");
-            }
-            (Ok(pull), Err(e)) => {
-                self.pull = pull;
-                self.releases.clear();
-                self.status = format!("error loading releases for {repo}: {e}");
-            }
-            (Err(pull_error), Err(release_error)) => {
-                self.pull = Pull::default();
-                self.releases.clear();
-                self.status =
-                    format!("error loading {repo}: pull: {pull_error}; releases: {release_error}");
-            }
-        }
+        self.activity = Activity::Log;
+        self.status = self
+            .repos
+            .get(self.repo_sel)
+            .map(|repo| format!("loading {repo}…"))
+            .unwrap_or_else(|| "loading…".into());
+        self.request_refresh();
     }
 
     pub fn selected_op(&self) -> Option<&Op> {
@@ -145,9 +160,8 @@ impl App {
         self.releases.get(self.release_sel)
     }
 
-    // Moving the cursor is pure state; `on_key` decides whether a move in the
-    // Repos pane should also (blockingly) reload that repo's log. Keeping the
-    // network out of here keeps the navigation unit-tests offline.
+    // Moving the cursor is pure state; `on_key` queues a refresh only when the
+    // selected repo actually changes.
     fn move_down(&mut self) {
         match self.focus {
             Focus::Repos => {
@@ -295,32 +309,29 @@ impl App {
                     Focus::Log => Focus::Repos,
                 };
             }
-            // The log follows the repos cursor, so arrowing the list shows each
-            // repo's log without an extra keypress. Only reload when the cursor
-            // actually moved — at a list boundary the selection is unchanged and
-            // a refetch would just freeze the UI on the same repo. The pull is
-            // blocking; a debounce (then a background fetch) is the fast-follow.
+            // The log follows the repos cursor, so arrowing the list queues the
+            // newly selected repo without waiting on its remote reads.
             KeyCode::Down | KeyCode::Char('j') => {
                 let prev = self.repo_sel;
                 self.move_down();
                 if self.focus == Focus::Repos && self.repo_sel != prev {
-                    self.load_selected_repo();
+                    self.queue_selected_repo();
                 }
             }
             KeyCode::Up | KeyCode::Char('k') => {
                 let prev = self.repo_sel;
                 self.move_up();
                 if self.focus == Focus::Repos && self.repo_sel != prev {
-                    self.load_selected_repo();
+                    self.queue_selected_repo();
                 }
             }
-            // Enter on the repos pane loads that repo's log and focuses it.
+            // Enter queues the selected repo's log and focuses it.
             KeyCode::Enter | KeyCode::Char('l') if self.focus == Focus::Repos => {
-                self.load_selected_repo();
+                self.queue_selected_repo();
                 self.focus = Focus::Log;
             }
             KeyCode::Char('r') if self.activity == Activity::Query => self.rerun_query(),
-            KeyCode::Char('r') => self.refresh(),
+            KeyCode::Char('r') => self.request_refresh(),
             KeyCode::Char('R') => self.show_reputation(),
             KeyCode::Char('t') => {
                 self.activity = match self.activity {
@@ -338,6 +349,7 @@ impl App {
 mod tests {
     use super::*;
     use crate::client::{Op, Release};
+    use crate::live::{RefreshMessage, RefreshSnapshot, RefreshTarget};
     use std::collections::HashMap;
 
     fn op(id: &str, lamport: i64) -> Op {
@@ -389,11 +401,181 @@ mod tests {
             query_source: None,
             reputation: None,
             should_quit: false,
+            refresh_requested: false,
         }
     }
 
     fn key(code: KeyCode) -> KeyEvent {
         KeyEvent::from(code)
+    }
+
+    #[test]
+    fn live_refresh_preserves_selected_ids_and_open_overlays() {
+        let mut app = fixture();
+        app.op_sel = 1;
+        app.activity = Activity::Query;
+        app.query = Some(QueryView {
+            expression: "references refresh".into(),
+            result: QueryResult::References(Vec::new()),
+            selected: 0,
+        });
+        app.reputation = Some(Reputation::default());
+        let selected = app.pull.ops[1].id.clone();
+
+        let target = app.refresh_target();
+        let message = RefreshMessage {
+            target,
+            result: Ok(RefreshSnapshot {
+                repos: app.repos.clone(),
+                repo: app.repos.get(app.repo_sel).cloned(),
+                pull: Pull {
+                    heads: vec!["op3".into()],
+                    ops: vec![op("op3", 3), op(&selected, 1)],
+                    prov: HashMap::new(),
+                    veto: HashMap::new(),
+                },
+                releases: app.releases.clone(),
+            }),
+        };
+        assert!(app.apply_refresh(message));
+
+        assert_eq!(
+            app.selected_op().map(|op| op.id.as_str()),
+            Some(selected.as_str())
+        );
+        assert_eq!(app.activity, Activity::Query);
+        assert!(app.query.is_some());
+        assert!(app.reputation.is_some());
+    }
+
+    #[test]
+    fn stale_or_failed_live_refresh_keeps_last_good_data() {
+        let mut app = fixture();
+        let old_ids: Vec<String> = app.pull.ops.iter().map(|op| op.id.clone()).collect();
+        let stale = RefreshMessage {
+            target: RefreshTarget {
+                repo: Some("other/repo".into()),
+                view: "main".into(),
+            },
+            result: Ok(RefreshSnapshot {
+                repos: vec!["other/repo".into()],
+                repo: Some("other/repo".into()),
+                pull: Pull::default(),
+                releases: Vec::new(),
+            }),
+        };
+        assert!(!app.apply_refresh(stale));
+        assert_eq!(
+            app.pull
+                .ops
+                .iter()
+                .map(|op| op.id.clone())
+                .collect::<Vec<_>>(),
+            old_ids
+        );
+
+        let failed = RefreshMessage {
+            target: app.refresh_target(),
+            result: Err("offline".into()),
+        };
+        assert!(app.apply_refresh(failed));
+        assert_eq!(
+            app.pull
+                .ops
+                .iter()
+                .map(|op| op.id.clone())
+                .collect::<Vec<_>>(),
+            old_ids
+        );
+        assert!(app.status.contains("offline"));
+    }
+
+    #[test]
+    fn live_refresh_clamps_when_the_selected_item_disappears() {
+        let mut app = fixture();
+        app.op_sel = 1;
+        let message = RefreshMessage {
+            target: app.refresh_target(),
+            result: Ok(RefreshSnapshot {
+                repos: app.repos.clone(),
+                repo: app.repos.get(app.repo_sel).cloned(),
+                pull: Pull {
+                    heads: vec!["op3".into()],
+                    ops: vec![op("op3", 3)],
+                    prov: HashMap::new(),
+                    veto: HashMap::new(),
+                },
+                releases: Vec::new(),
+            }),
+        };
+        assert!(app.apply_refresh(message));
+        assert_eq!(app.op_sel, 0);
+        assert_eq!(app.selected_op().map(|op| op.id.as_str()), Some("op3"));
+    }
+
+    #[test]
+    fn live_refresh_restores_the_selected_release_by_id() {
+        let mut app = fixture();
+        app.activity = Activity::Releases;
+        app.releases = vec![release("v2"), release("v1")];
+        app.release_sel = 1;
+        let selected = app.releases[1].id.clone();
+        let message = RefreshMessage {
+            target: app.refresh_target(),
+            result: Ok(RefreshSnapshot {
+                repos: app.repos.clone(),
+                repo: app.repos.get(app.repo_sel).cloned(),
+                pull: app.pull.clone(),
+                releases: vec![release("v3"), release("v1")],
+            }),
+        };
+
+        assert!(app.apply_refresh(message));
+        assert_eq!(
+            app.selected_release().map(|release| release.id.as_str()),
+            Some(selected.as_str())
+        );
+        assert_eq!(app.activity, Activity::Releases);
+    }
+
+    #[test]
+    fn new_queues_initial_refresh_without_remote_io() {
+        let mut app = App::new(
+            Remote::new("http://127.0.0.1:1"),
+            "http://127.0.0.1:1".into(),
+            None,
+        );
+
+        assert!(app.repos.is_empty());
+        assert_eq!(app.status, "loading…");
+        assert!(app.take_refresh_request());
+        assert!(!app.take_refresh_request());
+    }
+
+    #[test]
+    fn manual_refresh_only_queues_remote_io() {
+        let mut app = fixture();
+        app.remote = Remote::new("http://127.0.0.1:1");
+        app.status = "ready".into();
+
+        app.on_key(key(KeyCode::Char('r')));
+        assert!(app.take_refresh_request());
+        assert_eq!(app.status, "ready");
+    }
+
+    #[test]
+    fn repo_cursor_only_queues_remote_io() {
+        let mut app = fixture();
+        app.remote = Remote::new("http://127.0.0.1:1");
+
+        app.focus = Focus::Repos;
+        app.on_key(key(KeyCode::Down));
+        assert_eq!(app.repo_sel, 1);
+        assert!(app.pull.ops.is_empty());
+        assert!(app.releases.is_empty());
+        assert!(app.take_refresh_request());
+        assert_eq!(app.status, "loading acme/api…");
+        assert!(!app.status.contains("error"));
     }
 
     #[test]

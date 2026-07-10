@@ -5,11 +5,12 @@
 
 mod app;
 mod client;
+mod live;
 mod query;
 mod ui;
 
 use std::io::{self, Stdout};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use anyhow::Result;
 use ratatui::backend::CrosstermBackend;
@@ -22,6 +23,7 @@ use ratatui::Terminal;
 
 use app::App;
 use client::Remote;
+use live::LiveRefresh;
 use query::{LocalQueries, QuerySource};
 
 const DEFAULT_SERVER: &str = "http://localhost:4000";
@@ -127,10 +129,12 @@ fn main() -> Result<()> {
         .ok()
         .and_then(|cwd| LocalQueries::discover(&cwd).ok().flatten())
         .map(|source| Box::new(source) as Box<dyn QuerySource>);
-    let mut app = App::new(Remote::new(&server), server.clone(), local_queries);
+    let remote = Remote::new(&server);
+    let mut app = App::new(remote.clone(), server.clone(), local_queries);
+    let mut live = LiveRefresh::new(remote);
 
     let mut terminal = setup_terminal()?;
-    let result = run(&mut terminal, &mut app);
+    let result = run(&mut terminal, &mut app, &mut live);
     // Always restore the terminal, even if the loop errored.
     restore_terminal(&mut terminal)?;
     result
@@ -150,8 +154,20 @@ fn restore_terminal(terminal: &mut Terminal<CrosstermBackend<Stdout>>) -> Result
     Ok(())
 }
 
-fn run(terminal: &mut Terminal<CrosstermBackend<Stdout>>, app: &mut App) -> Result<()> {
+fn run(
+    terminal: &mut Terminal<CrosstermBackend<Stdout>>,
+    app: &mut App,
+    live: &mut LiveRefresh,
+) -> Result<()> {
+    let mut next_refresh = Instant::now() + Duration::from_secs(2);
     loop {
+        while let Some(message) = live.try_recv() {
+            app.apply_refresh(message);
+        }
+        if app.take_refresh_request() || Instant::now() >= next_refresh {
+            live.request(app.refresh_target());
+            next_refresh = Instant::now() + Duration::from_secs(2);
+        }
         terminal.draw(|frame| ui::render(frame, app))?;
         // Poll so the UI stays responsive; only handle key PRESS events (some
         // terminals also emit Release/Repeat, which would double-fire actions).

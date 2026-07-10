@@ -570,6 +570,7 @@ mod tests {
             query_source: None,
             reputation: None,
             should_quit: false,
+            refresh_requested: false,
         }
     }
 
