@@ -199,21 +199,25 @@ test('validates watch command intervals and event kinds', async () => {
     },
   };
 
+  // Preflight diagnostics always use stderr: watch streams events on stdout
+  // in both text and JSON modes, so redirected stdout must never interleave
+  // error lines with the event stream.
   expect(await run(['watch', '--interval', '99ms'], invalidEnv)).toBe(2);
-  expect(out).toEqual(['watch interval must be at least 100ms']);
+  expect(out).toEqual([]);
+  expect(errors).toEqual(['watch interval must be at least 100ms']);
 
-  out.length = 0;
+  errors.length = 0;
   expect(await run(['watch', '--kind', 'signature-changed'], invalidEnv)).toBe(
     2
   );
-  expect(out).toEqual(['invalid watch kind: signature-changed']);
-  expect(errors).toEqual([]);
+  expect(out).toEqual([]);
+  expect(errors).toEqual(['invalid watch kind: signature-changed']);
 
-  out.length = 0;
+  errors.length = 0;
   expect(await run(['watch', '--unknown'], invalidEnv)).toBe(2);
-  expect(out).toHaveLength(1);
-  expect(out[0]).toContain('--unknown');
-  expect(errors).toEqual([]);
+  expect(out).toEqual([]);
+  expect(errors).toHaveLength(1);
+  expect(errors[0]).toContain('--unknown');
 });
 
 test('routes every JSON watch preflight diagnostic to stderr', async () => {
