@@ -13,9 +13,11 @@ installer below installs both commands.
 Interactive remote views refresh every two seconds in a single-flight background
 worker without blocking keyboard input. Lazythad preserves the selected repo,
 operation, and release across fresh snapshots and keeps last-known-good data
-visible when a refresh fails; press `r` to request an immediate retry. Refreshes
-read public metadata and ciphertext pulls only. Semantic derivation remains
-local, keyless in lazythad itself, and bounded by the `thaddeus` CLI identity's
+visible when a refresh fails. In log and release views, `r` requests an
+immediate retry; in a query view it reruns the active expression. With a
+reputation overlay open, `r` only dismisses that modal overlay. Refreshes read
+public metadata and ciphertext pulls only. Semantic derivation remains local,
+keyless in lazythad itself, and bounded by the `thaddeus` CLI identity's
 decryption capabilities.
 
 ```sh

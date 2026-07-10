@@ -115,6 +115,40 @@ export class SymbolLedger {
     return this.#byId.get(id)?.name ?? null;
   }
 
+  ids(): readonly string[] {
+    return [...this.#byId.keys()];
+  }
+
+  // Replace the provisional id minted while projecting a newly landed name,
+  // but never overwrite a different identity that predated that projection.
+  reconcile(id: string, to: string, projectedId: string): boolean {
+    const binding = this.#byId.get(id);
+    if (binding === undefined) {
+      return false;
+    }
+    const next: Binding = { path: binding.path, name: to, kind: binding.kind };
+    const nextKey = bindingKey(next);
+    const target = this.#byKey.get(nextKey);
+    if (target !== id && target !== projectedId) {
+      return false;
+    }
+    if (projectedId !== id) {
+      const provisional = this.#byId.get(projectedId);
+      if (
+        provisional === undefined ||
+        bindingKey(provisional) !== nextKey ||
+        target !== projectedId
+      ) {
+        return false;
+      }
+      this.#byId.delete(projectedId);
+    }
+    this.#byKey.delete(bindingKey(binding));
+    this.#byKey.set(nextKey, id);
+    this.#byId.set(id, next);
+    return true;
+  }
+
   // Move a symbol's binding from its current name to `to`, keeping the same id.
   rebind(id: string, to: string): void {
     const b = this.#byId.get(id);
@@ -137,35 +171,39 @@ interface LocalDef {
   readonly line: number;
 }
 
-function renamePathExists(
+// Find exactly one cycle-free rename route; zero or competing routes are not
+// authoritative enough to restore identity from an unordered peer history.
+function uniqueRenamePath(
   history: readonly SymbolOp[],
   from: string,
   to: string
-): boolean {
+): readonly SymbolOp[] | null {
   if (from === to) {
-    return true;
+    return [];
   }
-  const edges = new Map<string, Set<string>>();
-  for (const op of history) {
-    const next = edges.get(op.from) ?? new Set<string>();
-    next.add(op.to);
-    edges.set(op.from, next);
-  }
-  const seen = new Set<string>([from]);
-  const queue = [from];
-  while (queue.length > 0) {
-    const name = queue.shift()!;
-    for (const next of edges.get(name) ?? []) {
-      if (next === to) {
-        return true;
+  const paths: SymbolOp[][] = [];
+  const visit = (
+    name: string,
+    path: readonly SymbolOp[],
+    seen: ReadonlySet<string>
+  ): void => {
+    if (paths.length > 1) {
+      return;
+    }
+    for (const op of history) {
+      if (op.from !== name || seen.has(op.to)) {
+        continue;
       }
-      if (!seen.has(next)) {
-        seen.add(next);
-        queue.push(next);
+      const nextPath = [...path, op];
+      if (op.to === to) {
+        paths.push(nextPath);
+      } else {
+        visit(op.to, nextPath, new Set([...seen, op.to]));
       }
     }
-  }
-  return false;
+  };
+  visit(from, [], new Set([from]));
+  return paths.length === 1 ? paths[0] : null;
 }
 
 // The read/rename surface over a Workspace. Reads re-extract from decryptable
@@ -316,6 +354,8 @@ export class SymbolGraph {
     return edges;
   }
 
+  // Restore landed history on first use; later, consume only the unique unseen
+  // rename path whose terminal definition is present in the projected view.
   async syncRenames(ops: readonly SymbolOp[]): Promise<void> {
     const valid = ops.filter((op) => verifySymbolOp(op));
     if (!this.#renamesHydrated) {
@@ -326,9 +366,14 @@ export class SymbolGraph {
         history.push(op);
         bySymbol.set(op.symbol, history);
       }
-      for (const definition of model.defs) {
-        const kind = model.kinds.get(definition.symbol) ?? 'function';
-        for (const [symbol, history] of bySymbol) {
+      for (const [symbol, history] of bySymbol) {
+        const candidates: {
+          birth: Binding;
+          current: Binding;
+          path: readonly SymbolOp[];
+        }[] = [];
+        for (const definition of model.defs) {
+          const kind = model.kinds.get(definition.symbol) ?? 'function';
           const births = new Set(history.map((op) => op.from));
           for (const birthName of births) {
             const birth = { path: definition.path, name: birthName, kind };
@@ -337,37 +382,84 @@ export class SymbolGraph {
               name: definition.name,
               kind,
             };
-            if (
-              symbolIdFor(birth) === symbol &&
-              renamePathExists(history, birthName, definition.name) &&
-              this.ledger.restore(symbol, birth, current)
-            ) {
-              break;
+            const path = uniqueRenamePath(history, birthName, definition.name);
+            if (symbolIdFor(birth) === symbol && path !== null) {
+              candidates.push({ birth, current, path });
             }
           }
         }
-      }
-      for (const op of valid) {
-        this.#syncedRenameOps.add(op.id);
+        if (candidates.length !== 1) {
+          continue;
+        }
+        const candidate = candidates[0];
+        if (
+          candidate !== undefined &&
+          this.ledger.restore(symbol, candidate.birth, candidate.current)
+        ) {
+          for (const op of candidate.path) {
+            this.#syncedRenameOps.add(op.id);
+          }
+        }
       }
       this.#renamesHydrated = true;
       return;
     }
 
     const pending = valid.filter((op) => !this.#syncedRenameOps.has(op.id));
-    let progressed = true;
-    while (progressed) {
-      progressed = false;
-      for (let index = pending.length - 1; index >= 0; index--) {
-        const op = pending[index];
+    if (pending.length === 0) {
+      return;
+    }
+    const knownBeforeProjection = new Set(this.ledger.ids());
+    const model = await this.#model();
+    const bySymbol = new Map<string, SymbolOp[]>();
+    for (const op of pending) {
+      const history = bySymbol.get(op.symbol) ?? [];
+      history.push(op);
+      bySymbol.set(op.symbol, history);
+    }
+    for (const [symbol, history] of bySymbol) {
+      const binding = this.ledger.bindingOf(symbol);
+      if (binding === null) {
+        continue;
+      }
+      const projected = model.defs.filter(
+        (definition) =>
+          definition.path === binding.path &&
+          (model.kinds.get(definition.symbol) ?? 'function') === binding.kind
+      );
+      if (projected.some((definition) => definition.name === binding.name)) {
+        continue;
+      }
+      const candidates: {
+        definition: Definition;
+        path: readonly SymbolOp[];
+      }[] = [];
+      for (const definition of projected) {
         if (
-          op !== undefined &&
-          this.ledger.currentName(op.symbol) === op.from
+          definition.symbol !== symbol &&
+          knownBeforeProjection.has(definition.symbol)
         ) {
-          this.ledger.rebind(op.symbol, op.to);
+          continue;
+        }
+        const path = uniqueRenamePath(history, binding.name, definition.name);
+        if (path !== null && path.length > 0) {
+          candidates.push({ definition, path });
+        }
+      }
+      if (candidates.length !== 1) {
+        continue;
+      }
+      const candidate = candidates[0];
+      if (
+        candidate !== undefined &&
+        this.ledger.reconcile(
+          symbol,
+          candidate.definition.name,
+          candidate.definition.symbol
+        )
+      ) {
+        for (const op of candidate.path) {
           this.#syncedRenameOps.add(op.id);
-          pending.splice(index, 1);
-          progressed = true;
         }
       }
     }

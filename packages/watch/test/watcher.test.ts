@@ -1,5 +1,9 @@
 import { Workspace } from '@thaddeus.run/fs';
-import { HeuristicExtractor, SymbolGraph } from '@thaddeus.run/graph';
+import {
+  HeuristicExtractor,
+  signSymbolOp,
+  SymbolGraph,
+} from '@thaddeus.run/graph';
 import { Identity, ready } from '@thaddeus.run/identity';
 import { OpLog } from '@thaddeus.run/log';
 import { MemoryStore } from '@thaddeus.run/store';
@@ -100,6 +104,74 @@ describe('SemanticWatcher — subscriptions fire on meaning', () => {
         to: 'refreshAgain',
       },
     ]);
+  });
+
+  test('unlanded and colliding rename hints wait for projected text', async () => {
+    const store = new MemoryStore();
+    const log = new OpLog(store);
+    const dev = Identity.create();
+    const remote = Workspace.open(log, store, {
+      source: 'main',
+      reader: dev,
+      name: 'remote',
+    });
+    remote.write('src/auth.rs', enc('fn refresh() {}\nfn login() {}\n'));
+    await remote.commit(dev);
+
+    const mirror = Workspace.open(log, store, {
+      source: 'remote',
+      reader: dev,
+      name: 'watch/mirror',
+    });
+    const graph = SymbolGraph.over(mirror, {
+      extractor: new HeuristicExtractor(),
+    });
+    const stable = (await graph.resolve('refresh'))!;
+    const login = (await graph.resolve('login'))!;
+    await graph.syncRenames([]);
+    const watcher = await SemanticWatcher.over(graph);
+    const sub = watcher.watch();
+    const collision = signSymbolOp(
+      {
+        kind: 'rename-symbol',
+        symbol: stable,
+        from: 'refresh',
+        to: 'login',
+        base: null,
+      },
+      dev
+    );
+
+    await graph.syncRenames([collision]);
+    expect(await watcher.poll()).toEqual([]);
+    expect(sub.take()).toEqual([]);
+    expect(await graph.resolve('refresh')).toBe(stable);
+    expect(await graph.resolve('login')).toBe(login);
+
+    const source = SymbolGraph.over(remote, {
+      extractor: new HeuristicExtractor(),
+    });
+    const sourceStable = (await source.resolve('refresh'))!;
+    expect(sourceStable).toBe(stable);
+    const landed = await source.rename(sourceStable, 'refreshToken', dev);
+    await graph.syncRenames([collision, landed.symbolOp]);
+    expect(await watcher.poll()).toEqual([]);
+    expect(sub.take()).toEqual([]);
+
+    await log.repoint('watch/mirror', [...log.heads('remote')]);
+    await graph.syncRenames([collision, landed.symbolOp]);
+    await watcher.poll();
+
+    expect(sub.take()).toEqual([
+      {
+        kind: 'renamed',
+        symbol: stable,
+        from: 'refresh',
+        to: 'refreshToken',
+      },
+    ]);
+    expect(await graph.resolve('refreshToken')).toBe(stable);
+    expect(await graph.resolve('login')).toBe(login);
   });
 
   test('defining and removing a symbol fire defined/removed', async () => {

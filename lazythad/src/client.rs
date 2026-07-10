@@ -193,9 +193,9 @@ pub struct Remote {
 impl Remote {
     pub fn new(server: &str) -> Self {
         // Bound the blocking calls: an unreachable server should fail in seconds
-        // (surfaced in the status line) rather than freeze the UI for ureq's 30s
-        // default. Fetches still block the event loop while in flight — moving
-        // them to a background thread with a "loading…" state is a fast-follow.
+        // rather than wait for ureq's 30s default. Automatic refresh invokes
+        // these calls on the background worker; direct dump and reputation
+        // reads remain synchronous and use the same bounds.
         let agent = ureq::AgentBuilder::new()
             .timeout_connect(Duration::from_secs(5))
             .timeout(Duration::from_secs(10))
