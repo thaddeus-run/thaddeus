@@ -191,19 +191,6 @@ describe('SemanticWatcher — subscriptions fire on meaning', () => {
     const alpha = (await birthGraph.resolve('alpha'))!;
     const beta = (await birthGraph.resolve('beta'))!;
 
-    const projectedStore = new MemoryStore();
-    const projectedLog = new OpLog(projectedStore);
-    const projected = Workspace.open(projectedLog, projectedStore, {
-      source: 'main',
-      reader: dev,
-    });
-    projected.write('src/shared.rs', enc('fn shared() {}\n'));
-    await projected.commit(dev);
-    const graph = SymbolGraph.over(projected, {
-      extractor: new HeuristicExtractor(),
-    });
-    const provisional = (await graph.resolve('shared'))!;
-    const watcher = await SemanticWatcher.over(graph);
     const claims = [
       signSymbolOp(
         {
@@ -227,84 +214,96 @@ describe('SemanticWatcher — subscriptions fire on meaning', () => {
       ),
     ];
 
-    await graph.syncRenames(claims);
+    for (const reverse of [false, true]) {
+      const projectedStore = new MemoryStore();
+      const projectedLog = new OpLog(projectedStore);
+      const projected = Workspace.open(projectedLog, projectedStore, {
+        source: 'main',
+        reader: dev,
+      });
+      projected.write('src/shared.rs', enc('fn shared() {}\n'));
+      await projected.commit(dev);
+      const graph = SymbolGraph.over(projected, {
+        extractor: new HeuristicExtractor(),
+      });
+      const provisional = (await graph.resolve('shared'))!;
+      const watcher = await SemanticWatcher.over(graph);
 
-    expect(await watcher.poll()).toEqual([]);
-    expect(await graph.resolve('shared')).toBe(provisional);
-    expect(await graph.definitionOf(alpha)).toBeNull();
-    expect(await graph.definitionOf(beta)).toBeNull();
-    await graph.syncRenames([...claims].reverse());
-    expect(await watcher.poll()).toEqual([]);
-    expect(await graph.resolve('shared')).toBe(provisional);
+      await graph.syncRenames(reverse ? [...claims].reverse() : claims);
+
+      expect(await watcher.poll()).toEqual([]);
+      expect(await graph.resolve('shared')).toBe(provisional);
+      expect(await graph.definitionOf(alpha)).toBeNull();
+      expect(await graph.definitionOf(beta)).toBeNull();
+    }
   });
 
   test('incremental sync rejects two symbols claiming one projected binding', async () => {
-    const store = new MemoryStore();
-    const log = new OpLog(store);
     const dev = Identity.create();
     const peer = Identity.create();
-    const ws = Workspace.open(log, store, {
-      source: 'main',
-      reader: dev,
-    });
-    ws.write('src/shared.rs', enc('fn alpha() {}\nfn beta() {}\n'));
-    await ws.commit(dev);
-    const graph = SymbolGraph.over(ws, {
-      extractor: new HeuristicExtractor(),
-    });
-    const alpha = (await graph.resolve('alpha'))!;
-    const beta = (await graph.resolve('beta'))!;
-    await graph.syncRenames([]);
-    const watcher = await SemanticWatcher.over(graph);
-    const claims = [
-      signSymbolOp(
-        {
-          kind: 'rename-symbol',
-          symbol: alpha,
-          from: 'alpha',
-          to: 'shared',
-          base: null,
-        },
-        dev
-      ),
-      signSymbolOp(
-        {
-          kind: 'rename-symbol',
-          symbol: beta,
-          from: 'beta',
-          to: 'shared',
-          base: null,
-        },
-        peer
-      ),
-    ];
+    for (const reverse of [false, true]) {
+      const store = new MemoryStore();
+      const log = new OpLog(store);
+      const ws = Workspace.open(log, store, {
+        source: 'main',
+        reader: dev,
+      });
+      ws.write('src/shared.rs', enc('fn alpha() {}\nfn beta() {}\n'));
+      await ws.commit(dev);
+      const graph = SymbolGraph.over(ws, {
+        extractor: new HeuristicExtractor(),
+      });
+      const alpha = (await graph.resolve('alpha'))!;
+      const beta = (await graph.resolve('beta'))!;
+      await graph.syncRenames([]);
+      const watcher = await SemanticWatcher.over(graph);
+      const claims = [
+        signSymbolOp(
+          {
+            kind: 'rename-symbol',
+            symbol: alpha,
+            from: 'alpha',
+            to: 'shared',
+            base: null,
+          },
+          dev
+        ),
+        signSymbolOp(
+          {
+            kind: 'rename-symbol',
+            symbol: beta,
+            from: 'beta',
+            to: 'shared',
+            base: null,
+          },
+          peer
+        ),
+      ];
 
-    ws.write('src/shared.rs', enc('fn shared() {}\n'));
-    await ws.commit(dev);
-    await graph.syncRenames(claims);
-    const events = await watcher.poll();
-    const shared = (await graph.resolve('shared'))!;
+      ws.write('src/shared.rs', enc('fn shared() {}\n'));
+      await ws.commit(dev);
+      await graph.syncRenames(reverse ? [...claims].reverse() : claims);
+      const events = await watcher.poll();
+      const shared = (await graph.resolve('shared'))!;
 
-    expect(events.filter((event) => event.kind === 'renamed')).toEqual([]);
-    expect(events.filter((event) => event.kind === 'defined')).toEqual([
-      {
-        kind: 'defined',
-        symbol: shared,
-        name: 'shared',
-        path: 'src/shared.rs',
-      },
-    ]);
-    expect(
-      events
-        .filter((event) => event.kind === 'removed')
-        .map((event) => event.symbol)
-        .sort()
-    ).toEqual([alpha, beta].sort());
-    expect(shared).not.toBe(alpha);
-    expect(shared).not.toBe(beta);
-    await graph.syncRenames([...claims].reverse());
-    expect(await watcher.poll()).toEqual([]);
-    expect(await graph.resolve('shared')).toBe(shared);
+      expect(events.filter((event) => event.kind === 'renamed')).toEqual([]);
+      expect(events.filter((event) => event.kind === 'defined')).toEqual([
+        {
+          kind: 'defined',
+          symbol: shared,
+          name: 'shared',
+          path: 'src/shared.rs',
+        },
+      ]);
+      expect(
+        events
+          .filter((event) => event.kind === 'removed')
+          .map((event) => event.symbol)
+          .sort()
+      ).toEqual([alpha, beta].sort());
+      expect(shared).not.toBe(alpha);
+      expect(shared).not.toBe(beta);
+    }
   });
 
   test('equivalent signed edges restore one stable rename', async () => {
@@ -360,6 +359,149 @@ describe('SemanticWatcher — subscriptions fire on meaning', () => {
       },
     ]);
     expect(await graph.resolve('beta')).toBe(stable);
+    await graph.syncRenames([...claims].reverse());
+    expect(await watcher.poll()).toEqual([]);
+    expect(await graph.resolve('beta')).toBe(stable);
+  });
+
+  test('hydration never deletes another history stable birth id', async () => {
+    const dev = Identity.create();
+    const peer = Identity.create();
+    const birthStore = new MemoryStore();
+    const birthLog = new OpLog(birthStore);
+    const births = Workspace.open(birthLog, birthStore, {
+      source: 'main',
+      reader: dev,
+    });
+    births.write('src/shared.rs', enc('fn alpha() {}\nfn beta() {}\n'));
+    await births.commit(dev);
+    const birthGraph = SymbolGraph.over(births, {
+      extractor: new HeuristicExtractor(),
+    });
+    const alpha = (await birthGraph.resolve('alpha'))!;
+    const beta = (await birthGraph.resolve('beta'))!;
+    const claims = [
+      signSymbolOp(
+        {
+          kind: 'rename-symbol',
+          symbol: alpha,
+          from: 'alpha',
+          to: 'beta',
+          base: null,
+        },
+        dev
+      ),
+      signSymbolOp(
+        {
+          kind: 'rename-symbol',
+          symbol: beta,
+          from: 'beta',
+          to: 'gamma',
+          base: null,
+        },
+        peer
+      ),
+    ];
+
+    for (const reverse of [false, true]) {
+      const projectedStore = new MemoryStore();
+      const projectedLog = new OpLog(projectedStore);
+      const projected = Workspace.open(projectedLog, projectedStore, {
+        source: 'main',
+        reader: dev,
+      });
+      projected.write('src/shared.rs', enc('fn beta() {}\nfn gamma() {}\n'));
+      await projected.commit(dev);
+      const graph = SymbolGraph.over(projected, {
+        extractor: new HeuristicExtractor(),
+      });
+      const projectedBeta = (await graph.resolve('beta'))!;
+      const gamma = (await graph.resolve('gamma'))!;
+      expect(projectedBeta).toBe(beta);
+      const watcher = await SemanticWatcher.over(graph);
+
+      await graph.syncRenames(reverse ? [...claims].reverse() : claims);
+
+      expect(await watcher.poll()).toEqual([]);
+      expect(await graph.resolve('beta')).toBe(beta);
+      expect(await graph.resolve('gamma')).toBe(gamma);
+      expect(await graph.definitionOf(alpha)).toBeNull();
+    }
+  });
+
+  test('rejected contention retries when the competing birth reappears', async () => {
+    const store = new MemoryStore();
+    const log = new OpLog(store);
+    const dev = Identity.create();
+    const peer = Identity.create();
+    const ws = Workspace.open(log, store, {
+      source: 'main',
+      reader: dev,
+    });
+    ws.write('src/shared.rs', enc('fn alpha() {}\nfn beta() {}\n'));
+    await ws.commit(dev);
+    const graph = SymbolGraph.over(ws, {
+      extractor: new HeuristicExtractor(),
+    });
+    const alpha = (await graph.resolve('alpha'))!;
+    const beta = (await graph.resolve('beta'))!;
+    await graph.syncRenames([]);
+    const watcher = await SemanticWatcher.over(graph);
+    const claims = [
+      signSymbolOp(
+        {
+          kind: 'rename-symbol',
+          symbol: alpha,
+          from: 'alpha',
+          to: 'shared',
+          base: null,
+        },
+        dev
+      ),
+      signSymbolOp(
+        {
+          kind: 'rename-symbol',
+          symbol: beta,
+          from: 'beta',
+          to: 'shared',
+          base: null,
+        },
+        peer
+      ),
+    ];
+
+    ws.write('src/shared.rs', enc('fn shared() {}\n'));
+    await ws.commit(dev);
+    await graph.syncRenames(claims);
+    await watcher.poll();
+    const provisional = (await graph.resolve('shared'))!;
+    expect(provisional).not.toBe(alpha);
+    expect(provisional).not.toBe(beta);
+
+    ws.write('src/shared.rs', enc('fn shared() {}\nfn beta() {}\n'));
+    await ws.commit(dev);
+    await graph.syncRenames(claims);
+    const events = await watcher.poll();
+
+    expect(await graph.resolve('shared')).toBe(alpha);
+    expect(await graph.resolve('beta')).toBe(beta);
+    expect(events.filter((event) => event.kind === 'renamed')).toEqual([]);
+    expect(
+      events
+        .filter((event) => event.kind === 'defined')
+        .map((event) => `${event.symbol}:${event.name}`)
+        .sort((left, right) => left.localeCompare(right))
+    ).toEqual(
+      [`${alpha}:shared`, `${beta}:beta`].sort((left, right) =>
+        left.localeCompare(right)
+      )
+    );
+    expect(events.filter((event) => event.kind === 'removed')).toEqual([
+      { kind: 'removed', symbol: provisional, name: 'shared' },
+    ]);
+    await graph.syncRenames(claims);
+    expect(await watcher.poll()).toEqual([]);
+    expect(await graph.resolve('shared')).toBe(alpha);
   });
 
   test('defining and removing a symbol fire defined/removed', async () => {

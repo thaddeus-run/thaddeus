@@ -61,6 +61,7 @@ function symbolIdFor(binding: Binding): string {
 export class SymbolLedger {
   readonly #byKey: Map<string, string> = new Map();
   readonly #byId: Map<string, Binding> = new Map();
+  readonly #provisionalByKey: Map<string, Binding> = new Map();
 
   // The id for a binding, minting it on first sight. Content-addressed at birth
   // → deterministic and test-reproducible.
@@ -71,6 +72,7 @@ export class SymbolLedger {
       return existing;
     }
     const id = symbolIdFor(b);
+    this.#provisionalByKey.delete(key);
     this.#byKey.set(key, id);
     // Do not clobber an existing id→binding (a name resurrected after a rename is
     // a known spike edge, spec §11); the first binding for an id wins.
@@ -78,6 +80,30 @@ export class SymbolLedger {
       this.#byId.set(id, b);
     }
     return id;
+  }
+
+  // Project an unaccepted definition without granting it stable ownership.
+  // Its deterministic id is suitable for snapshots and remains retryable.
+  project(b: Binding): string {
+    const key = bindingKey(b);
+    const stable = this.#byKey.get(key);
+    if (stable !== undefined) {
+      return stable;
+    }
+    this.#provisionalByKey.set(key, b);
+    return symbolIdFor(b);
+  }
+
+  stableOwner(b: Binding): string | null {
+    return this.#byKey.get(bindingKey(b)) ?? null;
+  }
+
+  #projectedIdMatches(b: Binding, projectedId: string): boolean {
+    return symbolIdFor(b) === projectedId;
+  }
+
+  #discardProjected(b: Binding): void {
+    this.#provisionalByKey.delete(bindingKey(b));
   }
 
   restore(
@@ -89,6 +115,9 @@ export class SymbolLedger {
     if (symbolIdFor(birth) !== id) {
       return false;
     }
+    if (!this.#projectedIdMatches(current, projectedId)) {
+      return false;
+    }
     const currentKey = bindingKey(current);
     const existingBinding = this.#byId.get(id);
     if (
@@ -98,20 +127,10 @@ export class SymbolLedger {
       return false;
     }
     const target = this.#byKey.get(currentKey);
-    if (target !== id && target !== projectedId) {
+    if (target !== undefined && target !== id) {
       return false;
     }
-    if (projectedId !== id) {
-      const provisionalBinding = this.#byId.get(projectedId);
-      if (
-        target !== projectedId ||
-        provisionalBinding === undefined ||
-        bindingKey(provisionalBinding) !== currentKey
-      ) {
-        return false;
-      }
-      this.#byId.delete(projectedId);
-    }
+    this.#discardProjected(current);
     this.#byKey.set(currentKey, id);
     this.#byId.set(id, current);
     return true;
@@ -137,22 +156,15 @@ export class SymbolLedger {
       return false;
     }
     const next: Binding = { path: binding.path, name: to, kind: binding.kind };
-    const nextKey = bindingKey(next);
-    const target = this.#byKey.get(nextKey);
-    if (target !== id && target !== projectedId) {
+    if (!this.#projectedIdMatches(next, projectedId)) {
       return false;
     }
-    if (projectedId !== id) {
-      const provisional = this.#byId.get(projectedId);
-      if (
-        provisional === undefined ||
-        bindingKey(provisional) !== nextKey ||
-        target !== projectedId
-      ) {
-        return false;
-      }
-      this.#byId.delete(projectedId);
+    const nextKey = bindingKey(next);
+    const target = this.#byKey.get(nextKey);
+    if (target !== undefined && target !== id) {
+      return false;
     }
+    this.#discardProjected(next);
     this.#byKey.delete(bindingKey(binding));
     this.#byKey.set(nextKey, id);
     this.#byId.set(id, next);
@@ -178,6 +190,10 @@ interface LocalDef {
   readonly id: string;
   readonly name: string;
   readonly kind: Symbol['kind'];
+  readonly line: number;
+}
+
+interface ProjectedDefinition extends Binding {
   readonly line: number;
 }
 
@@ -266,6 +282,7 @@ export class SymbolGraph {
   readonly #ops: SymbolOpLog;
   #renamesHydrated = false;
   readonly #syncedRenameOps = new Set<string>();
+  readonly #provisionalRenameTargets = new Set<string>();
 
   protected constructor(
     ws: Workspace,
@@ -289,6 +306,31 @@ export class SymbolGraph {
       opts.ledger ?? new SymbolLedger(),
       opts.ops ?? new SymbolOpLog()
     );
+  }
+
+  // Extract definition bindings without consulting or mutating identity state.
+  // Rename reconciliation uses this immutable projection for global preflight.
+  async #projectedDefinitions(): Promise<readonly ProjectedDefinition[]> {
+    const definitions: ProjectedDefinition[] = [];
+    for (const path of await this.ws.list()) {
+      const bytes = await this.ws.read(path);
+      if (bytes === null) {
+        continue;
+      }
+      const raw = this.#extractor.extract(
+        path,
+        new TextDecoder().decode(bytes)
+      );
+      for (const definition of raw.defs) {
+        definitions.push({
+          path,
+          name: definition.name,
+          kind: definition.kind,
+          line: definition.line,
+        });
+      }
+    }
+    return definitions;
   }
 
   // Re-extract the whole decryptable view into a resolved model. Two passes: mint
@@ -321,7 +363,10 @@ export class SymbolGraph {
       const raw = this.#extractor.extract(path, text);
       const localDefs: LocalDef[] = [];
       for (const d of raw.defs) {
-        const id = this.ledger.mintOrGet({ path, name: d.name, kind: d.kind });
+        const binding = { path, name: d.name, kind: d.kind };
+        const id = this.#provisionalRenameTargets.has(bindingKey(binding))
+          ? this.ledger.project(binding)
+          : this.ledger.mintOrGet(binding);
         defs.push({ symbol: id, name: d.name, path, line: d.line });
         kinds.set(id, d.kind);
         localDefs.push({ id, name: d.name, kind: d.kind, line: d.line });
@@ -409,7 +454,7 @@ export class SymbolGraph {
   async syncRenames(ops: readonly SymbolOp[]): Promise<void> {
     const valid = ops.filter((op) => verifySymbolOp(op));
     if (!this.#renamesHydrated) {
-      const model = await this.#model();
+      const definitions = await this.#projectedDefinitions();
       const bySymbol = new Map<string, SymbolOp[]>();
       for (const op of valid) {
         const history = bySymbol.get(op.symbol) ?? [];
@@ -430,8 +475,8 @@ export class SymbolGraph {
           projectedId: string;
           path: readonly SymbolOp[];
         }[] = [];
-        for (const definition of model.defs) {
-          const kind = model.kinds.get(definition.symbol) ?? 'function';
+        for (const definition of definitions) {
+          const kind = definition.kind;
           const births = new Set(history.map((op) => op.from));
           for (const birthName of births) {
             const birth = { path: definition.path, name: birthName, kind };
@@ -445,7 +490,7 @@ export class SymbolGraph {
               candidates.push({
                 birth,
                 target,
-                projectedId: definition.symbol,
+                projectedId: symbolIdFor(target),
                 path,
               });
             }
@@ -459,7 +504,26 @@ export class SymbolGraph {
           selected.push({ symbol, ...candidate });
         }
       }
-      for (const candidate of uncontended(selected)) {
+      const stableClaimants = new Set(bySymbol.keys());
+      const accepted = uncontended(selected).filter((candidate) => {
+        const owner = this.ledger.stableOwner(candidate.target);
+        return (
+          (owner === null || owner === candidate.symbol) &&
+          (candidate.projectedId === candidate.symbol ||
+            !stableClaimants.has(candidate.projectedId))
+        );
+      });
+      const acceptedSet = new Set(accepted);
+      for (const candidate of selected) {
+        if (
+          !acceptedSet.has(candidate) &&
+          !stableClaimants.has(candidate.projectedId) &&
+          this.ledger.stableOwner(candidate.target) === null
+        ) {
+          this.#provisionalRenameTargets.add(bindingKey(candidate.target));
+        }
+      }
+      for (const candidate of accepted) {
         if (
           this.ledger.restore(
             candidate.symbol,
@@ -468,6 +532,7 @@ export class SymbolGraph {
             candidate.projectedId
           )
         ) {
+          this.#provisionalRenameTargets.delete(bindingKey(candidate.target));
           for (const op of candidate.path) {
             this.#syncedRenameOps.add(op.id);
           }
@@ -482,7 +547,7 @@ export class SymbolGraph {
       return;
     }
     const knownBeforeProjection = new Set(this.ledger.ids());
-    const model = await this.#model();
+    const definitions = await this.#projectedDefinitions();
     const bySymbol = new Map<string, SymbolOp[]>();
     for (const op of pending) {
       const history = bySymbol.get(op.symbol) ?? [];
@@ -500,10 +565,9 @@ export class SymbolGraph {
       if (binding === null) {
         continue;
       }
-      const projected = model.defs.filter(
+      const projected = definitions.filter(
         (definition) =>
-          definition.path === binding.path &&
-          (model.kinds.get(definition.symbol) ?? 'function') === binding.kind
+          definition.path === binding.path && definition.kind === binding.kind
       );
       if (projected.some((definition) => definition.name === binding.name)) {
         continue;
@@ -514,21 +578,20 @@ export class SymbolGraph {
         path: readonly SymbolOp[];
       }[] = [];
       for (const definition of projected) {
-        if (
-          definition.symbol !== symbol &&
-          knownBeforeProjection.has(definition.symbol)
-        ) {
+        const target = {
+          path: definition.path,
+          name: definition.name,
+          kind: binding.kind,
+        };
+        const projectedId = symbolIdFor(target);
+        if (projectedId !== symbol && knownBeforeProjection.has(projectedId)) {
           continue;
         }
         const path = uniqueRenamePath(history, binding.name, definition.name);
         if (path !== null && path.length > 0) {
           candidates.push({
-            target: {
-              path: definition.path,
-              name: definition.name,
-              kind: binding.kind,
-            },
-            projectedId: definition.symbol,
+            target,
+            projectedId,
             path,
           });
         }
@@ -541,7 +604,21 @@ export class SymbolGraph {
         selected.push({ symbol, ...candidate });
       }
     }
-    for (const candidate of uncontended(selected)) {
+    const accepted = uncontended(selected).filter((candidate) => {
+      const owner = this.ledger.stableOwner(candidate.target);
+      return owner === null || owner === candidate.symbol;
+    });
+    const acceptedSet = new Set(accepted);
+    for (const candidate of selected) {
+      if (
+        !acceptedSet.has(candidate) &&
+        !knownBeforeProjection.has(candidate.projectedId) &&
+        this.ledger.stableOwner(candidate.target) === null
+      ) {
+        this.#provisionalRenameTargets.add(bindingKey(candidate.target));
+      }
+    }
+    for (const candidate of accepted) {
       if (
         this.ledger.reconcile(
           candidate.symbol,
@@ -549,6 +626,7 @@ export class SymbolGraph {
           candidate.projectedId
         )
       ) {
+        this.#provisionalRenameTargets.delete(bindingKey(candidate.target));
         for (const op of candidate.path) {
           this.#syncedRenameOps.add(op.id);
         }
