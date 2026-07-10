@@ -868,7 +868,9 @@ export async function run(
       }
       case 'watch': {
         const json = wantsJson(rest);
-        const diagnostic = json ? err : out;
+        // Watch streams events on stdout in BOTH text and JSON modes, so every
+        // diagnostic goes to stderr — a redirected stdout stays events-only.
+        const diagnostic = err;
         let values: {
           kind?: string[];
           interval?: string;

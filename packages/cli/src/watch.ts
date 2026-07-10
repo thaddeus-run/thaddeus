@@ -108,6 +108,9 @@ export function abortableSleep(
       if (timer !== undefined) {
         clearTimeout(timer);
       }
+      // Required in the timer path: `once` only auto-removes when the abort
+      // fires, and the signal lives for the whole watch — without this, every
+      // tick would leave one more stale listener on it.
       signal.removeEventListener('abort', finish);
       resolve();
     };
