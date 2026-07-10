@@ -40,6 +40,20 @@ discovery.
 | `r`            | refresh remote / rerun active query    |
 | `R`            | reputation of the selected op's author |
 
+## Live refresh
+
+Interactive remote views refresh every two seconds in a single-flight background
+worker, so remote I/O never blocks keyboard handling or terminal drawing. Fresh
+results preserve the selected repo, operation, and release when those records
+still exist. A refresh error leaves the last-known-good data on screen, reports
+the error in the status line, and retries on the next interval; `r` requests the
+same worker to refresh immediately.
+
+Automatic refresh reads the same public repo metadata and ciphertext pull route
+as the rest of lazythad. It remains keyless and does not derive semantic events
+or ask the server to process plaintext; decryption-bounded semantic views still
+run locally through the `thaddeus` CLI.
+
 The query palette accepts:
 
 ```text

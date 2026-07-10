@@ -29,6 +29,7 @@ publish. All crypto is client-side; your identity seed lives in
 | `grants`                                       | List active grants for this repo       |
 | `policy [set\|clear]`                          | Show or select repo land policy        |
 | `query <kind> ...`                             | Query history and the semantic graph   |
+| `watch [symbol] [--kind <event>]...`           | Stream remote semantic changes         |
 | `schedule-reveal <path> --at <ISO>`            | Make committed content public later    |
 | `reveal <path>`                                | Trigger a due public reveal            |
 | `serve [--port 4000] [--data ./thaddeus-data]` | Run a durable server                   |
@@ -46,6 +47,27 @@ thaddeus query references refreshToken           # live use sites
 All query forms accept `--json`. They run locally over the current committed
 branch, include only code your identity can decrypt, and never pull, commit, or
 include dirty disk edits. `thaddeus why <op>` remains a compatibility alias.
+
+## Watch remote semantic changes
+
+```sh
+thaddeus watch [symbol] [--kind <event>]... [--interval <duration>] [--json]
+```
+
+`watch` polls this working copy's remote branch. Its initial pull establishes a
+silent baseline; later events are one line each in text mode or one
+`SemanticEvent` per line in JSON mode (JSONL). Repeat `--kind` to select
+`defined`, `removed`, `renamed`, `moved`, or `references-changed`. The optional
+symbol may be a current name, stable id, or unique id prefix, and continues to
+follow that stable id through signed remote renames. The interval defaults to
+`2s` and accepts `ms`, `s`, or `m` durations of at least `100ms`.
+
+The watcher pulls public ciphertext through the existing atomic pull route into
+an isolated in-memory mirror. It derives semantic events locally, bounded by the
+content your identity can decrypt, and never updates or cleans checked-out files
+or the durable working-copy store. Run `thaddeus pull` explicitly when you want
+to update the working tree. Transient polling errors are reported and retried;
+Ctrl-C exits cleanly.
 
 ## Timed public content
 

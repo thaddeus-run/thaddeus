@@ -53,6 +53,15 @@ public capability early. Trustless time-lock crypto remains deferred.
 Add `thaddeus watch` and live TUI updates. Blocked on P1's `pull`, which is now
 in place as the polling primitive.
 
+**Shipped:** `thaddeus watch` polls the existing atomic pull route into an
+isolated in-memory mirror and streams decryption-bounded semantic events, with
+optional stable-symbol/event-kind filters and JSONL output. The silent baseline
+and every later diff stay client-side; the command never changes checked-out
+files or the durable working-copy store. Lazythad now refreshes in a
+single-flight background worker while preserving selection and last-known-good
+data. This is live polling, not durable offline delivery, SSE/WebSockets, or a
+server-side plaintext semantic index.
+
 ## P9 - Agent Budgets + Key Revocation
 
 Add per-hour rate windows on delegations; today `--max-changes` is a lifetime

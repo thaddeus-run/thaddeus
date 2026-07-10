@@ -10,6 +10,14 @@ committed history and semantic graph through the separately installed `thaddeus`
 CLI (`why`, `touched-since`, `by`, `callers`, and `references`). The official
 installer below installs both commands.
 
+Interactive remote views refresh every two seconds in a single-flight background
+worker without blocking keyboard input. Lazythad preserves the selected repo,
+operation, and release across fresh snapshots and keeps last-known-good data
+visible when a refresh fails; press `r` to request an immediate retry. Refreshes
+read public metadata and ciphertext pulls only. Semantic derivation remains
+local, keyless in lazythad itself, and bounded by the `thaddeus` CLI identity's
+decryption capabilities.
+
 ```sh
 npm i -g @thaddeus.run/lazythad@alpha
 lazythad http://localhost:4000

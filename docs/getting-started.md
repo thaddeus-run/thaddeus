@@ -124,6 +124,25 @@ thaddeus query references refreshToken
 for scripting or a TUI. Queries use the current committed branch and are
 local/read-only: they do not pull, commit, or include dirty disk edits.
 
+### Watch remote semantic changes
+
+```sh
+thaddeus watch [symbol] [--kind <event>]... [--interval <duration>] [--json]
+```
+
+The initial remote pull is a silent baseline. Later text events are
+line-oriented; `--json` emits JSONL with one `SemanticEvent` per line. A symbol
+filter may be a current name, full stable id, or unique id prefix and follows
+that id through signed renames. Repeat `--kind` to select `defined`, `removed`,
+`renamed`, `moved`, or `references-changed`; the polling interval defaults to
+`2s` and accepts `ms`, `s`, or `m` durations of at least `100ms`.
+
+Watching is observer-only. It polls the existing atomic public-ciphertext pull
+route into an isolated in-memory mirror, derives semantic differences locally
+within your identity's decryption boundary, and never updates or cleans the
+working tree or durable working-copy store. Run `thaddeus pull` explicitly to
+update files. Transient polling errors retry, and Ctrl-C exits cleanly.
+
 ## 6. Collaborate with someone else
 
 Reads are **decryption-bounded**: the server only ever holds ciphertext, and you
@@ -228,6 +247,10 @@ cargo build --release --manifest-path lazythad/Cargo.toml
 
 Launch lazythad from inside the matching working copy and press `/` for the same
 `why`, time, author, caller, and reference queries in a navigable TUI view.
+Remote metadata refreshes every two seconds in a single-flight background
+worker, preserving the current selection and last-known-good data without
+blocking the terminal loop. Refresh errors stay visible and retry on the next
+interval; `r` requests an immediate refresh.
 
 ## Where to go next
 
