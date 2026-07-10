@@ -67,6 +67,8 @@ pub struct LiveRefresh {
     active: Option<RefreshTarget>,
     pending: Option<RefreshTarget>,
     disconnected: bool,
+    /// A send failure is reported by the next non-blocking result poll.
+    disconnect_target: Option<RefreshTarget>,
 }
 
 impl LiveRefresh {
@@ -92,17 +94,25 @@ impl LiveRefresh {
             active: None,
             pending: None,
             disconnected: false,
+            disconnect_target: None,
         }
     }
 
     /// Submit immediately when idle, otherwise retain only the newest target.
     pub fn request(&mut self, target: RefreshTarget) -> bool {
+        if self.disconnected {
+            return false;
+        }
         if self.in_flight {
             self.pending = Some(target);
             return false;
         }
         if self.requests.send(target.clone()).is_err() {
             self.disconnected = true;
+            self.in_flight = false;
+            self.active = None;
+            self.pending = None;
+            self.disconnect_target = Some(target);
             return false;
         }
         self.in_flight = true;
@@ -112,6 +122,15 @@ impl LiveRefresh {
 
     /// Poll without waiting and start any coalesced request after a completion.
     pub fn try_recv(&mut self) -> Option<RefreshMessage> {
+        if let Some(target) = self.disconnect_target.take() {
+            return Some(RefreshMessage {
+                target,
+                result: Err("live refresh worker disconnected".into()),
+            });
+        }
+        if self.disconnected {
+            return None;
+        }
         match self.results.try_recv() {
             Ok(message) => {
                 self.in_flight = false;
@@ -122,22 +141,24 @@ impl LiveRefresh {
                 Some(message)
             }
             Err(mpsc::TryRecvError::Empty) => None,
-            Err(mpsc::TryRecvError::Disconnected) if !self.disconnected => {
+            Err(mpsc::TryRecvError::Disconnected) => {
                 self.disconnected = true;
                 self.in_flight = false;
+                let target = self
+                    .pending
+                    .take()
+                    .or_else(|| self.active.take())
+                    .unwrap_or(RefreshTarget {
+                        repo: None,
+                        view: "main".into(),
+                    });
+                self.active = None;
+                self.pending = None;
                 Some(RefreshMessage {
-                    target: self
-                        .active
-                        .take()
-                        .or_else(|| self.pending.take())
-                        .unwrap_or(RefreshTarget {
-                            repo: None,
-                            view: "main".into(),
-                        }),
+                    target,
                     result: Err("live refresh worker disconnected".into()),
                 })
             }
-            Err(mpsc::TryRecvError::Disconnected) => None,
         }
     }
 }
@@ -219,6 +240,7 @@ mod tests {
             active: Some(target.clone()),
             pending: None,
             disconnected: false,
+            disconnect_target: None,
         };
 
         let message = live.try_recv().expect("disconnect message");
@@ -227,6 +249,74 @@ mod tests {
             message.result.unwrap_err(),
             "live refresh worker disconnected"
         );
+        assert!(live.try_recv().is_none());
+    }
+
+    #[test]
+    fn result_disconnect_reports_the_newest_pending_target_once() {
+        let (request_tx, _request_rx) = mpsc::channel();
+        let (result_tx, result_rx) = mpsc::channel();
+        drop(result_tx);
+        let target = |repo: &str| RefreshTarget {
+            repo: Some(repo.into()),
+            view: "main".into(),
+        };
+        let mut live = LiveRefresh {
+            requests: request_tx,
+            results: result_rx,
+            in_flight: true,
+            active: Some(target("one")),
+            pending: Some(target("two")),
+            disconnected: false,
+            disconnect_target: None,
+        };
+
+        let message = live.try_recv().expect("disconnect message");
+        assert_eq!(message.target, target("two"));
+        assert_eq!(
+            message.result.unwrap_err(),
+            "live refresh worker disconnected"
+        );
+        assert!(!live.in_flight);
+        assert!(live.active.is_none());
+        assert!(live.pending.is_none());
+
+        assert!(!live.request(target("three")));
+        assert!(live.try_recv().is_none());
+        assert!(!live.request(target("four")));
+        assert!(live.try_recv().is_none());
+    }
+
+    #[test]
+    fn request_channel_disconnect_reports_the_attempted_target_once() {
+        let (request_tx, request_rx) = mpsc::channel();
+        drop(request_rx);
+        let (result_tx, result_rx) = mpsc::channel();
+        let target = |repo: &str| RefreshTarget {
+            repo: Some(repo.into()),
+            view: "main".into(),
+        };
+        let mut live = LiveRefresh {
+            requests: request_tx,
+            results: result_rx,
+            in_flight: false,
+            active: None,
+            pending: None,
+            disconnected: false,
+            disconnect_target: None,
+        };
+
+        assert!(!live.request(target("one")));
+        let message = live.try_recv().expect("disconnect message");
+        assert_eq!(message.target, target("one"));
+        assert_eq!(
+            message.result.unwrap_err(),
+            "live refresh worker disconnected"
+        );
+
+        assert!(!live.request(target("two")));
+        assert!(live.try_recv().is_none());
+        drop(result_tx);
         assert!(live.try_recv().is_none());
     }
 }
