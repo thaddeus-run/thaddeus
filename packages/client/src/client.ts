@@ -13,9 +13,11 @@ import type { ContributionClaim } from '@thaddeus.run/reputation';
 import { type Veto, VetoLog } from '@thaddeus.run/review';
 import {
   decodeBundle,
+  decodeCapability,
   decodeDelegation,
   decodeRelease,
   encodeBundle,
+  encodeCapability,
   encodeClaim,
   encodeDelegation,
   encodeRelease,
@@ -26,7 +28,9 @@ import {
   type Backend,
   type Capability,
   type EncryptedObject,
+  type Ref,
   scoped,
+  type Store,
 } from '@thaddeus.run/store';
 
 import { bundleFor } from './bundle';
@@ -40,6 +44,7 @@ export interface PushResult {
     prov: number;
     veto: number;
     symop: number;
+    pending: number;
   };
   rejected: { kind: string; id: string; reason: string }[];
 }
@@ -48,6 +53,17 @@ export interface RevokeOutcome {
   agent: string;
   revoked: boolean;
   recalled?: PushResult;
+}
+
+export interface RevealOutcome {
+  object: string;
+  released: boolean;
+  public: boolean;
+}
+
+export interface ScheduleRevealOutcome extends RevealOutcome {
+  at: string;
+  scheduled: boolean;
 }
 
 export interface LandOutcome {
@@ -396,6 +412,94 @@ export class Client {
     return (await this.#ok(res)) as PushResult;
   }
 
+  // Schedule a committed object's content key for public release. The key is
+  // wrapped locally to the well-known public identity; the server receives only
+  // the signed capability and validates the current ciphertext id.
+  async scheduleReveal(
+    name: string,
+    store: Store,
+    ref: Ref,
+    at: string
+  ): Promise<ScheduleRevealOutcome> {
+    const current = store.current(ref.plaintext_id);
+    if (current === undefined) {
+      throw new Error(`no object for ${ref.plaintext_id}`);
+    }
+    const capability = await store.scheduleReveal(ref, at, this.#identity);
+    const res = await this.#signed(
+      'POST',
+      `/repos/${encodeURIComponent(name)}/reveals`,
+      { capability: encodeCapability(capability), object: current.id }
+    );
+    return (await this.#ok(res)) as ScheduleRevealOutcome;
+  }
+
+  // Fetch reveal schedules over the owner-authenticated route so a clone other
+  // than the one that scheduled them can preserve their start times while
+  // rotating keys. The route also returns a schedule concurrently promoted
+  // after this clone's pull, closing the pull/sync recall race.
+  async syncPendingReveals(
+    name: string,
+    store: Store,
+    plaintextIds: readonly string[]
+  ): Promise<number> {
+    const requested = new Set(plaintextIds);
+    const res = await this.#signed(
+      'POST',
+      `/repos/${encodeURIComponent(name)}/reveals/pending`,
+      { objects: [...requested] }
+    );
+    // Pre-P7 servers do not expose this owner-only route and cannot hold
+    // pending reveals, so absence is equivalent to an empty schedule set.
+    if (res.status === 404) {
+      return 0;
+    }
+    const body = (await this.#ok(res)) as { capabilities: string[] };
+    let ingested = 0;
+    const wires = Array.isArray(body.capabilities) ? body.capabilities : [];
+    for (const wire of wires) {
+      if (typeof wire !== 'string') {
+        continue;
+      }
+      let capability: Capability;
+      try {
+        capability = decodeCapability(wire);
+      } catch {
+        continue;
+      }
+      if (
+        !requested.has(capability.object) ||
+        capability.granted_by !== this.#identity.did
+      ) {
+        continue;
+      }
+      try {
+        if (await store.ingestReveal(capability)) {
+          ingested += 1;
+        }
+      } catch {
+        // Treat the remote as untrusted: malformed, forged, non-public, or
+        // unknown-object capabilities are ignored rather than persisted.
+      }
+    }
+    return ingested;
+  }
+
+  // Ask the server to promote a due reveal now. The server uses its own clock,
+  // so this cannot release a future-dated capability early.
+  async reveal(name: string, store: Store, ref: Ref): Promise<RevealOutcome> {
+    const current = store.current(ref.plaintext_id);
+    if (current === undefined) {
+      throw new Error(`no object for ${ref.plaintext_id}`);
+    }
+    const res = await this.#signed(
+      'POST',
+      `/repos/${encodeURIComponent(name)}/reveals/${encodeURIComponent(ref.plaintext_id)}`,
+      { object: current.id }
+    );
+    return (await this.#ok(res)) as RevealOutcome;
+  }
+
   // Push standing vetoes (P10) with no code — a veto-only bundle. The pusher must
   // be an authorized writer (owner or delegate), the same gate as any push: a
   // VERIFIED veto blocks a land, so only writers may lodge one (an unauthenticated
@@ -474,6 +578,7 @@ export class Client {
       const pids = reachablePids(recall.repo, recall.heads);
       const objects: EncryptedObject[] = [];
       const caps: Capability[] = [];
+      const pending: Capability[] = [];
       for (const pid of pids) {
         const current = recall.repo.store.current(pid);
         if (current === undefined) {
@@ -481,8 +586,9 @@ export class Client {
         }
         objects.push(current);
         caps.push(...recall.repo.store.caps(pid));
+        pending.push(...recall.repo.store.pendingReveals(pid));
       }
-      body.recall = encodeBundle([], objects, caps);
+      body.recall = encodeBundle([], objects, caps, [], [], [], pending);
     }
     const res = await this.#signed(
       'POST',

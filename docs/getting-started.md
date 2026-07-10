@@ -57,8 +57,10 @@ thaddeus whoami                   # prints your did:key
 
 ## 3. Run a server (or point at one)
 
-A Thaddeus server is untrusted: it holds no keys, verifies what it ingests, and
-serves ciphertext. Run one locally over a durable directory:
+A Thaddeus server normally holds no decryption keys: it verifies what it ingests
+and serves ciphertext. Timed reveals are the explicit exception—the chosen host
+is trusted to honor the embargo for scheduled files. Run one locally over a
+durable directory:
 
 ```sh
 thaddeus serve --port 4000 --data ./thaddeus-data
@@ -111,10 +113,16 @@ owns), and remove one you own with `thaddeus delete <repo> --yes`
 ```sh
 thaddeus log                       # main, newest-first, with the why per change (⛔ marks a vetoed op)
 thaddeus log --since 2026-07-01    # filter by the op's signed timestamp
-thaddeus why <op>                  # the signed why for one op (id prefix from `log`)
+thaddeus query why <op>            # the signed why for one op (id prefix from `log`)
+thaddeus query touched-since 2026-07-01
+thaddeus query by did:key:z6Mk... --since 2026-07-01
+thaddeus query callers refreshToken
+thaddeus query references refreshToken
 ```
 
-Every read verb also has `--json` for scripting or a TUI.
+`thaddeus why <op>` remains a compatibility alias. Every query also has `--json`
+for scripting or a TUI. Queries use the current committed branch and are
+local/read-only: they do not pull, commit, or include dirty disk edits.
 
 ## 6. Collaborate with someone else
 
@@ -198,6 +206,15 @@ blocked land leaves your branch untouched.
 - **Delegation:** grant an agent scoped, budgeted push access —
   `thaddeus grant <did> --paths 'src/**' --max-changes 50`; `thaddeus grants`;
   `thaddeus revoke <did>`.
+- **Timed public content:** an owner can run
+  `thaddeus schedule-reveal announcement.md --at 2030-01-01T00:00:00Z`. The
+  server withholds the wrapped public capability from pulls, then publishes it
+  automatically when due; `thaddeus reveal announcement.md` is an optional
+  manual trigger that still obeys the server clock. This reveals the committed
+  file content (dirty edits are ignored); its path and operation metadata were
+  already visible on the ciphertext mirror. Because the public identity is
+  well-known, scheduling opts into trusting that host not to unwrap or publish
+  the capability early; this membrane is store-honest, not trustless.
 
 ## 9. Browse it in a TUI
 
@@ -208,6 +225,9 @@ server's public mirror (repos, the op log, the why, vetoes, reputation):
 cargo build --release --manifest-path lazythad/Cargo.toml
 ./lazythad/target/release/lazythad http://localhost:4000
 ```
+
+Launch lazythad from inside the matching working copy and press `/` for the same
+`why`, time, author, caller, and reference queries in a navigable TUI view.
 
 ## Where to go next
 

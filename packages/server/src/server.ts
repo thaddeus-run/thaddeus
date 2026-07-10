@@ -31,6 +31,7 @@ import {
   type Capability,
   decodeRecord,
   encodeRecord,
+  publicDid,
   scoped,
   verifyCapability,
 } from '@thaddeus.run/store';
@@ -38,10 +39,12 @@ import {
 import {
   type Bundle,
   decodeBundle,
+  decodeCapability,
   decodeClaim,
   decodeDelegation,
   decodeRelease,
   encodeBundle,
+  encodeCapability,
   encodeDelegation,
   encodeRelease,
 } from './dto';
@@ -77,6 +80,12 @@ export interface ServerConfig {
   backend: Backend;
   policy?: LandPolicy;
   now?: () => string;
+  // Operational failures that can be isolated (for example, one repo's reveal
+  // scan) are reported here while work for other repos continues.
+  onError?: (
+    error: unknown,
+    context: { operation: 'reveal'; repo?: string }
+  ) => void;
   // An optional host identity turns this into an ATTESTING instance: on a
   // successful land it co-signs each client-pushed reputation claim (P07) for a
   // landed op, minting a host-vouched Contribution. Without it, the server holds
@@ -89,6 +98,9 @@ export interface ServerConfig {
 
 export interface Server {
   fetch(req: Request): Promise<Response>;
+  // Promote every scheduled public capability whose not_before is due. The
+  // HTTP host calls this on an interval; exposing it keeps tests deterministic.
+  revealDue(): Promise<number>;
 }
 
 interface RepoMeta {
@@ -160,9 +172,53 @@ function unionCaps(
   return out;
 }
 
-// A Bun.serve-compatible handler over a durable Platform. No keys; verifies and
-// serves ciphertext. Per-node state is just the opened-Repo cache + per-repo
-// mutation lock, both rebuildable from the backend.
+function sameBytes(left: Uint8Array, right: Uint8Array): boolean {
+  return (
+    left.length === right.length &&
+    left.every((value, index) => value === right[index])
+  );
+}
+
+function isValidPublicCapability(capability: Capability): boolean {
+  try {
+    return (
+      verifyCapability(capability) &&
+      capability.grantee === publicDid() &&
+      !Number.isNaN(Date.parse(capability.not_before))
+    );
+  } catch {
+    return false;
+  }
+}
+
+// A recall replacement keeps the signed reveal schedule but must wrap the new
+// content key. Requiring different sealed bytes catches a clone that merely
+// echoes the server's old pending capability instead of re-wrapping it.
+function replacesPendingReveal(
+  previous: Capability,
+  replacement: Capability
+): boolean {
+  let valid = false;
+  try {
+    valid = verifyCapability(replacement);
+  } catch {
+    valid = false;
+  }
+  return (
+    valid &&
+    replacement.grantee === publicDid() &&
+    !Number.isNaN(Date.parse(replacement.not_before)) &&
+    replacement.object === previous.object &&
+    replacement.granted_by === previous.granted_by &&
+    replacement.not_before === previous.not_before &&
+    !sameBytes(replacement.wrapped_key, previous.wrapped_key)
+  );
+}
+
+// A Bun.serve-compatible handler over a durable Platform. It verifies and
+// serves ciphertext; timed reveals are the explicit store-honest exception to
+// the normal key-free trust boundary. Per-node state is the opened-Repo cache +
+// per-repo mutation lock, both rebuildable from the backend.
 export function createServer(config: ServerConfig): Server {
   const platform = new Platform();
   const policy = config.policy ?? blockOnConflict;
@@ -409,13 +465,17 @@ export function createServer(config: ServerConfig): Server {
     });
   }
 
-  async function listRepos(): Promise<Response> {
+  async function repoNames(): Promise<string[]> {
     // Repos are the `meta/repo` keys across the backend: list `repo/*/meta/repo`.
     const keys = await config.backend.list('repo/');
-    const names = keys
+    return keys
       .filter((k) => k.endsWith('/meta/repo'))
       .map((k) => k.slice('repo/'.length, -'/meta/repo'.length))
       .sort();
+  }
+
+  async function listRepos(): Promise<Response> {
+    const names = await repoNames();
     // Include each repo's owner DID so a client can list "repos I own" without a
     // second round-trip. Owners are already public on the mirror (they sign
     // every op), so this leaks nothing new.
@@ -427,6 +487,219 @@ export function createServer(config: ServerConfig): Server {
       }
     }
     return json(200, { repos: names, owners });
+  }
+
+  function objectIsReferenced(repo: Repo, plaintextId: string): boolean {
+    return repo.log
+      .ops()
+      .some((op) => op.payload?.plaintext_id === plaintextId);
+  }
+
+  function currentObjectConflict(
+    repo: Repo,
+    plaintextId: string,
+    objectId: unknown
+  ): Response | undefined {
+    if (typeof objectId !== 'string') {
+      return json(400, { error: 'missing current ciphertext id' });
+    }
+    const current = repo.store.current(plaintextId);
+    if (current === undefined || current.id !== objectId) {
+      return json(409, {
+        error: 'local ciphertext is stale; pull and retry',
+      });
+    }
+    return undefined;
+  }
+
+  // Owner schedules a client-created public capability. The server validates
+  // its signature and current ciphertext, then holds it as embargo custodian.
+  async function scheduleReveal(
+    name: string,
+    req: Request,
+    body: Uint8Array
+  ): Promise<Response> {
+    const signer = verifyRequest(
+      'POST',
+      new URL(req.url).pathname,
+      body,
+      headers(req),
+      Date.parse(now())
+    );
+    if (signer === null) {
+      return json(401, { error: 'unsigned or invalid request' });
+    }
+    const meta = await readMeta(name);
+    if (meta === undefined) {
+      return json(404, { error: `no repo ${name}` });
+    }
+    if (signer !== meta.owner) {
+      return json(403, { error: 'not the repo owner' });
+    }
+    const parsed = safeParseJson(body);
+    if (parsed === undefined || parsed === null || typeof parsed !== 'object') {
+      return json(400, { error: 'invalid JSON body' });
+    }
+    const { capability: wire, object } = parsed as {
+      capability?: unknown;
+      object?: unknown;
+    };
+    if (typeof wire !== 'string') {
+      return json(400, { error: 'missing reveal capability' });
+    }
+    let capability: Capability;
+    try {
+      capability = decodeCapability(wire);
+    } catch {
+      return json(400, { error: 'malformed reveal capability' });
+    }
+    if (capability.granted_by !== signer) {
+      return json(403, { error: 'reveal was not granted by the repo owner' });
+    }
+    return withRepoLock(name, async () => {
+      const repo = await getRepo(name);
+      if (repo === undefined) {
+        return json(404, { error: `no repo ${name}` });
+      }
+      if (!objectIsReferenced(repo, capability.object)) {
+        return json(400, { error: 'object is not referenced by this repo' });
+      }
+      const conflict = currentObjectConflict(repo, capability.object, object);
+      if (conflict !== undefined) {
+        return conflict;
+      }
+      let scheduled: boolean;
+      try {
+        scheduled = await repo.store.ingestReveal(capability);
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        return json(400, { error: message });
+      }
+      const ref = { id: String(object), plaintext_id: capability.object };
+      const released = await repo.store.reveal(ref, now());
+      const isPublic = repo.store
+        .caps(capability.object)
+        .some((cap) => cap.grantee === publicDid());
+      return json(scheduled ? 201 : 200, {
+        object: capability.object,
+        at: capability.not_before,
+        scheduled,
+        released,
+        public: isPublic,
+      });
+    });
+  }
+
+  // Owner-triggered reveal. A trigger cannot bypass the embargo because the
+  // store receives the server's trusted clock, never a client-provided time.
+  async function reveal(
+    name: string,
+    plaintextId: string,
+    req: Request,
+    body: Uint8Array
+  ): Promise<Response> {
+    const signer = verifyRequest(
+      'POST',
+      new URL(req.url).pathname,
+      body,
+      headers(req),
+      Date.parse(now())
+    );
+    if (signer === null) {
+      return json(401, { error: 'unsigned or invalid request' });
+    }
+    const meta = await readMeta(name);
+    if (meta === undefined) {
+      return json(404, { error: `no repo ${name}` });
+    }
+    if (signer !== meta.owner) {
+      return json(403, { error: 'not the repo owner' });
+    }
+    const parsed = safeParseJson(body);
+    if (parsed === undefined || parsed === null || typeof parsed !== 'object') {
+      return json(400, { error: 'invalid JSON body' });
+    }
+    const { object } = parsed as { object?: unknown };
+    return withRepoLock(name, async () => {
+      const repo = await getRepo(name);
+      if (repo === undefined) {
+        return json(404, { error: `no repo ${name}` });
+      }
+      if (!objectIsReferenced(repo, plaintextId)) {
+        return json(400, { error: 'object is not referenced by this repo' });
+      }
+      const conflict = currentObjectConflict(repo, plaintextId, object);
+      if (conflict !== undefined) {
+        return conflict;
+      }
+      const released = await repo.store.reveal(
+        { id: String(object), plaintext_id: plaintextId },
+        now()
+      );
+      const isPublic = repo.store
+        .caps(plaintextId)
+        .some((cap) => cap.grantee === publicDid());
+      return json(200, { object: plaintextId, released, public: isPublic });
+    });
+  }
+
+  // Owner-only read of reveal schedules. Include both withheld capabilities
+  // and already-served public capabilities so promotion between pull and this
+  // request cannot make recall erase a newly public grant.
+  async function pendingReveals(
+    name: string,
+    req: Request,
+    body: Uint8Array
+  ): Promise<Response> {
+    const signer = verifyRequest(
+      'POST',
+      new URL(req.url).pathname,
+      body,
+      headers(req),
+      Date.parse(now())
+    );
+    if (signer === null) {
+      return json(401, { error: 'unsigned or invalid request' });
+    }
+    const meta = await readMeta(name);
+    if (meta === undefined) {
+      return json(404, { error: `no repo ${name}` });
+    }
+    if (signer !== meta.owner) {
+      return json(403, { error: 'not the repo owner' });
+    }
+    const parsed = safeParseJson(body);
+    if (parsed === undefined || parsed === null || typeof parsed !== 'object') {
+      return json(400, { error: 'invalid JSON body' });
+    }
+    const { objects } = parsed as { objects?: unknown };
+    if (
+      !Array.isArray(objects) ||
+      objects.some((id) => typeof id !== 'string')
+    ) {
+      return json(400, { error: 'objects must be an array of plaintext ids' });
+    }
+    return withRepoLock(name, async () => {
+      const repo = await getRepo(name);
+      if (repo === undefined) {
+        return json(404, { error: `no repo ${name}` });
+      }
+      const capabilities = [...new Set(objects as string[])]
+        .filter((id) => objectIsReferenced(repo, id))
+        .flatMap((id) => [
+          ...repo.store.pendingReveals(id),
+          ...repo.store
+            .caps(id)
+            .filter(
+              (capability) =>
+                capability.grantee === publicDid() &&
+                capability.granted_by === meta.owner
+            ),
+        ])
+        .map(encodeCapability);
+      const uniqueCapabilities = [...new Set(capabilities)];
+      return json(200, { capabilities: uniqueCapabilities });
+    });
   }
 
   // DELETE /repos/:name — owner-only. Drops every backend key under the repo's
@@ -855,7 +1128,8 @@ export function createServer(config: ServerConfig): Server {
   async function ingestBundle(
     name: string,
     repo: Repo,
-    bundle: ReturnType<typeof decodeBundle>
+    bundle: ReturnType<typeof decodeBundle>,
+    acceptPending = false
   ): Promise<{
     accepted: {
       objects: number;
@@ -864,6 +1138,7 @@ export function createServer(config: ServerConfig): Server {
       prov: number;
       veto: number;
       symop: number;
+      pending: number;
     };
     rejected: { kind: string; id: string; reason: string }[];
   }> {
@@ -871,10 +1146,15 @@ export function createServer(config: ServerConfig): Server {
     let objectsOk = 0;
     let capsOk = 0;
     let opsOk = 0;
+    let pendingOk = 0;
+    const repoOwner = (await readMeta(name))?.owner;
+    const recallOwner = acceptPending ? repoOwner : undefined;
+    const consumedPending = new Set<Capability>();
     // Verify each cap at the push boundary before grouping. Caps with invalid
     // or malformed signatures are rejected immediately so they never reach
     // store.ingest; only valid caps are grouped and counted in accepted.caps.
     const capsByPid = new Map<string, Capability[]>();
+    const trustedNow = Date.parse(now());
     for (const cap of bundle.caps) {
       let valid = false;
       try {
@@ -882,7 +1162,31 @@ export function createServer(config: ServerConfig): Server {
       } catch {
         valid = false;
       }
-      if (valid) {
+      const publicTimestamp =
+        cap.grantee === publicDid() ? Date.parse(cap.not_before) : undefined;
+      if (
+        valid &&
+        cap.grantee === publicDid() &&
+        publicTimestamp !== undefined &&
+        Number.isNaN(publicTimestamp)
+      ) {
+        rejected.push({
+          kind: 'cap',
+          id: cap.object ?? '?',
+          reason: 'invalid public capability timestamp',
+        });
+      } else if (
+        valid &&
+        cap.grantee === publicDid() &&
+        publicTimestamp !== undefined &&
+        publicTimestamp > trustedNow
+      ) {
+        rejected.push({
+          kind: 'cap',
+          id: cap.object ?? '?',
+          reason: 'future public capabilities require the reveal route',
+        });
+      } else if (valid) {
         const list = capsByPid.get(cap.object) ?? [];
         list.push(cap);
         capsByPid.set(cap.object, list);
@@ -905,18 +1209,102 @@ export function createServer(config: ServerConfig): Server {
         // would unwrap the wrong one, so those must be replaced outright.
         const stored = repo.store.current(object.plaintext_id);
         const sameKey = stored !== undefined && stored.id === object.id;
-        await repo.store.ingest(
-          object,
-          sameKey
-            ? unionCaps(repo.store.caps(object.plaintext_id), pushed)
-            : pushed
-        );
+        let replacements: Capability[] = [];
+        if (!sameKey) {
+          const existingPending = repo.store.pendingReveals(
+            object.plaintext_id
+          );
+          const existingPublic = repo.store
+            .caps(object.plaintext_id)
+            .filter(
+              (capability) =>
+                capability.grantee === publicDid() &&
+                capability.granted_by === repoOwner
+            );
+          const eligiblePending = bundle.pending.filter(
+            (capability) =>
+              capability.object === object.plaintext_id &&
+              capability.granted_by === recallOwner &&
+              isValidPublicCapability(capability)
+          );
+          const protectedReveals = [...existingPending, ...existingPublic];
+          if (protectedReveals.length > 0 && !acceptPending) {
+            throw new TypeError(
+              'ciphertext replacement with a pending reveal requires owner-authorized recall'
+            );
+          }
+          if (
+            acceptPending &&
+            protectedReveals.some(
+              (previous) =>
+                ![...pushed, ...eligiblePending].some((replacement) =>
+                  replacesPendingReveal(previous, replacement)
+                )
+            )
+          ) {
+            throw new TypeError(
+              'recall must re-wrap every pending reveal before rotating ciphertext'
+            );
+          }
+          if (acceptPending && eligiblePending.length > 0) {
+            replacements = eligiblePending;
+            replacements.forEach((capability) =>
+              consumedPending.add(capability)
+            );
+          }
+        }
+        if (replacements.length > 0) {
+          await repo.store.ingestRecall(object, pushed, replacements);
+          pendingOk += replacements.length;
+        } else {
+          await repo.store.ingest(
+            object,
+            sameKey
+              ? unionCaps(repo.store.caps(object.plaintext_id), pushed)
+              : pushed
+          );
+        }
         objectsOk += 1;
         capsOk += pushed.length;
       } catch (err) {
         rejected.push({
           kind: 'object',
           id: object.id ?? '?',
+          reason: String(err),
+        });
+      }
+    }
+    // Pending public capabilities are never accepted on the general push path:
+    // serving one early would disclose the key. The owner-only recall path may
+    // carry them after rotated objects so a scheduled reveal survives rekeying.
+    for (const capability of bundle.pending) {
+      if (consumedPending.has(capability)) {
+        continue;
+      }
+      if (!acceptPending) {
+        rejected.push({
+          kind: 'reveal',
+          id: capability.object ?? '?',
+          reason: 'pending reveals require an owner-authorized recall',
+        });
+        continue;
+      }
+      if (capability.granted_by !== recallOwner) {
+        rejected.push({
+          kind: 'reveal',
+          id: capability.object ?? '?',
+          reason: 'reveal was not granted by the repo owner',
+        });
+        continue;
+      }
+      try {
+        if (await repo.store.ingestReveal(capability)) {
+          pendingOk += 1;
+        }
+      } catch (err) {
+        rejected.push({
+          kind: 'reveal',
+          id: capability.object ?? '?',
           reason: String(err),
         });
       }
@@ -980,6 +1368,7 @@ export function createServer(config: ServerConfig): Server {
         prov: provOk,
         veto: vetoOk,
         symop: symopOk,
+        pending: pendingOk,
       },
       rejected,
     };
@@ -1329,7 +1718,7 @@ export function createServer(config: ServerConfig): Server {
       const recalled =
         recallBundle === undefined
           ? undefined
-          : await ingestBundle(name, repo, recallBundle);
+          : await ingestBundle(name, repo, recallBundle, true);
       const reg = await registryFor(name);
       reg.revoke(agent);
       await metaBackend(name).put(`revoked/${agent}`, encodeRecord(true));
@@ -1378,6 +1767,28 @@ export function createServer(config: ServerConfig): Server {
   }
 
   return {
+    async revealDue(): Promise<number> {
+      let released = 0;
+      let names: readonly string[];
+      try {
+        names = await repoNames();
+      } catch (error) {
+        config.onError?.(error, { operation: 'reveal' });
+        return 0;
+      }
+      for (const name of names) {
+        try {
+          released += await withRepoLock(name, async () => {
+            const repo = await getRepo(name);
+            return repo === undefined ? 0 : repo.store.revealDue(now());
+          });
+        } catch (error) {
+          config.onError?.(error, { operation: 'reveal', repo: name });
+        }
+      }
+      return released;
+    },
+
     async fetch(req: Request): Promise<Response> {
       const url = new URL(req.url);
       const path = url.pathname;
@@ -1487,6 +1898,35 @@ export function createServer(config: ServerConfig): Server {
           return json(400, { error: 'malformed path' });
         }
         return pull(repoName, url.searchParams.get('view') ?? 'main');
+      }
+      // Timed public capabilities: owner schedules one for the current
+      // ciphertext, or manually triggers a due reveal for one plaintext id.
+      const pendingRevealsMatch = path.match(
+        /^\/repos\/(.+)\/reveals\/pending$/
+      );
+      if (pendingRevealsMatch !== null && req.method === 'POST') {
+        const repoName = safeDecode(pendingRevealsMatch[1]);
+        if (repoName === undefined) {
+          return json(400, { error: 'malformed path' });
+        }
+        return pendingReveals(repoName, req, body);
+      }
+      const revealMatch = path.match(/^\/repos\/(.+)\/reveals\/([^/]+)$/);
+      if (revealMatch !== null && req.method === 'POST') {
+        const repoName = safeDecode(revealMatch[1]);
+        const plaintextId = safeDecode(revealMatch[2]);
+        if (repoName === undefined || plaintextId === undefined) {
+          return json(400, { error: 'malformed path' });
+        }
+        return reveal(repoName, plaintextId, req, body);
+      }
+      const revealsMatch = path.match(/^\/repos\/(.+)\/reveals$/);
+      if (revealsMatch !== null && req.method === 'POST') {
+        const repoName = safeDecode(revealsMatch[1]);
+        if (repoName === undefined) {
+          return json(400, { error: 'malformed path' });
+        }
+        return scheduleReveal(repoName, req, body);
       }
       // push / land: POST /repos/:name/push and POST /repos/:name/land
       // Match before the generic catch-all; names can contain '/'.

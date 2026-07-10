@@ -2,7 +2,7 @@
 name = "lazythad"
 version = "0.1.5-alpha"
 edition = "2021"
-description = "A lazygit-style terminal UI for Thaddeus — browse repos, the op log, the signed why, vetoes, and reputation over the untrusted HTTP remote."
+description = "A lazygit-style terminal UI for Thaddeus — browse the public mirror and query a local committed working copy."
 license = "Apache-2.0"
 repository = "https://github.com/thaddeus-run/thaddeus"
 

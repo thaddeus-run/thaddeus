@@ -5,6 +5,30 @@ All notable changes to Thaddeus. Format follows
 
 ## [Unreleased]
 
+### Added
+
+- **P7 timed reveal.** Repo owners can schedule committed file content for
+  public release with `thaddeus schedule-reveal <path> --at <ISO>` or trigger a
+  due release with `thaddeus reveal <path>`. The client creates the signed
+  public capability locally, the server persists it outside normal pull
+  responses and scans due reveals every second, and fresh clones can decrypt
+  released content through the well-known public membrane. Scheduling is
+  idempotent, manual triggers cannot bypass the server clock, and
+  rotate-and-recall preserves pending reveals across key changes. As documented
+  by the P02 design, unattended reveal is store-honest: scheduling trusts the
+  selected host not to unwrap or publish that file's capability early; trustless
+  time-lock crypto remains deferred.
+
+- **P6 query surface.** `thaddeus query` now exposes the existing `CodeDB` joins
+  as `why`, `touched-since`, `by`, `callers`, and `references`, with stable JSON
+  output, current-branch scoping, unique symbol/op prefixes, inclusive time
+  windows, and decryption-bounded semantic answers. Queries are local and
+  read-only over committed state; `thaddeus why` remains an alias.
+- **Local lazythad query views.** Press `/` inside a matching working copy to
+  run the five query forms through `thaddeus query --json` and browse results in
+  the existing activity/detail panes. The remote browser remains keyless: the
+  TUI invokes the CLI without a shell and never reads identity keys itself.
+
 ## [0.1.5-alpha] - 2026-07-09
 
 ### Added

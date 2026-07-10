@@ -37,6 +37,7 @@ import {
 import { type FileDiff, fileDiff, isBinary } from './diff';
 import { HELP, USAGE } from './help';
 import { initIdentity, loadIdentity } from './identity';
+import { runQuery } from './query';
 import { startServer } from './serve';
 import { VERSION } from './version';
 import {
@@ -165,7 +166,7 @@ function policyIsDefault(policy: RepoPolicyRecord): boolean {
   return (
     policy.restrictPaths.length === 0 &&
     policy.standingQueries.length === 0 &&
-    !policy.requireVerifiedProvenance &&
+    policy.requireVerifiedProvenance !== true &&
     policy.requirePassingChecks === null &&
     policy.release.creators === 'owner' &&
     policy.release.allow.length === 0
@@ -181,7 +182,7 @@ function describePolicy(policy: RepoPolicyRecord): string[] {
     return ['policy: default'];
   }
   const lines: string[] = ['policy:'];
-  if (policy.requireVerifiedProvenance) {
+  if (policy.requireVerifiedProvenance === true) {
     lines.push('  require verified provenance');
   }
   if (policy.requirePassingChecks !== null) {
@@ -1853,10 +1854,31 @@ export async function run(
         }
         return 0;
       }
-      case 'why': {
-        const prefix = rest.find((a) => !a.startsWith('-'));
-        if (prefix === undefined) {
-          out('usage: thaddeus why <op>');
+      case 'query':
+        return runQuery(rest, env, out);
+      case 'why':
+        return runQuery(['why', ...rest], env, out);
+      case 'schedule-reveal': {
+        const { values, positionals } = parseArgs({
+          args: [...rest],
+          options: {
+            at: { type: 'string' },
+            json: { type: 'boolean' },
+          },
+          allowPositionals: true,
+        });
+        const path = positionals[0];
+        if (path === undefined || values.at === undefined) {
+          out('usage: thaddeus schedule-reveal <path> --at <ISO> [--json]');
+          return 2;
+        }
+        const atMs = Date.parse(values.at);
+        if (Number.isNaN(atMs)) {
+          out(`invalid --at timestamp: ${values.at}`);
+          return 2;
+        }
+        if (positionals.length > 1) {
+          out('schedule-reveal accepts exactly one committed path');
           return 2;
         }
         const root = findRoot(env.cwd);
@@ -1865,50 +1887,69 @@ export async function run(
           return 2;
         }
         const cfg = loadConfig(root);
-        const view = viewOf(cfg);
+        const identity = loadIdentity(env.home);
         const local = await openLocal(root, cfg);
-        const provLog = await ProvenanceLog.load(
-          local.store,
-          repoScope(root, cfg)
-        );
-        // Resolve a short op-id prefix (as printed by `log`) to a full op.
-        const matches = opsOnView(local, view).filter((o) =>
-          o.id.startsWith(prefix)
-        );
-        if (matches.length === 0) {
-          out(`no op matching ${prefix}`);
+        const entry = local.log.materialize(viewOf(cfg), identity).get(path);
+        if (entry === undefined || entry.ref === null) {
+          out(`no committed file at ${path}`);
           return 1;
         }
-        if (matches.length > 1) {
-          out(`ambiguous op prefix ${prefix} (${matches.length} matches)`);
+        const at = new Date(atMs).toISOString();
+        const result = await new Client(
+          cfg.server,
+          identity,
+          env.fetchImpl
+        ).scheduleReveal(cfg.repo, local.store, entry.ref, at);
+        if (values.json === true) {
+          out(JSON.stringify({ path, ...result }));
+        } else if (result.released) {
+          out(`revealed ${path} publicly (scheduled for ${result.at})`);
+        } else {
+          out(
+            `${result.scheduled ? 'scheduled' : 'already scheduled'} ${path} for public reveal at ${result.at}`
+          );
+        }
+        return 0;
+      }
+      case 'reveal': {
+        const { values, positionals } = parseArgs({
+          args: [...rest],
+          options: { json: { type: 'boolean' } },
+          allowPositionals: true,
+        });
+        const path = positionals[0];
+        if (path === undefined || positionals.length > 1) {
+          out('usage: thaddeus reveal <path> [--json]');
           return 2;
         }
-        const op = matches[0];
-        const records = provLog.forOp(op.id);
-        if (wantsJson(rest)) {
+        const root = findRoot(env.cwd);
+        if (root === undefined) {
+          out("not a thaddeus working copy — run 'thaddeus clone' first");
+          return 2;
+        }
+        const cfg = loadConfig(root);
+        const identity = loadIdentity(env.home);
+        const local = await openLocal(root, cfg);
+        const entry = local.log.materialize(viewOf(cfg), identity).get(path);
+        if (entry === undefined || entry.ref === null) {
+          out(`no committed file at ${path}`);
+          return 1;
+        }
+        const result = await new Client(
+          cfg.server,
+          identity,
+          env.fetchImpl
+        ).reveal(cfg.repo, local.store, entry.ref);
+        if (values.json === true) {
+          out(JSON.stringify({ path, ...result }));
+        } else if (result.public) {
           out(
-            JSON.stringify({
-              op: { id: op.id, at: op.at, path: op.path, author: op.author },
-              records: records.map((p) => ({
-                status: provLog.status(p),
-                actor_kind: p.actor_kind,
-                intent: p.intent,
-                reasoning: p.reasoning,
-              })),
-            })
+            result.released
+              ? `revealed ${path} publicly`
+              : `${path} is already public`
           );
-          return 0;
-        }
-        out(`op ${op.id.slice(0, 10)}  ${op.at}  ${op.path}  by ${op.author}`);
-        if (records.length === 0) {
-          out('  (no why recorded)');
-          return 0;
-        }
-        for (const p of records) {
-          out(`  [${provLog.status(p)}] ${p.actor_kind}: ${p.intent}`);
-          if (p.reasoning.length > 0 && p.reasoning !== p.intent) {
-            out(`    reasoning: ${p.reasoning}`);
-          }
+        } else {
+          out(`${path} remains private — its scheduled time has not arrived`);
         }
         return 0;
       }
@@ -2481,9 +2522,14 @@ export async function run(
         }
         try {
           const heads = [...local.log.heads(recallView)];
+          const pids = reachablePids(local, heads);
+          // Pending public caps are intentionally absent from pull. Fetch them
+          // over the owner-only route before rotating so a revoke from any
+          // owner clone preserves the scheduled start times.
+          await client.syncPendingReveals(cfg.repo, local.store, [...pids]);
           const recalled = await revokeObjects(
             local,
-            reachablePids(local, heads),
+            pids,
             PublicIdentity.fromDid(did),
             identity
           );

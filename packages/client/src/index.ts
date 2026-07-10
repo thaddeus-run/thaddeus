@@ -3,6 +3,8 @@ export {
   type LandOutcome,
   type PushResult,
   type RevokeOutcome,
+  type RevealOutcome,
+  type ScheduleRevealOutcome,
 } from './client';
 export type { RepoPolicyRecord } from '@thaddeus.run/server';
 export type {

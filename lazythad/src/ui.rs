@@ -9,6 +9,7 @@ use ratatui::Frame;
 
 use crate::app::{Activity, App, Focus};
 use crate::client::Reputation;
+use crate::query::QueryResult;
 
 const ACCENT: Color = Color::Cyan;
 
@@ -48,6 +49,9 @@ pub fn render(frame: &mut Frame, app: &App) {
     if let Some(rep) = &app.reputation {
         render_reputation(frame, rep, frame.area());
     }
+    if let Some(input) = &app.query_input {
+        render_query_prompt(frame, input, frame.area());
+    }
 }
 
 fn render_repos(frame: &mut Frame, app: &App, area: Rect) {
@@ -71,6 +75,7 @@ fn render_activity(frame: &mut Frame, app: &App, area: Rect) {
     match app.activity {
         Activity::Log => render_log(frame, app, area),
         Activity::Releases => render_releases(frame, app, area),
+        Activity::Query => render_query(frame, app, area),
     }
 }
 
@@ -138,10 +143,80 @@ fn render_releases(frame: &mut Frame, app: &App, area: Rect) {
     frame.render_stateful_widget(list, area, &mut state);
 }
 
+fn render_query(frame: &mut Frame, app: &App, area: Rect) {
+    let Some(query) = &app.query else {
+        frame.render_widget(
+            Paragraph::new("press / to run a local query")
+                .block(pane_block("Query", app.focus == Focus::Log)),
+            area,
+        );
+        return;
+    };
+    let mut items: Vec<ListItem> = match &query.result {
+        QueryResult::Why(result) => vec![ListItem::new(Line::from(vec![
+            Span::styled(
+                result.op.id.chars().take(10).collect::<String>(),
+                Style::new().fg(Color::Yellow),
+            ),
+            Span::raw("  "),
+            Span::raw(result.op.path.clone()),
+        ]))],
+        QueryResult::Ops(ops) => ops
+            .iter()
+            .map(|op| {
+                ListItem::new(Line::from(vec![
+                    Span::styled(
+                        op.id.chars().take(10).collect::<String>(),
+                        Style::new().fg(Color::Yellow),
+                    ),
+                    Span::raw("  "),
+                    Span::styled(op.at.clone(), Style::new().fg(Color::DarkGray)),
+                    Span::raw("  "),
+                    Span::raw(op.path.clone()),
+                ]))
+            })
+            .collect(),
+        QueryResult::Callers(callers) => callers
+            .iter()
+            .map(|caller| match &caller.definition {
+                Some(definition) => ListItem::new(format!(
+                    "{}  {}:{}",
+                    definition.name, definition.path, definition.line
+                )),
+                None => ListItem::new(format!(
+                    "{}  (definition unavailable)",
+                    caller.symbol.id.chars().take(10).collect::<String>()
+                )),
+            })
+            .collect(),
+        QueryResult::References(references) => references
+            .iter()
+            .map(|reference| ListItem::new(format!("{}:{}", reference.path, reference.line)))
+            .collect(),
+    };
+    if items.is_empty() {
+        items.push(ListItem::new(Span::styled(
+            "(no matches)",
+            Style::new().fg(Color::DarkGray),
+        )));
+    }
+    let title = format!("Query · {}", query.expression);
+    let list = List::new(items)
+        .block(pane_block(&title, app.focus == Focus::Log))
+        .highlight_style(selected_style())
+        .highlight_symbol("▌ ");
+    let mut state = ListState::default();
+    if !query.result.is_empty() {
+        state.select(Some(query.selected));
+    }
+    frame.render_stateful_widget(list, area, &mut state);
+}
+
 fn render_detail(frame: &mut Frame, app: &App, area: Rect) {
     match app.activity {
         Activity::Log => render_op_detail(frame, app, area),
         Activity::Releases => render_release_detail(frame, app, area),
+        Activity::Query => render_query_detail(frame, app, area),
     }
 }
 
@@ -267,9 +342,107 @@ fn render_release_detail(frame: &mut Frame, app: &App, area: Rect) {
     frame.render_widget(para, area);
 }
 
+fn render_query_detail(frame: &mut Frame, app: &App, area: Rect) {
+    let mut lines: Vec<Line> = Vec::new();
+    match app.query.as_ref() {
+        None => lines.push(Line::from(Span::styled(
+            "press / to run a query",
+            Style::new().fg(Color::DarkGray),
+        ))),
+        Some(query) if query.result.is_empty() => lines.push(Line::from(Span::styled(
+            "(no matches)",
+            Style::new().fg(Color::DarkGray),
+        ))),
+        Some(query) => match &query.result {
+            QueryResult::Why(result) => {
+                lines.push(Line::from(
+                    result.op.id.chars().take(10).collect::<String>().yellow(),
+                ));
+                lines.push(Line::from(format!("{}  {}", result.op.at, result.op.path)));
+                lines.push(Line::from(format!("by {}", result.op.author)));
+                lines.push(Line::raw(""));
+                lines.push(Line::from(if result.verified {
+                    "Why · verified".green().bold()
+                } else {
+                    "Why · unverified".red().bold()
+                }));
+                if result.records.is_empty() {
+                    lines.push(Line::raw("  (no why recorded)"));
+                }
+                for record in &result.records {
+                    lines.push(Line::from(format!(
+                        "  [{}] {}: {}",
+                        record.status, record.actor_kind, record.intent
+                    )));
+                    lines.push(Line::from(Span::styled(
+                        format!("    actor {}", record.actor),
+                        Style::new().fg(Color::DarkGray),
+                    )));
+                    if record.reasoning != record.intent {
+                        lines.push(Line::from(format!("    {}", record.reasoning)));
+                    }
+                    if let Some(task) = &record.task {
+                        lines.push(Line::from(format!("    task {task}")));
+                    }
+                }
+            }
+            QueryResult::Ops(ops) => {
+                if let Some(op) = ops.get(query.selected) {
+                    lines.push(Line::from(
+                        op.id.chars().take(10).collect::<String>().yellow(),
+                    ));
+                    lines.push(Line::from(format!("{}  {}", op.at, op.path)));
+                    lines.push(Line::raw(""));
+                    lines.push(Line::from(format!("author: {}", op.author)));
+                    lines.push(Line::from(format!("lamport: {}", op.lamport)));
+                    lines.push(Line::from(format!("kind: {}", op.kind)));
+                }
+            }
+            QueryResult::Callers(callers) => {
+                if let Some(caller) = callers.get(query.selected) {
+                    lines.push(Line::from("Caller".bold()));
+                    lines.push(Line::from(format!("id: {}", caller.symbol.id)));
+                    lines.push(Line::from(format!("kind: {}", caller.symbol.kind)));
+                    lines.push(Line::raw(""));
+                    match &caller.definition {
+                        Some(definition) => {
+                            lines.push(Line::from(format!("name: {}", definition.name)));
+                            lines.push(Line::from(format!(
+                                "defined: {}:{}",
+                                definition.path, definition.line
+                            )));
+                            lines.push(Line::from(format!("symbol: {}", definition.symbol)));
+                        }
+                        None => lines.push(Line::raw("(definition unavailable)")),
+                    }
+                }
+            }
+            QueryResult::References(references) => {
+                if let Some(reference) = references.get(query.selected) {
+                    lines.push(Line::from("Reference".bold()));
+                    lines.push(Line::from(format!(
+                        "location: {}:{}",
+                        reference.path, reference.line
+                    )));
+                    lines.push(Line::from(format!("symbol: {}", reference.symbol)));
+                }
+            }
+        },
+    }
+    let para = Paragraph::new(lines)
+        .block(pane_block("Query detail", false))
+        .wrap(Wrap { trim: false });
+    frame.render_widget(para, area);
+}
+
 fn render_status(frame: &mut Frame, app: &App, area: Rect) {
-    let hints =
-        "q quit · Tab focus · j/k move · Enter open · t log/releases · r refresh · R reputation";
+    let hints = if app.query_input.is_some() {
+        "type query · Enter run · Esc cancel"
+    } else if app.activity == Activity::Query {
+        "q quit · j/k move · / new query · r rerun · t log"
+    } else {
+        "q quit · Tab focus · j/k move · / query · t log/releases · r refresh · R reputation"
+    };
     let left = if app.status.is_empty() {
         app.server_label.clone()
     } else {
@@ -331,6 +504,33 @@ fn render_reputation(frame: &mut Frame, rep: &Reputation, area: Rect) {
     frame.render_widget(para, popup);
 }
 
+fn render_query_prompt(frame: &mut Frame, input: &str, area: Rect) {
+    let popup = centered(area, 82, 56);
+    frame.render_widget(Clear, popup);
+    let lines = vec![
+        Line::from("why <op>"),
+        Line::from("touched-since <ISO>"),
+        Line::from("by <did> [--since <ISO>] [--until <ISO>]"),
+        Line::from("callers <symbol>"),
+        Line::from("references <name>"),
+        Line::raw(""),
+        Line::from(Span::styled(
+            "Queries use the matching local committed working copy.",
+            Style::new().fg(Color::DarkGray),
+        )),
+        Line::raw(""),
+        Line::from(vec![
+            Span::styled("> ", Style::new().fg(ACCENT).add_modifier(Modifier::BOLD)),
+            Span::raw(input.to_string()),
+            Span::styled("█", Style::new().fg(ACCENT)),
+        ]),
+    ];
+    let para = Paragraph::new(lines)
+        .block(pane_block("Query · Enter run · Esc cancel", true))
+        .wrap(Wrap { trim: false });
+    frame.render_widget(para, popup);
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -365,6 +565,9 @@ mod tests {
             activity: Activity::Log,
             focus: Focus::Log,
             status: String::new(),
+            query: None,
+            query_input: None,
+            query_source: None,
             reputation: None,
             should_quit: false,
         }
@@ -432,5 +635,30 @@ mod tests {
         assert!(text.contains("commits: 2"));
         assert!(text.contains("Signed metadata release"));
         assert!(text.contains("thaddeus.tar.gz"));
+    }
+
+    #[test]
+    fn renders_query_results_and_the_slash_palette() {
+        let mut app = app_with_ops();
+        app.activity = Activity::Query;
+        app.query = Some(crate::app::QueryView {
+            expression: "references refresh".into(),
+            result: QueryResult::References(vec![crate::query::ReferenceResult {
+                symbol: "symbol-1".into(),
+                path: "src/auth.rs".into(),
+                line: 3,
+            }]),
+            selected: 0,
+        });
+        let text = rendered_text(&app);
+        assert!(text.contains("Query · references refresh"));
+        assert!(text.contains("src/auth.rs:3"));
+        assert!(text.contains("symbol-1"));
+
+        app.query_input = Some("callers refresh".into());
+        let text = rendered_text(&app);
+        assert!(text.contains("Query · Enter run · Esc cancel"));
+        assert!(text.contains("callers refresh"));
+        assert!(text.contains("Queries use the matching local committed working copy"));
     }
 }

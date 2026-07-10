@@ -10,6 +10,9 @@ export interface ServeOptions {
   policy?: LandPolicy; // default blockOnConflict (createServer's default)
   host?: Identity; // attest reputation with this key (P07); omit to hold no keys
   minMerges?: number; // gate land on this many attested merges per op author
+  // Scheduler cadence. Public for deterministic integration tests; normal CLI
+  // servers use one second.
+  revealIntervalMs?: number;
 }
 
 // A running server handle.
@@ -28,8 +31,37 @@ export function startServer(opts: ServeOptions): RunningServer {
     policy: opts.policy,
     host: opts.host,
     minMerges: opts.minMerges,
+    onError: (error, context) => {
+      const scope = context.repo === undefined ? '' : ` for ${context.repo}`;
+      console.error(`timed reveal ${context.operation} failed${scope}:`, error);
+    },
   });
   const http = Bun.serve({ port: opts.port ?? 4000, fetch: srv.fetch });
+  const revealIntervalMs = opts.revealIntervalMs ?? 1_000;
+  if (!Number.isFinite(revealIntervalMs) || revealIntervalMs <= 0) {
+    void http.stop(true);
+    throw new RangeError('revealIntervalMs must be greater than zero');
+  }
+  let revealTick: Promise<void> | undefined;
+  const scanDueReveals = (): void => {
+    if (revealTick !== undefined) {
+      return;
+    }
+    revealTick = srv
+      .revealDue()
+      .then(() => undefined)
+      // A transient backend failure must not stop future scans or surface as an
+      // unhandled rejection from the timer. The next interval retries.
+      .catch((error) => {
+        console.error('timed reveal scan failed:', error);
+      })
+      .finally(() => {
+        revealTick = undefined;
+      });
+  };
+  const revealTimer = setInterval(scanDueReveals, revealIntervalMs);
+  revealTimer.unref();
+  scanDueReveals();
   // http.port is always defined after a successful Bun.serve() call; the type
   // is number | undefined only because Bun.serve can theoretically be called
   // before the socket is bound, but that can't happen synchronously here.
@@ -38,6 +70,8 @@ export function startServer(opts: ServeOptions): RunningServer {
     url: `http://localhost:${resolvedPort}`,
     port: resolvedPort,
     stop: async (): Promise<void> => {
+      clearInterval(revealTimer);
+      await revealTick;
       await http.stop(true);
     },
   };

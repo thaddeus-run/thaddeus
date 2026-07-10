@@ -16,11 +16,13 @@ export {
 } from './sign';
 export {
   type Bundle,
+  decodeCapability,
   decodeBundle,
   decodeClaim,
   decodeDelegation,
   decodeRelease,
   encodeBundle,
+  encodeCapability,
   encodeClaim,
   encodeDelegation,
   encodeRelease,

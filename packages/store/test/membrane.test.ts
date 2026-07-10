@@ -47,6 +47,97 @@ describe('scheduled reveal (manual trigger)', () => {
       new TextDecoder().decode(await store.get(ref, publicIdentity(), T))
     ).toBe('fix');
   });
+
+  test('scheduling is idempotent and returns the capability to transport', async () => {
+    const store = new MemoryStore();
+    const author = Identity.create();
+    const ref = await store.put(new TextEncoder().encode('fix'), author);
+
+    const first = await store.scheduleReveal(ref, T, author);
+    const second = await store.scheduleReveal(ref, T, author);
+
+    expect(first).toEqual(second);
+    expect(first.object).toBe(ref.plaintext_id);
+    expect(first.grantee).toBe(publicDid());
+    expect(store.pendingReveals(ref.plaintext_id)).toHaveLength(1);
+  });
+});
+
+describe('scheduled reveal (server transport)', () => {
+  const T = '2030-01-01T00:00:00.000Z';
+  const beforeT = '2026-06-23T00:00:00.000Z';
+
+  test('a mirror ingests a withheld capability and releases it when due', async () => {
+    const authorStore = new MemoryStore();
+    const author = Identity.create();
+    const ref = await authorStore.put(
+      new TextEncoder().encode('public later'),
+      author
+    );
+    const capability = await authorStore.scheduleReveal(ref, T, author);
+
+    const mirror = new MemoryStore();
+    await mirror.ingest(
+      authorStore.current(ref.plaintext_id)!,
+      authorStore.caps(ref.plaintext_id)
+    );
+    expect(await mirror.ingestReveal(capability)).toBe(true);
+    expect(await mirror.ingestReveal(capability)).toBe(false);
+    expect(mirror.pendingReveals(ref.plaintext_id)).toHaveLength(1);
+    expect(await mirror.revealDue(beforeT)).toBe(0);
+    expect(await mirror.revealDue(T)).toBe(1);
+
+    // Once public, any identity can use the well-known public capability. A
+    // clone should not need to impersonate a special reader identity.
+    expect(
+      new TextDecoder().decode(await mirror.get(ref, Identity.create(), T))
+    ).toBe('public later');
+  });
+
+  test('rejects a pending capability that is not a public reveal', async () => {
+    const store = new MemoryStore();
+    const author = Identity.create();
+    const reader = Identity.create();
+    const ref = await store.put(new TextEncoder().encode('private'), author);
+    await store.grant(ref, reader.toPublic(), author);
+    const privateGrant = store
+      .caps(ref.plaintext_id)
+      .find((cap) => cap.grantee === reader.did)!;
+
+    await expectRejects(store.ingestReveal(privateGrant), TypeError);
+  });
+
+  test('replaces a stale pending key when newer ciphertext is ingested', async () => {
+    const authorStore = new MemoryStore();
+    const author = Identity.create();
+    const reader = Identity.create();
+    const ref = await authorStore.put(
+      new TextEncoder().encode('rotated later'),
+      author
+    );
+    await authorStore.grant(ref, reader.toPublic(), author);
+    const originalObject = authorStore.current(ref.plaintext_id)!;
+    const originalCaps = [...authorStore.caps(ref.plaintext_id)];
+    const originalReveal = await authorStore.scheduleReveal(ref, T, author);
+
+    const mirror = new MemoryStore();
+    await mirror.ingest(originalObject, originalCaps);
+    await mirror.ingestReveal(originalReveal);
+
+    await authorStore.revoke(ref, reader.toPublic(), author);
+    await mirror.ingest(
+      authorStore.current(ref.plaintext_id)!,
+      authorStore.caps(ref.plaintext_id)
+    );
+    expect(mirror.pendingReveals(ref.plaintext_id)).toHaveLength(0);
+    expect(
+      await mirror.ingestReveal(authorStore.pendingReveals(ref.plaintext_id)[0])
+    ).toBe(true);
+    expect(await mirror.revealDue(T)).toBe(1);
+    expect(
+      new TextDecoder().decode(await mirror.get(ref, Identity.create(), T))
+    ).toBe('rotated later');
+  });
 });
 
 describe('scheduled reveal (timestamp trigger, lazy on get)', () => {

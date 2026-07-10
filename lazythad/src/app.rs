@@ -4,12 +4,14 @@
 use ratatui::crossterm::event::{KeyCode, KeyEvent};
 
 use crate::client::{Op, Pull, Release, Remote, Reputation};
+use crate::query::{same_server, QueryResult, QuerySource};
 
 /// The activity shown in the middle and detail panes.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Activity {
     Log,
     Releases,
+    Query,
 }
 
 /// Which pane has the keyboard.
@@ -17,6 +19,12 @@ pub enum Activity {
 pub enum Focus {
     Repos,
     Log,
+}
+
+pub struct QueryView {
+    pub expression: String,
+    pub result: QueryResult,
+    pub selected: usize,
 }
 
 pub struct App {
@@ -32,6 +40,9 @@ pub struct App {
     pub activity: Activity,
     pub focus: Focus,
     pub status: String,
+    pub query: Option<QueryView>,
+    pub query_input: Option<String>,
+    pub(crate) query_source: Option<Box<dyn QuerySource>>,
     /// When `Some`, a reputation overlay is shown for a DID.
     pub reputation: Option<Reputation>,
     pub should_quit: bool,
@@ -40,7 +51,11 @@ pub struct App {
 impl App {
     /// Build an app and load the remote's repos (+ the first repo's log). A
     /// failure is surfaced in the status line rather than aborting startup.
-    pub fn new(remote: Remote, server_label: String) -> Self {
+    pub fn new(
+        remote: Remote,
+        server_label: String,
+        query_source: Option<Box<dyn QuerySource>>,
+    ) -> Self {
         let mut app = App {
             remote,
             server_label,
@@ -54,6 +69,9 @@ impl App {
             activity: Activity::Log,
             focus: Focus::Repos,
             status: String::new(),
+            query: None,
+            query_input: None,
+            query_source,
             reputation: None,
             should_quit: false,
         };
@@ -79,6 +97,7 @@ impl App {
     pub fn load_selected_repo(&mut self) {
         self.op_sel = 0;
         self.release_sel = 0;
+        self.query = None;
         self.reputation = None;
         let Some(repo) = self.repos.get(self.repo_sel).cloned() else {
             self.pull = Pull::default();
@@ -143,6 +162,13 @@ impl App {
                 Activity::Releases if self.release_sel + 1 < self.releases.len() => {
                     self.release_sel += 1;
                 }
+                Activity::Query => {
+                    if let Some(query) = &mut self.query {
+                        if query.selected + 1 < query.result.len() {
+                            query.selected += 1;
+                        }
+                    }
+                }
                 _ => {}
             },
         }
@@ -156,7 +182,62 @@ impl App {
             Focus::Log => match self.activity {
                 Activity::Log => self.op_sel = self.op_sel.saturating_sub(1),
                 Activity::Releases => self.release_sel = self.release_sel.saturating_sub(1),
+                Activity::Query => {
+                    if let Some(query) = &mut self.query {
+                        query.selected = query.selected.saturating_sub(1);
+                    }
+                }
             },
+        }
+    }
+
+    /// Run an expression through the local CLI only when the selected remote
+    /// repo is the working copy the bridge was discovered from.
+    fn execute_query(&mut self, expression: String) {
+        let Some(repo) = self.repos.get(self.repo_sel).cloned() else {
+            self.status = "select a repo before querying".to_string();
+            return;
+        };
+        let Some(source) = self.query_source.as_ref() else {
+            self.status = "queries need a local working copy and the thaddeus CLI; launch lazythad from a clone"
+                .to_string();
+            return;
+        };
+        if source.repo() != repo {
+            self.status = format!(
+                "selected repo {repo} is not local {}; launch from that repo's working copy",
+                source.repo()
+            );
+            return;
+        }
+        if !same_server(source.server(), &self.server_label) {
+            self.status = format!(
+                "local repo uses {}, not {}; launch lazythad for the working copy's server",
+                source.server(),
+                self.server_label
+            );
+            return;
+        }
+        let view = source.view().to_string();
+        match source.run(&expression) {
+            Ok(result) => {
+                let count = result.len();
+                self.query = Some(QueryView {
+                    expression: expression.clone(),
+                    result,
+                    selected: 0,
+                });
+                self.activity = Activity::Query;
+                self.focus = Focus::Log;
+                self.status = format!("{repo}/{view}  ·  {expression}  ·  {count} result(s)");
+            }
+            Err(error) => self.status = format!("query error: {error}"),
+        }
+    }
+
+    fn rerun_query(&mut self) {
+        if let Some(expression) = self.query.as_ref().map(|query| query.expression.clone()) {
+            self.execute_query(expression);
         }
     }
 
@@ -177,6 +258,25 @@ impl App {
     /// Drive one key press. Esc closes an open overlay first; otherwise keys map
     /// to navigation/actions.
     pub fn on_key(&mut self, key: KeyEvent) {
+        if self.query_input.is_some() {
+            match key.code {
+                KeyCode::Esc => self.query_input = None,
+                KeyCode::Enter => {
+                    let expression = self.query_input.take().unwrap_or_default();
+                    self.execute_query(expression.trim().to_string());
+                }
+                KeyCode::Backspace => {
+                    self.query_input.as_mut().and_then(String::pop);
+                }
+                KeyCode::Char(ch) => {
+                    if let Some(input) = &mut self.query_input {
+                        input.push(ch);
+                    }
+                }
+                _ => {}
+            }
+            return;
+        }
         if self.reputation.is_some() {
             // The overlay is modal: q/Esc still quit (matching the documented
             // keys), any other key just dismisses it.
@@ -188,6 +288,7 @@ impl App {
         }
         match key.code {
             KeyCode::Char('q') | KeyCode::Esc => self.should_quit = true,
+            KeyCode::Char('/') => self.query_input = Some(String::new()),
             KeyCode::Tab | KeyCode::Char('\t') => {
                 self.focus = match self.focus {
                     Focus::Repos => Focus::Log,
@@ -218,12 +319,14 @@ impl App {
                 self.load_selected_repo();
                 self.focus = Focus::Log;
             }
+            KeyCode::Char('r') if self.activity == Activity::Query => self.rerun_query(),
             KeyCode::Char('r') => self.refresh(),
             KeyCode::Char('R') => self.show_reputation(),
             KeyCode::Char('t') => {
                 self.activity = match self.activity {
                     Activity::Log => Activity::Releases,
                     Activity::Releases => Activity::Log,
+                    Activity::Query => Activity::Log,
                 };
             }
             _ => {}
@@ -281,6 +384,9 @@ mod tests {
             activity: Activity::Log,
             focus: Focus::Log,
             status: String::new(),
+            query: None,
+            query_input: None,
+            query_source: None,
             reputation: None,
             should_quit: false,
         }
@@ -353,5 +459,76 @@ mod tests {
         app.on_key(key(KeyCode::Down));
         assert_eq!(app.selected_release().unwrap().tag, "v1");
         assert_eq!(app.op_sel, 0);
+    }
+
+    struct FakeQueries;
+
+    impl QuerySource for FakeQueries {
+        fn repo(&self) -> &str {
+            "acme/web"
+        }
+
+        fn server(&self) -> &str {
+            "unused/"
+        }
+
+        fn view(&self) -> &str {
+            "main"
+        }
+
+        fn run(&self, _expression: &str) -> anyhow::Result<QueryResult> {
+            Ok(QueryResult::Ops(vec![
+                crate::query::QueryOp {
+                    id: "q2".into(),
+                    path: "b.rs".into(),
+                    at: "t2".into(),
+                    author: "did:key:zA".into(),
+                    lamport: 2,
+                    kind: "write".into(),
+                },
+                crate::query::QueryOp {
+                    id: "q1".into(),
+                    path: "a.rs".into(),
+                    at: "t1".into(),
+                    author: "did:key:zA".into(),
+                    lamport: 1,
+                    kind: "write".into(),
+                },
+            ]))
+        }
+    }
+
+    #[test]
+    fn slash_palette_executes_and_query_results_are_navigable() {
+        let mut app = fixture();
+        app.query_source = Some(Box::new(FakeQueries));
+        app.on_key(key(KeyCode::Char('/')));
+        assert_eq!(app.query_input.as_deref(), Some(""));
+        for ch in "touched-since 2000-01-01".chars() {
+            app.on_key(key(KeyCode::Char(ch)));
+        }
+        app.on_key(key(KeyCode::Enter));
+        assert_eq!(app.activity, Activity::Query);
+        assert_eq!(app.query.as_ref().unwrap().selected, 0);
+        app.on_key(key(KeyCode::Char('j')));
+        assert_eq!(app.query.as_ref().unwrap().selected, 1);
+        app.on_key(key(KeyCode::Char('j')));
+        assert_eq!(app.query.as_ref().unwrap().selected, 1);
+        app.on_key(key(KeyCode::Char('t')));
+        assert_eq!(app.activity, Activity::Log);
+    }
+
+    #[test]
+    fn palette_treats_q_as_input_and_escape_cancels_without_quitting() {
+        let mut app = fixture();
+        app.on_key(key(KeyCode::Char('/')));
+        app.on_key(key(KeyCode::Char('q')));
+        assert_eq!(app.query_input.as_deref(), Some("q"));
+        assert!(!app.should_quit);
+        app.on_key(key(KeyCode::Backspace));
+        assert_eq!(app.query_input.as_deref(), Some(""));
+        app.on_key(key(KeyCode::Esc));
+        assert!(app.query_input.is_none());
+        assert!(!app.should_quit);
     }
 }

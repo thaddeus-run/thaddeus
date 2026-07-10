@@ -17,7 +17,7 @@ publish. All crypto is client-side; your identity seed lives in
 ## Commands
 
 | Command                                        | Description                            |
-| ---------------------------------------------- | -------------------------------------- | ------------------------------- |
+| ---------------------------------------------- | -------------------------------------- |
 | `init`                                         | Create a self-owned `did:key` identity |
 | `create <server> <repo>`                       | Create a repo on a server              |
 | `clone <server> <repo> [dir]`                  | Clone a repo to a working tree         |
@@ -27,8 +27,40 @@ publish. All crypto is client-side; your identity seed lives in
 | `grant <did> [--paths a,b] [--max-changes N]`  | Grant push rights to a DID/agent       |
 | `revoke <did>`                                 | Revoke a previously granted delegation |
 | `grants`                                       | List active grants for this repo       |
-| `policy [set                                   | clear]`                                | Show or select repo land policy |
+| `policy [set\|clear]`                          | Show or select repo land policy        |
+| `query <kind> ...`                             | Query history and the semantic graph   |
+| `schedule-reveal <path> --at <ISO>`            | Make committed content public later    |
+| `reveal <path>`                                | Trigger a due public reveal            |
 | `serve [--port 4000] [--data ./thaddeus-data]` | Run a durable server                   |
+
+## Query the committed branch
+
+```sh
+thaddeus query why <op>                          # signed provenance
+thaddeus query touched-since 2026-07-01          # time-window history
+thaddeus query by did:key:z6Mk... --since 2026-07-01
+thaddeus query callers refreshToken              # live semantic callers
+thaddeus query references refreshToken           # live use sites
+```
+
+All query forms accept `--json`. They run locally over the current committed
+branch, include only code your identity can decrypt, and never pull, commit, or
+include dirty disk edits. `thaddeus why <op>` remains a compatibility alias.
+
+## Timed public content
+
+```sh
+thaddeus schedule-reveal announcement.md --at 2030-01-01T00:00:00Z
+thaddeus reveal announcement.md # optional manual trigger; cannot release early
+```
+
+The owner creates a future-dated public capability locally; the server stores it
+outside ordinary pulls and promotes it automatically when due. A fresh clone can
+then read the content without a grant. Because the public identity is
+well-known, this opts into trusting the selected host as embargo custodian for
+the scheduled file; the current membrane is store-honest, not trustless. These
+commands reveal committed file content—the path and operation metadata are
+already visible on the ciphertext mirror—and ignore dirty disk edits.
 
 ## Collaboration example
 
