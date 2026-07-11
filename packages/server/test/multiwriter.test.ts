@@ -192,6 +192,91 @@ describe('multi-writer land enforcement', () => {
     expect(over.reason?.toLowerCase()).toContain('budget');
   });
 
+  // Regression for the P9 rate-window invariant: buildRegistry's meter replay
+  // (server.ts, the `meter/` loop) must restore lifetime totals via
+  // replayMeter(), NOT record() — record() would stamp the replayed lifetime
+  // total into the current hour's window and wrongly reject the very next
+  // land after a restart. Mirrors the durable-budget test above but adds a
+  // maxChangesPerHour cap and checks behavior across the "restart".
+  test('server restart replays the durable meter without stamping the current hour (P9)', async () => {
+    const a = Identity.create();
+    const b = Identity.create();
+    const backend = new MemoryBackend();
+    const srv = createServer({ backend });
+    await srv.fetch(signed('POST', '/repos', { name: 'r4' }, a));
+    await srv.fetch(
+      signed(
+        'POST',
+        '/repos/r4/grants',
+        {
+          delegation: encodeDelegation(
+            signDelegation(
+              {
+                agent: b.did,
+                paths: ['**'],
+                maxChanges: 100,
+                maxSpend: 1000,
+                maxChangesPerHour: 1,
+              },
+              a
+            )
+          ),
+        },
+        a
+      )
+    );
+
+    const first = await authored(b, 'a.txt');
+    await srv.fetch(signed('POST', '/repos/r4/push', first.bundle, b));
+    const firstLanded = (await (
+      await srv.fetch(
+        signed(
+          'POST',
+          '/repos/r4/land',
+          { fromHeads: first.heads, into: 'main' },
+          b
+        )
+      )
+    ).json()) as LandResult;
+    expect(firstLanded.landed).toBe(true);
+
+    // Restart: a fresh server over the SAME backend rebuilds the registry,
+    // replaying the persisted meter (1 lifetime change). If buildRegistry used
+    // record() instead of replayMeter(), that replay would land in the current
+    // hour's window and this land would be wrongly rejected (1 + 1 > 1).
+    const srv2 = createServer({ backend });
+    const second = await authored(b, 'b.txt');
+    await srv2.fetch(signed('POST', '/repos/r4/push', second.bundle, b));
+    const secondLanded = (await (
+      await srv2.fetch(
+        signed(
+          'POST',
+          '/repos/r4/land',
+          { fromHeads: second.heads, into: 'main' },
+          b
+        )
+      )
+    ).json()) as LandResult;
+    expect(secondLanded.landed).toBe(true);
+
+    // Forward-looking: the second land above genuinely used the hourly
+    // window's one slot on srv2, so a third land within the hour is rejected.
+    const third = await authored(b, 'c.txt');
+    await srv2.fetch(signed('POST', '/repos/r4/push', third.bundle, b));
+    const thirdLanded = (await (
+      await srv2.fetch(
+        signed(
+          'POST',
+          '/repos/r4/land',
+          { fromHeads: third.heads, into: 'main' },
+          b
+        )
+      )
+    ).json()) as LandResult;
+    expect(thirdLanded.landed).toBe(false);
+    expect(thirdLanded.reason?.toLowerCase()).toContain('hourly rate window');
+  });
+
   // Regression for the registry concurrency race: with a fresh (cold-cache)
   // server, fire a delegate land and an owner revoke in the SAME tick. Because
   // registryFor is single-flight (one AgentRegistry per repo) and the
