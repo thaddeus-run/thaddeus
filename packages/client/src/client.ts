@@ -9,7 +9,12 @@ import {
   verifyRelease,
 } from '@thaddeus.run/platform';
 import { type Provenance, ProvenanceLog } from '@thaddeus.run/provenance';
-import type { ContributionClaim } from '@thaddeus.run/reputation';
+import {
+  type ContributionClaim,
+  decodeReputationArchive,
+  encodeReputationArchive,
+  type ReputationArchive,
+} from '@thaddeus.run/reputation';
 import { type Veto, VetoLog } from '@thaddeus.run/review';
 import {
   decodeBundle,
@@ -80,8 +85,16 @@ export interface LandOutcome {
 export interface ReputationProfile {
   subject: string;
   attested: number;
+  untrusted: number;
   claimed: number;
   byKind: Record<string, number>;
+}
+
+export interface ReputationImportOutcome {
+  subject: string;
+  imported: number;
+  duplicates: number;
+  total: number;
 }
 
 // FetchLike matches the server's fetch(req: Request) shape. The client always
@@ -387,6 +400,7 @@ export class Client {
         headers: {
           'x-thaddeus-did': h.did,
           'x-thaddeus-timestamp': h.timestamp,
+          'x-thaddeus-nonce': h.nonce,
           'x-thaddeus-signature': h.signature,
         },
       })
@@ -540,6 +554,28 @@ export class Client {
     return (await this.#ok(res)) as ReputationProfile;
   }
 
+  // Public export of a subject's complete dual-signed contribution set.
+  async exportReputation(did: string): Promise<ReputationArchive> {
+    const res = await this.#fetch(
+      new Request(
+        `${this.#server}/reputation/${encodeURIComponent(did)}/export`
+      )
+    );
+    const body = (await this.#ok(res)) as { archive: string };
+    return decodeReputationArchive(body.archive);
+  }
+
+  // Signed, subject-authorized import. The destination independently verifies
+  // the archive before making its one-write durable merge.
+  async importReputation(
+    archive: ReputationArchive
+  ): Promise<ReputationImportOutcome> {
+    const res = await this.#signed('POST', '/reputation/import', {
+      archive: encodeReputationArchive(archive),
+    });
+    return (await this.#ok(res)) as ReputationImportOutcome;
+  }
+
   // Owner: register an owner-signed delegation granting `delegation.agent` push.
   async grant(
     name: string,
@@ -641,6 +677,7 @@ export class Client {
           'content-type': 'application/json',
           'x-thaddeus-did': h.did,
           'x-thaddeus-timestamp': h.timestamp,
+          'x-thaddeus-nonce': h.nonce,
           'x-thaddeus-signature': h.signature,
         },
       })

@@ -5,6 +5,23 @@ All notable changes to Thaddeus. Format follows
 
 ## [Unreleased]
 
+### Added
+
+- **Signed-request replay protection.** Every signed mutation now carries a
+  random nonce covered by the request signature. Servers retain accepted
+  `(signer, nonce)` pairs in a bounded, expiring cache and reject replays for
+  the full five-minute timestamp-validity window, failing closed when the cache
+  is full.
+
+- **P10 portable reputation.** Fully dual-signed contribution histories now move
+  between instances as deterministic `thaddeus.reputation.v1` JSON archives.
+  `thaddeus reputation export` writes stdout or a file; `reputation import`
+  reads a file/stdin or copies directly with `--from`. Imports are strictly
+  verified, signed by the archive subject, persisted as one content-addressed
+  delta, and idempotent. Destinations retain valid foreign attestations but
+  count them in profiles and `--min-merges` only for host DIDs configured with
+  repeatable `serve --trust-host` (the local host is trusted automatically).
+
 ## [0.1.6-alpha] - 2026-07-11
 
 ### Added

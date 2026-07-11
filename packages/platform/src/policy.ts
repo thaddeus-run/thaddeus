@@ -66,11 +66,12 @@ export function requireVerifiedProvenance(prov: ProvenanceLog): LandPolicy {
 
 // A reputation-tier gate (Pillar 10): merge is a function of proven
 // contribution, not a human reading a diff. Allow iff EVERY incoming op's
-// author has at least `minMerges` ATTESTED merges — P07 counts only the
-// host-vouched set, so self-claimed reputation can never unlock the gate.
+// author has at least `minMerges` ATTESTED merges. When `trustedHosts` is
+// supplied, valid foreign-host proofs remain visible but cannot unlock the gate.
 export function requireReputationTier(
   reps: ReputationLog,
-  minMerges: number
+  minMerges: number,
+  trustedHosts?: ReadonlySet<string>
 ): LandPolicy {
   // Fail fast on a misconfigured tier: since `byKind.merge` is always >= 0, a
   // negative threshold would silently pass every author (a no-op gate). Reject
@@ -82,7 +83,7 @@ export function requireReputationTier(
   }
   return (p) => {
     const below = p.incomingOps.filter(
-      (op) => reps.profile(op.author).byKind.merge < minMerges
+      (op) => reps.profile(op.author, trustedHosts).byKind.merge < minMerges
     );
     return below.length === 0
       ? { allow: true }

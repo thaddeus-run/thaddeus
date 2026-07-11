@@ -63,15 +63,21 @@ SQLite/S3 backends, compaction/GC, and a Git gateway are the next steps.
 The durable `Platform` is reachable over HTTP via `@thaddeus.run/server` — a
 `Bun.serve` remote that is **untrusted** (no keys, verifies-don't-trust, serves
 ciphertext): reads are a public mirror, writes are owner-signed, `land` is
-key-free and policy-gated. It is stateless over the shared `Backend`, so a node
-restart serves the same repos. It now carries **and persists the whole
-substrate** — not just code (P01 objects, P03 ops) but the meaning around it:
-the signed "why" (P04), the standing human veto (P10), server-wide reputation
-(P07), and semantic-graph ops (P08), each write-through under its own
-content-addressed key and rebuilt on load. The server may **optionally attest**:
-given a `host` identity it co-signs a client's reputation claim on a successful
-land (minting a host-vouched merge) and can gate land on that durable reputation
-(`--min-merges`). Multi-node concurrency, cross-instance federation, and the Git
+key-free and policy-gated. Signed mutations bind a random nonce into the request
+signature; a bounded process-local cache rejects reuse throughout the
+five-minute timestamp window. Replay state is not shared across nodes or
+preserved over restart. The server is otherwise stateless over the shared
+`Backend`, so a node restart serves the same repos. It now carries **and
+persists the whole substrate** — not just code (P01 objects, P03 ops) but the
+meaning around it: the signed "why" (P04), the standing human veto (P10),
+server-wide reputation (P07), and semantic-graph ops (P08), each write-through
+under its own content-addressed key and rebuilt on load. The server may
+**optionally attest**: given a `host` identity it co-signs a client's reputation
+claim on a successful land (minting a host-vouched merge) and can gate land on
+that durable reputation (`--min-merges`). Reputation is portable across
+instances as a strict, subject-imported JSON proof archive. Foreign attestations
+are retained but count only when their host DID is in the destination's explicit
+trust set. Multi-node concurrency, dynamic federation discovery, and the Git
 gateway are the next steps.
 
 Timed reveal is the deliberate exception to that normal trust boundary. An owner

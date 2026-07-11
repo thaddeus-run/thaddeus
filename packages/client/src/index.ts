@@ -2,6 +2,8 @@ export {
   Client,
   type LandOutcome,
   type PushResult,
+  type ReputationImportOutcome,
+  type ReputationProfile,
   type RevokeOutcome,
   type RevealOutcome,
   type ScheduleRevealOutcome,

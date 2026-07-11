@@ -68,9 +68,12 @@ substrate seams it needs. Deliverables:
   and `ARCHITECTURE.md` + `CHANGELOG.md` updates.
 
 Not the job (deferred, §11): multi-node concurrency / optimistic-concurrency on
-`land` + the `scope` delimiter-encode; a grant list / richer ACLs; replay-proof
-request nonces; a client SDK/CLI; TLS / deployment; incremental pull /
-pagination; the Git gateway.
+`land` + the `scope` delimiter-encode; a grant list / richer ACLs; a client
+SDK/CLI; TLS / deployment; incremental pull / pagination; the Git gateway.
+
+> **P11 update (2026-07-11):** replay-proof request nonces have shipped. See
+> `docs/superpowers/specs/2026-07-11-p11-replay-nonce-cache-design.md` for the
+> current protocol and its process-local boundary.
 
 ## 4. Decisions taken (brainstorm outcomes)
 
@@ -91,8 +94,8 @@ pagination; the Git gateway.
    (persisted). Write requests (`push`/`land`/`create`) carry a signature over a
    canonical request string; the server verifies it and checks
    `signer === owner`. Reads are public (the mirror serves ciphertext to
-   anyone). A grant list and nonce-based replay-proofing are deferred (slice one
-   uses a timestamp window).
+   anyone). Slice one used a timestamp window; P11 now binds a random nonce and
+   rejects its reuse within the running server process.
 
 4. **`Bun.serve`, single node.** Zero-dependency, matches the toolchain. The
    only per-node state is an in-memory cache of opened `Repo`s, rebuildable from
@@ -137,8 +140,9 @@ HTTP-level tests; `examples/server/`; docs.
   the `scope()` delimiter-encode for many repos in one shared store. Single node
   now (per-repo in-process lock).
 - **Grant list / richer ACLs** — owner-only writes in slice one.
-- **Replay-proof nonces** — slice one binds a signed timestamp window; a
-  seen-nonce store is deferred.
+- **Replay-proof nonces (shipped in P11)** — a signed random nonce is consumed
+  by a bounded, expiring process-local cache. Durable multi-node consumption is
+  still deferred.
 - **Client SDK / CLI** — the client is `fetch` + existing packages in
   tests/demo.
 - **TLS / auth tokens / deployment / process management.**
@@ -187,19 +191,21 @@ function per type.
 
 ### 6.2 The signed-request envelope (writes only)
 
-Three headers:
+Four headers:
 
 ```
 X-Thaddeus-Did        the signer's did:key
 X-Thaddeus-Timestamp  ISO-8601
-X-Thaddeus-Signature  sign( `${method}\n${pathWithQuery}\n${blake3(body)}\n${timestamp}` )
+X-Thaddeus-Nonce      random request identifier
+X-Thaddeus-Signature  sign( `${method}\n${pathWithQuery}\n${blake3(body)}\n${timestamp}\n${nonce}` )
 ```
 
 The server: (1) verifies the signature with the DID's public key; (2) requires
-the timestamp within ±5 minutes (bounds replay; a nonce store is deferred); (3)
-for `push`/`land`, requires `signer === repo.owner`. Failures: `401`
-(missing/invalid/expired signature), `403` (valid signature, not owner). Binding
-the signature to `blake3(body)` means a tampered payload fails — the owner
+the timestamp within ±5 minutes; (3) consumes the `(signer, nonce)` pair in the
+server's bounded replay cache; and (4) for `push`/`land`, requires
+`signer === repo.owner`. Failures: `401` (missing/invalid/expired/replayed
+signature), `403` (valid signature, not owner). Binding the signature to
+`blake3(body)` and the nonce means a tampered payload or nonce fails — the owner
 authorizes exactly these bytes.
 
 ### 6.3 Substrate seams (additive)

@@ -32,7 +32,10 @@ publish. All crypto is client-side; your identity seed lives in
 | `watch [symbol] [--kind <event>]...`                                     | Stream remote semantic changes         |
 | `schedule-reveal <path> --at <ISO>`                                      | Make committed content public later    |
 | `reveal <path>`                                                          | Trigger a due public reveal            |
-| `serve [--port 4000] [--data ./thaddeus-data]`                           | Run a durable server                   |
+| `reputation <did>`                                                       | Show trusted/untrusted reputation      |
+| `reputation export <did> [--output path]`                                | Export a public reputation archive     |
+| `reputation import <path\|->` / `import --from URL`                      | Import or directly copy your archive   |
+| `serve [--port 4000] [--data DIR] [--trust-host <did>]`                  | Run a durable server                   |
 
 ## Query the committed branch
 

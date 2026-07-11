@@ -22,6 +22,9 @@ import { ProvenanceLog } from '@thaddeus.run/provenance';
 import {
   attest,
   type ContributionClaim,
+  decodeReputationArchive,
+  encodeReputationArchive,
+  type ReputationArchive,
   ReputationLog,
   verifyClaim,
 } from '@thaddeus.run/reputation';
@@ -54,7 +57,11 @@ import {
   repoPolicyGates,
   type RepoPolicyRecord,
 } from './repo-policy';
-import { type SignedHeaders, verifyRequest } from './sign';
+import {
+  ReplayNonceCache,
+  type SignedHeaders,
+  verifyRequest as verifySignedEnvelope,
+} from './sign';
 
 // Parse a JSON request body, returning undefined on malformed input (so a handler
 // can answer 400 rather than throwing a 500). Used by every body-parsing handler.
@@ -94,6 +101,12 @@ export interface ServerConfig {
   // When set, land is additionally gated on durable server-wide reputation:
   // every incoming op's author must have at least this many ATTESTED merges.
   minMerges?: number;
+  // Host DIDs whose valid attestations count in this instance's profile and
+  // reputation gates. The local `host`, when present, is trusted automatically.
+  trustedReputationHosts?: readonly string[];
+  // Maximum live signed-request nonces retained during the five-minute replay
+  // window. When full, writes fail closed until the oldest nonce expires.
+  replayCacheCapacity?: number;
 }
 
 export interface Server {
@@ -217,12 +230,24 @@ function replacesPendingReveal(
 
 // A Bun.serve-compatible handler over a durable Platform. It verifies and
 // serves ciphertext; timed reveals are the explicit store-honest exception to
-// the normal key-free trust boundary. Per-node state is the opened-Repo cache +
-// per-repo mutation lock, both rebuildable from the backend.
+// the normal key-free trust boundary. Per-node state is the opened-Repo cache,
+// per-repo mutation lock, and replay-nonce cache. The first two rebuild from
+// the backend; accepted nonces intentionally do not survive restart.
 export function createServer(config: ServerConfig): Server {
   const platform = new Platform();
   const policy = config.policy ?? blockOnConflict;
   const now = config.now ?? ((): string => new Date().toISOString());
+  const replayNonces = new ReplayNonceCache(config.replayCacheCapacity);
+  const trustedReputationHosts = new Set<string>();
+  for (const did of config.trustedReputationHosts ?? []) {
+    try {
+      PublicIdentity.fromDid(did);
+    } catch {
+      throw new TypeError(`invalid trusted reputation host DID: ${did}`);
+    }
+    trustedReputationHosts.add(did);
+  }
+  if (config.host !== undefined) trustedReputationHosts.add(config.host.did);
   const repoCache = new Map<string, Repo>();
   // Per-repo promise chain: each mutation awaits the previous, so a land's
   // read-heads -> re-point can't interleave with a concurrent push.
@@ -420,11 +445,36 @@ export function createServer(config: ServerConfig): Server {
   function headers(req: Request): SignedHeaders | null {
     const did = req.headers.get('x-thaddeus-did');
     const timestamp = req.headers.get('x-thaddeus-timestamp');
+    const nonce = req.headers.get('x-thaddeus-nonce');
     const signature = req.headers.get('x-thaddeus-signature');
-    if (did === null || timestamp === null || signature === null) {
+    if (
+      did === null ||
+      timestamp === null ||
+      nonce === null ||
+      signature === null
+    ) {
       return null;
     }
-    return { did, timestamp, signature };
+    return { did, timestamp, nonce, signature };
+  }
+
+  // Every signed route uses this local wrapper so adding a new mutation cannot
+  // accidentally verify freshness without consuming the server's nonce cache.
+  function verifyRequest(
+    method: string,
+    pathWithQuery: string,
+    body: Uint8Array,
+    signedHeaders: SignedHeaders | null,
+    nowMs: number
+  ): string | null {
+    return verifySignedEnvelope(
+      method,
+      pathWithQuery,
+      body,
+      signedHeaders,
+      nowMs,
+      replayNonces
+    );
   }
 
   const json = (status: number, body: unknown): Response =>
@@ -1537,7 +1587,11 @@ export function createServer(config: ServerConfig): Server {
       // Loaded lazily — a server with no host and no floor never touches `rep/`.
       if (config.minMerges !== undefined) {
         gates.push(
-          requireReputationTier(await reputationLog(), config.minMerges)
+          requireReputationTier(
+            await reputationLog(),
+            config.minMerges,
+            trustedReputationHosts
+          )
         );
       }
       const result = await repo.land({
@@ -1754,17 +1808,74 @@ export function createServer(config: ServerConfig): Server {
     return json(200, { grants });
   }
 
-  // Public: a subject's server-wide reputation profile (P07) — attested vs
-  // claimed counts and the attested tally by kind. Counts (not the full records)
-  // keep the response JSON-safe; the tier gate reads the same durable log.
+  // Public: a subject's server-wide reputation profile — trusted-attested,
+  // valid-but-untrusted, and claimed counts. The tier gate reads the same log
+  // with the same destination trust set.
   async function reputationProfile(did: string): Promise<Response> {
     const reps = await reputationLog();
-    const profile = reps.profile(did);
+    const profile = reps.profile(did, trustedReputationHosts);
     return json(200, {
       subject: profile.subject,
       attested: profile.attested.length,
+      untrusted: profile.untrusted.length,
       claimed: profile.claimed.length,
       byKind: profile.byKind,
+    });
+  }
+
+  // Public export: portable reputation is cleartext signed metadata. The
+  // archive carries all valid host proofs; the destination applies its trust.
+  async function reputationExport(did: string): Promise<Response> {
+    try {
+      const archive = (await reputationLog()).archive(did);
+      return json(200, { archive: encodeReputationArchive(archive) });
+    } catch {
+      return json(400, { error: 'reputation subject must be a valid did:key' });
+    }
+  }
+
+  // Subject-authorized strict import. Every contribution is independently
+  // verified by decodeReputationArchive before the one-write durable merge.
+  async function reputationImport(
+    req: Request,
+    body: Uint8Array
+  ): Promise<Response> {
+    const signer = verifyRequest(
+      'POST',
+      new URL(req.url).pathname,
+      body,
+      headers(req),
+      Date.parse(now())
+    );
+    if (signer === null) {
+      return json(401, { error: 'unsigned or invalid request' });
+    }
+    const parsed = safeParseJson(body);
+    if (parsed === undefined || parsed === null || typeof parsed !== 'object') {
+      return json(400, { error: 'invalid JSON body' });
+    }
+    const archiveJson = (parsed as { archive?: unknown }).archive;
+    if (typeof archiveJson !== 'string') {
+      return json(400, { error: 'missing reputation archive' });
+    }
+    let archive: ReputationArchive;
+    try {
+      archive = decodeReputationArchive(archiveJson);
+    } catch (error) {
+      return json(400, {
+        error:
+          error instanceof Error ? error.message : 'invalid reputation archive',
+      });
+    }
+    if (signer !== archive.subject) {
+      return json(403, { error: 'only the archive subject may import it' });
+    }
+    const reps = await reputationLog();
+    const result = await reps.ingestArchive(archive);
+    return json(200, {
+      subject: archive.subject,
+      ...result,
+      total: reps.archive(archive.subject).contributions.length,
     });
   }
 
@@ -1801,6 +1912,15 @@ export function createServer(config: ServerConfig): Server {
 
       if (path === '/repos' && req.method === 'GET') {
         return listRepos();
+      }
+      if (path === '/reputation/import' && req.method === 'POST') {
+        return reputationImport(req, body);
+      }
+      const repExportMatch = path.match(/^\/reputation\/(.+)\/export$/);
+      if (repExportMatch !== null && req.method === 'GET') {
+        const did = safeDecode(repExportMatch[1]);
+        if (did === undefined) return json(400, { error: 'malformed path' });
+        return reputationExport(did);
       }
       // GET /reputation/:did — the subject's server-wide profile.
       const repMatch = path.match(/^\/reputation\/(.+)$/);

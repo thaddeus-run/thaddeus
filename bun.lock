@@ -258,6 +258,7 @@
       "version": "0.0.0",
       "dependencies": {
         "@thaddeus.run/agent": "workspace:*",
+        "@thaddeus.run/client": "workspace:*",
         "@thaddeus.run/fs": "workspace:*",
         "@thaddeus.run/graph": "workspace:*",
         "@thaddeus.run/identity": "workspace:*",
@@ -267,6 +268,7 @@
         "@thaddeus.run/provenance": "workspace:*",
         "@thaddeus.run/query": "workspace:*",
         "@thaddeus.run/reputation": "workspace:*",
+        "@thaddeus.run/server": "workspace:*",
         "@thaddeus.run/store": "workspace:*",
         "@thaddeus.run/watch": "workspace:*",
       },

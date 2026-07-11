@@ -111,6 +111,7 @@ and write-once, so incremental backups are cheap.
   container then runs against **AWS S3**, **Cloudflare R2**, or self-hosted
   **MinIO**, making a host switch a config change and enabling multiple server
   replicas.
-- **Replay-nonce hardening.** The signed-request check currently allows a ±5-min
-  window (`packages/server/src/sign.ts`); a server-side nonce cache closes the
-  replay window for a public deployment.
+- **Distributed replay protection.** The server rejects reused signed nonces
+  throughout their ±5-minute timestamp window, but the cache is process-local. A
+  restart or another replica starts a separate replay boundary; a durable atomic
+  consume mechanism remains deferred for multi-replica deployments.

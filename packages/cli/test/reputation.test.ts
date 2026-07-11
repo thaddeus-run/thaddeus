@@ -2,10 +2,11 @@ import { Identity, ready } from '@thaddeus.run/identity';
 import { MemoryBackend } from '@thaddeus.run/persist';
 import { createServer } from '@thaddeus.run/server';
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
+import { loadIdentity } from '../src/identity';
 import { run } from '../src/run';
 
 beforeAll(async () => {
@@ -81,5 +82,92 @@ describe('thaddeus reputation', () => {
     out.length = 0;
     expect(await run(['reputation', owner!], e(a))).toBe(0);
     expect(out.join('\n')).toContain('attested: 0');
+  });
+
+  test('exports to stdout/file and imports from stdin or directly across instances', async () => {
+    const host = Identity.create();
+    const source = createServer({ backend: new MemoryBackend(), host });
+    const destination = createServer({ backend: new MemoryBackend() });
+    const directDestination = createServer({ backend: new MemoryBackend() });
+    const fetchImpl = (req: Request): Promise<Response> => {
+      const hostname = new URL(req.url).hostname;
+      if (hostname === 'source') return source.fetch(req);
+      if (hostname === 'destination') return destination.fetch(req);
+      return directDestination.fetch(req);
+    };
+    const home = await clientHome(fetchImpl, 'portable');
+    const identity = loadIdentity(home);
+    const out: string[] = [];
+    const env = (cwd: string, stdin?: () => Promise<string>) => ({
+      cwd,
+      home,
+      fetchImpl,
+      stdin,
+      out: (line: string) => out.push(line),
+    });
+
+    expect(
+      await run(['create', 'portable', '--server', 'http://source'], env(home))
+    ).toBe(0);
+    const wc = mkdtempSync(join(tmp, 'portable-wc-'));
+    expect(
+      await run(['clone', 'portable', wc, '--server', 'http://source'], env(wc))
+    ).toBe(0);
+    writeFileSync(join(wc, 'proof.rs'), 'fn proof() {}');
+    expect(await run(['push', '-m', 'portable proof'], env(wc))).toBe(0);
+
+    out.length = 0;
+    expect(
+      await run(
+        ['reputation', 'export', identity.did, '--server', 'http://source'],
+        env(home)
+      )
+    ).toBe(0);
+    const archive = out.join('\n');
+    expect(JSON.parse(archive).format).toBe('thaddeus.reputation.v1');
+
+    const archivePath = join(home, 'reputation.json');
+    out.length = 0;
+    expect(
+      await run(
+        [
+          'reputation',
+          'export',
+          identity.did,
+          '--server',
+          'http://source',
+          '--output',
+          archivePath,
+        ],
+        env(home)
+      )
+    ).toBe(0);
+    expect(readFileSync(archivePath, 'utf8')).toBe(`${archive}\n`);
+
+    out.length = 0;
+    expect(
+      await run(
+        ['reputation', 'import', '-', '--server', 'http://destination'],
+        env(home, () => Promise.resolve(archive))
+      )
+    ).toBe(0);
+    expect(out.join('\n')).toContain('imported 1 contribution(s)');
+
+    out.length = 0;
+    expect(
+      await run(
+        [
+          'reputation',
+          'import',
+          '--from',
+          'http://source',
+          '--server',
+          'http://direct',
+          '--json',
+        ],
+        env(home)
+      )
+    ).toBe(0);
+    expect(JSON.parse(out.join('\n'))).toMatchObject({ imported: 1, total: 1 });
   });
 });

@@ -79,10 +79,27 @@ describe('ReputationLog — aggregate, verify, profile', () => {
 
     const p = log.profile(alice.did);
     expect(p.attested.map((c) => c.ref)).toEqual(['op-a']);
+    expect(p.untrusted).toEqual([]);
     expect(p.claimed.map((c) => c.ref)).toEqual(['op-b']);
     expect(p.byKind.merge).toBe(1);
     expect(p.byKind.review).toBe(0);
     expect(p.byKind.release).toBe(0);
+  });
+
+  test('an explicit trust set separates valid foreign attestations', () => {
+    const alice = Identity.create();
+    const trusted = Identity.create();
+    const foreign = Identity.create();
+    const log = new ReputationLog();
+    log.append(signContribution(fields({ ref: 'trusted' }), alice, trusted));
+    log.append(signContribution(fields({ ref: 'foreign' }), alice, foreign));
+
+    const filtered = log.profile(alice.did, new Set([trusted.did]));
+    expect(filtered.attested.map((c) => c.ref)).toEqual(['trusted']);
+    expect(filtered.untrusted.map((c) => c.ref)).toEqual(['foreign']);
+    expect(filtered.byKind.merge).toBe(1);
+    expect(log.profile(alice.did).attested).toHaveLength(2);
+    expect(log.profile(alice.did, new Set()).attested).toHaveLength(0);
   });
 
   test('forSubject returns a deterministic order regardless of append order', () => {

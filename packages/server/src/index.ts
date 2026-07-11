@@ -10,6 +10,9 @@ export type {
 } from './repo-policy';
 export {
   canonicalRequest,
+  DEFAULT_REPLAY_CACHE_CAPACITY,
+  ReplayNonceCache,
+  REQUEST_SKEW_MS,
   signRequest,
   verifyRequest,
   type SignedHeaders,
