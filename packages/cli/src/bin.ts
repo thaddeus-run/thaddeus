@@ -14,6 +14,7 @@ try {
   process.exitCode = await run(process.argv.slice(2), {
     cwd: process.cwd(),
     home: homedir(),
+    stdin: () => Bun.stdin.text(),
   });
 } catch (e) {
   console.error(`error: ${e instanceof Error ? e.message : String(e)}`);
