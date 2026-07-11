@@ -79,6 +79,16 @@ export function delegationPolicy(
           reason: `agent ${agent} is over its change budget`,
         };
       }
+      // P9 rate window: reject a landing that would push the agent past its
+      // per-hour cap. `null`/absent = no rate limit; composes with (does not
+      // replace) the lifetime cap above.
+      const rate = d.maxChangesPerHour;
+      if (rate != null && registry.recentChanges(agent) + count > rate) {
+        return {
+          allow: false,
+          reason: `agent ${agent} is over its hourly rate window`,
+        };
+      }
       // Spend is checked retrospectively (no projection) — a change's spend
       // is not known until the caller `record`s it after a successful land.
       if (u.spend >= d.maxSpend) {
