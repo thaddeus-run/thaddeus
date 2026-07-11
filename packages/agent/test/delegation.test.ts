@@ -62,4 +62,75 @@ describe('Delegation — sign & verify', () => {
     ).toThrow();
     expect(() => signDelegation({ ...FIELDS, agent: '' }, operator)).toThrow();
   });
+
+  describe('maxChangesPerHour (P9 rate window)', () => {
+    const fields = (agent: Identity) =>
+      ({
+        agent: agent.did,
+        paths: ['src/**'],
+        maxChanges: 5,
+        maxSpend: 100,
+      }) as const;
+
+    test('a pre-P9 record and a new no-cap grant sign the identical v1 tuple', () => {
+      const operator = Identity.create();
+      const agent = Identity.create();
+      const f = fields(agent);
+      // Reproduce the legacy canonical bytes exactly as the old code built them.
+      const legacyBytes = new TextEncoder().encode(
+        JSON.stringify([
+          'thaddeus.delegation.v1',
+          operator.did,
+          f.agent,
+          [...f.paths],
+          f.maxChanges,
+          f.maxSpend,
+        ])
+      );
+      const legacy = {
+        ...f,
+        operator: operator.did,
+        sig: operator.sign(legacyBytes),
+      };
+      expect(verifyDelegation(legacy)).toBe(true); // old grant still verifies
+      // A new grant without the field verifies against the SAME bytes.
+      const fresh = signDelegation(f, operator);
+      expect(verifyDelegation({ ...fresh, sig: legacy.sig })).toBe(true);
+      // Explicit null is byte-identical to absent.
+      const explicit = signDelegation(
+        { ...f, maxChangesPerHour: null },
+        operator
+      );
+      expect(verifyDelegation({ ...explicit, sig: legacy.sig })).toBe(true);
+    });
+
+    test('a rate-capped grant verifies and rejects tampering with the cap', () => {
+      const operator = Identity.create();
+      const agent = Identity.create();
+      const d = signDelegation(
+        { ...fields(agent), maxChangesPerHour: 3 },
+        operator
+      );
+      expect(d.maxChangesPerHour).toBe(3);
+      expect(verifyDelegation(d)).toBe(true);
+      expect(verifyDelegation({ ...d, maxChangesPerHour: 4 })).toBe(false);
+      expect(verifyDelegation({ ...d, maxChangesPerHour: null })).toBe(false);
+    });
+
+    test('canonicalization rejects a negative or fractional cap; zero is legal', () => {
+      const operator = Identity.create();
+      const agent = Identity.create();
+      expect(() =>
+        signDelegation({ ...fields(agent), maxChangesPerHour: -1 }, operator)
+      ).toThrow(TypeError);
+      expect(() =>
+        signDelegation({ ...fields(agent), maxChangesPerHour: 1.5 }, operator)
+      ).toThrow(TypeError);
+      expect(
+        verifyDelegation(
+          signDelegation({ ...fields(agent), maxChangesPerHour: 0 }, operator)
+        )
+      ).toBe(true);
+    });
+  });
 });
