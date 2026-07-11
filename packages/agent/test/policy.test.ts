@@ -186,4 +186,96 @@ describe('delegationPolicy', () => {
     await delegationPolicy(reg)(p);
     expect(reg.usage(agent.did)).toEqual({ changes: 0, spend: 0 });
   });
+
+  describe('hourly rate window (P9)', () => {
+    test('rejects a landing that exceeds the cap inside the window, allows it after the window slides', async () => {
+      const operator = Identity.create();
+      const agent = Identity.create();
+      let t = 1_000_000;
+      const reg = new AgentRegistry(() => t);
+      reg.register(
+        signDelegation(
+          {
+            agent: agent.did,
+            paths: ['src/**'],
+            maxChanges: 100,
+            maxSpend: 100,
+            maxChangesPerHour: 2,
+          },
+          operator
+        )
+      );
+      const policy = delegationPolicy(reg);
+      // Two ops land and are recorded — the window is now full.
+      reg.record(agent.did, 2);
+      const third = proposal([await op(agent, 'src/a.rs')]);
+      const rejected = await policy(third);
+      expect(rejected.allow).toBe(false);
+      expect(rejected).toMatchObject({
+        reason: `agent ${agent.did} is over its hourly rate window`,
+      });
+      // An hour later the window is empty; the same landing is allowed.
+      t += 61 * 60_000;
+      expect((await policy(third)).allow).toBe(true);
+    });
+
+    test('lifetime and hourly caps compose; a null cap never rate-limits', async () => {
+      const operator = Identity.create();
+      const capped = Identity.create();
+      const uncapped = Identity.create();
+      let t = 1_000_000;
+      const reg = new AgentRegistry(() => t);
+      // Lifetime nearly exhausted, hourly cap generous → lifetime trips first.
+      reg.register(
+        signDelegation(
+          {
+            agent: capped.did,
+            paths: ['**'],
+            maxChanges: 1,
+            maxSpend: 100,
+            maxChangesPerHour: 10,
+          },
+          operator
+        )
+      );
+      reg.record(capped.did, 1);
+      const lifetime = await delegationPolicy(reg)(
+        proposal([await op(capped, 'src/a.rs')])
+      );
+      expect(lifetime.allow).toBe(false);
+      expect(lifetime).toMatchObject({
+        reason: `agent ${capped.did} is over its change budget`,
+      });
+      // No hourly cap → heavy recent usage does not rate-limit.
+      reg.register(
+        signDelegation(
+          {
+            agent: uncapped.did,
+            paths: ['**'],
+            maxChanges: 100,
+            maxSpend: 100,
+          },
+          operator
+        )
+      );
+      reg.record(uncapped.did, 50);
+      expect(
+        (
+          await delegationPolicy(reg)(
+            proposal([await op(uncapped, 'src/a.rs')])
+          )
+        ).allow
+      ).toBe(true);
+    });
+
+    test('an exempt author skips the hourly window', async () => {
+      const owner = Identity.create();
+      let t = 1_000_000;
+      const reg = new AgentRegistry(() => t);
+      const policy = delegationPolicy(reg, (a) => a === owner.did);
+      expect(
+        (await policy(proposal([await op(owner, 'src/a.rs')]))).allow
+      ).toBe(true);
+    });
+  });
 });
