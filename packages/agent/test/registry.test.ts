@@ -90,3 +90,48 @@ describe('AgentRegistry', () => {
     expect(() => reg.record(agent.did, 1, -5)).toThrow();
   });
 });
+
+describe('hourly rate window (P9)', () => {
+  test('record feeds the trailing-hour window; entries expire after an hour', () => {
+    const operator = Identity.create();
+    const agent = Identity.create();
+    let t = 1_000_000;
+    const reg = new AgentRegistry(() => t);
+    reg.register(grant(operator, agent));
+    expect(reg.recentChanges(agent.did)).toBe(0);
+    reg.record(agent.did, 2);
+    t += 30 * 60_000; // +30min
+    reg.record(agent.did, 1);
+    expect(reg.recentChanges(agent.did)).toBe(3);
+    t += 31 * 60_000; // first entry is now 61min old
+    expect(reg.recentChanges(agent.did)).toBe(1);
+    t += 60 * 60_000; // everything expired
+    expect(reg.recentChanges(agent.did)).toBe(0);
+    // Lifetime totals are unaffected by window expiry.
+    expect(reg.usage(agent.did).changes).toBe(3);
+  });
+
+  test('replayMeter restores lifetime totals without touching the window', () => {
+    const operator = Identity.create();
+    const agent = Identity.create();
+    let t = 1_000_000;
+    const reg = new AgentRegistry(() => t);
+    reg.register(grant(operator, agent));
+    reg.replayMeter(agent.did, 4, 10);
+    expect(reg.usage(agent.did)).toEqual({ changes: 4, spend: 10 });
+    expect(reg.recentChanges(agent.did)).toBe(0);
+    expect(() => reg.replayMeter('did:key:zUnknown', 1)).toThrow(TypeError);
+  });
+
+  test('re-registering preserves both the lifetime meter and the window', () => {
+    const operator = Identity.create();
+    const agent = Identity.create();
+    let t = 1_000_000;
+    const reg = new AgentRegistry(() => t);
+    reg.register(grant(operator, agent));
+    reg.record(agent.did, 2);
+    reg.register(grant(operator, agent));
+    expect(reg.usage(agent.did).changes).toBe(2);
+    expect(reg.recentChanges(agent.did)).toBe(2);
+  });
+});
