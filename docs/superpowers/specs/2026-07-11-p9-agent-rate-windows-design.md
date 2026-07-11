@@ -28,8 +28,12 @@ rejects a landing when `usage.changes + count > maxChanges`.
 
 ## Non-goals
 
-- No durable usage meter. The window state is in-memory and resets on server
-  restart, exactly like the existing lifetime meter (documented spike behavior).
+- No durable window state. The lifetime meter is already durable server-side
+  (`meter/<agent>` records replayed by `buildRegistry`); the hourly window's
+  timestamped entries are NOT persisted, so a restart forgets the current hour's
+  usage (documented spike behavior). Crucially, the meter replay must bypass
+  window accounting — otherwise a restart would stamp an agent's whole lifetime
+  total into the current hour and block it for an hour.
 - No per-minute/per-day generalization; the window is fixed at one hour. The
   record field is a count, not a `{count, windowMs}` pair — a future window size
   would be a new field under the same dual-verify pattern.
@@ -46,8 +50,11 @@ owners and make the deliberately stateless policy stateful).
 
 ### Record shape and signature compatibility (dual-verify)
 
-`DelegationFields` gains `maxChangesPerHour: number | null`; `null` means no
-rate limit. Canonicalization is presence-keyed:
+`DelegationFields` gains `maxChangesPerHour?: number | null`; `null` or absent
+means no rate limit. The property is optional so the ~30 existing
+`signDelegation` call sites (and records persisted before the field existed,
+which decode without the property) stay valid; canonicalization treats
+`undefined` and `null` identically. Canonicalization is presence-keyed:
 
 - `maxChangesPerHour === null` → the canonical tuple is byte-identical to the
   existing v1 tuple. New no-limit grants verify under old code and vice versa.
@@ -65,6 +72,10 @@ integer (0 is legal: zero changes allowed per hour).
   default `Date.now`) at construction.
 - `record(agent, changes, spend)` additionally appends `{ at: now(), changes }`
   to a per-agent window list, pruning entries older than one hour.
+- New method `replayMeter(agent, changes, spend)` restores lifetime totals
+  WITHOUT touching the window list; the server's `buildRegistry` meter replay
+  switches to it so a restart never attributes historical changes to the current
+  hour.
 - New accessor `recentChanges(agent): number` returns the pruned sum of changes
   within the trailing hour. `usage()` (lifetime totals) is unchanged.
 - Re-registering a delegation continues to NOT reset the meter — neither the
