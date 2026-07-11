@@ -11,11 +11,17 @@ never imported by the server: `restrictPaths`, `standingQuery`,
 no restart. This comes before releases because a release is the natural thing
 you'd want policy-gated.
 
+**Shipped:** repos persist a policy record selectable over the wire; the four
+gates are enforced at land without a restart.
+
 ## P5 - Releases
 
 A typed, signed `Release { tag, at, signed_by, commits }` record in `platform`,
 a server route, `thaddeus release`/`releases`, and a TUI view. Needs P2's
 nameable heads and P4 if releases should be gated.
+
+**Shipped:** typed, signed `Release` records with a server route,
+`thaddeus release`/`releases`, and a lazythad view, gated by P4 policy.
 
 ## P6 - Query Surface
 
@@ -66,6 +72,15 @@ server-side plaintext semantic index.
 
 Add per-hour rate windows on delegations; today `--max-changes` is a lifetime
 cap. Make `revoke` perform real key rotation and recall.
+
+**Shipped (rotate-and-recall, pulled forward):** `thaddeus revoke <did>` rotates
+every reachable content key and re-wraps for the remaining members; recall
+preserves pending reveals across key changes.
+
+**Shipped (budgets):** delegations carry an optional signed `maxChangesPerHour`;
+`thaddeus grant <did> --max-changes-per-hour N` bounds ops landed within any
+trailing hour, composing with the lifetime cap and enforced server-side at land.
+The window is in-memory; durable lifetime meters replay outside it on restart.
 
 ## P10 - Portable Reputation
 

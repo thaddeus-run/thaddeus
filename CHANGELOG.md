@@ -7,6 +7,15 @@ All notable changes to Thaddeus. Format follows
 
 ### Added
 
+- **P9 agent rate windows.** Delegations accept an optional signed
+  `maxChangesPerHour`; `thaddeus grant <did> --max-changes-per-hour N` caps how
+  many ops the agent may land within any trailing hour, composing with the
+  lifetime `--max-changes` cap. Enforcement is server-side at land with a
+  distinct rejection reason. Records without the field sign the exact legacy
+  tuple, so every existing grant keeps verifying. The hourly window is
+  in-memory: durable lifetime meters replay outside it, and a server restart
+  forgets the current hour.
+
 - **P8 Watch / Subscriptions.**
   `thaddeus watch [symbol] [--kind <event>]... [--interval <duration>] [--json]`
   now polls the existing atomic public-ciphertext pull route into an isolated

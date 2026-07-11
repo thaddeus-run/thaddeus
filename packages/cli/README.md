@@ -16,23 +16,23 @@ publish. All crypto is client-side; your identity seed lives in
 
 ## Commands
 
-| Command                                        | Description                            |
-| ---------------------------------------------- | -------------------------------------- |
-| `init`                                         | Create a self-owned `did:key` identity |
-| `create <server> <repo>`                       | Create a repo on a server              |
-| `clone <server> <repo> [dir]`                  | Clone a repo to a working tree         |
-| `status`                                       | Show working-tree changes              |
-| `push [--no-land]`                             | Commit + upload + land into `main`     |
-| `land`                                         | Land uploaded-but-unmerged commits     |
-| `grant <did> [--paths a,b] [--max-changes N]`  | Grant push rights to a DID/agent       |
-| `revoke <did>`                                 | Revoke a previously granted delegation |
-| `grants`                                       | List active grants for this repo       |
-| `policy [set\|clear]`                          | Show or select repo land policy        |
-| `query <kind> ...`                             | Query history and the semantic graph   |
-| `watch [symbol] [--kind <event>]...`           | Stream remote semantic changes         |
-| `schedule-reveal <path> --at <ISO>`            | Make committed content public later    |
-| `reveal <path>`                                | Trigger a due public reveal            |
-| `serve [--port 4000] [--data ./thaddeus-data]` | Run a durable server                   |
+| Command                                                                  | Description                            |
+| ------------------------------------------------------------------------ | -------------------------------------- |
+| `init`                                                                   | Create a self-owned `did:key` identity |
+| `create <server> <repo>`                                                 | Create a repo on a server              |
+| `clone <server> <repo> [dir]`                                            | Clone a repo to a working tree         |
+| `status`                                                                 | Show working-tree changes              |
+| `push [--no-land]`                                                       | Commit + upload + land into `main`     |
+| `land`                                                                   | Land uploaded-but-unmerged commits     |
+| `grant <did> [--paths a,b] [--max-changes N] [--max-changes-per-hour N]` | Grant push rights to a DID/agent       |
+| `revoke <did>`                                                           | Revoke a previously granted delegation |
+| `grants`                                                                 | List active grants for this repo       |
+| `policy [set\|clear]`                                                    | Show or select repo land policy        |
+| `query <kind> ...`                                                       | Query history and the semantic graph   |
+| `watch [symbol] [--kind <event>]...`                                     | Stream remote semantic changes         |
+| `schedule-reveal <path> --at <ISO>`                                      | Make committed content public later    |
+| `reveal <path>`                                                          | Trigger a due public reveal            |
+| `serve [--port 4000] [--data ./thaddeus-data]`                           | Run a durable server                   |
 
 ## Query the committed branch
 
