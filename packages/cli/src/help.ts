@@ -34,7 +34,7 @@ History & meaning
   releases [tag]                  list releases or show one
 
 Access & trust
-  grant  <did> [--paths a,b] [--max-changes N]  grant push to a DID/agent
+  grant  <did> [--paths a,b] [--max-changes N] [--max-changes-per-hour N]  grant push to a DID/agent
   revoke <did>                                  revoke a grant and rotate keys
   grants                                        list active grants
   policy [set|clear]                            show or select repo land policy
@@ -254,13 +254,16 @@ thaddeus query references <name> [--json]
   List immutable releases newest-first, or show one release with its signer,
   view snapshot, notes, and artifact metadata. JSON signatures are base64.`,
 
-  grant: `thaddeus grant <did> [--paths a,b] [--max-changes N]
+  grant: `thaddeus grant <did> [--paths a,b] [--max-changes N] [--max-changes-per-hour N]
 
   Grant <did> push access to the repo, scoped to --paths (globs, default **)
   and capped at --max-changes ops (default 1,000,000). Also shares the
   decryption capability for every object this working copy can read, so the
   delegate can clone and read the repo — run 'thaddeus pull' first if your copy
-  is stale, since you can only share what you can decrypt.`,
+  is stale, since you can only share what you can decrypt.
+  --max-changes-per-hour caps how many ops the agent may land within any
+  trailing hour (default: no hourly cap); the server forgets the current hour
+  on restart.`,
 
   revoke: `thaddeus revoke <did>
 

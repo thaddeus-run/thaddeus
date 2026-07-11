@@ -2549,12 +2549,15 @@ export async function run(
           options: {
             paths: { type: 'string' },
             'max-changes': { type: 'string' },
+            'max-changes-per-hour': { type: 'string' },
           },
           allowPositionals: true,
         });
         const did = positionals[0];
         if (did === undefined) {
-          out('usage: thaddeus grant <did> [--paths a,b] [--max-changes N]');
+          out(
+            'usage: thaddeus grant <did> [--paths a,b] [--max-changes N] [--max-changes-per-hour N]'
+          );
           return 2;
         }
         const root = findRoot(env.cwd);
@@ -2580,14 +2583,43 @@ export async function run(
           out(`invalid --max-changes: ${values['max-changes']}`);
           return 2;
         }
+        // P9 rate window: absent = no hourly cap (null); 0 is legal (zero
+        // changes per hour).
+        const maxChangesPerHour =
+          values['max-changes-per-hour'] !== undefined
+            ? Number(values['max-changes-per-hour'])
+            : null;
+        if (
+          maxChangesPerHour !== null &&
+          (!Number.isInteger(maxChangesPerHour) || maxChangesPerHour < 0)
+        ) {
+          out(
+            `invalid --max-changes-per-hour: ${values['max-changes-per-hour']}`
+          );
+          return 2;
+        }
         const delegation = signDelegation(
-          { agent: did, paths, maxChanges, maxSpend: 1_000_000 },
+          {
+            agent: did,
+            paths,
+            maxChanges,
+            maxSpend: 1_000_000,
+            maxChangesPerHour,
+          },
           identity
         );
         const client = new Client(cfg.server, identity, env.fetchImpl);
         const g = await client.grant(cfg.repo, delegation);
+        // client.grant()'s response type mirrors the server's POST /grants ack,
+        // which predates P9 and doesn't echo maxChangesPerHour — so read the cap
+        // from the delegation we just signed (the same value the server received)
+        // rather than from `g`.
         out(
-          `granted ${g.agent} → ${g.paths.join(', ')} (max ${g.maxChanges} changes)`
+          `granted ${g.agent} → ${g.paths.join(', ')} (max ${g.maxChanges} changes${
+            delegation.maxChangesPerHour == null
+              ? ''
+              : `, ${delegation.maxChangesPerHour}/h`
+          })`
         );
         // A delegation conveys WRITE authority only. To actually collaborate the
         // delegate also needs the decryption capability, so re-wrap every object
@@ -2697,6 +2729,7 @@ export async function run(
                 paths: [...g.paths],
                 maxChanges: g.maxChanges,
                 maxSpend: g.maxSpend,
+                maxChangesPerHour: g.maxChangesPerHour ?? null,
               }))
             )
           );
@@ -2708,7 +2741,9 @@ export async function run(
         }
         for (const g of grants) {
           out(
-            `${g.agent} → ${g.paths.join(', ')} (max ${g.maxChanges} changes)`
+            `${g.agent} → ${g.paths.join(', ')} (max ${g.maxChanges} changes${
+              g.maxChangesPerHour == null ? '' : `, ${g.maxChangesPerHour}/h`
+            })`
           );
         }
         return 0;

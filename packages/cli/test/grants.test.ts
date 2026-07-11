@@ -118,4 +118,86 @@ describe('thaddeus grant/revoke/grants', () => {
       await s.stop();
     }
   });
+
+  test('an hourly rate cap rejects the landing that exceeds it', async () => {
+    const s = startServer({
+      dataDir: mkdtempSync(join(tmp, 'srv2-')),
+      port: 0,
+    });
+    try {
+      const out: string[] = [];
+      const ownerHome = mkdtempSync(join(tmp, 'owner2-'));
+      const mateHome = mkdtempSync(join(tmp, 'mate2-'));
+      const e = (cwd: string, home: string) => ({
+        cwd,
+        home,
+        out: (l: string) => out.push(l),
+      });
+      await run(['init'], e(ownerHome, ownerHome));
+      await run(['init'], e(mateHome, mateHome));
+      const mateDid = (
+        JSON.parse(
+          readFileSync(
+            join(mateHome, '.config', 'thaddeus', 'identity.json'),
+            'utf8'
+          )
+        ) as { did: string }
+      ).did;
+
+      await run(['create', s.url, 'proj2'], e(ownerHome, ownerHome));
+      const ownerWc = mkdtempSync(join(tmp, 'ownerwc2-'));
+      await run(['clone', s.url, 'proj2', ownerWc], e(ownerWc, ownerHome));
+      mkdirSync(join(ownerWc, 'src'), { recursive: true });
+      writeFileSync(join(ownerWc, 'src', 'seed.rs'), 'fn seed() {}\n');
+      expect(await run(['push', '-m', 'seed'], e(ownerWc, ownerHome))).toBe(0);
+
+      // Bad flag value → exit 2 with a terse message.
+      out.length = 0;
+      expect(
+        await run(
+          ['grant', mateDid, '--max-changes-per-hour', 'nope'],
+          e(ownerWc, ownerHome)
+        )
+      ).toBe(2);
+      expect(out.join('\n')).toContain('invalid --max-changes-per-hour');
+
+      // Grant one landed op per hour.
+      out.length = 0;
+      expect(
+        await run(
+          [
+            'grant',
+            mateDid,
+            '--paths',
+            'src/**',
+            '--max-changes-per-hour',
+            '1',
+          ],
+          e(ownerWc, ownerHome)
+        )
+      ).toBe(0);
+
+      // grants output shows the cap.
+      out.length = 0;
+      expect(await run(['grants'], e(ownerWc, ownerHome))).toBe(0);
+      expect(out.join('\n')).toContain('1/h');
+
+      // First in-scope landing fits the window.
+      const mateWc = mkdtempSync(join(tmp, 'matewc2-'));
+      await run(['clone', s.url, 'proj2', mateWc], e(mateWc, mateHome));
+      writeFileSync(join(mateWc, 'src', 'a.rs'), 'fn a() {}');
+      out.length = 0;
+      expect(await run(['push', '-m', 'a'], e(mateWc, mateHome))).toBe(0);
+      expect(out.join('\n').toLowerCase()).toContain('published');
+
+      // Second landing within the hour exceeds the cap → rejected.
+      writeFileSync(join(mateWc, 'src', 'b.rs'), 'fn b() {}');
+      out.length = 0;
+      const code = await run(['push', '-m', 'b'], e(mateWc, mateHome));
+      expect(code).not.toBe(0);
+      expect(out.join('\n')).toContain('hourly rate window');
+    } finally {
+      await s.stop();
+    }
+  });
 });
