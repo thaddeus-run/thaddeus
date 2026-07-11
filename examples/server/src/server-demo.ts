@@ -48,6 +48,7 @@ const post = (
     headers: {
       'x-thaddeus-did': h.did,
       'x-thaddeus-timestamp': h.timestamp,
+      'x-thaddeus-nonce': h.nonce,
       'x-thaddeus-signature': h.signature,
     },
   });

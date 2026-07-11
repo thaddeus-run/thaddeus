@@ -28,6 +28,7 @@ function signed(
     headers: {
       'x-thaddeus-did': h.did,
       'x-thaddeus-timestamp': h.timestamp,
+      'x-thaddeus-nonce': h.nonce,
       'x-thaddeus-signature': h.signature,
     },
   });
@@ -68,6 +69,38 @@ async function localCommit(
 }
 
 describe('writes', () => {
+  test('an exact signed request can mutate the server only once', async () => {
+    const owner = Identity.create();
+    const srv = createServer({ backend: new MemoryBackend() });
+    const body = jbody({ name: 'replay-proof' });
+    const signedHeaders = signRequest(
+      'POST',
+      '/repos',
+      body,
+      owner,
+      new Date().toISOString(),
+      'captured-request'
+    );
+    const request = (): Request =>
+      new Request('http://t/repos', {
+        method: 'POST',
+        body,
+        headers: {
+          'x-thaddeus-did': signedHeaders.did,
+          'x-thaddeus-timestamp': signedHeaders.timestamp,
+          'x-thaddeus-nonce': signedHeaders.nonce,
+          'x-thaddeus-signature': signedHeaders.signature,
+        },
+      });
+
+    expect((await srv.fetch(request())).status).toBe(201);
+    const replayed = await srv.fetch(request());
+    expect(replayed.status).toBe(401);
+    expect(await replayed.json()).toEqual({
+      error: 'unsigned or invalid request',
+    });
+  });
+
   test('owner push + land; non-owner push is 403', async () => {
     const a = Identity.create();
     const b = Identity.create();
@@ -241,6 +274,7 @@ describe('writes', () => {
         headers: {
           'x-thaddeus-did': h.did,
           'x-thaddeus-timestamp': h.timestamp,
+          'x-thaddeus-nonce': h.nonce,
           'x-thaddeus-signature': h.signature,
         },
       })
@@ -267,6 +301,7 @@ describe('writes', () => {
         headers: {
           'x-thaddeus-did': h.did,
           'x-thaddeus-timestamp': h.timestamp,
+          'x-thaddeus-nonce': h.nonce,
           'x-thaddeus-signature': h.signature,
         },
       })

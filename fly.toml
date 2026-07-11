@@ -10,6 +10,7 @@ PORT = "4000"
 THADDEUS_DATA = "/data"
 THADDEUS_HOST = "1"
 # THADDEUS_MIN_MERGES = "0"    # gate land on N attested merges per author
+# THADDEUS_TRUST_HOSTS = "did:key:...,did:key:..." # foreign attesting hosts
 
 # Existing durable volume, mounted where the FileBackend + host identity live.
 # Do not create, rename, or migrate it: `data` is attached in `ams`.

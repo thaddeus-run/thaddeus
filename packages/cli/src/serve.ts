@@ -10,6 +10,7 @@ export interface ServeOptions {
   policy?: LandPolicy; // default blockOnConflict (createServer's default)
   host?: Identity; // attest reputation with this key (P07); omit to hold no keys
   minMerges?: number; // gate land on this many attested merges per op author
+  trustedReputationHosts?: readonly string[]; // foreign host DIDs that count
   // Scheduler cadence. Public for deterministic integration tests; normal CLI
   // servers use one second.
   revealIntervalMs?: number;
@@ -31,6 +32,7 @@ export function startServer(opts: ServeOptions): RunningServer {
     policy: opts.policy,
     host: opts.host,
     minMerges: opts.minMerges,
+    trustedReputationHosts: opts.trustedReputationHosts,
     onError: (error, context) => {
       const scope = context.repo === undefined ? '' : ` for ${context.repo}`;
       console.error(`timed reveal ${context.operation} failed${scope}:`, error);

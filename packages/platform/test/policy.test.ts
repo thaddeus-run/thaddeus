@@ -231,6 +231,42 @@ describe('policy — requireReputationTier', () => {
     expect(() => requireReputationTier(reps, -1)).toThrow(RangeError);
     expect(() => requireReputationTier(reps, 1.5)).toThrow(RangeError);
   });
+
+  test('a reputation tier can require an explicitly trusted host', async () => {
+    const store = new MemoryStore();
+    const log = new OpLog(store);
+    const reps = new ReputationLog();
+    const subject = Identity.create();
+    const host = Identity.create();
+    seedMerges(reps, subject, host, 1);
+    const op = await log.write(
+      'main',
+      'trusted.rs',
+      enc('fn trusted() {}'),
+      subject
+    );
+
+    expect(
+      await requireReputationTier(
+        reps,
+        1,
+        new Set([host.did])
+      )(proposal({ incomingOps: [op] }))
+    ).toEqual({ allow: true });
+    expect(
+      await requireReputationTier(
+        reps,
+        1,
+        new Set()
+      )(proposal({ incomingOps: [op] }))
+    ).toEqual({
+      allow: false,
+      reason: '1 op(s) authored below the required tier (1 attested merge(s))',
+    });
+    expect(
+      await requireReputationTier(reps, 1)(proposal({ incomingOps: [op] }))
+    ).toEqual({ allow: true });
+  });
 });
 
 // Record a verified checker attestation on `op`: a provenance record whose

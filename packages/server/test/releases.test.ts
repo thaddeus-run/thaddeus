@@ -78,6 +78,7 @@ function signed(
       'content-type': 'application/json',
       'x-thaddeus-did': headers.did,
       'x-thaddeus-timestamp': headers.timestamp,
+      'x-thaddeus-nonce': headers.nonce,
       'x-thaddeus-signature': headers.signature,
     },
   });

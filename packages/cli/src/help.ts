@@ -38,7 +38,7 @@ Access & trust
   revoke <did>                                  revoke a grant and rotate keys
   grants                                        list active grants
   policy [set|clear]                            show or select repo land policy
-  reputation <did>                              a DID's server-wide reputation
+  reputation <did>|export|import                inspect or move reputation
   schedule-reveal <path> --at <ISO>             make committed content public later
   reveal <path>                                 trigger a due public reveal now
 
@@ -298,18 +298,27 @@ thaddeus policy clear [--json]
   take effect on the next land or release; no server restart.`,
 
   reputation: `thaddeus reputation <did> [--server <url>] [--json]
+  thaddeus reputation export <did> [--server <url>] [--output <path>]
+  thaddeus reputation import <path|-> [--server <url>] [--json]
+  thaddeus reputation import --from <source-url> [--server <destination>] [--json]
 
-  Show a DID's server-wide reputation: attested (host-vouched) vs claimed
-  (self-asserted) contributions, and the attested tally by kind. Reputation is
+  Show a DID's server-wide reputation: trusted host-attested, valid but
+  untrusted-host, and claimed contributions, plus the trusted tally by kind.
+  Export writes a public versioned JSON proof archive to stdout (or --output).
+  Import reads a file or '-' from stdin; --from copies your current identity's
+  archive directly between instances. Only the archive subject may import it.
+  Reputation is
   server-wide, not repo-scoped: the server is resolved like 'repos' (--server,
   else your default), so this works from anywhere — no working copy needed.
   Only an attesting server ('serve --host') co-signs merges, so a non-attesting
   server reports attested: 0.`,
 
-  serve: `thaddeus serve [--port N] [--data DIR] [--host] [--min-merges N]
+  serve: `thaddeus serve [--port N] [--data DIR] [--host] [--min-merges N] [--trust-host <did> ...]
 
   Run a durable Thaddeus server over a FileBackend at --data (default
   ./thaddeus-data) on --port (default 4000). --host makes it an attesting
   instance (co-signs reputation with the operator's identity); --min-merges
-  gates land on that many attested merges per op author.`,
+  gates land on that many trusted attested merges per op author. --trust-host
+  is repeatable and allows a foreign host DID's imported attestations to count;
+  this server's own --host DID is always trusted automatically.`,
 };

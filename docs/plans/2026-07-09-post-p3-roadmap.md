@@ -88,11 +88,25 @@ Add `reputation export/import` across instances. Contributions are dual-signed
 and self-verifying, so they're already portable in principle. This is the "your
 reputation is yours, not the platform's" pillar.
 
+**Shipped:** `thaddeus reputation export <did>` writes a versioned, public JSON
+archive of fully dual-verified contributions to stdout or a file;
+`reputation import <path|->` and `reputation import --from <source>` perform a
+strict, subject-authorized, idempotent one-write import into another instance.
+Destinations retain valid foreign proofs but count them in profiles and
+`--min-merges` only when the attesting host DID is explicitly trusted with
+repeatable `serve --trust-host`. The local host DID is trusted automatically.
+
 ## P11 - Hardening & Proof
 
 Add benchmarks proving the Pillar-2 speed claims, the replay-nonce cache for the
 signed-request envelope's current 5-minute replay window, outside-reviewer veto,
 and TUI write actions.
+
+**Shipped (replay protection):** every signed mutation includes a random nonce
+covered by its signature. Each server process retains accepted `(signer, nonce)`
+pairs through the complete five-minute validity window in a bounded, expiring
+cache; a duplicate or full cache fails closed. Benchmarks, outside-reviewer
+veto, and TUI write actions remain.
 
 ## Loose Ends
 

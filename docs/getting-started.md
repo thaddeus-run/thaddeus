@@ -215,7 +215,13 @@ blocked land leaves your branch untouched.
   `thaddeus vetoes <op>`. A verified veto blocks the next land, durably.
 - **Reputation (attested contributions):** against an attesting server
   (`serve --host`), a landed op mints a host-vouched merge for its author.
-  `thaddeus reputation <did>`.
+  `thaddeus reputation <did>`. Take those public proofs with you using
+  `thaddeus reputation export <did> --output reputation.json`, then import them
+  as that identity with
+  `thaddeus reputation import reputation.json --server <destination>` (or copy
+  directly with `--from <source>`). A destination keeps valid foreign proofs but
+  counts only host DIDs its operator configured with repeatable
+  `serve --trust-host <did>`.
 - **Repo policy:** owners can select durable land gates without restarting the
   server. `thaddeus policy` shows the active record;
   `thaddeus policy set --protect 'src/auth/**' --allow did:key:z6Mk...` protects

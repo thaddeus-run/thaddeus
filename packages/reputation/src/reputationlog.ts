@@ -3,6 +3,15 @@ import { bytesToHex } from '@noble/hashes/utils';
 import { type Backend, decodeRecord, encodeRecord } from '@thaddeus.run/store';
 
 import {
+  compareContributions,
+  contributionContentKey,
+  encodeReputationArchive,
+  normalizeReputationArchive,
+  REPUTATION_ARCHIVE_FORMAT,
+  type ReputationArchive,
+  type ReputationImportResult,
+} from './archive';
+import {
   type Contribution,
   type ContributionKind,
   type Verification,
@@ -15,36 +24,9 @@ import {
 export interface Profile {
   readonly subject: string;
   readonly attested: readonly Contribution[];
+  readonly untrusted: readonly Contribution[];
   readonly claimed: readonly Contribution[];
   readonly byKind: Readonly<Record<ContributionKind, number>>;
-}
-
-// A total key over every field, so dedup is on full content (not on a sig that a
-// forged record could reuse). Uint8Arrays encode as plain number arrays so the
-// key is stable and JSON-encodable.
-function contentKey(c: Contribution): string {
-  return JSON.stringify([
-    c.subject,
-    c.host,
-    c.repo,
-    c.ref,
-    c.kind,
-    c.at,
-    Array.from(c.subj_sig),
-    Array.from(c.host_sig),
-  ]);
-}
-
-// Deterministic order: (at, ref, kind), then the full content key as a tiebreak.
-function byOrder(a: Contribution, b: Contribution): number {
-  const ka = `${a.at}|${a.ref}|${a.kind}`;
-  const kb = `${b.at}|${b.ref}|${b.kind}`;
-  if (ka !== kb) {
-    return ka < kb ? -1 : 1;
-  }
-  const ca = contentKey(a);
-  const cb = contentKey(b);
-  return ca < cb ? -1 : ca > cb ? 1 : 0;
 }
 
 // The untrusted aggregator: an indexer over signed records gathered from
@@ -74,9 +56,23 @@ export class ReputationLog {
       }
       try {
         const c = decodeRecord(bytes) as Contribution;
-        log.#records.set(contentKey(c), c);
+        log.#records.set(contributionContentKey(c), c);
       } catch {
         continue; // torn/old-version/corrupt record — skip, never surface
+      }
+    }
+    for (const key of await backend.list('rep-import/')) {
+      const bytes = await backend.get(key);
+      if (bytes === undefined) continue;
+      try {
+        const archive = normalizeReputationArchive(
+          decodeRecord(bytes) as ReputationArchive
+        );
+        for (const c of archive.contributions) {
+          log.#records.set(contributionContentKey(c), c);
+        }
+      } catch {
+        continue; // corrupt or old import archive — skip the whole batch
       }
     }
     return log;
@@ -84,7 +80,7 @@ export class ReputationLog {
 
   // Ingest a record, keep it regardless of validity, idempotent on full content.
   append(c: Contribution): void {
-    this.#records.set(contentKey(c), c);
+    this.#records.set(contributionContentKey(c), c);
   }
 
   // Durably ingest a record (keep-and-label). Write-through first so a failed
@@ -92,7 +88,7 @@ export class ReputationLog {
   // Idempotent (content-addressed key).
   async ingest(c: Contribution): Promise<void> {
     await this.#persist(c);
-    this.#records.set(contentKey(c), c);
+    this.#records.set(contributionContentKey(c), c);
   }
 
   // Write-through for a record (no-op without a backend). Content-addressed key
@@ -101,7 +97,7 @@ export class ReputationLog {
   async #persist(c: Contribution): Promise<void> {
     if (this.#backend !== undefined) {
       const key = `rep/${bytesToHex(
-        blake3(new TextEncoder().encode(contentKey(c)))
+        blake3(new TextEncoder().encode(contributionContentKey(c)))
       )}`;
       await this.#backend.put(key, encodeRecord(c));
     }
@@ -111,7 +107,46 @@ export class ReputationLog {
   forSubject(subject: string): readonly Contribution[] {
     return [...this.#records.values()]
       .filter((c) => c.subject === subject)
-      .sort(byOrder);
+      .sort(compareContributions);
+  }
+
+  // Export every genuine dual-signed proof for the subject. Host trust is a
+  // destination policy, so it deliberately does not filter this portable set.
+  archive(subject: string): ReputationArchive {
+    return normalizeReputationArchive({
+      format: REPUTATION_ARCHIVE_FORMAT,
+      subject,
+      contributions: this.forSubject(subject).filter((c) => {
+        const v = verifyContribution(c);
+        return v.authentic && v.attested;
+      }),
+    });
+  }
+
+  // Strictly validate first, then persist only the missing delta in one backend
+  // write. Memory changes happen last, so a failed write exposes no partial set.
+  async ingestArchive(
+    archive: ReputationArchive
+  ): Promise<ReputationImportResult> {
+    const normalized = normalizeReputationArchive(archive);
+    const missing = normalized.contributions.filter(
+      (c) => !this.#records.has(contributionContentKey(c))
+    );
+    const duplicates = normalized.contributions.length - missing.length;
+    if (missing.length === 0) return { imported: 0, duplicates };
+
+    const delta: ReputationArchive = { ...normalized, contributions: missing };
+    if (this.#backend !== undefined) {
+      const encoded = encodeReputationArchive(delta);
+      const key = `rep-import/${bytesToHex(
+        blake3(new TextEncoder().encode(encoded))
+      )}`;
+      await this.#backend.put(key, encodeRecord(delta));
+    }
+    for (const c of missing) {
+      this.#records.set(contributionContentKey(c), c);
+    }
+    return { imported: missing.length, duplicates };
   }
 
   // Check a record's two signatures against the dids it carries. This is
@@ -126,8 +161,9 @@ export class ReputationLog {
   // Partition `subject`'s records: attested (authentic ∧ attested), claimed
   // (authentic ∧ ¬attested); non-authentic records are dropped (not the
   // subject's claim). byKind counts the attested set.
-  profile(subject: string): Profile {
+  profile(subject: string, trustedHosts?: ReadonlySet<string>): Profile {
     const attested: Contribution[] = [];
+    const untrusted: Contribution[] = [];
     const claimed: Contribution[] = [];
     const byKind: Record<ContributionKind, number> = {
       merge: 0,
@@ -140,12 +176,16 @@ export class ReputationLog {
         continue;
       }
       if (v.attested) {
-        attested.push(c);
-        byKind[c.kind] += 1;
+        if (trustedHosts === undefined || trustedHosts.has(c.host)) {
+          attested.push(c);
+          byKind[c.kind] += 1;
+        } else {
+          untrusted.push(c);
+        }
       } else {
         claimed.push(c);
       }
     }
-    return { subject, attested, claimed, byKind };
+    return { subject, attested, untrusted, claimed, byKind };
   }
 }

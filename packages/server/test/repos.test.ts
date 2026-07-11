@@ -20,6 +20,7 @@ function signedPost(path: string, bodyObj: unknown, signer: Identity): Request {
       'content-type': 'application/json',
       'x-thaddeus-did': h.did,
       'x-thaddeus-timestamp': h.timestamp,
+      'x-thaddeus-nonce': h.nonce,
       'x-thaddeus-signature': h.signature,
     },
   });
@@ -39,6 +40,7 @@ function signedDelete(path: string, signer: Identity): Request {
     headers: {
       'x-thaddeus-did': h.did,
       'x-thaddeus-timestamp': h.timestamp,
+      'x-thaddeus-nonce': h.nonce,
       'x-thaddeus-signature': h.signature,
     },
   });
@@ -121,6 +123,7 @@ describe('repos', () => {
         headers: {
           'x-thaddeus-did': h.did,
           'x-thaddeus-timestamp': h.timestamp,
+          'x-thaddeus-nonce': h.nonce,
           'x-thaddeus-signature': h.signature,
         },
       })
@@ -142,6 +145,7 @@ describe('repos', () => {
         headers: {
           'x-thaddeus-did': h.did,
           'x-thaddeus-timestamp': h.timestamp,
+          'x-thaddeus-nonce': h.nonce,
           'x-thaddeus-signature': h.signature,
         },
       })

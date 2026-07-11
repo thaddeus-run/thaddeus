@@ -19,12 +19,18 @@ import type { Conflict, Op } from '@thaddeus.run/log';
 import { FileBackend } from '@thaddeus.run/persist';
 import { Platform, type Repo, signRelease } from '@thaddeus.run/platform';
 import { type Provenance, ProvenanceLog } from '@thaddeus.run/provenance';
-import { type ContributionClaim, signClaim } from '@thaddeus.run/reputation';
+import {
+  type ContributionClaim,
+  decodeReputationArchive,
+  encodeReputationArchive,
+  type ReputationArchive,
+  signClaim,
+} from '@thaddeus.run/reputation';
 import { signVeto, VetoLog } from '@thaddeus.run/review';
 import { type Backend, scoped } from '@thaddeus.run/store';
 import type { EventKind } from '@thaddeus.run/watch';
 import { createHash } from 'node:crypto';
-import { mkdirSync, readFileSync, rmSync } from 'node:fs';
+import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { basename, dirname, isAbsolute, join, relative } from 'node:path';
 import { parseArgs } from 'node:util';
 
@@ -74,6 +80,7 @@ export interface CliEnv {
   err?: (line: string) => void;
   signal?: AbortSignal;
   sleep?: WatchSleep;
+  stdin?: () => Promise<string>;
 }
 
 // Detect the `--json` flag a read verb offers for scripting/TUI. Kept simple so
@@ -2753,31 +2760,26 @@ export async function run(
         return 0;
       }
       case 'reputation': {
-        // Reputation is SERVER-wide, not repo-scoped, so it resolves the server
-        // like `repos`/`delete` (--server, else your default) and needs no
-        // working copy — ask any server about any DID from anywhere.
+        // Reputation is server-wide. Preserve the original `<did>` profile
+        // form while adding explicit export/import portability subcommands.
+        const action = rest[0];
+        const actionArgs =
+          action === 'export' || action === 'import' ? rest.slice(1) : rest;
         const { values, positionals } = parseArgs({
-          args: [...rest],
+          args: [...actionArgs],
           options: {
             server: { type: 'string' },
-            // Declared so parseArgs accepts the flag rather than throwing on it;
-            // the JSON path below reads it via wantsJson, like every other verb.
             json: { type: 'boolean' },
+            output: { type: 'string' },
+            from: { type: 'string' },
           },
           allowPositionals: true,
         });
-        const did = positionals[0];
-        if (did === undefined) {
-          out('usage: thaddeus reputation <did> [--server <url>]');
-          return 2;
-        }
         if (values.server !== undefined && !isServerUrl(values.server)) {
           out(`invalid --server url: ${values.server}`);
           return 2;
         }
-        // --server, else the server of the working copy you're standing in,
-        // else your saved default.
-        let repServer = values.server;
+        let repServer: string | undefined = values.server;
         if (repServer === undefined) {
           const root = findRoot(env.cwd);
           if (root !== undefined) repServer = loadConfig(root).server;
@@ -2791,14 +2793,115 @@ export async function run(
           repServer = resolved.server;
         }
         const identity = loadIdentity(env.home);
+
+        if (action === 'export') {
+          const did = positionals[0];
+          if (did === undefined || positionals.length !== 1) {
+            out(
+              'usage: thaddeus reputation export <did> [--server <url>] [--output <path>]'
+            );
+            return 2;
+          }
+          if (values.from !== undefined || values.json === true) {
+            out('reputation export accepts --server and --output only');
+            return 2;
+          }
+          const client = new Client(repServer, identity, env.fetchImpl);
+          const archive = await client.exportReputation(did);
+          const encoded = encodeReputationArchive(archive);
+          if (values.output === undefined || values.output === '-') {
+            out(encoded.trimEnd());
+          } else {
+            const path = isAbsolute(values.output)
+              ? values.output
+              : join(env.cwd, values.output);
+            writeFileSync(path, encoded, 'utf8');
+            out(
+              `exported ${archive.contributions.length} contribution(s) to ${values.output}`
+            );
+          }
+          return 0;
+        }
+
+        if (action === 'import') {
+          const path = positionals[0];
+          if (
+            positionals.length > 1 ||
+            (path !== undefined && values.from !== undefined)
+          ) {
+            out('use either an archive path or --from, not both');
+            return 2;
+          }
+          if (path === undefined && values.from === undefined) {
+            out(
+              'usage: thaddeus reputation import <path|-> [--server <url>]\n       thaddeus reputation import --from <source-url> [--server <destination>]'
+            );
+            return 2;
+          }
+          if (values.output !== undefined) {
+            out('reputation import does not accept --output');
+            return 2;
+          }
+          let archive: ReputationArchive;
+          if (values.from !== undefined) {
+            if (!isServerUrl(values.from)) {
+              out(`invalid --from url: ${values.from}`);
+              return 2;
+            }
+            archive = await new Client(
+              values.from,
+              identity,
+              env.fetchImpl
+            ).exportReputation(identity.did);
+          } else {
+            const json =
+              path === '-'
+                ? await (env.stdin ?? (() => Bun.stdin.text()))()
+                : readFileSync(
+                    isAbsolute(path) ? path : join(env.cwd, path),
+                    'utf8'
+                  );
+            archive = decodeReputationArchive(json);
+          }
+          if (archive.subject !== identity.did) {
+            throw new Error(
+              `archive subject ${archive.subject} does not match current identity ${identity.did}`
+            );
+          }
+          const outcome = await new Client(
+            repServer,
+            identity,
+            env.fetchImpl
+          ).importReputation(archive);
+          if (values.json === true) {
+            out(JSON.stringify(outcome));
+          } else {
+            out(
+              `imported ${outcome.imported} contribution(s) for ${outcome.subject} (${outcome.duplicates} already present, ${outcome.total} total)`
+            );
+          }
+          return 0;
+        }
+
+        const did = positionals[0];
+        if (did === undefined || positionals.length !== 1) {
+          out('usage: thaddeus reputation <did> [--server <url>]');
+          return 2;
+        }
+        if (values.output !== undefined || values.from !== undefined) {
+          out('reputation profile accepts --server and --json only');
+          return 2;
+        }
         const client = new Client(repServer, identity, env.fetchImpl);
         const profile = await client.reputation(did);
-        if (wantsJson(rest)) {
+        if (values.json === true) {
           out(JSON.stringify(profile));
           return 0;
         }
         out(profile.subject);
-        out(`  attested: ${profile.attested}  claimed: ${profile.claimed}`);
+        out(
+          `  attested: ${profile.attested}  untrusted: ${profile.untrusted}  claimed: ${profile.claimed}`
+        );
         const kinds = Object.entries(profile.byKind)
           .filter(([, n]) => n > 0)
           .map(([k, n]) => `${k}=${n}`)
@@ -2814,6 +2917,7 @@ export async function run(
             data: { type: 'string' },
             host: { type: 'boolean' },
             'min-merges': { type: 'string' },
+            'trust-host': { type: 'string', multiple: true },
           },
           allowPositionals: true,
         });
@@ -2835,10 +2939,29 @@ export async function run(
             return 2;
           }
         }
-        const server = startServer({ dataDir, port, host, minMerges });
+        const trustedReputationHosts = values['trust-host'] ?? [];
+        for (const did of trustedReputationHosts) {
+          try {
+            PublicIdentity.fromDid(did);
+          } catch {
+            out(`invalid --trust-host DID: ${did}`);
+            return 2;
+          }
+        }
+        const server = startServer({
+          dataDir,
+          port,
+          host,
+          minMerges,
+          trustedReputationHosts,
+        });
         out(
           `thaddeus serving on ${server.url} (data: ${dataDir}${
             host !== undefined ? `, attesting as ${host.did}` : ''
+          }${
+            trustedReputationHosts.length > 0
+              ? `, trusting ${trustedReputationHosts.length} reputation host(s)`
+              : ''
           })`
         );
         process.on('SIGINT', () => {

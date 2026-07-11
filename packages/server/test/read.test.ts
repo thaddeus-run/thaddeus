@@ -18,6 +18,7 @@ function signedPost(path: string, bodyObj: unknown, signer: Identity): Request {
     headers: {
       'x-thaddeus-did': h.did,
       'x-thaddeus-timestamp': h.timestamp,
+      'x-thaddeus-nonce': h.nonce,
       'x-thaddeus-signature': h.signature,
     },
   });
