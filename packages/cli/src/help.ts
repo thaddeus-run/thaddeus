@@ -34,7 +34,7 @@ History & meaning
   releases [tag]                  list releases or show one
 
 Access & trust
-  grant  <did> [--paths a,b] [--max-changes N] [--max-changes-per-hour N]  grant push to a DID/agent
+  grant  <did> [--paths a,b] [--max-changes N]  grant push to a DID/agent
   revoke <did>                                  revoke a grant and rotate keys
   grants                                        list active grants
   policy [set|clear]                            show or select repo land policy
