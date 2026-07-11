@@ -5,6 +5,8 @@ All notable changes to Thaddeus. Format follows
 
 ## [Unreleased]
 
+## [0.1.6-alpha] - 2026-07-11
+
 ### Added
 
 - **P9 agent rate windows.** Delegations accept an optional signed
