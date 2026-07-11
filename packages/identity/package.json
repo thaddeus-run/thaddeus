@@ -1,6 +1,6 @@
 {
   "name": "@thaddeus.run/identity",
-  "version": "0.1.5-alpha",
+  "version": "0.1.6-alpha",
   "description": "Self-owned did:key identity — ed25519 sign/verify and x25519 sealed-box seal/unseal.",
   "keywords": [
     "did",
