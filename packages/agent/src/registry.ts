@@ -6,6 +6,10 @@ export interface Usage {
   readonly spend: number;
 }
 
+// The fixed P9 rate-window span. The Delegation field is a count per trailing
+// hour, not a configurable window — see the design doc's non-goals.
+const HOUR_MS = 3_600_000;
+
 // The enforcement authority: verified delegations + a quarantine set + a
 // per-agent meter. Unlike ReputationLog (keep-and-label), this REJECTS invalid
 // grants — a forged delegation confers nothing. Spike — in-memory, single
@@ -14,6 +18,16 @@ export class AgentRegistry {
   readonly #grants: Map<string, Delegation> = new Map();
   readonly #quarantine: Set<string> = new Set();
   readonly #meter: Map<string, { changes: number; spend: number }> = new Map();
+  // Timestamped landings inside the trailing hour, per agent — the P9 rate
+  // window. Pruned lazily on record/read; never persisted (a restart forgets
+  // the current hour, documented spike behavior).
+  readonly #window: Map<string, { at: number; changes: number }[]> = new Map();
+  readonly #now: () => number;
+
+  // The clock is injectable so window expiry is testable without sleeping.
+  constructor(now: () => number = Date.now) {
+    this.#now = now;
+  }
 
   // Verify and store a delegation (one active per agent; re-register replaces).
   // Throws TypeError on an invalid delegation. Re-registering replaces the
@@ -69,11 +83,8 @@ export class AgentRegistry {
       : { changes: u.changes, spend: u.spend };
   }
 
-  // After a successful land: += `changes` (the number of ops landed, matching
-  // what delegationPolicy counts) and += spend for the agent. The policy never
-  // calls this — recording is the caller's post-land step. Re-registering a
-  // delegation does NOT reset the meter (the budget is a lifetime cap).
-  record(agent: string, changes: number, spend = 0): void {
+  // Shared validation + lifetime accumulation for record/replayMeter.
+  #accumulate(agent: string, changes: number, spend: number): void {
     if (!this.#grants.has(agent)) {
       throw new TypeError(
         `cannot record usage for unregistered agent ${agent}`
@@ -90,5 +101,44 @@ export class AgentRegistry {
       changes: u.changes + changes,
       spend: u.spend + spend,
     });
+  }
+
+  // After a successful land: += `changes` (the number of ops landed, matching
+  // what delegationPolicy counts) and += spend for the agent. The policy never
+  // calls this — recording is the caller's post-land step. Re-registering a
+  // delegation does NOT reset the meter (the budget is a lifetime cap).
+  record(agent: string, changes: number, spend = 0): void {
+    this.#accumulate(agent, changes, spend);
+    if (changes > 0) {
+      const entries = this.#window.get(agent) ?? [];
+      entries.push({ at: this.#now(), changes });
+      this.#window.set(agent, this.#prune(entries));
+    }
+  }
+
+  // Restore persisted lifetime totals WITHOUT window accounting. The server's
+  // registry rebuild replays durable meters through this — recording them via
+  // record() would stamp an agent's whole history into the current hour and
+  // block it until the window slides.
+  replayMeter(agent: string, changes: number, spend = 0): void {
+    this.#accumulate(agent, changes, spend);
+  }
+
+  // Changes landed within the trailing hour (the P9 rate-window numerator).
+  recentChanges(agent: string): number {
+    const entries = this.#window.get(agent);
+    if (entries === undefined) {
+      return 0;
+    }
+    const pruned = this.#prune(entries);
+    this.#window.set(agent, pruned);
+    return pruned.reduce((sum, e) => sum + e.changes, 0);
+  }
+
+  #prune(
+    entries: readonly { at: number; changes: number }[]
+  ): { at: number; changes: number }[] {
+    const cutoff = this.#now() - HOUR_MS;
+    return entries.filter((e) => e.at > cutoff);
   }
 }
