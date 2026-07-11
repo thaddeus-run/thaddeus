@@ -154,6 +154,9 @@ means sharing _keys_, not just permissions — `grant` does both:
 thaddeus grant did:key:z6Mk…               # write access AND the read capability
 ```
 
+Add `--max-changes-per-hour N` to also bound how many ops the agent may land
+within any trailing hour; the lifetime `--max-changes` cap still applies.
+
 The collaborator can then clone, read, edit and publish; every `push` re-wraps
 its new objects for all members, so the owner can read their work too:
 
