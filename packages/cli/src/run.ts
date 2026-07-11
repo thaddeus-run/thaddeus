@@ -2575,13 +2575,14 @@ export async function run(
                 .map((p) => p.trim())
                 .filter(Boolean)
             : ['**'];
-        // Guard '' on both budget flags: Number('') is 0, which would silently
-        // sign a zero-cap (fully blocking) grant from a script's empty variable.
+        // Guard blank values on both budget flags: Number('') and Number(' ')
+        // are 0, which would silently sign a zero-cap (fully blocking) grant
+        // from a script's empty or whitespace-expanded variable.
         const rawMaxChanges = values['max-changes'];
         const maxChanges =
           rawMaxChanges !== undefined ? Number(rawMaxChanges) : 1_000_000;
         if (
-          rawMaxChanges === '' ||
+          rawMaxChanges?.trim() === '' ||
           !Number.isInteger(maxChanges) ||
           maxChanges < 0
         ) {
@@ -2594,7 +2595,7 @@ export async function run(
         const maxChangesPerHour =
           rawRate !== undefined ? Number(rawRate) : null;
         if (
-          rawRate === '' ||
+          rawRate?.trim() === '' ||
           (maxChangesPerHour !== null &&
             (!Number.isInteger(maxChangesPerHour) || maxChangesPerHour < 0))
         ) {
