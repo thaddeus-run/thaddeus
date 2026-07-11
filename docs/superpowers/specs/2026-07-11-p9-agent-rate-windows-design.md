@@ -104,9 +104,9 @@ today.
 - Fail-closed like every other delegation check: a landing that would exceed the
   window is rejected atomically under the repo lock; nothing is recorded for
   rejected landings.
-- The window list is only mutated via `record()` under the server's existing
-  land path; reads prune lazily, so an idle agent's stale entries cost nothing
-  until the next check.
+- The window list grows only via `record()` under the server's existing land
+  path; `recentChanges()` reads also prune it lazily (dropping expired entries),
+  so an idle agent's stale entries cost nothing until the next check.
 
 ## Testing
 
