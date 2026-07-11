@@ -609,6 +609,16 @@ function resolveServer(
   return { server, rest };
 }
 
+// Library callers may run under Node rather than the compiled Bun binary. Read
+// its standard stream without referring to Bun; bin.ts injects Bun.stdin for
+// the real executable while tests can continue injecting a deterministic reader.
+async function readProcessStdin(): Promise<string> {
+  process.stdin.setEncoding('utf8');
+  let text = '';
+  for await (const chunk of process.stdin) text += String(chunk);
+  return text;
+}
+
 // The injectable entry point. Returns a process exit code.
 export async function run(
   argv: readonly string[],
@@ -2856,7 +2866,7 @@ export async function run(
           } else {
             const json =
               path === '-'
-                ? await (env.stdin ?? (() => Bun.stdin.text()))()
+                ? await (env.stdin ?? readProcessStdin)()
                 : readFileSync(
                     isAbsolute(path) ? path : join(env.cwd, path),
                     'utf8'

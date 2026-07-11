@@ -5,6 +5,7 @@ import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { Readable } from 'node:stream';
 
 import { loadIdentity } from '../src/identity';
 import { run } from '../src/run';
@@ -152,6 +153,36 @@ describe('thaddeus reputation', () => {
       )
     ).toBe(0);
     expect(out.join('\n')).toContain('imported 1 contribution(s)');
+
+    // The reusable run() entrypoint must not depend on Bun globals when its
+    // caller leaves stdin uninjected. The compiled Bun binary injects its own
+    // reader, while Node consumers fall back to process.stdin.
+    const stdinDescriptor = Object.getOwnPropertyDescriptor(process, 'stdin');
+    const bunStdin = Bun.stdin as { text: () => Promise<string> };
+    const bunText = bunStdin.text;
+    Object.defineProperty(process, 'stdin', {
+      configurable: true,
+      enumerable: true,
+      value: Readable.from([archive]),
+      writable: true,
+    });
+    bunStdin.text = () =>
+      Promise.reject(new Error('Bun-specific stdin fallback used'));
+    try {
+      out.length = 0;
+      expect(
+        await run(
+          ['reputation', 'import', '-', '--server', 'http://destination'],
+          env(home)
+        )
+      ).toBe(0);
+      expect(out.join('\n')).toContain('already present');
+    } finally {
+      bunStdin.text = bunText;
+      if (stdinDescriptor !== undefined) {
+        Object.defineProperty(process, 'stdin', stdinDescriptor);
+      }
+    }
 
     out.length = 0;
     expect(
