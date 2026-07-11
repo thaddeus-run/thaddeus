@@ -2575,27 +2575,30 @@ export async function run(
                 .map((p) => p.trim())
                 .filter(Boolean)
             : ['**'];
+        // Guard '' on both budget flags: Number('') is 0, which would silently
+        // sign a zero-cap (fully blocking) grant from a script's empty variable.
+        const rawMaxChanges = values['max-changes'];
         const maxChanges =
-          values['max-changes'] !== undefined
-            ? Number(values['max-changes'])
-            : 1_000_000;
-        if (!Number.isInteger(maxChanges) || maxChanges < 0) {
-          out(`invalid --max-changes: ${values['max-changes']}`);
+          rawMaxChanges !== undefined ? Number(rawMaxChanges) : 1_000_000;
+        if (
+          rawMaxChanges === '' ||
+          !Number.isInteger(maxChanges) ||
+          maxChanges < 0
+        ) {
+          out(`invalid --max-changes: ${rawMaxChanges}`);
           return 2;
         }
         // P9 rate window: absent = no hourly cap (null); 0 is legal (zero
         // changes per hour).
+        const rawRate = values['max-changes-per-hour'];
         const maxChangesPerHour =
-          values['max-changes-per-hour'] !== undefined
-            ? Number(values['max-changes-per-hour'])
-            : null;
+          rawRate !== undefined ? Number(rawRate) : null;
         if (
-          maxChangesPerHour !== null &&
-          (!Number.isInteger(maxChangesPerHour) || maxChangesPerHour < 0)
+          rawRate === '' ||
+          (maxChangesPerHour !== null &&
+            (!Number.isInteger(maxChangesPerHour) || maxChangesPerHour < 0))
         ) {
-          out(
-            `invalid --max-changes-per-hour: ${values['max-changes-per-hour']}`
-          );
+          out(`invalid --max-changes-per-hour: ${rawRate}`);
           return 2;
         }
         const delegation = signDelegation(

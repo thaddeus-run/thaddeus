@@ -161,6 +161,25 @@ describe('thaddeus grant/revoke/grants', () => {
       ).toBe(2);
       expect(out.join('\n')).toContain('invalid --max-changes-per-hour');
 
+      // An explicit empty value must not coerce to 0 (a script with an unset
+      // variable would otherwise sign a fully-blocking zero-cap grant).
+      out.length = 0;
+      expect(
+        await run(
+          ['grant', mateDid, '--max-changes-per-hour', ''],
+          e(ownerWc, ownerHome)
+        )
+      ).toBe(2);
+      expect(out.join('\n')).toContain('invalid --max-changes-per-hour');
+      out.length = 0;
+      expect(
+        await run(
+          ['grant', mateDid, '--max-changes', ''],
+          e(ownerWc, ownerHome)
+        )
+      ).toBe(2);
+      expect(out.join('\n')).toContain('invalid --max-changes');
+
       // Grant one landed op per hour.
       out.length = 0;
       expect(
