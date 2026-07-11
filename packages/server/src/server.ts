@@ -376,7 +376,9 @@ export function createServer(config: ServerConfig): Server {
         const agent = key.slice('meter/'.length);
         const m = decodeRecord(bytes) as { changes: number; spend: number };
         try {
-          reg.record(agent, m.changes, m.spend);
+          // replayMeter, not record: restoring durable lifetime totals must not
+          // stamp them into the current hour's rate window (P9).
+          reg.replayMeter(agent, m.changes, m.spend);
         } catch {
           // a meter for an agent with no grant — skip
         }
