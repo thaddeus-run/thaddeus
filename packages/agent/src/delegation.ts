@@ -6,6 +6,10 @@ export interface DelegationFields {
   readonly paths: readonly string[]; // globs the agent may touch, e.g. ['src/**']
   readonly maxChanges: number; // cap on # of ops the agent may land (total)
   readonly maxSpend: number; // cap on caller-reported spend (abstract units)
+  // Per-hour rate window (P9): max ops the agent may land within any trailing
+  // hour. `null`/absent = no rate limit. Optional so records signed before the
+  // field existed — and their many constructor sites — stay valid.
+  readonly maxChangesPerHour?: number | null;
 }
 
 // A signed delegation: the operator authorizes the agent to act for them. The
@@ -56,21 +60,37 @@ function assertCanonical(core: DelegationCore): void {
   ) {
     throw new TypeError('delegation.maxSpend must be a finite number >= 0');
   }
+  const rate = core.maxChangesPerHour;
+  if (
+    rate !== undefined &&
+    rate !== null &&
+    (!Number.isInteger(rate) || rate < 0)
+  ) {
+    throw new TypeError(
+      'delegation.maxChangesPerHour must be a non-negative integer or null'
+    );
+  }
 }
 
 // Deterministic bytes the operator's signature covers: the domain tag followed
 // by the core fields in a fixed order. Throws on non-canonical input.
 export function canonicalDelegation(core: DelegationCore): Uint8Array {
   assertCanonical(core);
+  const v1 = [
+    DELEGATION_DOMAIN,
+    core.operator,
+    core.agent,
+    [...core.paths],
+    core.maxChanges,
+    core.maxSpend,
+  ];
+  // Presence-keyed compatibility: a record without a rate cap signs the exact
+  // legacy v1 tuple, so pre-P9 grants and new no-limit grants verify
+  // identically everywhere; only a real cap extends the signed tuple.
   return new TextEncoder().encode(
-    JSON.stringify([
-      DELEGATION_DOMAIN,
-      core.operator,
-      core.agent,
-      [...core.paths],
-      core.maxChanges,
-      core.maxSpend,
-    ])
+    JSON.stringify(
+      core.maxChangesPerHour == null ? v1 : [...v1, core.maxChangesPerHour]
+    )
   );
 }
 
