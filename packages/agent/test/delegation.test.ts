@@ -132,5 +132,24 @@ describe('Delegation — sign & verify', () => {
         )
       ).toBe(true);
     });
+
+    // Security pin: canonicalDelegation is presence-keyed, not truthiness-keyed
+    // (see the `== null` check, not `?`/truthy, in canonicalDelegation). A cap
+    // of exactly 0 must sign DIFFERENT bytes than an absent/null cap, so a
+    // record can never be replayed as "no rate limit" by simply dropping the
+    // field. A future `rate ? [...v1, rate] : v1` regression would make this
+    // fail because 0 is falsy.
+    test('a zero rate cap does not verify once the field is stripped (cap 0 != no cap)', () => {
+      const operator = Identity.create();
+      const agent = Identity.create();
+      const zero = signDelegation(
+        { ...fields(agent), maxChangesPerHour: 0 },
+        operator
+      );
+      const { maxChangesPerHour: _dropped, ...rest } = zero;
+      expect(verifyDelegation({ ...rest, maxChangesPerHour: null })).toBe(
+        false
+      );
+    });
   });
 });
