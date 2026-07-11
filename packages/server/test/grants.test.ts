@@ -1,4 +1,4 @@
-import { signDelegation } from '@thaddeus.run/agent';
+import { signDelegation, verifyDelegation } from '@thaddeus.run/agent';
 import { Identity, ready } from '@thaddeus.run/identity';
 import { MemoryBackend } from '@thaddeus.run/persist';
 import { beforeAll, describe, expect, test } from 'bun:test';
@@ -111,5 +111,38 @@ describe('grants', () => {
       await srv2.fetch(new Request('http://t/repos/r/grants'))
     ).json()) as { grants: string[] };
     expect(reloaded.grants).toHaveLength(0); // still revoked after reload
+  });
+
+  test('a rate-capped delegation rides the wire intact', async () => {
+    const owner = Identity.create();
+    const agent = Identity.create();
+    const backend = new MemoryBackend();
+    const srv = createServer({ backend });
+    await srv.fetch(signed('POST', '/repos', { name: 'rw' }, owner));
+    const capped = signDelegation(
+      {
+        agent: agent.did,
+        paths: ['src/**'],
+        maxChanges: 100,
+        maxSpend: 1000,
+        maxChangesPerHour: 2,
+      },
+      owner
+    );
+    const ok = await srv.fetch(
+      signed(
+        'POST',
+        '/repos/rw/grants',
+        { delegation: encodeDelegation(capped) },
+        owner
+      )
+    );
+    expect(ok.status).toBe(200);
+    const list = (await (
+      await srv.fetch(new Request('http://t/repos/rw/grants'))
+    ).json()) as { grants: string[] };
+    const roundTripped = decodeDelegation(list.grants[0]);
+    expect(roundTripped.maxChangesPerHour).toBe(2);
+    expect(verifyDelegation(roundTripped)).toBe(true);
   });
 });
