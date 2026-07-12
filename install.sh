@@ -75,6 +75,10 @@ base="https://github.com/$REPO/releases/download/$version"
 sums=$(fetch "$base/SHA256SUMS" 2>/dev/null || printf '')
 
 mkdir -p "$BIN_DIR"
+alias_path="$BIN_DIR/thad$ext"
+if [ -d "$alias_path" ] && [ ! -L "$alias_path" ]; then
+  err "$alias_path is a directory; remove or rename it before installing"
+fi
 printf 'Installing Thaddeus %s (%s-%s) → %s\n' "$version" "$os" "$arch" "$BIN_DIR"
 
 # --- download each tool (a binary not built for this platform is a soft skip) ---
@@ -112,11 +116,11 @@ done
 # relative symlink on Unix so moving the install prefix keeps it valid; copy on
 # Windows shells where creating symlinks commonly requires extra privileges.
 if [ -x "$BIN_DIR/thaddeus$ext" ]; then
-  rm -f "$BIN_DIR/thad$ext"
+  rm -f "$alias_path"
   if [ "$os" = windows ]; then
-    cp "$BIN_DIR/thaddeus$ext" "$BIN_DIR/thad$ext"
+    cp "$BIN_DIR/thaddeus$ext" "$alias_path"
   else
-    ln -s "thaddeus$ext" "$BIN_DIR/thad$ext"
+    ln -s "thaddeus$ext" "$alias_path"
   fi
 fi
 
