@@ -1,6 +1,6 @@
 {
   "name": "@thaddeus.run/cli",
-  "version": "0.1.6-alpha",
+  "version": "0.1.7-alpha",
   "private": true,
   "description": "The Thaddeus CLI (thaddeus / thad) source — compiled into the distributed binary. The published `@thaddeus.run/cli` on npm is the binary launcher in `npm/thaddeus`, so this workspace package is private.",
   "keywords": [
