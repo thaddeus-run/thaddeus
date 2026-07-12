@@ -1,0 +1,1910 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Thaddeus — Five-Lens Analysis, Roadmap & ThadHub Plan</title>
+    <style>
+      :root {
+        --bg: #fbfbfa;
+        --fg: #1f2328;
+        --muted: #656d76;
+        --rule: #d8dce1;
+        --card: #ffffff;
+        --accent: #0969da;
+        --code-bg: #f3f4f6;
+        --done: #1a7f37;
+        --crit: #cf222e;
+        --high: #bc4c00;
+        --med: #9a6700;
+        --low: #57606a;
+        --band: #f6f8fa;
+      }
+      @media (prefers-color-scheme: dark) {
+        :root {
+          --bg: #0d1117;
+          --fg: #e6edf3;
+          --muted: #9198a1;
+          --rule: #30363d;
+          --card: #161b22;
+          --accent: #4493f8;
+          --code-bg: #1c2128;
+          --done: #3fb950;
+          --crit: #ff7b72;
+          --high: #ffa657;
+          --med: #e3b341;
+          --low: #8b949e;
+          --band: #12171e;
+        }
+      }
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        margin: 0;
+        background: var(--bg);
+        color: var(--fg);
+        font:
+          16px/1.65 system-ui,
+          -apple-system,
+          'Segoe UI',
+          sans-serif;
+      }
+      .wrap {
+        max-width: 900px;
+        margin: 0 auto;
+        padding: 3rem 1.25rem 6rem;
+      }
+      header.doc {
+        border-bottom: 1px solid var(--rule);
+        padding-bottom: 1.5rem;
+        margin-bottom: 1.5rem;
+      }
+      h1 {
+        font-size: 2.1rem;
+        line-height: 1.15;
+        margin: 0 0 0.6rem;
+        letter-spacing: -0.02em;
+      }
+      h2 {
+        font-size: 1.45rem;
+        margin: 3rem 0 0.6rem;
+        letter-spacing: -0.01em;
+        padding-top: 0.6rem;
+        border-top: 2px solid var(--rule);
+      }
+      h3 {
+        font-size: 1.12rem;
+        margin: 1.8rem 0 0.4rem;
+      }
+      h4 {
+        font-size: 1rem;
+        margin: 1.2rem 0 0.3rem;
+        color: var(--muted);
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+        font-size: 0.8rem;
+      }
+      .meta {
+        color: var(--muted);
+        font-size: 0.9rem;
+        margin: 0.25rem 0;
+      }
+      .meta strong {
+        color: var(--fg);
+        font-weight: 600;
+      }
+      a {
+        color: var(--accent);
+        text-decoration: none;
+      }
+      a:hover {
+        text-decoration: underline;
+      }
+      nav.toc {
+        background: var(--card);
+        border: 1px solid var(--rule);
+        border-radius: 8px;
+        padding: 1rem 1.25rem;
+        margin: 1.5rem 0;
+        font-size: 0.92rem;
+      }
+      nav.toc ol {
+        margin: 0.4rem 0 0;
+        padding-left: 1.2rem;
+      }
+      nav.toc li {
+        margin: 0.15rem 0;
+      }
+      .lead {
+        font-size: 1.05rem;
+      }
+      .card {
+        background: var(--card);
+        border: 1px solid var(--rule);
+        border-radius: 8px;
+        padding: 1rem 1.35rem;
+        margin: 1.25rem 0;
+      }
+      .verdict {
+        border-left: 4px solid var(--accent);
+      }
+      table {
+        border-collapse: collapse;
+        width: 100%;
+        margin: 1rem 0;
+        font-size: 0.9rem;
+      }
+      th,
+      td {
+        text-align: left;
+        padding: 0.5rem 0.6rem;
+        border-bottom: 1px solid var(--rule);
+        vertical-align: top;
+      }
+      th {
+        color: var(--muted);
+        font-weight: 600;
+        background: var(--band);
+      }
+      code {
+        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+        font-size: 0.86em;
+        background: var(--code-bg);
+        padding: 0.05rem 0.3rem;
+        border-radius: 4px;
+      }
+      pre {
+        background: var(--code-bg);
+        border: 1px solid var(--rule);
+        border-radius: 6px;
+        padding: 0.8rem 1rem;
+        overflow-x: auto;
+        font-size: 0.85rem;
+        line-height: 1.5;
+        margin: 0.6rem 0;
+      }
+      pre code {
+        background: none;
+        padding: 0;
+      }
+      .tag {
+        display: inline-block;
+        font-size: 0.72rem;
+        font-weight: 700;
+        letter-spacing: 0.03em;
+        padding: 0.08rem 0.45rem;
+        border-radius: 20px;
+        color: #fff;
+        vertical-align: middle;
+        white-space: nowrap;
+      }
+      .t-crit {
+        background: var(--crit);
+      }
+      .t-high {
+        background: var(--high);
+      }
+      .t-med {
+        background: var(--med);
+      }
+      .t-low {
+        background: var(--low);
+      }
+      .t-ok {
+        background: var(--done);
+      }
+      .pill {
+        display: inline-block;
+        font-size: 0.74rem;
+        font-weight: 600;
+        padding: 0.05rem 0.5rem;
+        border: 1px solid var(--rule);
+        border-radius: 20px;
+        color: var(--muted);
+      }
+      ul.tight {
+        margin: 0.4rem 0;
+      }
+      ul.tight li {
+        margin: 0.2rem 0;
+      }
+      .grade {
+        font-weight: 800;
+        font-variant-numeric: tabular-nums;
+      }
+      .scorecard td:first-child {
+        font-weight: 600;
+      }
+      blockquote {
+        margin: 1rem 0;
+        padding: 0.5rem 1rem;
+        border-left: 3px solid var(--accent);
+        color: var(--fg);
+        background: var(--band);
+        border-radius: 0 6px 6px 0;
+      }
+      .checklist {
+        list-style: none;
+        padding: 0;
+        margin: 0.5rem 0;
+      }
+      .checklist li {
+        display: flex;
+        gap: 0.55rem;
+        align-items: flex-start;
+        padding: 0.35rem 0;
+        border-top: 1px solid var(--rule);
+      }
+      .checklist li:first-child {
+        border-top: 0;
+      }
+      .checklist input {
+        margin-top: 0.4rem;
+        flex: none;
+      }
+      .checklist input:checked + span {
+        color: var(--muted);
+      }
+      .done-flag {
+        color: var(--done);
+        font-weight: 700;
+      }
+      footer {
+        margin-top: 4rem;
+        padding-top: 1.5rem;
+        border-top: 1px solid var(--rule);
+        color: var(--muted);
+        font-size: 0.85rem;
+      }
+      .small {
+        font-size: 0.85rem;
+        color: var(--muted);
+      }
+    </style>
+  </head>
+  <body>
+    <div class="wrap">
+      <header class="doc">
+        <h1>Thaddeus — Five-Lens Analysis, Active Roadmap & ThadHub Plan</h1>
+        <p class="meta">
+          <strong>Date:</strong> 2026-07-12 · <strong>Subject:</strong> the
+          Thaddeus source-control substrate (18 TS packages +
+          <code>lazythad</code> Rust TUI), live at <code>thaddeus.fly.dev</code>
+        </p>
+        <p class="meta">
+          <strong>Method:</strong> five independent expert subagents each
+          audited the code directly, plus a de-novo ThadHub design. Every claim
+          below is anchored to <code>file:line</code> in their reports. Findings
+          are <em>source-review</em>, not runtime-exploited, unless noted.
+        </p>
+        <p class="meta">
+          <strong>Companion changes (already applied):</strong> the deferred
+          ledger was rewritten and the active pipeline consolidated into
+          <code>CHANGELOG.md</code> (the standalone roadmap file was retired),
+          and 25 issues across 4 milestones (P11–P14) were opened on
+          <code>thaddeus-run/thaddeus</code>. See <a href="#implemented">§6</a>.
+        </p>
+      </header>
+
+      <div class="card verdict" style="border-left-color: var(--high)">
+        <strong>⚠ Currency &amp; corrections (read first).</strong> The five
+        audits below were run against the working tree at branch
+        <code>agent/add-source-control-research-files</code> (commit
+        <code>9613e66</code>), which was
+        <strong>two releases behind <code>main</code></strong
+        >. Since then <code>main</code> shipped <strong>0.1.6-alpha</strong> and
+        <strong>0.1.7-alpha</strong>, which already close several findings.
+        Verified against <code>main</code>:
+        <ul class="tight" style="margin-top: 0.5rem">
+          <li>
+            <strong>Closed:</strong>
+            <code>query</code
+            >/<code>watch</code>/<code>schedule-reveal</code>/<code
+              >reveal</code
+            >
+            <em>are</em> wired into the CLI (0.1.6) — the PM "differentiator is
+            invisible" finding and issue #81 are resolved; a signed-request
+            <strong>replay-nonce cache</strong> shipped (0.1.7), so the "no
+            nonce store" item is closed (only cross-restart durability remains,
+            #61); a reputation
+            <strong><code>--trust-host</code> allowlist</strong> + export/import
+            archives shipped (0.1.7), narrowing #79 to anti-farming; and
+            <strong>per-hour agent rate windows</strong> shipped (0.1.6).
+          </li>
+          <li>
+            <strong>Still open on <code>main</code> (re-verified):</strong> the
+            capability <code>wrapped_key</code> is still unsigned (#72); view
+            heads are still unsigned (#73); the request body is still buffered
+            pre-auth with no cap (#75); <code>blockOnVeto</code> is still called
+            with no reviewer allowlist (#77); <code>maxSpend</code> is still a
+            hard-coded 0 (#78); the <code>Backend</code> still has no CAS (#68);
+            the op-log/graph are still <code>O(n²)</code> (#74); the semantic
+            graph is still a regex heuristic; there is still no git gateway. The
+            architectural verdict is unchanged.
+          </li>
+        </ul>
+        Section text below is preserved as-written against <code>9613e66</code>;
+        where a finding is now closed it is flagged inline. The CHANGELOG
+        <code>[Unreleased]</code> pipeline and the GitHub issues carry the
+        corrected, current status.
+      </div>
+
+      <p class="lead">
+        Thaddeus is a genuinely impressive cryptographic substrate whose
+        foundation (encrypted objects, a real CRDT op-log, portable reputation,
+        a standing human veto) is real and tested — sitting under a
+        social/meaning layer and a "post-git" story that the marketing currently
+        outruns, and two architectural fault lines the roadmap is about to drive
+        straight into. It is
+        <strong
+          >not yet safe for untrusted public write, not ready for external
+          contributors, and not multi-node-safe</strong
+        >
+        — but none of those gaps require a rewrite, and most are already scoped
+        as tracked work.
+      </p>
+
+      <nav class="toc">
+        <strong>Contents</strong>
+        <ol>
+          <li>
+            <a href="#scorecard"
+              >Executive scorecard — the four questions you asked</a
+            >
+          </li>
+          <li><a href="#security">Is it secure?</a></li>
+          <li>
+            <a href="#pm">Is it usable? (PM lens: wedge, gaps, backlog)</a>
+          </li>
+          <li>
+            <a href="#code">Which code is bad? What to rewrite in Rust/Go?</a>
+          </li>
+          <li><a href="#manifesto">Do we fulfill the manifesto?</a></li>
+          <li>
+            <a href="#implemented"
+              >What was already implemented (tracking cleanup)</a
+            >
+          </li>
+          <li>
+            <a href="#nextsteps"
+              >Detailed next-steps outline (the re-prioritized pipeline)</a
+            >
+          </li>
+          <li><a href="#thadhub">ThadHub — detailed plan</a></li>
+        </ol>
+      </nav>
+
+      <h2 id="scorecard">1. Executive scorecard</h2>
+      <table class="scorecard">
+        <tr>
+          <th>Question</th>
+          <th>Verdict</th>
+          <th>The one-line reason</th>
+        </tr>
+        <tr>
+          <td>Is it secure?</td>
+          <td><span class="tag t-high">Not yet</span></td>
+          <td>
+            Crypto primitives are sound, but the "untrusted server" thesis has
+            real holes (unsigned capability key material, unsigned view heads)
+            and there are two <em>unauthenticated</em> DoS primitives against
+            the live 512&nbsp;MB node.
+          </td>
+        </tr>
+        <tr>
+          <td>Is it usable? (PM)</td>
+          <td><span class="tag t-high">Over-built, no wedge</span></td>
+          <td>
+            A determined dev can reach first-push, but there's no
+            <code>init</code>-in-place, the documented path has a copy-paste
+            break, and the product has no acute job yet.
+            <em
+              >(The "<code>query</code> verbs not wired" point below is now
+              closed — they shipped in the CLI in 0.1.6.)</em
+            >
+          </td>
+        </tr>
+        <tr>
+          <td>Which code is bad?</td>
+          <td><span class="tag t-med">Two fault lines</span></td>
+          <td>
+            Not the language: the <code>Backend</code> contract can't express
+            the atomic compare-and-swap multi-node needs, and the op-log / graph
+            are <code>O(n²)</code>–<code>O(n³)</code> re-derivations. Both are
+            fixable in TypeScript.
+          </td>
+        </tr>
+        <tr>
+          <td>Rewrite in Rust or Go?</td>
+          <td><span class="tag t-ok">Not yet — nothing</span></td>
+          <td>
+            CLI is already ~47&nbsp;ms warm; crypto isn't the profile top; keep
+            <code>lazythad</code> in Rust. Fix algorithms + the CAS contract in
+            TS first. Concrete rewrite triggers in <a href="#code">§4</a>.
+          </td>
+        </tr>
+        <tr>
+          <td>Do we fulfill the manifesto?</td>
+          <td><span class="grade">~65%</span></td>
+          <td>
+            Foundation (P01–P04) genuinely matches the poetry; the "boldest
+            break" (P08 semantic graph) is two regexes, and the one concrete
+            compatibility promise — <code>git clone</code> works day one — has
+            no code.
+          </td>
+        </tr>
+      </table>
+
+      <div class="card verdict">
+        <strong>The through-line across all five lenses:</strong> the codebase
+        is refreshingly honest with <em>itself</em> — <code>Spike</code>,
+        <code>deferred</code>, <code>frontier</code>, "not concurrency-safe"
+        comments are everywhere. The credibility risk is the
+        <em>framing around it</em>: <code>README</code>'s "the eleven pillars"
+        and <code>ARCHITECTURE.md</code>'s "built" status table read as
+        production-complete when P08/P11 are early scaffolding and multi-node/S3
+        — the literal "next steps" — are exactly what the current design cannot
+        do correctly.
+        <strong
+          >Fix the framing, close two security bindings, grow one interface, and
+          this is a strong system on a credible path.</strong
+        >
+      </div>
+
+      <h2 id="security">2. Is it secure?</h2>
+      <p>
+        Two independent adversarial source audits were run. They converge:
+        <strong
+          >the cryptographic core is solid; the gaps are in authorization
+          lifecycle, resource governance, and the distance between the
+          "untrusted server / terminal revocation" marketing and the deployed
+          behavior.</strong
+        >
+      </p>
+
+      <h3>Deployment-readiness verdict</h3>
+      <table>
+        <tr>
+          <th>Can you…</th>
+          <th></th>
+          <th>Why</th>
+        </tr>
+        <tr>
+          <td>Run publicly as-is?</td>
+          <td><span class="tag t-high">No</span></td>
+          <td>
+            Two unauthenticated DoS primitives take the single 512&nbsp;MB node
+            down trivially. Fine as a read-mostly demo with one trusted owner.
+          </td>
+        </tr>
+        <tr>
+          <td>Invite external contributors?</td>
+          <td><span class="tag t-high">Not yet</span></td>
+          <td>
+            Any non-owner writer can mount a repo-wide, durable land-blocking
+            veto DoS; the advertised <code>maxSpend</code> budget is never
+            metered; revocation's read-recall needs verification.
+          </td>
+        </tr>
+        <tr>
+          <td>Go multi-node?</td>
+          <td><span class="tag t-crit">No</span></td>
+          <td>
+            Every concurrency control (repo lock, budget meter, revocation
+            cache) is in-process; the backend has no compare-and-swap. Two
+            replicas ⇒ lost lands, budget double-spend, split brain.
+          </td>
+        </tr>
+      </table>
+
+      <h3>Findings (ranked, both audits merged)</h3>
+      <table>
+        <tr>
+          <th>Sev</th>
+          <th>Finding</th>
+          <th>Evidence</th>
+          <th>Issue</th>
+        </tr>
+        <tr>
+          <td><span class="tag t-crit">CRIT*</span></td>
+          <td>
+            <strong
+              >Capability signature doesn't cover <code>wrapped_key</code>;
+              object↔op binding not re-checked at read.</strong
+            >
+            A tampering relay/server can substitute the sealed key (silent,
+            targeted <em>read-denial</em>) — and one audit argues it escalates
+            to <em>content substitution</em> that decrypts cleanly, because
+            <code>store.get</code> follows the server-controlled
+            <code>current</code> pointer without asserting the object address
+            equals the signed op payload id. This is the binding the
+            "verify-don't-trust" thesis rests on.
+          </td>
+          <td>
+            <code>store/src/capability.ts:16-22,46-51</code>;
+            <code>store/src/store.ts:190-206</code>
+          </td>
+          <td>#72</td>
+        </tr>
+        <tr>
+          <td><span class="tag t-high">HIGH</span></td>
+          <td>
+            <strong>View/branch heads are unsigned.</strong> Everything else is
+            individually signed, but <code>repoint</code> writes
+            <code>view/&lt;name&gt;</code> as plain data and the client accepts
+            <code>body.heads</code> unverified. An untrusted server can roll
+            back, fork/equivocate (different heads to different clients), or
+            withhold ops — none detectable.
+          </td>
+          <td>
+            <code>log/src/oplog.ts:113-118</code>;
+            <code>client/src/client.ts:149-150,206-207</code>
+          </td>
+          <td>#73</td>
+        </tr>
+        <tr>
+          <td><span class="tag t-high">HIGH</span></td>
+          <td>
+            <strong>Unauthenticated pre-auth body buffering → OOM.</strong> The
+            whole POST body is read into memory
+            <em>before</em> routing/signature check, with no size cap; a few
+            hundred-MB bodies exhaust the 512&nbsp;MB Fly node. Exploitable
+            today.
+          </td>
+          <td>
+            <code>server/src/server.ts:1384-1387</code>;
+            <code>cli/src/serve.ts:32</code>
+          </td>
+          <td>#75</td>
+        </tr>
+        <tr>
+          <td><span class="tag t-high">HIGH</span></td>
+          <td>
+            <strong>Open registration + no quotas.</strong>
+            <code>createRepo</code> accepts any valid signature, no rate
+            limit/quota; loop it to fill the flat-dir volume + inodes and grow
+            never-evicted in-memory maps. <code>listRepos</code> (also the
+            health check) reads every repo's meta → self-restart loop.
+          </td>
+          <td><code>server/src/server.ts:378-409,412-430</code></td>
+          <td>#76</td>
+        </tr>
+        <tr>
+          <td><span class="tag t-high">HIGH</span></td>
+          <td>
+            <strong>Veto injection bypasses delegation scope.</strong>
+            <code>blockOnVeto</code> has no reviewer allowlist, and
+            <code>push</code> doesn't scope-check veto ingestion, so a
+            <code>docs/**</code>-scoped delegate can veto the owner's unlanded
+            <code>src/**</code> ops (visible via public <code>pull</code>) — a
+            durable repo-wide land-DoS that survives revoking the delegate.
+          </td>
+          <td>
+            <code>server/src/server.ts:1142,1026-1039</code>;
+            <code>platform/src/policy.ts:147-179</code>
+          </td>
+          <td>#77</td>
+        </tr>
+        <tr>
+          <td><span class="tag t-med">MED</span></td>
+          <td>
+            <strong
+              >Revocation read-recall vs. the "terminal revoke" claim.</strong
+            >
+            The CLI <code>revoke</code> (v0.1.4) is documented to rotate every
+            readable object and upload recalled ciphertext, so fresh clones get
+            no keys. But one audit found the <em>server</em> delegation-revoke
+            handler only quarantines and never calls the key-rotating path.
+            Reconcile the two paths and verify a revoked, still-cloned party
+            cannot read post-revoke content (an offline grantee keeping an old
+            key is an accepted, documented limit).
+          </td>
+          <td>
+            <code>server/src/server.ts:1286-1338</code> vs.
+            <code>store/src/store.ts:223-269</code> +
+            <code>CHANGELOG</code> v0.1.4
+          </td>
+          <td>#78</td>
+        </tr>
+        <tr>
+          <td><span class="tag t-med">MED</span></td>
+          <td>
+            <strong><code>maxSpend</code> is never metered.</strong> The server
+            records spend as a hard-coded <code>0</code> on every land, so
+            <code>maxSpend&gt;0</code> is unbounded and
+            <code>maxSpend===0</code> is an instant lockout.
+            <code>--max-spend</code> is a no-op footgun.
+          </td>
+          <td>
+            <code>server/src/server.ts:1178</code>;
+            <code>agent/src/policy.ts:84</code>
+          </td>
+          <td>#78</td>
+        </tr>
+        <tr>
+          <td><span class="tag t-med">MED</span></td>
+          <td>
+            <strong>Reputation is farmable + has no host trust anchor.</strong>
+            The <code>--min-merges</code> Sybil gate is farmable on one host
+            (free repos + self-authored, self-landed ops mint attested merges;
+            the land path doesn't even check <code>claim.repo===name</code>);
+            and <em>(as analyzed)</em> there was no allowlist of trusted
+            attesting hosts.
+            <em
+              >Update: a <code>--trust-host</code> allowlist shipped in 0.1.7,
+              so this narrows to the farming half — the
+              <code>claim.repo===name</code> check, not attesting owner-authored
+              merges, and rate-limiting.</em
+            >
+            Also: the live deploy holds a host signing key on the
+            <code>/data</code> volume — contradicting "the server holds no
+            keys."
+          </td>
+          <td>
+            <code>reputation/src/reputationlog.ts:129-150</code>;
+            <code>server.ts:1191-1204</code>;
+            <code>docker-entrypoint.sh:26</code>, <code>fly.toml:11</code>
+          </td>
+          <td>#79</td>
+        </tr>
+        <tr>
+          <td><span class="tag t-low">LOW</span></td>
+          <td>
+            <strong>Replay window</strong>
+            <em
+              >(now closed on <code>main</code> — a signed-request
+              <code>ReplayNonceCache</code> shipped in 0.1.7; only cross-restart
+              durability remains, #61)</em
+            >;
+            <strong
+              ><code>plaintext_id = blake3(plaintext)</code> is public</strong
+            >
+            (known-plaintext confirmation of a file's presence);
+            <strong><code>install.sh</code> checksum fails open</strong> and
+            <code>curl | sh</code> runs unsigned code.
+          </td>
+          <td>
+            <code>server/src/sign.ts:5-7</code>;
+            <code>store/src/object.ts:41</code>;
+            <code>install.sh:75,89-100</code>
+          </td>
+          <td>#61, later</td>
+        </tr>
+      </table>
+      <p class="small">
+        * CRIT is the maximum severity if the content-substitution path is
+        confirmed; if only read-denial holds it is HIGH. Both audits agree the
+        fix (sign <code>wrapped_key</code> + re-check the read-time binding) is
+        mandatory regardless. A definitive exploit-or-refute test should settle
+        it — that's part of #72.
+      </p>
+
+      <h3>What is genuinely well-built</h3>
+      <ul class="tight">
+        <li>
+          <strong>Authorship cannot be forged</strong> — ops are signed over
+          domain-separated canonical bytes and <code>OpLog.ingest</code> rejects
+          any unverifiable op (<code>oplog.ts:191-193</code>), so a delegate
+          can't push an op claiming the owner as author. The key escalation path
+          is closed.
+        </li>
+        <li>
+          <strong>Uniform signature discipline</strong> — distinct domain tags
+          per record type, canonical JSON that rejects NaN/Infinity/non-UTC,
+          fail-closed non-throwing verifiers everywhere.
+        </li>
+        <li>
+          <strong>Path traversal is closed</strong> —
+          <code>FileBackend</code> percent-encodes each key into one flat
+          filename; staging + atomic rename gives per-key crash atomicity; glob
+          matchers fail closed on <code>..</code> in three independent places.
+        </li>
+        <li>
+          <strong>AEAD hygiene</strong> — XChaCha20-Poly1305, fresh random
+          192-bit nonce + fresh content key per put/rotate; no nonce-reuse risk.
+          <code>did:key</code> derives the verifying key from the DID itself, so
+          a DID can't be spoofed.
+        </li>
+        <li>
+          <strong>Single-node concurrency is reasoned</strong> — per-repo
+          promise-lock, single-flight registry cache, TOCTOU closed inside the
+          lock, frozen deep-copy of a registered delegation so a caller can't
+          widen a verified grant.
+        </li>
+      </ul>
+
+      <h2 id="pm">3. Is it usable? (Product/PM lens)</h2>
+      <blockquote>
+        <strong>Headline:</strong> Thaddeus is an extraordinary substrate
+        wrapped around a product that does not yet have a job. A disciplined
+        developer <em>can</em> reach a first published change today — but three
+        things block adoption.
+      </blockquote>
+      <ol>
+        <li>
+          <strong>No acute wedge.</strong> Every headline capability is a
+          <em>platform</em> feature that pays off only inside a team that
+          already adopted the whole stack. Nothing solves a screaming
+          today-problem for a single developer better than
+          <code>git init</code>, and the switching cost is total (no git
+          interop, no hosting, no ecosystem).
+        </li>
+        <li>
+          <strong>You cannot version the directory you're standing in.</strong>
+          The core <code>git init</code> gesture doesn't exist —
+          <code>thaddeus init</code> only mints an identity
+          (<code>run.ts:625</code>). To version existing code you must
+          <code>create</code> an empty remote, <code>clone</code> it into a new
+          dir, and move files in. This inverts muscle memory on the very first
+          command.
+        </li>
+        <li>
+          <strong>The documented first-run path has a copy-paste break.</strong>
+          <code>getting-started.md §4</code> says <code>clone acme/web</code> →
+          <code>./acme/web</code>, but the code creates <code>./web</code>, so
+          the <code>cd</code> fails.
+          <em
+            >(As analyzed, the marquee
+            <code>query</code>/<code>watch</code>/<code>reveal</code> verbs were
+            also not wired into the CLI — but that shipped in 0.1.6, so the
+            differentiator <strong>is</strong> now reachable. The remaining PM
+            gap is positioning/discoverability, not existence.)</em
+          >
+        </li>
+      </ol>
+
+      <h3>The reframe that unlocks a first user</h3>
+      <p>
+        The strongest job hiding in here is
+        <strong>agent-governed code</strong>: "let an autonomous agent push —
+        cryptographically bound to a scoped, budgeted, revocable delegation,
+        with a signed <em>why</em> on every change and a standing human veto."
+        That is a 2026 problem people actually have (fleets of coding agents
+        with no real permissioning), and everything for it is
+        <em>already built and passing as a test</em>
+        (<code>one-edit-end-to-end.test.ts:177</code>). It's buried as bullet 8
+        of getting-started. Position Thaddeus as
+        <strong>"the permission layer for AI agents committing code,"</strong>
+        with post-git as the substrate that makes it possible.
+      </p>
+
+      <h3>Feature gaps vs. table stakes</h3>
+      <table>
+        <tr>
+          <th>Capability</th>
+          <th>State</th>
+          <th>Fatal for adoption?</th>
+        </tr>
+        <tr>
+          <td>Repo init in place</td>
+          <td><span class="tag t-high">Missing</span></td>
+          <td>Yes</td>
+        </tr>
+        <tr>
+          <td>Offline/local commit</td>
+          <td><span class="tag t-high">Missing</span> (fused into push)</td>
+          <td>Yes for git-natives</td>
+        </tr>
+        <tr>
+          <td>Branch/PR equivalent</td>
+          <td><span class="tag t-ok">Built</span> — novel COW workspaces</td>
+          <td>No</td>
+        </tr>
+        <tr>
+          <td>Diff (working & branch)</td>
+          <td>
+            <span class="tag t-ok">Built</span> (<code>diff --from/--to</code>)
+          </td>
+          <td>No</td>
+        </tr>
+        <tr>
+          <td>Merge / conflict resolution</td>
+          <td>
+            <span class="tag t-med">Half</span> — LWW winner,
+            <code>conflicts()</code> surfaces, no 3-way
+          </td>
+          <td>Yes for teams</td>
+        </tr>
+        <tr>
+          <td>History / <code>why</code></td>
+          <td>
+            <span class="tag t-ok">Built</span> — the <code>why</code> is a real
+            advantage
+          </td>
+          <td>No</td>
+        </tr>
+        <tr>
+          <td>Query (<code>callers</code>/<code>touchedSince</code>)</td>
+          <td><span class="tag t-ok">Wired in CLI (0.1.6)</span></td>
+          <td>Resolved — was "built but not in CLI" at time of analysis</td>
+        </tr>
+        <tr>
+          <td>Git interop</td>
+          <td><span class="tag t-high">Missing</span></td>
+          <td>Yes, strategically</td>
+        </tr>
+        <tr>
+          <td>Hosting / discovery</td>
+          <td><span class="tag t-med">One Fly node, no web UI</span></td>
+          <td>Medium → see ThadHub</td>
+        </tr>
+      </table>
+
+      <h3>Ranked PM backlog — (value × adoption) ÷ cost</h3>
+      <table>
+        <tr>
+          <th>#</th>
+          <th>Item</th>
+          <th>Verdict</th>
+        </tr>
+        <tr>
+          <td>1</td>
+          <td><code>thaddeus init</code> that adopts the current directory</td>
+          <td><span class="tag t-ok">ADD (was missing)</span> #80</td>
+        </tr>
+        <tr>
+          <td>2</td>
+          <td>Fix getting-started §4 clone path + version drift</td>
+          <td><span class="tag t-ok">DO NOW</span> #82</td>
+        </tr>
+        <tr>
+          <td>3</td>
+          <td>
+            Wire
+            <code>query</code
+            >/<code>callers</code>/<code>why</code>-across-history into the CLI
+          </td>
+          <td><span class="tag t-ok">DONE in 0.1.6</span> #81 closed</td>
+        </tr>
+        <tr>
+          <td>4</td>
+          <td>
+            The "impossible-in-git" agent-governed demo + runnable
+            <code>examples/</code>
+          </td>
+          <td><span class="tag t-ok">DO NOW</span> #82</td>
+        </tr>
+        <tr>
+          <td>5</td>
+          <td>Git gateway (import/export git history)</td>
+          <td><span class="pill">FUND — the real wedge bet</span></td>
+        </tr>
+        <tr>
+          <td>6</td>
+          <td>Standalone offline <code>commit</code></td>
+          <td><span class="pill">DO</span></td>
+        </tr>
+        <tr>
+          <td>7</td>
+          <td>Conflict inspection + 3-way merge</td>
+          <td><span class="pill">DO (defer short-term)</span> #65</td>
+        </tr>
+        <tr>
+          <td>8–13</td>
+          <td>
+            Benchmarks, reveal CLI, review queue, TUI writes, multi-remote,
+            subscriptions depth
+          </td>
+          <td><span class="pill">DEFER until a team is on it</span></td>
+        </tr>
+      </table>
+      <p class="small">
+        PM's blunt note: the roadmap is sequenced for a substrate-builder, not
+        for a product earning its first ten users. Stop adding
+        pillars/governance depth; reallocate to on-ramp, the demo, and git
+        interop.
+      </p>
+
+      <h2 id="code">4. Which code is bad? What to rewrite in Rust/Go?</h2>
+      <blockquote>
+        <strong>Headline:</strong> well-engineered spike code with excellent
+        crypto and test discipline, sitting on two fault lines the roadmap is
+        about to hit. <strong>Rewrite nothing in Rust or Go yet</strong> — the
+        bottleneck is algorithmic and architectural, not the language.
+      </blockquote>
+
+      <h3>Worst-code, ranked</h3>
+      <table>
+        <tr>
+          <th>#</th>
+          <th>Module</th>
+          <th>Sin</th>
+          <th>Sev</th>
+        </tr>
+        <tr>
+          <td>1</td>
+          <td><code>server</code> land + concurrency</td>
+          <td>
+            "Stateless multi-node" is false — per-node in-memory lock + 7
+            caches; read-modify-write on <code>view/main</code>,
+            <code>meter/</code>, registry with no atomicity
+          </td>
+          <td><span class="tag t-crit">Critical</span></td>
+        </tr>
+        <tr>
+          <td>2</td>
+          <td><code>store</code> <code>Backend</code> contract</td>
+          <td>
+            No CAS / conditional put / version token; mutable refs and immutable
+            blobs conflated under one <code>put</code>
+          </td>
+          <td><span class="tag t-crit">Critical</span></td>
+        </tr>
+        <tr>
+          <td>3</td>
+          <td><code>log</code> <code>OpLog</code></td>
+          <td>
+            Hot-path god-object; <code>conflicts()</code> ≈
+            <code>O(n²)</code>→<code>O(n³)</code> per land;
+            <code>materialize()</code> re-sorts all history every call
+          </td>
+          <td><span class="tag t-high">High</span></td>
+        </tr>
+        <tr>
+          <td>4</td>
+          <td><code>graph</code> + <code>query</code></td>
+          <td>
+            <code>SymbolGraph.#model</code> re-decrypts + re-parses the whole
+            workspace every query; <code>CodeDB.callers()</code> is N+1
+          </td>
+          <td><span class="tag t-high">High</span></td>
+        </tr>
+        <tr>
+          <td>5</td>
+          <td><code>persist</code> <code>FileBackend</code></td>
+          <td>
+            Flat directory; every <code>open</code>/<code>load</code> is
+            <code>list</code>+serial-<code>get</code> N+1 (~7 full dir scans on
+            cold start)
+          </td>
+          <td><span class="tag t-high">High at scale</span></td>
+        </tr>
+        <tr>
+          <td>6</td>
+          <td><code>cli</code> <code>run.ts</code></td>
+          <td>
+            ~2060-line <code>run()</code> with a 30-branch switch;
+            identity/client prologue copy-pasted ~20×
+          </td>
+          <td><span class="tag t-med">Medium</span></td>
+        </tr>
+        <tr>
+          <td>7</td>
+          <td>wire boundary (<code>dto.ts</code>)</td>
+          <td>
+            JSON→typed via unvalidated <code>as</code> casts; corrupt
+            <code>meta/repo</code> → uncaught 500 on every route
+          </td>
+          <td><span class="tag t-med">Medium</span></td>
+        </tr>
+      </table>
+
+      <h3>The <code>Backend</code> question (load-bearing)</h3>
+      <p>
+        The interface is <code>put / get / list / delete</code>.
+        <strong
+          >An S3 backend can mechanically implement it — but that's the wrong
+          question.</strong
+        >
+        The interface conflates two key classes:
+      </p>
+      <ul class="tight">
+        <li>
+          <strong>Immutable content-addressed blobs</strong>
+          (<code>obj/&lt;blake3&gt;</code>, <code>op/&lt;blake3&gt;</code>) —
+          write-once, concurrent writers write identical bytes, last-writer-wins
+          is safe. <strong>S3 is perfect here.</strong>
+        </li>
+        <li>
+          <strong>Mutable registers</strong> (<code>view/main</code>,
+          <code>current/</code>, <code>cap/</code>, <code>meter/</code>,
+          <code>rep/</code>, <code>meta/</code>) — read-modify-write, whose
+          <em>only</em> concurrency control today is the single-node event loop
+          + an in-process lock.
+        </li>
+      </ul>
+      <p>
+        The interface exposes
+        <strong
+          >no primitive that could replace that lock across processes</strong
+        >
+        — no put-if-absent, no compare-and-swap on a version/etag, and
+        <code>get</code> returns bare bytes with no version to compare. So a
+        second node gives you lost lands on <code>main</code>, double-spent
+        budgets, and revocation races, <em>undetectably</em>. The fix isn't the
+        storage engine (S3 gained conditional writes in 2024; SQLite has
+        transactions; <code>FileBackend</code> can emulate with
+        <code>O_EXCL</code>) — <strong>it's the contract</strong>, which must
+        grow roughly:
+      </p>
+      <pre><code>putIfAbsent(key, bytes): Promise&lt;boolean&gt;        // create-once
+get(key): Promise&lt;{ bytes, version } | undefined&gt; // versioned read
+putIfMatch(key, bytes, expectedVersion): boolean  // compare-and-swap</code></pre>
+      <p>
+        This is issue <strong>#68</strong> (define CAS semantics) and it is the
+        hard prerequisite for <em>any</em> multi-node work in
+        <em>any</em> language.
+      </p>
+
+      <h3>Rust or Go — the recommendation, with triggers</h3>
+      <p>
+        Evidence the language is not the bottleneck: the compiled Bun CLI is
+        <strong>~47&nbsp;ms warm</strong> (a git-like tool is already fast;
+        Rust/Go buys binary <em>size</em>, not latency); the crypto core is real
+        work but <code>conflicts()</code>/<code>materialize()</code>/graph
+        re-extraction are seconds-to-minutes and are
+        <em>pure TS algorithm bugs</em>; and the multi-node problem is a
+        <em>coordination</em> problem (CAS + externalized state) that Go's
+        goroutines do not solve. <code>lazythad</code> in Rust is the right call
+        and good code (1,320 LOC, 7 <code>unwrap</code>s, tolerant wire
+        decoding, clean split) — a TUI over an HTTP boundary is the ideal Rust
+        target; keep it.
+      </p>
+      <table>
+        <tr>
+          <th>Phase</th>
+          <th>Do</th>
+          <th>Trigger threshold</th>
+        </tr>
+        <tr>
+          <td><strong>0 — now (TS)</strong></td>
+          <td>
+            Fix the algorithms (memoize closures, incremental materialize, cache
+            the graph model, batch loads, shard dirs) + grow the
+            <code>Backend</code> contract with CAS.
+          </td>
+          <td>
+            Unconditional — these are the real wins and the prerequisites.
+          </td>
+        </tr>
+        <tr>
+          <td><strong>1 — Rust/wasm oplog+crypto core</strong></td>
+          <td>
+            Move blake3 + ed25519 verify + DAG replay behind a
+            <em>process/wasm</em> boundary (never napi — it would fight package
+            composition and marshal <code>Uint8Array</code>-heavy structs per
+            op).
+          </td>
+          <td>
+            Only when cold-open replay p50 &gt; ~1&nbsp;s <em>and</em> a profile
+            shows &gt;40% of wall-time in crypto (not JS re-derive) —
+            practically &gt;~250k ops/repo, and only <em>after</em> Phase 0.
+          </td>
+        </tr>
+        <tr>
+          <td><strong>2 — coordination-capable server</strong></td>
+          <td>
+            Externalize state; enforce authority from storage, not memory.
+            CAS-backed Bun is fine; pick Go only if you <em>also</em> need
+            multi-core verification throughput.
+          </td>
+          <td>
+            Only when you genuinely need &gt;1 node (concurrent writers one node
+            can't serve, or the <code>repoCache</code> RAM ceiling).
+          </td>
+        </tr>
+        <tr>
+          <td><strong>never</strong></td>
+          <td>Rewrite the CLI for startup.</td>
+          <td>
+            Reconsider only to shrink the 63&nbsp;MB binary for distribution.
+          </td>
+        </tr>
+      </table>
+      <p class="small">
+        Test-quality note: the "higher pillars are <code>test.todo</code>" claim
+        in <code>ARCHITECTURE.md:30-32</code> is <strong>stale</strong> — the
+        north-star integration test is 11 real tests, 56 assertions, 0 todo,
+        with negative-path assertions. Update the doc; it undersells the code.
+      </p>
+
+      <h2 id="manifesto">5. Do we fulfill the manifesto?</h2>
+      <p>
+        <strong>Overall ~65%.</strong> The foundation genuinely matches the
+        poetry; the social/meaning layer is aspirational-to-partial. Per-pillar:
+      </p>
+      <table>
+        <tr>
+          <th>Pillar</th>
+          <th>Score</th>
+          <th>Read</th>
+        </tr>
+        <tr>
+          <td>P01 Encrypted objects + capabilities</td>
+          <td class="grade">95%</td>
+          <td>
+            Everything claimed is real and tested,
+            <em>including the hard part</em>: revoke rotates the key &
+            re-encrypts.
+          </td>
+        </tr>
+        <tr>
+          <td>P02 Membrane (timed visibility)</td>
+          <td class="grade">70%</td>
+          <td>
+            Timed key-release is genuinely robust; loses points on 2/4 triggers
+            unbuilt and metadata-sealing being projection-only, not at-rest.
+          </td>
+        </tr>
+        <tr>
+          <td>P03 Operation log / CRDT</td>
+          <td class="grade">80%</td>
+          <td>
+            A real op-based CRDT converging divergent DAGs — the hardest
+            technical claim, delivered. Cross-peer
+            <em>continuous</em> convergence deferred.
+          </td>
+        </tr>
+        <tr>
+          <td>P04 Provenance ("why")</td>
+          <td class="grade">80%</td>
+          <td>
+            Model, signing, cap-gated prompt, <code>unverified</code> label all
+            real. The provenance→reputation link and <code>--why ✓</code> UX are
+            not as described.
+          </td>
+        </tr>
+        <tr>
+          <td>P05 Virtual FS</td>
+          <td class="grade">65%</td>
+          <td>
+            COW-by-structural-sharing genuinely delivered; the named API surface
+            doesn't exist and FUSE is absent.
+          </td>
+        </tr>
+        <tr>
+          <td>P06 Platform / discoverability</td>
+          <td class="grade">60%</td>
+          <td>
+            One-call repo + typed signed Release are solid; 3 of 4 promised
+            query one-liners (<code>--path</code>, tag-<code>diff</code>,
+            <code>next</code>) missing/contradicted.
+          </td>
+        </tr>
+        <tr>
+          <td>P07 Identity / federated reputation</td>
+          <td class="grade">70%</td>
+          <td>
+            The record protocol (dual-sig, verify-from-DID, portability) is
+            excellent; "federated" is only proven same-process — no wire moves a
+            contribution between hosts.
+          </td>
+        </tr>
+        <tr>
+          <td>P08 Semantic graph ("boldest break")</td>
+          <td class="grade">35%</td>
+          <td>
+            Weakest. Graph is <em>derived from text</em> (inverting the claim),
+            backed by two regexes, 1 of 4 structural ops, no structural
+            conflicts.
+          </td>
+        </tr>
+        <tr>
+          <td>P09 Agents as principals</td>
+          <td class="grade">55%</td>
+          <td>
+            Identity/attribution + terminal revocation real; budgets are
+            path-only/lifetime/self-reported; the "economy" (paid attestation)
+            is entirely absent.
+          </td>
+        </tr>
+        <tr>
+          <td>P10 Review as policy</td>
+          <td class="grade">60%</td>
+          <td>
+            The standing human veto is the best-built thing in the repo; the
+            "semantic + behavioral diff" artifact doesn't exist and "formal
+            proof" is redefined to "a CI signature."
+          </td>
+        </tr>
+        <tr>
+          <td>P11 Live database</td>
+          <td class="grade">50%</td>
+          <td>
+            Policy-as-standing-query + semantic-event diffing are real; it's a
+            re-derive facade not an indexed DB, and subscriptions are pull, not
+            push.
+          </td>
+        </tr>
+      </table>
+
+      <h3>The 5 biggest poetry-vs-product gaps (vaporware risk)</h3>
+      <ol>
+        <li>
+          <strong
+            >P08 "code as a queryable semantic graph, files are a rendered view"
+            is two regexes.</strong
+          >
+          The implementation is <code>DEF_RE = /\bfn\s+…/</code> over Rust
+          functions only, self-labeled <code>rs-heuristic</code>, and the graph
+          is <em>derived from text</em> — the exact inverse of the pillar. The
+          single most exposed claim.
+        </li>
+        <li>
+          <strong
+            >"Source control <em>after git</em>" ships no git bridge.</strong
+          >
+          The promise that <code>git clone</code>/<code>git push</code> "work on
+          day one" has <em>zero</em> code (only a comment;
+          <code>ARCHITECTURE.md:59</code> concedes it's a "next step"). The one
+          concrete migration promise doesn't exist.
+        </li>
+        <li>
+          <strong>"Federated reputation" isn't networked</strong> — the endpoint
+          returns counts and sync bundles omit contributions; "federated" is a
+          same-process property today.
+        </li>
+        <li>
+          <strong
+            >The richest promised artifacts are absent or redefined-down</strong
+          >
+          — P09 paid attestation (zero code), P10 semantic/behavioral diff
+          (doesn't exist), "formal proof" (reduced to an allowlisted CI
+          signature), P11 "query like Postgres in ms" (a full re-derive facade).
+        </li>
+        <li>
+          <strong
+            >The embargo hides metadata only at the projection layer</strong
+          >
+          — <code>write()</code> still persists the full cleartext op at rest,
+          so an untrusted mirror holding the store sees path/author/timing.
+          Honestly hedged as a "frontier," but a skeptic testing the store
+          directly catches it.
+        </li>
+      </ol>
+
+      <h3>What is impressively real (matches the vision in tested code)</h3>
+      <ul class="tight">
+        <li>
+          <strong>Revoke <em>is</em> a key rotation</strong> — new content key,
+          re-encrypt, re-wrap only for remaining grantees; runnable
+          <code>examples/offboarding</code>.
+        </li>
+        <li>
+          <strong>Timed reveal is a real key-release</strong>, survives a
+          concurrent rotation, cancellable by revoking the public identity.
+        </li>
+        <li>
+          <strong>A real op-based CRDT</strong> — two genuinely divergent DAGs
+          converge deterministically; order-independence is proven.
+        </li>
+        <li>
+          <strong>Dual-signed, portable contributions</strong> — a second
+          instance with no shared state verifies a record from the DIDs alone.
+        </li>
+        <li>
+          <strong>The standing human veto</strong> — durable, terminal, composed
+          unconditionally over every green gate, immune to forged-veto DoS. The
+          manifesto's "retiring the diff must not retire the veto," implemented
+          exactly.
+        </li>
+        <li>
+          <strong>The server is genuinely untrusted</strong> for confidentiality
+          — it never calls a decrypting <code>store.get</code>; the only
+          optional key attests reputation, never decrypts.
+        </li>
+      </ul>
+
+      <h2 id="implemented">
+        6. What was already implemented (Part 1 §1 — tracking cleanup)
+      </h2>
+      <p>
+        These changes are <strong>done and verified</strong> in the repo (docs
+        formatted clean; milestones/issues live on GitHub):
+      </p>
+      <ul class="checklist">
+        <li>
+          <input type="checkbox" checked disabled /><span
+            ><span class="done-flag">DONE</span> —
+            <strong
+              >Active pipeline consolidated into
+              <code>CHANGELOG.md</code></strong
+            >
+            (under <code>[Unreleased]</code>): status-at-a-glance table, P4–P10
+            marked shipped, P11 in-progress, P12–P14 queued, each linked to its
+            milestone, plus a hard pre-infrastructure exit gate. The separate
+            <code>post-p3-roadmap.md</code> file was <strong>retired</strong> —
+            the two homes for this information are now this document and the
+            CHANGELOG.</span
+          >
+        </li>
+        <li>
+          <input type="checkbox" checked disabled /><span
+            ><span class="done-flag">DONE</span> —
+            <strong>The erroneous "#14 S3 backend" reference corrected.</strong>
+            PR #14 was "Multi-writer collaboration: delegated push over P09,"
+            unrelated to storage; the S3 backend had <em>no</em> tracking issue
+            and is now <strong>#69</strong>. The roadmap carries an explicit
+            correction note.</span
+          >
+        </li>
+        <li>
+          <input type="checkbox" checked disabled /><span
+            ><span class="done-flag">DONE</span> —
+            <strong>Deferred-ledger header updated</strong>
+            (<code>CHANGELOG.md</code>): a security-debt callout listing the
+            five still-open audit findings (#72, #73, #75, #77, #78) and a
+            pointer that milestone-tracked open items live in the
+            <code>[Unreleased]</code> pipeline.
+            <em
+              >(A deeper line-by-line ledger rewrite was drafted against the
+              stale branch but not ported — <code>main</code>'s ledger is
+              already current as of 0.1.7, so only the additive callout was
+              applied to avoid clobbering release-accurate content.)</em
+            ></span
+          >
+        </li>
+        <li>
+          <input type="checkbox" checked disabled /><span
+            ><span class="done-flag">DONE</span> —
+            <strong>Stale issues reconciled against <code>main</code></strong
+            >: #81 (query/watch/reveal CLI) closed as shipped in 0.1.6; #61
+            (replay nonce) and #79 (reputation host allowlist) narrowed to what
+            0.1.7 left open.</span
+          >
+        </li>
+        <li>
+          <input type="checkbox" checked disabled /><span
+            ><span class="done-flag">DONE</span> —
+            <strong>4 milestones + 25 issues created</strong> (#58–#82): P11
+            Hardening & Proof, P12 Single-node security, P13 Product/collab UX,
+            P14 Backend-behind-flags — including the 8 security findings
+            (#72–#79) and 3 PM/DX items (#80–#82) surfaced by this
+            analysis.</span
+          >
+        </li>
+      </ul>
+
+      <h2 id="nextsteps">
+        7. Detailed next-steps outline (the re-prioritized pipeline)
+      </h2>
+      <p>
+        The user's Part 1/Part 2 plan is sound. The five analyses re-order
+        <em>within</em> it: put the <strong>security bindings</strong> and the
+        <strong>on-ramp</strong> ahead of the substrate-polish they were mixed
+        with, and grow the <strong>Backend contract</strong> before any
+        infrastructure change. The GitHub milestones now encode exactly this.
+      </p>
+
+      <h3>
+        P11 — Hardening & Proof <span class="pill">current</span> ·
+        <a href="https://github.com/thaddeus-run/thaddeus/milestone/1"
+          >milestone</a
+        >
+      </h3>
+      <ul class="checklist">
+        <li>
+          <input type="checkbox" disabled /><span
+            ><strong
+              >#72 — Sign <code>wrapped_key</code> + verify object↔op binding at
+              read.</strong
+            >
+            <span class="tag t-crit">top priority</span> Close the
+            content-integrity gap the whole thesis rests on; ship an
+            exploit-or-refute test.</span
+          >
+        </li>
+        <li>
+          <input type="checkbox" disabled /><span
+            ><strong>#73 — Sign view/branch heads;</strong> reject non-monotonic
+            rollback; lay the CT-style head log (also powers ThadHub
+            head-transparency).</span
+          >
+        </li>
+        <li>
+          <input type="checkbox" disabled /><span
+            ><strong>#59 + #77 — Outside-reviewer veto capability</strong> that
+            doubles as the veto allowlist, closing the veto-injection DoS. Veto
+            authority stays separate from write delegation.</span
+          >
+        </li>
+        <li>
+          <input type="checkbox" disabled /><span
+            ><strong
+              >#58 — Reproducible benchmarks + FileBackend baseline</strong
+            >
+            (no code.store-scale claims); this is also the gate for any future
+            Rust core.</span
+          >
+        </li>
+        <li>
+          <input type="checkbox" disabled /><span
+            ><strong
+              >#74 — Fix the <code>OpLog</code> <code>O(n²)</code> + graph
+              re-derivation</strong
+            >
+            so the baseline reflects fixed algorithms, not accidental
+            blowup.</span
+          >
+        </li>
+        <li>
+          <input type="checkbox" disabled /><span
+            ><strong>#60 — lazythad signed write actions</strong> (land + veto,
+            keys local, replay-nonce tests).</span
+          >
+        </li>
+      </ul>
+
+      <h3>
+        P12 — Single-node security hardening ·
+        <a href="https://github.com/thaddeus-run/thaddeus/milestone/2"
+          >milestone</a
+        >
+      </h3>
+      <ul class="checklist">
+        <li>
+          <input type="checkbox" disabled /><span
+            ><strong>#75 — Cap/stream request body before buffering</strong>
+            (unauthenticated OOM).
+            <span class="tag t-high">ship first</span></span
+          >
+        </li>
+        <li>
+          <input type="checkbox" disabled /><span
+            ><strong>#76 — Per-identity repo/object quotas + rate limits</strong
+            >; shard the FileBackend directory.</span
+          >
+        </li>
+        <li>
+          <input type="checkbox" disabled /><span
+            ><strong>#61 — Persist replay nonces</strong> via a backend-neutral
+            atomic <code>consumeNonce()</code> (FileBackend implements the
+            single-node case; distributed CAS arrives in P14).</span
+          >
+        </li>
+        <li>
+          <input type="checkbox" disabled /><span
+            ><strong>#62 — Size/count limits + defensive pagination</strong> on
+            every list/pull route.</span
+          >
+        </li>
+        <li>
+          <input type="checkbox" disabled /><span
+            ><strong
+              >#63 — Per-signer rate limits + provenance/veto spam
+              control</strong
+            >; fail-closed config validation; security fuzz/property
+            tests.</span
+          >
+        </li>
+        <li>
+          <input type="checkbox" disabled /><span
+            ><strong>#78 — Meter <code>maxSpend</code> (or remove it)</strong>;
+            reconcile the revocation read-recall paths.</span
+          >
+        </li>
+        <li>
+          <input type="checkbox" disabled /><span
+            ><strong>#79 — Reputation host allowlist + anti-farming</strong>;
+            move the host key off the volume; reconcile the "no keys"
+            claim.</span
+          >
+        </li>
+      </ul>
+
+      <h3>
+        P13 — Product & collaboration UX ·
+        <a href="https://github.com/thaddeus-run/thaddeus/milestone/3"
+          >milestone</a
+        >
+      </h3>
+      <ul class="checklist">
+        <li>
+          <input type="checkbox" disabled /><span
+            ><strong>#80 — <code>thaddeus init</code> in-place</strong> +
+            decouple an offline <code>commit</code>.
+            <span class="tag t-ok">biggest on-ramp win</span></span
+          >
+        </li>
+        <li>
+          <input type="checkbox" checked disabled /><span
+            ><strong
+              >#81 — Wire <code>query</code>/<code>watch</code>/<code
+                >reveal</code
+              >
+              into the CLI</strong
+            >
+            — <span class="done-flag">SHIPPED in 0.1.6</span>; #81 closed. The
+            differentiator is now reachable.</span
+          >
+        </li>
+        <li>
+          <input type="checkbox" disabled /><span
+            ><strong
+              >#82 — Fix the getting-started clone bug + version drift + ship
+              the agent-governed demo</strong
+            >
+            (<code>make demo</code> from the passing integration test).</span
+          >
+        </li>
+        <li>
+          <input type="checkbox" disabled /><span
+            ><strong
+              >#64–#67 — track, base sync, 3-way merge, incremental/resumable
+              pull, multi-remote, approval policy, review queue, triggered
+              reveal, prompt-cap wiring.</strong
+            ></span
+          >
+        </li>
+      </ul>
+
+      <h3>
+        P14 — Backend behind flags (no production change) ·
+        <a href="https://github.com/thaddeus-run/thaddeus/milestone/4"
+          >milestone</a
+        >
+      </h3>
+      <ul class="checklist">
+        <li>
+          <input type="checkbox" disabled /><span
+            ><strong
+              >#68 — Define the backend CAS/conditional-write contract
+              FIRST</strong
+            >
+            (<code>putIfAbsent</code>/<code>putIfMatch</code>/versioned
+            <code>get</code>). An S3 adapter alone does not make Thaddeus
+            multi-node safe.</span
+          >
+        </li>
+        <li>
+          <input type="checkbox" disabled /><span
+            ><strong>#69 — S3-compatible backend</strong> (delimiter-safe
+            scoping) behind a flag;
+            <strong>#70 — optional SQLite backend</strong>.</span
+          >
+        </li>
+        <li>
+          <input type="checkbox" disabled /><span
+            ><strong
+              >#71 — Backend conformance tests + migration/rollback + backup
+              drills</strong
+            >; local MinIO load +
+            restart/partial-write/stale-writer/concurrent-land tests.</span
+          >
+        </li>
+      </ul>
+
+      <div class="card">
+        <strong
+          >Exit gate before <em>any</em> Part 2 production infrastructure
+          change:</strong
+        >
+        P11 complete · performance measured (#58) · backend conformance passes
+        (#71) · migration + rollback tested (#71) · atomic land + nonce
+        semantics specified and implemented (#61, #68) · a local MinIO
+        multi-node test passes (#69) · a backup restored successfully in a clean
+        environment (#71).
+        <strong
+          >An S3 adapter is necessary but not sufficient — the CAS contract must
+          land first, or multi-node silently corrupts head-repoints.</strong
+        >
+      </div>
+
+      <h2 id="thadhub">8. ThadHub — detailed plan</h2>
+      <blockquote>
+        <strong>What it is:</strong> a hosted, multi-tenant home for Thaddeus
+        repos — it runs <code>@thaddeus.run/server</code> at scale, gives every
+        repo/identity/release a stable URL, and provides the web surfaces GitHub
+        taught us to expect (browse, discovery, provenance, review/veto queue,
+        reputation profiles, agent management, releases)
+        <em
+          >while holding no private keys, storing only ciphertext +
+          self-verifying signed metadata, and letting any user walk away with
+          code and reputation fully intact.</em
+        >
+      </blockquote>
+      <p>
+        The inversion that defines the product: GitHub <em>owns</em> the
+        identity graph, the social graph, and the canonical copy. ThadHub can
+        own none of them without betraying the manifesto.
+        <strong
+          >ThadHub is not a database of record — it is the fastest, best-lit
+          mirror and index of a substrate whose truth lives in the artifacts
+          themselves.</strong
+        >
+        "GitHub is where your code lives; ThadHub is where your code is
+        currently most conveniently mirrored." That word "currently" is the
+        entire product ethic.
+      </p>
+
+      <h3>The load-bearing seam: what a ciphertext host can and can't show</h3>
+      <p>
+        The server holds ciphertext for file <em>contents</em>, but a large
+        amount of structural metadata is <em>cleartext</em> — and that seam is
+        what makes a useful hub possible.
+      </p>
+      <table>
+        <tr>
+          <th>Cleartext (no keys needed)</th>
+          <th>Never visible to the hub</th>
+        </tr>
+        <tr>
+          <td>
+            The op DAG (ids, author DIDs, lamport, parents), and crucially
+            <strong>file paths</strong> (<code>op.path</code> is read by the
+            delegation gate); branch names + heads; provenance "why" text; veto
+            reasons; release tags/notes/manifests; grant scopes; reputation
+            profiles; owner DIDs.
+          </td>
+          <td>
+            The <strong>bytes of any file object</strong> — objects are
+            ciphertext, the content key is sealed per-reader to their X25519
+            key. Only a capability-holder unseals.
+          </td>
+        </tr>
+      </table>
+      <p>
+        This yields three honest visibility tiers, defined by
+        <em>who holds a capability for the content key</em>, not a server ACL
+        flag:
+      </p>
+      <ul class="tight">
+        <li>
+          <strong>Public repo</strong> = "a capability was issued to a
+          world-readable identity." ThadHub is then a designated reader and can
+          render fully (code, blame, why, search) server-side — a GitHub-grade
+          experience with the ciphertext-at-rest property unchanged.
+        </li>
+        <li>
+          <strong>Private repo, logged-out visitor</strong> = the cleartext
+          skeleton only: repo exists, owner DID, branch names, commit-graph
+          shape, file <em>paths</em>, timestamps, releases, contributor
+          reputation — <em>no contents, no diffs.</em> A genuinely novel, honest
+          UX.
+        </li>
+        <li>
+          <strong>Private repo, authorized reader</strong> = decryption happens
+          <em>client-side in the browser</em> with a key the hub never receives
+          (the hard key-custody problem — see risks).
+        </li>
+      </ul>
+
+      <h3>Architecture — a shell around the existing server</h3>
+      <p>
+        ThadHub is <strong>not a rewrite</strong>; it's a deployment + frontend
+        around <code>createServer(config)</code>, which is already stateless
+        over a shared <code>Backend</code>. The web frontend is a read-mostly
+        client of the same HTTP API the CLI uses; every write (veto, release,
+        grant) is signed <em>client-side</em>, so a stolen session cookie can't
+        forge a signed op.
+      </p>
+      <ul class="tight">
+        <li>
+          <strong>Namespacing</strong> — the server already scopes repos under
+          <code>repo/&lt;name&gt;/</code> and already tolerates
+          <code>/</code> in names, so <code>@alice/web</code> →
+          <code>alice/web</code> with <em>zero</em> core changes. New: a
+          <strong>handle→DID registry</strong> as a signed
+          <code>HandleClaim</code> record (first-claim-wins within an instance,
+          but portable — the DID is the real identity).
+        </li>
+        <li>
+          <strong>Auth</strong> — <code>did:key</code> challenge sign-in →
+          short-lived session cookie for read/personalization only; writes stay
+          individually signed. Ship the replay-nonce cache (#61) before public
+          launch.
+        </li>
+        <li>
+          <strong>Discovery/search</strong> — index the cleartext surface
+          (paths, owners, branches, releases, reputation) for
+          <em>all</em> repos; full content + symbol search for
+          <em>public</em> repos (via the semantic graph). Private content is
+          deliberately un-indexed server-side ("we can't read it, and that's the
+          point"). The index is derived and disposable.
+        </li>
+        <li>
+          <strong>Storage path</strong> — FileBackend (today, fine for Lite) →
+          S3/R2 with conditional writes (the CAS unlock, #68/#69) → multi-node
+          with node-local rebuildable caches + etag invalidation.
+        </li>
+        <li>
+          <strong>Federation</strong> — already latent: a clone is a complete
+          signed bundle, and contributions carry their own host DID and verify
+          from the record alone, so instance B displays and
+          <em>verifies</em> instance A's attestations without asking A. Define
+          an instance↔instance mirror/subscribe + an attestation-trust list.
+        </li>
+      </ul>
+
+      <h3>Trust model — and how a user catches the hub cheating</h3>
+      <p>
+        <strong>Cryptographically cannot:</strong> read private contents; forge
+        a commit/veto/release/delegation/contribution (a forged record is kept
+        and rendered <em>unverified</em>, never silently trusted); fabricate
+        reputation (only host-attested merges count, and attestation is
+        checkable); mint a delegation the owner didn't authorize.
+        <strong>Can (the honest residual):</strong> withhold or lie by omission
+        — serve a stale head, hide a commit, refuse to serve. It can't forge,
+        but a mirror can censor. Build the counters as features:
+      </p>
+      <ol>
+        <li>
+          <strong>Re-clone and re-verify</strong> — a "Verify this repo" command
+          that clones and reports any <code>unverified</code> record turns the
+          trust model into a button.
+        </li>
+        <li>
+          <strong>Head transparency</strong> — a signed append-only log of
+          served <code>(repo, view, head, time)</code> (CT-style) makes
+          equivocation detectable. This is exactly what issue #73 lays the
+          groundwork for.
+        </li>
+        <li>
+          <strong>Host attestation as the positive primitive</strong> — an
+          attesting hub puts <em>its own portable signature</em> on "this merge
+          happened here." ThadHub's brand becomes the value of its attestation —
+          a manifesto-honest moat.
+        </li>
+      </ol>
+
+      <h3>Monetization without betraying "your code & reputation are yours"</h3>
+      <p>
+        Never charge rent on the things the manifesto says are yours (leaving,
+        verifying, taking your reputation). Charge for compute, hosting,
+        availability, and the value of your attestation: (1)
+        hosting/availability (free public, paid private storage/bandwidth/CDN);
+        (2) CI/verification-as-a-service (sell the CPU-seconds that produce the
+        signed check-provenance the land gate consumes — not merge permission);
+        (3) paid higher-assurance attestations (your reputation to spend, not
+        theirs to lose); (4) private-repo compute; (5) enterprise self-hosted
+        ThadHub + federation. Off the table: charging to export, charging to
+        read your own reputation, holding keys hostage.
+      </p>
+
+      <h3>Phased build plan</h3>
+      <table>
+        <tr>
+          <th>Phase</th>
+          <th>Ships</th>
+          <th>Thaddeus-core dependency</th>
+        </tr>
+        <tr>
+          <td>
+            <strong>H0 — ThadHub Lite</strong>
+            <span class="pill">this quarter</span>
+          </td>
+          <td>
+            Deploy on today's live Fly server; handle→DID registry; namespace
+            routing; <strong>public-repo web browse</strong> (server-side render
+            via world capability); provenance "why" view; reputation profiles;
+            releases; read-only.
+          </td>
+          <td>
+            <strong>None</strong> — uses existing scoping + <code>/</code> names
+            as-is.
+          </td>
+        </tr>
+        <tr>
+          <td><strong>H1 — Write surfaces + auth</strong></td>
+          <td>
+            <code>did:key</code> sign-in + sessions; client-signed veto queue,
+            release creation, grant/revoke console; head-transparency log;
+            "Verify this repo."
+          </td>
+          <td>Ship the replay-nonce cache (#61) before public launch.</td>
+        </tr>
+        <tr>
+          <td><strong>H2 — Discovery & search</strong></td>
+          <td>
+            Metadata index (all repos); content + symbol search for public
+            repos; topics; trending by attested reputation.
+          </td>
+          <td>Optional: the query-surface CLI/verbs (#81).</td>
+        </tr>
+        <tr>
+          <td><strong>H3 — Attesting hub</strong></td>
+          <td>
+            Host-vouched merges/releases; reputation-tier gates; paid CI
+            producing signed check-provenance.
+          </td>
+          <td>
+            Portable reputation export/import (P10) + host allowlist (#79).
+          </td>
+        </tr>
+        <tr>
+          <td><strong>H4 — Multi-node scale</strong></td>
+          <td>
+            S3/R2 backend; replace the per-process lock with CAS-retry on
+            head-repoint; node-local rebuildable caches; autoscaling.
+          </td>
+          <td>
+            <strong>BLOCKING:</strong> the CAS contract + S3 backend (#68, #69)
+            and multi-node coordination.
+          </td>
+        </tr>
+        <tr>
+          <td><strong>H5 — Federation</strong></td>
+          <td>
+            Instance↔instance mirror/subscribe; cross-instance reputation;
+            attestation-trust lists; move-your-repo-between-hubs.
+          </td>
+          <td>Cross-instance federation + a federation protocol spec.</td>
+        </tr>
+        <tr>
+          <td><strong>H6 — Private-repo browsing</strong></td>
+          <td>
+            Browser-side WASM decrypt for capability-holders;
+            encrypted/client-side private search; hardware/extension key
+            custody.
+          </td>
+          <td>Key-custody UX (the hardest open problem).</td>
+        </tr>
+      </table>
+      <p>
+        <strong>The key insight:</strong> "ThadHub Lite" (H0) can ship this
+        quarter over the <em>already-live</em> server with
+        <strong>zero core changes</strong>, because public browse is "issue a
+        world capability" and every metadata surface it renders is already
+        cleartext in the <code>pull</code> bundle. The full federated,
+        multi-node, private-browsing vision (H4–H6) is honestly gated on the
+        S3/CAS + federation work the Thaddeus roadmap already sequences.
+      </p>
+
+      <h3>Hard open problems (state them plainly)</h3>
+      <ul class="tight">
+        <li>
+          <strong>Browser key custody</strong> for private-repo decrypt — a key
+          in <code>localStorage</code> is an XSS/phishing disaster. Likely
+          answer: a browser extension / hardware signer exposing only
+          <code>sign</code>/<code>unseal</code> to an allow-listed origin. Until
+          then, private browse stays CLI/desktop-first and the web shows only
+          the metadata skeleton. The single biggest UX gap vs. GitHub; scope it
+          as its own project.
+        </li>
+        <li>
+          <strong>Discovery of encrypted content</strong> — you can't index what
+          you can't read. Ship metadata search first; be honest that private
+          content search is client-side.
+        </li>
+        <li>
+          <strong>Spam/Sybil at hub scale</strong> — free <code>did:key</code>s
+          mean infinite identities; the defense is reputation that only counts
+          host-attested merges (fresh DIDs have zero standing) + rate limits +
+          reputation-weighted discovery. Depends on fixing the farming gap
+          (#79).
+        </li>
+        <li>
+          <strong>Name squatting</strong> — handles are convenience, disputes
+          resolve to DIDs; can't be "solved" without a central authority we
+          refuse to be — so it's managed (reputation-gated/paid registration),
+          not solved.
+        </li>
+        <li>
+          <strong>Moderation of a censorship-resistant substrate</strong> — the
+          hub can't forge but <em>can</em> de-mirror; moderate its own mirror
+          transparently (a public signed removal log) while being explicit that
+          de-listing is not deletion. Needs real legal/policy design, not just
+          engineering.
+        </li>
+        <li>
+          <strong>The multi-node correctness cliff</strong> — someone scaling
+          ThadHub horizontally before the CAS work lands will corrupt
+          head-repoints. Add a startup assertion that refuses multi-node until a
+          CAS-capable backend is present.
+        </li>
+      </ul>
+
+      <footer>
+        <p>
+          <strong>Method & honesty note.</strong> Findings come from five
+          independent expert subagents that read the source directly (two
+          security auditors, a PM reviewer, a principal-engineer code review,
+          and a manifesto-conformance auditor), plus a de-novo ThadHub design.
+          Everything is anchored to <code>file:line</code>. These are
+          <em>source-review</em> findings and a design proposal —
+          <strong
+            >no exploit was run and no code in <code>packages/</code> was
+            changed</strong
+          >. The only changes applied to the repo are the documentation/tracking
+          cleanup in §6 (roadmap, CHANGELOG deferred ledger) and the 25 GitHub
+          issues across milestones P11–P14. The two most severe security items
+          (#72 capability-key binding, #73 unsigned heads) each warrant a
+          definitive exploit-or-refute test before the severity is treated as
+          final.
+        </p>
+        <p class="small">Generated 2026-07-12 for the Thaddeus project.</p>
+      </footer>
+    </div>
+  </body>
+</html>
