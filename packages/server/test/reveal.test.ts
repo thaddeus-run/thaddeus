@@ -469,17 +469,20 @@ describe('timed reveal', () => {
         await srv.fetch(new Request('http://t/repos/r/pull?view=main'))
       ).json()) as Bundle
     );
-    expect(
-      pull.caps.some(
-        (capability) =>
-          capability.grantee === owner.did &&
-          capability.wrapped_key.length ===
-            rewrappedOwnerCap.wrapped_key.length &&
-          capability.wrapped_key.every(
-            (value, index) => value === rewrappedOwnerCap.wrapped_key[index]
-          )
-      )
-    ).toBe(true);
+    const ownerCaps = pull.caps.filter(
+      (capability) => capability.grantee === owner.did
+    );
+    expect(ownerCaps).toHaveLength(1);
+    expect(ownerCaps[0]?.wrapped_key).toEqual(rewrappedOwnerCap.wrapped_key);
+
+    const clone = new MemoryStore();
+    const current = pull.objects.find(
+      (object) => object.plaintext_id === local.ref.plaintext_id
+    )!;
+    await clone.ingest(current, ownerCaps);
+    expect(dec(await clone.get(local.ref, owner))).toBe(
+      'export const launch = true;'
+    );
   });
 
   test('manual reveal respects the trusted server clock', async () => {
