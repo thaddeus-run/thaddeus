@@ -67,11 +67,20 @@ describe('thaddeus rename', () => {
     expect(histOut).toContain('refresh → refreshToken');
     expect(histOut).toContain('[verified]');
 
+    // The current live name resolves through the durable rename ledger too.
+    out.length = 0;
+    expect(await run(['history', 'refreshToken'], e(a))).toBe(0);
+    expect(out.join('\n')).toContain('refresh → refreshToken');
+
     // A fresh clone carries the SymbolOp over the wire — history survives.
     const b = mkdtempSync(join(tmp, 'b-'));
     await run(['clone', 'http://t', 'proj', b], e(b));
     out.length = 0;
     expect(await run(['history', sym!], e(b))).toBe(0);
+    expect(out.join('\n')).toContain('refresh → refreshToken');
+
+    out.length = 0;
+    expect(await run(['history', 'refreshToken'], e(b))).toBe(0);
     expect(out.join('\n')).toContain('refresh → refreshToken');
   });
 });
