@@ -274,13 +274,21 @@ export class MemoryStore implements Store {
     await this.#finishRecall(object.plaintext_id, recall);
   }
 
+  // Decrypt the current ciphertext, then bind what the server served back to
+  // the authenticated op's plaintext id. We deliberately do not compare
+  // `ref.id`: key rotation replaces ciphertext without minting a new op, while
+  // the plaintext address remains stable across re-encryption.
   async get(ref: Ref, reader: Identity, now?: string): Promise<Uint8Array> {
     const nowMs = this.#resolveNow(now);
     await this.#promoteDue(ref.plaintext_id, nowMs);
-    return decrypt(
+    const plaintext = decrypt(
       this.#currentObject(ref.plaintext_id),
       this.#contentKeyVia(ref.plaintext_id, reader, nowMs)
     );
+    if (address(plaintext) !== ref.plaintext_id) {
+      throw new AccessDenied(reader.did);
+    }
+    return plaintext;
   }
 
   async grant(ref: Ref, grantee: PublicIdentity, by: Identity): Promise<void> {
