@@ -1867,12 +1867,13 @@ export async function run(
         });
         const graph = SymbolGraph.over(ws, {
           extractor: new HeuristicExtractor(),
+          ops: symopLog,
         });
-        // Resolve `arg` to a symbol id. A rename changes a symbol's name, so its
-        // id (content-addressed from the OLD name) is not recoverable from the
-        // current name in a fresh session — cross-peer id convergence is deferred
-        // (spec §11). So resolve in three ways: a live symbol NAME, a full symbol
-        // id, or an id PREFIX (as `rename` prints), matched against known records.
+        // Replay durable renames before resolving the live name so the ledger
+        // binds it to the original stable symbol id, just as `rename` does.
+        await graph.syncRenames(symopLog.all());
+        // Resolve in three ways: a live symbol NAME, a full symbol id, or an id
+        // PREFIX (as `rename` prints), matched against known records.
         let symbolId = await graph.resolve(arg);
         if (symbolId === null) {
           const ids = [...new Set(symopLog.all().map((o) => o.symbol))];

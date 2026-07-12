@@ -108,6 +108,18 @@ for tool in thaddeus lazythad; do
 done
 [ -n "$installed" ] || err "nothing was installed for $os-$arch"
 
+# The CLI's documented short name points at the same installed binary. Use a
+# relative symlink on Unix so moving the install prefix keeps it valid; copy on
+# Windows shells where creating symlinks commonly requires extra privileges.
+if [ -x "$BIN_DIR/thaddeus$ext" ]; then
+  rm -f "$BIN_DIR/thad$ext"
+  if [ "$os" = windows ]; then
+    cp "$BIN_DIR/thaddeus$ext" "$BIN_DIR/thad$ext"
+  else
+    ln -s "thaddeus$ext" "$BIN_DIR/thad$ext"
+  fi
+fi
+
 # --- ensure BIN_DIR is on PATH ---
 case ":${PATH:-}:" in
   *":$BIN_DIR:"*)
