@@ -12,26 +12,26 @@ All notable changes to Thaddeus. Format follows
 > five-lens analysis (security, product, code-quality/Rust-vs-Go, manifesto
 > conformance) and the ThadHub plan are the companion document:
 > <https://4xibq00df3aj.postplan.dev/>. Statuses below are current as of
-> **0.1.7-alpha**; update the table when a milestone opens or closes.
+> **0.1.8-alpha**; update the table when a milestone opens or closes.
 
-| Phase   | What it is                                                                                                                                                  | Status                             | Milestone / issues                                                                         |
-| ------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------- | ------------------------------------------------------------------------------------------ |
-| P4–P10  | Policy, releases, query surface, timed reveal, watch, agent budgets + rate windows, rotate-and-recall, portable reputation (export/import + `--trust-host`) | **Shipped** — through v0.1.7-alpha | —                                                                                          |
-| **P11** | **Hardening & Proof** — benchmarks, outside-reviewer veto, lazythad write actions                                                                           | **In progress**                    | [P11](https://github.com/thaddeus-run/thaddeus/milestone/1) — #58, #59, #60, #72, #73, #74 |
-| P12     | Single-node security hardening                                                                                                                              | Queued                             | [P12](https://github.com/thaddeus-run/thaddeus/milestone/2) — #61–#63, #75–#79             |
-| P13     | Product & collaboration UX                                                                                                                                  | Queued                             | [P13](https://github.com/thaddeus-run/thaddeus/milestone/3) — #64–#67, #80, #82            |
-| P14     | Backend implementation (behind flags): CAS, S3/SQLite, conformance, migration                                                                               | Queued                             | [P14](https://github.com/thaddeus-run/thaddeus/milestone/4) — #68–#71                      |
+| Phase   | What it is                                                                                                                                                  | Status                             | Milestone / issues                                                                    |
+| ------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------- | ------------------------------------------------------------------------------------- |
+| P4–P10  | Policy, releases, query surface, timed reveal, watch, agent budgets + rate windows, rotate-and-recall, portable reputation (export/import + `--trust-host`) | **Shipped** — through v0.1.8-alpha | —                                                                                     |
+| **P11** | **Hardening & Proof** — benchmarks, outside-reviewer veto, lazythad write actions                                                                           | **In progress**                    | [P11](https://github.com/thaddeus-run/thaddeus/milestone/1) — #58, #59, #60, #73, #74 |
+| P12     | Single-node security hardening                                                                                                                              | Queued                             | [P12](https://github.com/thaddeus-run/thaddeus/milestone/2) — #61–#63, #75–#79        |
+| P13     | Product & collaboration UX                                                                                                                                  | Queued                             | [P13](https://github.com/thaddeus-run/thaddeus/milestone/3) — #64–#67, #80, #82       |
+| P14     | Backend implementation (behind flags): CAS, S3/SQLite, conformance, migration                                                                               | Queued                             | [P14](https://github.com/thaddeus-run/thaddeus/milestone/4) — #68–#71                 |
 
 Everything through P14 is **Part 1** — it ships on the current single Fly node
 with `FileBackend`. The production infrastructure change (S3 / multi-node) is
 **Part 2**, gated by the exit criteria below.
 
-- **P11 — Hardening & Proof (current).** Two trust bindings the "untrusted
-  server" thesis depends on come first — both verified still-open as of 0.1.7:
-  sign a capability's `wrapped_key` and re-check the object↔op binding at read
-  (#72), and sign view/branch heads so a server cannot roll back / fork /
-  withhold undetectably (#73). Then wire the outside-reviewer veto capability
-  (#59) as the `blockOnVeto` allowlist the server does not yet pass, closing the
+- **P11 — Hardening & Proof (current).** The first trust binding the "untrusted
+  server" thesis depends on shipped in 0.1.8-alpha: capability signatures cover
+  `wrapped_key`, and reads re-check the object↔op plaintext binding (#72). Next,
+  sign view/branch heads so a server cannot roll back / fork / withhold
+  undetectably (#73). Then wire the outside-reviewer veto capability (#59) as
+  the `blockOnVeto` allowlist the server does not yet pass, closing the
   veto-injection DoS (#77); reproducible benchmarks + a `FileBackend` baseline
   with **no** code.store-scale claims (#58); the op-log / graph `O(n²)` fixes
   (#74); and lazythad signed write actions (#60).
@@ -65,6 +65,35 @@ restored successfully in a clean environment (#71).
 > **Correction:** the S3 backend was once cited as "#14," but PR #14 was
 > "Multi-writer collaboration: delegated push over P09," unrelated to storage.
 > The S3 backend is tracked as **#69** under milestone P14.
+
+## [0.1.8-alpha] - 2026-07-12
+
+### Security
+
+- **Capability signatures and reads now bind the content they authorize (#72).**
+  Domain-separated v2 capability signatures cover the sealed `wrapped_key`,
+  malformed capabilities fail closed, and reads recompute the decrypted
+  plaintext address against the `plaintext_id` authenticated by the signed
+  operation. Same-ciphertext re-pushes replace stale seals with the current
+  re-wrapped capability, preventing an old content key from winning lookup after
+  rotation. This closes the demonstrated untrusted-server content substitution
+  path.
+
+  **Breaking:** v1 capability signatures no longer verify. Deployments with
+  persisted `cap/*` or `pending/*` records need a data reset or client re-push.
+
+### Fixed
+
+- **Rename history and CLI alias installation.** Fixed rename-history handling
+  and CLI alias installation, and fail early when an alias destination conflicts
+  with a directory.
+
+### Documentation
+
+- **Published the substrate analysis and consolidated the active roadmap.** The
+  five-lens security/product/code-quality/manifesto review and ThadHub plan now
+  ship as a self-contained document, while P11–P14 tracking and the Part 2 exit
+  gate live under `[Unreleased]` in this changelog.
 
 ## [0.1.7-alpha] - 2026-07-12
 
@@ -567,18 +596,14 @@ CLI, and the lazythad TUI.
 > tracked on a GitHub milestone are folded into the **active pipeline** under
 > `[Unreleased]` above (P11–P14).
 >
-> **Security debt (highest priority — P11/P12, verified open as of 0.1.7).**
-> Surfaced by the 2026-07-12 audit (<https://4xibq00df3aj.postplan.dev/>): (1) a
-> capability's `wrapped_key` is not covered by the granter signature and the
-> object↔op binding is not re-checked at read, so an untrusted server can at
-> least deny a read and possibly substitute content that still decrypts (#72);
-> (2) view/branch heads are unsigned, so a server can roll back, fork, or
-> withhold history undetectably (#73); (3) the request body is buffered before
-> auth with no size cap (#75); (4) `blockOnVeto` is called with no reviewer
-> allowlist, so any writer can mount a durable land-blocking veto DoS (#77); and
-> (5) `maxSpend` is recorded as a hard-coded 0, so the advertised budget is a
-> no-op (#78). Close these before inviting external contributors or going
-> multi-node.
+> **Security debt (highest priority — P11/P12, verified open as of 0.1.8).**
+> Surfaced by the 2026-07-12 audit (<https://4xibq00df3aj.postplan.dev/>): (1)
+> view/branch heads are unsigned, so a server can roll back, fork, or withhold
+> history undetectably (#73); (2) the request body is buffered before auth with
+> no size cap (#75); (3) `blockOnVeto` is called with no reviewer allowlist, so
+> any writer can mount a durable land-blocking veto DoS (#77); and (4)
+> `maxSpend` is recorded as a hard-coded 0, so the advertised budget is a no-op
+> (#78). Close these before inviting external contributors or going multi-node.
 
 ### Research — open/hard problems (the "do it great" list)
 
