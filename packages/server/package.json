@@ -1,6 +1,6 @@
 {
   "name": "@thaddeus.run/server",
-  "version": "0.1.6-alpha",
+  "version": "0.1.7-alpha",
   "description": "The untrusted API-first remote for Thaddeus: a Bun.serve HTTP server over the durable Platform that verifies, never decrypts, and serves ciphertext.",
   "keywords": [
     "http",

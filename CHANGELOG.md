@@ -5,6 +5,8 @@ All notable changes to Thaddeus. Format follows
 
 ## [Unreleased]
 
+## [0.1.7-alpha] - 2026-07-12
+
 ### Added
 
 - **Signed-request replay protection.** Every signed mutation now carries a
