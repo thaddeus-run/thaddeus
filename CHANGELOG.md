@@ -5,6 +5,67 @@ All notable changes to Thaddeus. Format follows
 
 ## [Unreleased]
 
+### Roadmap — active pipeline (P11–P14)
+
+> The tracking pipeline lives **here** and on the GitHub milestones — not in a
+> separate roadmap file (the old `post-p3-roadmap.md` was retired). The full
+> five-lens analysis (security, product, code-quality/Rust-vs-Go, manifesto
+> conformance) and the ThadHub plan are the companion document:
+> <https://4xibq00df3aj.postplan.dev/>. Statuses below are current as of
+> **0.1.7-alpha**; update the table when a milestone opens or closes.
+
+| Phase   | What it is                                                                                                                                                  | Status                             | Milestone / issues                                                                         |
+| ------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------- | ------------------------------------------------------------------------------------------ |
+| P4–P10  | Policy, releases, query surface, timed reveal, watch, agent budgets + rate windows, rotate-and-recall, portable reputation (export/import + `--trust-host`) | **Shipped** — through v0.1.7-alpha | —                                                                                          |
+| **P11** | **Hardening & Proof** — benchmarks, outside-reviewer veto, lazythad write actions                                                                           | **In progress**                    | [P11](https://github.com/thaddeus-run/thaddeus/milestone/1) — #58, #59, #60, #72, #73, #74 |
+| P12     | Single-node security hardening                                                                                                                              | Queued                             | [P12](https://github.com/thaddeus-run/thaddeus/milestone/2) — #61–#63, #75–#79             |
+| P13     | Product & collaboration UX                                                                                                                                  | Queued                             | [P13](https://github.com/thaddeus-run/thaddeus/milestone/3) — #64–#67, #80, #82            |
+| P14     | Backend implementation (behind flags): CAS, S3/SQLite, conformance, migration                                                                               | Queued                             | [P14](https://github.com/thaddeus-run/thaddeus/milestone/4) — #68–#71                      |
+
+Everything through P14 is **Part 1** — it ships on the current single Fly node
+with `FileBackend`. The production infrastructure change (S3 / multi-node) is
+**Part 2**, gated by the exit criteria below.
+
+- **P11 — Hardening & Proof (current).** Two trust bindings the "untrusted
+  server" thesis depends on come first — both verified still-open as of 0.1.7:
+  sign a capability's `wrapped_key` and re-check the object↔op binding at read
+  (#72), and sign view/branch heads so a server cannot roll back / fork /
+  withhold undetectably (#73). Then wire the outside-reviewer veto capability
+  (#59) as the `blockOnVeto` allowlist the server does not yet pass, closing the
+  veto-injection DoS (#77); reproducible benchmarks + a `FileBackend` baseline
+  with **no** code.store-scale claims (#58); the op-log / graph `O(n²)` fixes
+  (#74); and lazythad signed write actions (#60).
+- **P12 — Single-node security hardening.** Cap/stream the request body before
+  buffering (#75, still open), per-identity repo/object quotas + rate limits
+  (#76), **persist** replay nonces across restart via a backend-neutral atomic
+  `consumeNonce()` (#61 — the in-window `ReplayNonceCache` shipped in 0.1.7;
+  only cross-restart durability + the cross-node CAS remain), size/count
+  limits + pagination (#62), per-signer rate + spam control (#63), meter or
+  remove `maxSpend` (#78, still a hard-coded 0), and the reputation anti-farming
+  hardening on top of the 0.1.7 `--trust-host` allowlist (#79). No replicas
+  required.
+- **P13 — Product & collaboration UX.** `thaddeus init` in-place + offline
+  `commit` (#80), the getting-started clone-path fix + version drift + a
+  runnable agent-governed demo (#82), plus `track`, workspace base sync, 3-way
+  merge, incremental/resumable pull, multiple remotes, approval-required policy,
+  review queue, and prompt-cap wiring (#64–#67). _(The `query`/`watch`/`reveal`
+  CLI wiring that was #81 shipped in 0.1.6-alpha; #81 is closed.)_
+- **P14 — Backend implementation (behind flags).** Define the backend
+  CAS/conditional-write contract **first** (#68) — an S3 adapter alone does not
+  make Thaddeus multi-node safe — then the S3-compatible backend (#69), an
+  optional SQLite backend (#70), and conformance tests + migration/rollback +
+  backup drills (#71). No production infrastructure change.
+
+**Exit gate — before any Part 2 production infrastructure change:** P11 complete
+· performance measured (#58) · backend conformance passes (#71) · migration +
+rollback tested (#71) · atomic land and nonce semantics specified and
+implemented (#61, #68) · a local MinIO multi-node test passes (#69) · a backup
+restored successfully in a clean environment (#71).
+
+> **Correction:** the S3 backend was once cited as "#14," but PR #14 was
+> "Multi-writer collaboration: delegated push over P09," unrelated to storage.
+> The S3 backend is tracked as **#69** under milestone P14.
+
 ## [0.1.7-alpha] - 2026-07-12
 
 ### Added
@@ -502,7 +563,22 @@ CLI, and the lazythad TUI.
 > Three buckets: **scope-cut** (a later pillar/release, no unknowns),
 > **research** (blocked on an open/hard problem — the things we must eventually
 > do _well_, not just at all), and **honest limitations** of what currently
-> ships. Items move up into a release section above when they land.
+> ships. Items move up into a release section above when they land. Open items
+> tracked on a GitHub milestone are folded into the **active pipeline** under
+> `[Unreleased]` above (P11–P14).
+>
+> **Security debt (highest priority — P11/P12, verified open as of 0.1.7).**
+> Surfaced by the 2026-07-12 audit (<https://4xibq00df3aj.postplan.dev/>): (1) a
+> capability's `wrapped_key` is not covered by the granter signature and the
+> object↔op binding is not re-checked at read, so an untrusted server can at
+> least deny a read and possibly substitute content that still decrypts (#72);
+> (2) view/branch heads are unsigned, so a server can roll back, fork, or
+> withhold history undetectably (#73); (3) the request body is buffered before
+> auth with no size cap (#75); (4) `blockOnVeto` is called with no reviewer
+> allowlist, so any writer can mount a durable land-blocking veto DoS (#77); and
+> (5) `maxSpend` is recorded as a hard-coded 0, so the advertised budget is a
+> no-op (#78). Close these before inviting external contributors or going
+> multi-node.
 
 ### Research — open/hard problems (the "do it great" list)
 
