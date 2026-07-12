@@ -1,3 +1,4 @@
+import { bytesToHex } from '@noble/hashes/utils';
 import { Identity, PublicIdentity } from '@thaddeus.run/identity';
 
 export interface Capability {
@@ -11,14 +12,45 @@ export interface Capability {
 
 const EPOCH = '1970-01-01T00:00:00.000Z';
 
-// Bytes signed by the granter: binds object, grantee, and start time so none
-// can be swapped without breaking the signature.
-function canonical(
+// Domain-separate capability signatures from other signed protocol payloads.
+// v2 adds `wrapped_key`; a v1 signature (without it) no longer verifies.
+const CAP_DOMAIN = 'thaddeus.store.cap.v2';
+
+// Reject values that JSON.stringify would silently coerce or serialize into an
+// ambiguous capability before signing or verification.
+function assertCanonicalCap(
   object: string,
   grantee: string,
   notBefore: string
+): void {
+  if (typeof object !== 'string' || object.length === 0) {
+    throw new TypeError('capability.object must be a non-empty string');
+  }
+  if (typeof grantee !== 'string' || grantee.length === 0) {
+    throw new TypeError('capability.grantee must be a non-empty string');
+  }
+  if (typeof notBefore !== 'string' || notBefore.length === 0) {
+    throw new TypeError('capability.not_before must be a non-empty string');
+  }
+}
+
+// Bytes signed by the granter bind every security-sensitive grant field.
+function canonical(
+  object: string,
+  grantee: string,
+  notBefore: string,
+  wrappedKey: Uint8Array
 ): Uint8Array {
-  return new TextEncoder().encode(`${object}\n${grantee}\n${notBefore}`);
+  assertCanonicalCap(object, grantee, notBefore);
+  return new TextEncoder().encode(
+    JSON.stringify([
+      CAP_DOMAIN,
+      object,
+      grantee,
+      notBefore,
+      bytesToHex(wrappedKey),
+    ])
+  );
 }
 
 export interface IssueParams {
@@ -31,23 +63,28 @@ export interface IssueParams {
 
 export function issueCapability(params: IssueParams): Capability {
   const notBefore = params.notBefore ?? EPOCH;
+  const wrappedKey = params.grantee.seal(params.contentKey);
   return {
     object: params.object,
     grantee: params.grantee.did,
-    wrapped_key: params.grantee.seal(params.contentKey),
+    wrapped_key: wrappedKey,
     granted_by: params.grantedBy.did,
     not_before: notBefore,
     sig: params.grantedBy.sign(
-      canonical(params.object, params.grantee.did, notBefore)
+      canonical(params.object, params.grantee.did, notBefore, wrappedKey)
     ),
   };
 }
 
 export function verifyCapability(cap: Capability): boolean {
-  return PublicIdentity.fromDid(cap.granted_by).verify(
-    canonical(cap.object, cap.grantee, cap.not_before),
-    cap.sig
-  );
+  try {
+    return PublicIdentity.fromDid(cap.granted_by).verify(
+      canonical(cap.object, cap.grantee, cap.not_before, cap.wrapped_key),
+      cap.sig
+    );
+  } catch {
+    return false;
+  }
 }
 
 // Assumes the capability has ALREADY BEEN VERIFIED. The store always calls

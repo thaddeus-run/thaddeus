@@ -39,4 +39,33 @@ describe('capability', () => {
     const forged = { ...cap, grantee: Identity.create().did };
     expect(verifyCapability(forged)).toBe(false);
   });
+
+  test('a tampered object fails signature verification', () => {
+    const alice = Identity.create();
+    const bob = Identity.create();
+    const cap = issueCapability({
+      object: 'pid',
+      contentKey: newContentKey(),
+      grantee: bob.toPublic(),
+      grantedBy: alice,
+    });
+    const forged = { ...cap, object: 'other-pid' };
+    expect(verifyCapability(forged)).toBe(false);
+  });
+
+  test('a tampered wrapped_key fails signature verification', () => {
+    const alice = Identity.create();
+    const bob = Identity.create();
+    const cap = issueCapability({
+      object: 'pid',
+      contentKey: newContentKey(),
+      grantee: bob.toPublic(),
+      grantedBy: alice,
+    });
+    const forged = {
+      ...cap,
+      wrapped_key: bob.toPublic().seal(newContentKey()),
+    };
+    expect(verifyCapability(forged)).toBe(false);
+  });
 });

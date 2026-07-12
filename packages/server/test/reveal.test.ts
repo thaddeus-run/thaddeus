@@ -418,6 +418,70 @@ describe('timed reveal', () => {
     expect(pending.capabilities).toHaveLength(1);
   });
 
+  test('same-ciphertext re-push preserves a re-wrapped capability', async () => {
+    const owner = Identity.create();
+    const revoked = Identity.create();
+    const local = await committed(owner);
+    const oldOwnerCap = local.store
+      .caps(local.ref.plaintext_id)
+      .find((capability) => capability.grantee === owner.did)!;
+    const srv = createServer({
+      backend: new MemoryBackend(),
+      now: () => before,
+    });
+    await srv.fetch(signedPost('/repos', { name: 'r' }, owner, before));
+    await srv.fetch(signedPost('/repos/r/push', local.bundle, owner, before));
+    await srv.fetch(
+      signedPost(
+        '/repos/r/land',
+        { fromHeads: local.heads, into: 'main' },
+        owner,
+        before
+      )
+    );
+
+    await local.store.grant(local.ref, revoked.toPublic(), owner);
+    await local.store.revoke(local.ref, revoked.toPublic(), owner);
+    const rotated = local.store.current(local.ref.plaintext_id)!;
+    const rewrappedOwnerCap = local.store
+      .caps(local.ref.plaintext_id)
+      .find((capability) => capability.grantee === owner.did)!;
+
+    await srv.fetch(
+      signedPost(
+        '/repos/r/push',
+        encodeBundle([], [rotated], [oldOwnerCap]),
+        owner,
+        before
+      )
+    );
+    await srv.fetch(
+      signedPost(
+        '/repos/r/push',
+        encodeBundle([], [rotated], [rewrappedOwnerCap]),
+        owner,
+        before
+      )
+    );
+
+    const pull = decodeBundle(
+      (await (
+        await srv.fetch(new Request('http://t/repos/r/pull?view=main'))
+      ).json()) as Bundle
+    );
+    expect(
+      pull.caps.some(
+        (capability) =>
+          capability.grantee === owner.did &&
+          capability.wrapped_key.length ===
+            rewrappedOwnerCap.wrapped_key.length &&
+          capability.wrapped_key.every(
+            (value, index) => value === rewrappedOwnerCap.wrapped_key[index]
+          )
+      )
+    ).toBe(true);
+  });
+
   test('manual reveal respects the trusted server clock', async () => {
     let clock = before;
     const owner = Identity.create();
