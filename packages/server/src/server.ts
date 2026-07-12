@@ -1,4 +1,3 @@
-import { bytesToHex } from '@noble/hashes/utils';
 import {
   AgentRegistry,
   type Delegation,
@@ -166,24 +165,19 @@ function all(...policies: LandPolicy[]): LandPolicy {
   };
 }
 
-// Merge two capability sets for one object, deduped by the signed grant fields
-// plus its granter. The wrapped key distinguishes a stale seal from a re-wrapped
-// capability after rotation. Used to keep a concurrent push from dropping a
-// just-issued grant.
+// Merge capabilities by logical grant, preserving unrelated concurrent grants.
+// Incoming caps overwrite matching stored caps so a re-wrapped key supersedes
+// its stale seal instead of leaving the read path to select the stale one first.
 function unionCaps(
   existing: readonly Capability[],
   incoming: readonly Capability[]
 ): Capability[] {
-  const out: Capability[] = [];
-  const seen = new Set<string>();
+  const byGrant = new Map<string, Capability>();
   for (const cap of [...existing, ...incoming]) {
-    const key = `${cap.grantee}\n${cap.granted_by}\n${cap.not_before}\n${bytesToHex(cap.wrapped_key)}`;
-    if (!seen.has(key)) {
-      seen.add(key);
-      out.push(cap);
-    }
+    const key = `${cap.grantee}\n${cap.granted_by}\n${cap.not_before}`;
+    byGrant.set(key, cap);
   }
-  return out;
+  return [...byGrant.values()];
 }
 
 function sameBytes(left: Uint8Array, right: Uint8Array): boolean {

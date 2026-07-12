@@ -1,5 +1,5 @@
 import { Identity, ready } from '@thaddeus.run/identity';
-import { beforeAll, describe, test } from 'bun:test';
+import { beforeAll, describe, expect, test } from 'bun:test';
 
 import { issueCapability } from '../src/capability';
 import { encrypt, newContentKey } from '../src/object';
@@ -46,6 +46,7 @@ describe('content integrity', () => {
     };
 
     await store.ingest(object, [tampered]);
+    expect(store.caps(ref.plaintext_id)).toHaveLength(0);
     await expectRejects(store.get(ref, owner), AccessDenied);
   });
 });

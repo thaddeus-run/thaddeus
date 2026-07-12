@@ -61,6 +61,7 @@ export interface IssueParams {
   readonly notBefore?: string;
 }
 
+// Seal first, then sign the exact wrapped-key bytes carried by the capability.
 export function issueCapability(params: IssueParams): Capability {
   const notBefore = params.notBefore ?? EPOCH;
   const wrappedKey = params.grantee.seal(params.contentKey);
@@ -76,6 +77,7 @@ export function issueCapability(params: IssueParams): Capability {
   };
 }
 
+// Verify the v2 canonical tuple and reject malformed peer input without throwing.
 export function verifyCapability(cap: Capability): boolean {
   try {
     return PublicIdentity.fromDid(cap.granted_by).verify(
