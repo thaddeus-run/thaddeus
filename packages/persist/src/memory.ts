@@ -9,6 +9,14 @@ export class MemoryBackend implements Backend {
     this.#map.set(key, new Uint8Array(bytes));
   }
 
+  async putIfAbsent(key: string, bytes: Uint8Array): Promise<boolean> {
+    if (this.#map.has(key)) {
+      return false;
+    }
+    this.#map.set(key, new Uint8Array(bytes));
+    return true;
+  }
+
   async get(key: string): Promise<Uint8Array | undefined> {
     const v = this.#map.get(key);
     return v === undefined ? undefined : new Uint8Array(v);

@@ -20,11 +20,16 @@ function fail(verification: Exclude<HeadVerification, { ok: true }>): never {
 // Keep caller-owned mutable arrays out of the store and never expose the
 // store's own signature bytes through its read APIs.
 function copyRecord(record: HeadRecord): HeadRecord {
-  return Object.freeze({
+  const signature = new Uint8Array(record.sig);
+  const copy = {
     ...record,
     heads: Object.freeze([...record.heads]),
-    sig: new Uint8Array(record.sig),
+  } as HeadRecord;
+  Object.defineProperty(copy, 'sig', {
+    enumerable: true,
+    get: () => new Uint8Array(signature),
   });
+  return Object.freeze(copy);
 }
 
 export class HeadVerificationError extends Error {
@@ -43,6 +48,7 @@ export class HeadStore {
   readonly #repo: string;
   readonly #backend: Backend | undefined;
   readonly #histories = new Map<string, HeadRecord[]>();
+  #mutations: Promise<void> = Promise.resolve();
   #owner: string | undefined;
 
   constructor(repo: string, backend?: Backend) {
@@ -145,6 +151,10 @@ export class HeadStore {
   }
 
   async bootstrap(record: HeadRecord): Promise<void> {
+    return this.#serialize(() => this.#bootstrap(record));
+  }
+
+  async #bootstrap(record: HeadRecord): Promise<void> {
     const verified = verifyHeadChain([record], {
       repo: this.#repo,
       view: record.view,
@@ -170,6 +180,10 @@ export class HeadStore {
   }
 
   async advance(record: HeadRecord): Promise<void> {
+    return this.#serialize(() => this.#advance(record));
+  }
+
+  async #advance(record: HeadRecord): Promise<void> {
     const history = this.#histories.get(record.view);
     if (history === undefined) {
       fail({
@@ -227,36 +241,78 @@ export class HeadStore {
     chain: readonly HeadRecord[],
     expectedOwner?: string
   ): Promise<void> {
-    const first = chain[0];
-    const view = first?.view;
-    const local = view === undefined ? [] : this.history(view);
-    const verified = verifyHeadChain(chain, {
-      repo: this.#repo,
-      view,
-      owner: expectedOwner ?? this.#owner,
-      prefix: local,
-    });
-    if (!verified.ok) {
-      fail(verified);
-    }
-    if (first === undefined) {
-      return;
-    }
-    for (const record of chain.slice(local.length)) {
-      if (record.version === 0) {
-        await this.bootstrap(record);
-      } else {
-        await this.advance(record);
+    return this.#serialize(async () => {
+      const first = chain[0];
+      const view = first?.view;
+      const local = view === undefined ? [] : this.history(view);
+      const verified = verifyHeadChain(chain, {
+        repo: this.#repo,
+        view,
+        owner: expectedOwner ?? this.#owner,
+        prefix: local,
+      });
+      if (!verified.ok) {
+        fail(verified);
       }
-    }
+      if (first === undefined) {
+        return;
+      }
+      for (const record of chain.slice(local.length)) {
+        if (record.version === 0) {
+          await this.#bootstrap(record);
+        } else {
+          await this.#advance(record);
+        }
+      }
+    });
+  }
+
+  // One store publishes mutations in call order. The backend's atomic create
+  // below extends the same fork protection across separate HeadStore instances.
+  #serialize<T>(mutation: () => Promise<T>): Promise<T> {
+    const result = this.#mutations.then(mutation, mutation);
+    this.#mutations = result.then(
+      () => undefined,
+      () => undefined
+    );
+    return result;
   }
 
   async #write(record: HeadRecord): Promise<void> {
-    if (this.#backend !== undefined) {
-      await this.#backend.put(
-        keyFor(record.view, record.version),
-        encodeRecord(record)
-      );
+    if (this.#backend === undefined) {
+      return;
+    }
+    const key = keyFor(record.view, record.version);
+    const bytes = encodeRecord(record);
+    if (this.#backend.putIfAbsent !== undefined) {
+      if (await this.#backend.putIfAbsent(key, bytes)) {
+        return;
+      }
+    } else if ((await this.#backend.get(key)) === undefined) {
+      await this.#backend.put(key, bytes);
+      return;
+    }
+
+    const existingBytes = await this.#backend.get(key);
+    if (existingBytes === undefined) {
+      throw new Error(`signed-head record disappeared during create: ${key}`);
+    }
+    let existing: HeadRecord;
+    try {
+      existing = decodeRecord(existingBytes) as HeadRecord;
+    } catch {
+      throw new Error(`corrupt signed-head record already exists: ${key}`);
+    }
+    const verified = verifyHead(existing);
+    if (!verified.ok) {
+      fail(verified);
+    }
+    if (existing.id !== record.id) {
+      fail({
+        ok: false,
+        code: 'fork',
+        message: `conflicting signed-head record already exists: ${key}`,
+      });
     }
   }
 }

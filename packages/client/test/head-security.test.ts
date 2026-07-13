@@ -136,6 +136,7 @@ describe('Client signed-head verification', () => {
   test('trust on first use pins the owner durably and rejects a later change', async () => {
     const firstOwner = Identity.create();
     const substitute = Identity.create();
+    const reader = Identity.create();
     const genesis = (owner: Identity) =>
       signHead(
         {
@@ -152,7 +153,7 @@ describe('Client signed-head verification', () => {
     const backend = new MemoryBackend();
     const client = new Client(
       'http://t',
-      firstOwner,
+      reader,
       responseFetch(() => body)
     );
     await client.clone('r', backend);
@@ -164,6 +165,89 @@ describe('Client signed-head verification', () => {
     const reopened = await new Platform().openDurable('r', backend);
     expect(reopened.headRecords.owner).toBe(firstOwner.did);
     expect(reopened.headRecords.current('main')?.id).toBe(first.id);
+  });
+
+  test('view listing rejects pinned rollback and forks and verifies newer chains', async () => {
+    const owner = Identity.create();
+    const genesis = signHead(
+      {
+        repo: 'r',
+        view: 'main',
+        version: 0,
+        previous: null,
+        heads: [],
+      },
+      owner
+    );
+    const next = signHead(
+      {
+        repo: 'r',
+        view: 'main',
+        version: 1,
+        previous: genesis.id,
+        heads: [],
+      },
+      owner
+    );
+    const fork = signHead(
+      {
+        repo: 'r',
+        view: 'main',
+        version: 1,
+        previous: genesis.id,
+        heads: ['f'.repeat(64)],
+      },
+      owner
+    );
+    const backend = new MemoryBackend();
+    const repo = await new Platform().openDurable('r', backend);
+    await repo.headRecords.import([genesis, next], owner.did);
+    let listed = next;
+    let chain: readonly HeadRecord[] = [genesis, next];
+    const client = new Client('http://t', Identity.create(), (request) => {
+      const path = new URL(request.url).pathname;
+      const response = path.endsWith('/views')
+        ? { views: { main: encodeHeadRecord(listed) } }
+        : {
+            view: 'main',
+            head: encodeHeadRecord(chain.at(-1) as HeadRecord),
+            chain: chain.map(encodeHeadRecord),
+          };
+      return Promise.resolve(
+        new Response(JSON.stringify(response), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        })
+      );
+    });
+
+    listed = genesis;
+    expect((await failureOf(client.listViews('r', repo))).message).toContain(
+      'rollback'
+    );
+    listed = fork;
+    expect((await failureOf(client.listViews('r', repo))).message).toContain(
+      'fork'
+    );
+
+    const higher = signHead(
+      {
+        repo: 'r',
+        view: 'main',
+        version: 2,
+        previous: next.id,
+        heads: [],
+      },
+      owner
+    );
+    listed = higher;
+    chain = [genesis, next];
+    expect((await failureOf(client.listViews('r', repo))).message).toContain(
+      'fork'
+    );
+    chain = [genesis, next, higher];
+    expect(await client.listViews('r', repo)).toEqual({ main: [] });
+    expect(repo.headRecords.current('main')?.id).toBe(next.id);
   });
 
   test('rejects rollback, a pinned-version fork, and broken or gapped chains', async () => {

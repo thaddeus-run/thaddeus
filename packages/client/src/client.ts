@@ -378,8 +378,8 @@ export class Client {
     return [...new Set(dids)].sort();
   }
 
-  // The repo's branches and their heads. A branch is a name over a head-set, so
-  // this is cheap and never touches content. Public read, like the rest.
+  // The repo's branches and their heads. Listing does not ingest content or
+  // mutate trust, but newer records fetch their complete chain for validation.
   async listViews(name: string, repo: Repo): Promise<Record<string, string[]>> {
     const res = await this.#fetch(
       new Request(`${this.#server}/repos/${encodeURIComponent(name)}/views`)
@@ -415,6 +415,34 @@ export class Client {
       listedOwner ??= head.owner;
       if (head.owner !== listedOwner) {
         throw new Error('wrong_owner: listed views have inconsistent owners');
+      }
+      const pinned = repo.headRecords.current(view);
+      if (pinned !== undefined && head.version < pinned.version) {
+        throw new Error('rollback: listed view is older than the local pin');
+      }
+      if (
+        pinned !== undefined &&
+        head.version === pinned.version &&
+        head.id !== pinned.id
+      ) {
+        throw new Error('fork: listed view conflicts with the local pin');
+      }
+      if (pinned?.id !== head.id) {
+        const detailResponse = await this.#fetch(
+          new Request(
+            `${this.#server}/repos/${encodeURIComponent(name)}/views/${encodeURIComponent(view)}`
+          )
+        );
+        const detail = (await this.#ok(detailResponse)) as HeadResponse;
+        const verified = decodeVerifiedChain(detail, name, view, {
+          owner: listedOwner,
+          prefix: repo.headRecords.history(view),
+        });
+        if (verified.head.id !== head.id) {
+          throw new Error(
+            'fork: listed view does not match its signed head chain'
+          );
+        }
       }
       views[view] = [...head.heads];
     }

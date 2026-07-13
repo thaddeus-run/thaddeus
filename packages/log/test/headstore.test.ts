@@ -22,6 +22,14 @@ class MemoryBackend implements Backend {
     return Promise.resolve();
   }
 
+  putIfAbsent(key: string, bytes: Uint8Array): Promise<boolean> {
+    if (this.records.has(key)) {
+      return Promise.resolve(false);
+    }
+    this.records.set(key, new Uint8Array(bytes));
+    return Promise.resolve(true);
+  }
+
   get(key: string): Promise<Uint8Array | undefined> {
     const bytes = this.records.get(key);
     return Promise.resolve(
@@ -118,6 +126,9 @@ describe('HeadStore', () => {
 
     const retained = store.current('main');
     expect(retained).toBeDefined();
+    expect(verifyHead(exposed as NonNullable<typeof exposed>)).toEqual({
+      ok: true,
+    });
     expect(verifyHead(retained as NonNullable<typeof retained>)).toEqual({
       ok: true,
     });
@@ -181,6 +192,68 @@ describe('HeadStore', () => {
         expect((error as HeadVerificationError).verification.code).toBe(code);
       }
     }
+  });
+
+  test('concurrent stores cannot publish conflicting successors', async () => {
+    const backend = new MemoryBackend();
+    const owner = Identity.create();
+    const genesis = signHead(
+      { repo: 'r', view: 'main', version: 0, previous: null, heads: [] },
+      owner
+    );
+    const seed = await HeadStore.load('r', backend);
+    await seed.bootstrap(genesis);
+    const [left, right] = await Promise.all([
+      HeadStore.load('r', backend),
+      HeadStore.load('r', backend),
+    ]);
+    const leftHead = signHead(
+      {
+        repo: 'r',
+        view: 'main',
+        version: 1,
+        previous: genesis.id,
+        heads: [A],
+      },
+      owner
+    );
+    const rightHead = signHead(
+      {
+        repo: 'r',
+        view: 'main',
+        version: 1,
+        previous: genesis.id,
+        heads: [B],
+      },
+      owner
+    );
+
+    const results = await Promise.allSettled([
+      left.advance(leftHead),
+      right.advance(rightHead),
+    ]);
+    expect(
+      results.filter((result) => result.status === 'fulfilled')
+    ).toHaveLength(1);
+    const rejected = results.find((result) => result.status === 'rejected');
+    expect(rejected?.status).toBe('rejected');
+    expect(
+      rejected?.status === 'rejected' ? rejected.reason : undefined
+    ).toBeInstanceOf(HeadVerificationError);
+
+    const reopened = await HeadStore.load('r', backend);
+    expect(reopened.history('main')).toHaveLength(2);
+    const reopenedCurrent = reopened.current('main');
+    expect(reopenedCurrent).toBeDefined();
+    if (reopenedCurrent === undefined) {
+      throw new Error('expected a persisted concurrent winner');
+    }
+    expect([leftHead.id, rightHead.id]).toContain(reopenedCurrent.id);
+    expect(
+      [left.history('main').length, right.history('main').length].sort(
+        (a, b) => a - b
+      )
+    ).toEqual([1, 2]);
   });
 
   test('fails closed on corrupt or incomplete persisted histories', async () => {

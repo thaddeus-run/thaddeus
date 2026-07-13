@@ -95,11 +95,27 @@ describe('owner ⇄ delegate collaboration', () => {
     expect(delegateOut.join('\n')).toContain('owner signature required');
     expect(delegateOut.join('\n')).toContain('uploaded head IDs');
     expect(delegateOut.join('\n')).not.toContain('published to');
+    const uploadedHeads = delegateOut
+      .join('\n')
+      .match(/uploaded head IDs: ([0-9a-f, ]+)/)?.[1]
+      ?.split(', ')
+      .filter((head) => head.length > 0);
+    expect(uploadedHeads).toBeDefined();
+
+    const delegateLandOut: string[] = [];
+    expect(
+      await run(
+        ['land'],
+        env(delHome, dirB, (line) => delegateLandOut.push(line))
+      )
+    ).toBe(1);
+    expect(delegateLandOut.join('\n')).toContain('owner signature required');
+    expect(delegateLandOut.join('\n')).toContain('uploaded head IDs');
 
     // The owner reviews those uploaded heads and signs the shared-head update.
-    const delegateRepo = await new Platform().openDurable(
+    const ownerRepo = await new Platform().openDurable(
       'proj',
-      new FileBackend(join(dirB, '.thaddeus', 'store'))
+      new FileBackend(join(dirA, '.thaddeus', 'store'))
     );
     const ownerClient = new Client(
       'http://t',
@@ -107,11 +123,7 @@ describe('owner ⇄ delegate collaboration', () => {
       fetchImpl
     );
     expect(
-      await ownerClient.land(
-        'proj',
-        delegateRepo,
-        delegateRepo.log.heads('main')
-      )
+      await ownerClient.land('proj', ownerRepo, uploadedHeads ?? [])
     ).toMatchObject({ landed: true });
 
     // The owner pulls and CAN read the now-owner-landed delegate file.

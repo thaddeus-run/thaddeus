@@ -4,6 +4,9 @@
 // store/log mutations and the static loaders; synchronous reads never touch it.
 export interface Backend {
   put(key: string, bytes: Uint8Array): Promise<void>;
+  // Atomically creates a key and returns false when it already exists. Durable
+  // monotonic records use this to prevent concurrent writers from overwriting.
+  putIfAbsent?(key: string, bytes: Uint8Array): Promise<boolean>;
   get(key: string): Promise<Uint8Array | undefined>;
   list(prefix: string): Promise<readonly string[]>;
   delete(key: string): Promise<void>;

@@ -1,13 +1,7 @@
 import { Workspace } from '@thaddeus.run/fs';
 import { signSymbolOp } from '@thaddeus.run/graph';
 import { Identity, ready } from '@thaddeus.run/identity';
-import {
-  decodeHeadRecord,
-  encodeHeadRecord,
-  type HeadRecordWire,
-  OpLog,
-  signHead,
-} from '@thaddeus.run/log';
+import { OpLog } from '@thaddeus.run/log';
 import { FileBackend } from '@thaddeus.run/persist';
 import { signProvenance } from '@thaddeus.run/provenance';
 import { signClaim } from '@thaddeus.run/reputation';
@@ -26,7 +20,7 @@ import {
 } from '../src/dto';
 import { createServer } from '../src/server';
 import { signRequest } from '../src/sign';
-import { createRepoBody } from './heads';
+import { createRepoBody, landBody as signedLandBody } from './heads';
 import { expectRejects } from './reject';
 
 beforeAll(async () => {
@@ -64,30 +58,18 @@ function client(base: string) {
     heads: readonly string[],
     owner: Identity,
     extra: Record<string, unknown> = {}
-  ): Promise<Record<string, unknown>> => {
-    const response = await get(`/repos/${encodeURIComponent(name)}/views/main`);
-    const current = decodeHeadRecord(
-      ((await response.json()) as { head: HeadRecordWire }).head
+  ): Promise<Record<string, unknown>> =>
+    signedLandBody(
+      (request) => {
+        const url = new URL(request.url);
+        return fetch(`${base}${url.pathname}${url.search}`);
+      },
+      name,
+      heads,
+      owner,
+      'main',
+      extra
     );
-    const merged = [...new Set([...current.heads, ...heads])].sort();
-    return {
-      fromHeads: [...heads],
-      into: 'main',
-      ...extra,
-      head: encodeHeadRecord(
-        signHead(
-          {
-            repo: name,
-            view: 'main',
-            version: current.version + 1,
-            previous: current.id,
-            heads: merged,
-          },
-          owner
-        )
-      ),
-    };
-  };
   return { post, get, landBody };
 }
 

@@ -138,15 +138,36 @@ export function headId(fields: HeadFields, owner: string): string {
   return bytesToHex(blake3(canonicalHead(fields, owner)));
 }
 
-export function signHead(fields: HeadFields, owner: Identity): HeadRecord {
-  const bytes = canonicalHead(fields, owner.did);
-  return Object.freeze({
+// Keep the authoritative signature private while preserving the portable
+// Uint8Array API: every read receives a copy that cannot mutate the record.
+function immutableHeadRecord(
+  fields: HeadFields,
+  id: string,
+  owner: string,
+  sig: Uint8Array
+): HeadRecord {
+  const signature = new Uint8Array(sig);
+  const record = {
     ...fields,
     heads: Object.freeze([...fields.heads]),
-    id: bytesToHex(blake3(bytes)),
-    owner: owner.did,
-    sig: owner.sign(bytes),
+    id,
+    owner,
+  } as HeadRecord;
+  Object.defineProperty(record, 'sig', {
+    enumerable: true,
+    get: () => new Uint8Array(signature),
   });
+  return Object.freeze(record);
+}
+
+export function signHead(fields: HeadFields, owner: Identity): HeadRecord {
+  const bytes = canonicalHead(fields, owner.did);
+  return immutableHeadRecord(
+    fields,
+    bytesToHex(blake3(bytes)),
+    owner.did,
+    owner.sign(bytes)
+  );
 }
 
 // Cryptographic verification is result-based so callers can preserve stable
@@ -246,10 +267,7 @@ export function decodeHeadRecord(wire: unknown): HeadRecord {
   if (!verification.ok) {
     throw new TypeError(verification.message);
   }
-  return Object.freeze({
-    ...record,
-    heads: Object.freeze([...record.heads]),
-  });
+  return immutableHeadRecord(record, record.id, record.owner, record.sig);
 }
 
 function sameRecord(left: HeadRecord, right: HeadRecord): boolean {
