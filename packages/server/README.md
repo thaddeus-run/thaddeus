@@ -39,8 +39,10 @@ integer no greater than `Number.MAX_SAFE_INTEGER - 1`.
 
 The CLI host configures Bun's native transport ceiling one sentinel byte above
 the application limit. This lets the application detect the exact overflow
-boundary while Bun rejects larger declarations before routing. Application
-rejections use these stable JSON responses:
+boundary while Bun rejects larger declarations before routing. The host also
+pins Bun's connection idle timeout at 10 seconds so a stalled partial request
+cannot retain its buffered prefix indefinitely. Application rejections use these
+stable JSON responses:
 
 - `413 {"error":"request body too large","maxBytes":<limit>}` for a declared or
   streamed overflow.

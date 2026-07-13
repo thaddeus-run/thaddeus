@@ -23,6 +23,7 @@ afterAll(() => rmSync(tmp, { recursive: true, force: true }));
 
 const encoder = new TextEncoder();
 
+/** Produces the exact signed-header set used by live POST route tests. */
 function signedHeaders(path: string, body: Uint8Array, signer: Identity) {
   const signed = signRequest(
     'POST',
@@ -39,6 +40,7 @@ function signedHeaders(path: string, body: Uint8Array, signer: Identity) {
   };
 }
 
+/** Produces a valid repository JSON body at an exact byte boundary. */
 function exactRepoBody(limit: number, fill: string): Uint8Array {
   const emptyLength = encoder.encode(JSON.stringify({ name: '' })).byteLength;
   return encoder.encode(

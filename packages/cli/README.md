@@ -40,10 +40,10 @@ publish. All crypto is client-side; your identity seed lives in
 ## Server request limits
 
 `thaddeus serve` accepts request bodies through 16 MiB by default. Override the
-inclusive limit with `--max-request-body-bytes N`; invalid, non-positive, or
-unsafe-integer values stop startup before the listening socket opens. The
-container entrypoint exposes the same setting as
-`THADDEUS_MAX_REQUEST_BODY_BYTES`.
+inclusive limit with `--max-request-body-bytes N`; values must be positive
+integers no greater than `Number.MAX_SAFE_INTEGER - 1`. Invalid values stop
+startup before the listening socket opens. The container entrypoint exposes the
+same setting as `THADDEUS_MAX_REQUEST_BODY_BYTES`.
 
 ## Query the committed branch
 
