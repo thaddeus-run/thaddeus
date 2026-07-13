@@ -322,5 +322,6 @@ thaddeus policy clear [--json]
   is repeatable and allows a foreign host DID's imported attestations to count;
   this server's own --host DID is always trusted automatically.
   --max-request-body-bytes sets the inclusive request-body limit (default
-  16777216, or 16 MiB) and must be a positive safe integer.`,
+  16777216, or 16 MiB) and must be a positive integer no greater than
+  Number.MAX_SAFE_INTEGER - 1.`,
 };

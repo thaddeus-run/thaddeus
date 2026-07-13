@@ -36,13 +36,13 @@ with `FileBackend`. The production infrastructure change (S3 / multi-node) is
   with **no** code.store-scale claims (#58); the op-log / graph `O(n²)` fixes
   (#74); and lazythad signed write actions (#60).
 - **P12 — Single-node security hardening.** Request bodies are now capped and
-  streamed before buffering (#75, shipped under Unreleased); next are
-  per-identity repo/object quotas + rate limits (#76), **persist** replay nonces
-  across restart via a backend-neutral atomic `consumeNonce()` (#61 — the
-  in-window `ReplayNonceCache` shipped in 0.1.7; only cross-restart durability +
-  the cross-node CAS remain), size/count limits + pagination (#62), per-signer
-  rate + spam control (#63), meter or remove `maxSpend` (#78, still a hard-coded
-  0), and the reputation anti-farming hardening on top of the 0.1.7
+  streamed before authentication or buffering (#75, shipped under Unreleased);
+  next are per-identity repo/object quotas + rate limits (#76), **persist**
+  replay nonces across restart via a backend-neutral atomic `consumeNonce()`
+  (#61 — the in-window `ReplayNonceCache` shipped in 0.1.7; only cross-restart
+  durability + the cross-node CAS remain), size/count limits + pagination (#62),
+  per-signer rate + spam control (#63), meter or remove `maxSpend` (#78, still a
+  hard-coded 0), and the reputation anti-farming hardening on top of the 0.1.7
   `--trust-host` allowlist (#79). No replicas required.
 - **P13 — Product & collaboration UX.** `thaddeus init` in-place + offline
   `commit` (#80), the getting-started clone-path fix + version drift + a

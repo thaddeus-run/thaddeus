@@ -9,6 +9,7 @@ beforeAll(async () => {
   await ready();
 });
 
+/** Builds a controllable request stream for boundary and cancellation tests. */
 function chunkedBody(
   chunks: readonly Uint8Array[],
   hooks: { cancelled?: () => void } = {}

@@ -6,6 +6,10 @@ import {
   DEFAULT_MAX_REQUEST_BODY_BYTES,
 } from '@thaddeus.run/server';
 
+// Pin Bun's documented default so slow-body protection cannot drift across
+// runtime upgrades.
+const REQUEST_IDLE_TIMEOUT_SECONDS = 10;
+
 // Options for a local Thaddeus server.
 export interface ServeOptions {
   dataDir: string; // FileBackend root (the durable cold tier)
@@ -14,7 +18,9 @@ export interface ServeOptions {
   host?: Identity; // attest reputation with this key (P07); omit to hold no keys
   minMerges?: number; // gate land on this many attested merges per op author
   trustedReputationHosts?: readonly string[]; // foreign host DIDs that count
-  maxRequestBodyBytes?: number; // default 16 MiB; must be a positive safe integer
+  // Default 16 MiB; accepts positive integers through
+  // Number.MAX_SAFE_INTEGER - 1.
+  maxRequestBodyBytes?: number;
   // Scheduler cadence. Public for deterministic integration tests; normal CLI
   // servers use one second.
   revealIntervalMs?: number;
@@ -27,9 +33,10 @@ export interface RunningServer {
   stop(): Promise<void>; // release the port
 }
 
-// Start a durable Thaddeus server over a FileBackend at `dataDir`. Does NOT
-// block — returns a handle. The CLI `serve` command awaits indefinitely; tests
-// call this directly, fetch against `url`, then `stop()`.
+/**
+ * Starts a durable server without blocking so callers can stop it cleanly.
+ * The CLI awaits the returned handle indefinitely; tests use its live URL.
+ */
 export function startServer(opts: ServeOptions): RunningServer {
   let maxRequestBodyBytes = DEFAULT_MAX_REQUEST_BODY_BYTES;
   if (opts.maxRequestBodyBytes !== undefined) {
@@ -49,6 +56,7 @@ export function startServer(opts: ServeOptions): RunningServer {
   });
   const http = Bun.serve({
     port: opts.port ?? 4000,
+    idleTimeout: REQUEST_IDLE_TIMEOUT_SECONDS,
     maxRequestBodySize: maxRequestBodyBytes + 1,
     fetch: srv.fetch,
   });

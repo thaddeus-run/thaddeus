@@ -86,6 +86,7 @@ function safeDecode(segment: string): string | undefined {
 export const DEFAULT_MAX_REQUEST_BODY_BYTES: number = 16 * 1024 * 1024;
 const REQUEST_BODY_BUFFER_BLOCK_BYTES = 64 * 1024;
 
+/** Resolves the inclusive application limit and rejects unsafe host values. */
 function requestBodyLimit(value: number | undefined): number {
   let limit = DEFAULT_MAX_REQUEST_BODY_BYTES;
   if (value !== undefined) {
@@ -246,11 +247,13 @@ function replacesPendingReveal(
   );
 }
 
-// A Bun.serve-compatible handler over a durable Platform. It verifies and
-// serves ciphertext; timed reveals are the explicit store-honest exception to
-// the normal key-free trust boundary. Per-node state is the opened-Repo cache,
-// per-repo mutation lock, and replay-nonce cache. The first two rebuild from
-// the backend; accepted nonces intentionally do not survive restart.
+/**
+ * Creates a Bun-compatible handler over a durable platform. It verifies and
+ * serves ciphertext; timed reveals are the explicit store-honest exception to
+ * the normal key-free trust boundary. Request validation stays ahead of
+ * authentication and persistence. Per-node caches and counters rebuild from
+ * the backend or intentionally reset after restart.
+ */
 export function createServer(config: ServerConfig): Server {
   const maxRequestBodyBytes = requestBodyLimit(config.maxRequestBodyBytes);
   const platform = new Platform();
@@ -508,6 +511,7 @@ export function createServer(config: ServerConfig): Server {
     invalid_content_length: 0,
   };
 
+  /** Cancels an unread body without allowing cleanup failure to mask a reply. */
   const cancelBody = async (body: ReadableStream<Uint8Array> | null) => {
     try {
       await body?.cancel();
@@ -517,21 +521,25 @@ export function createServer(config: ServerConfig): Server {
     }
   };
 
+  /** Builds a stable JSON body error and closes the partially read connection. */
   const bodyError = (status: number, body: unknown): Response => {
     const response = json(status, body);
     response.headers.set('connection', 'close');
     return response;
   };
 
+  /** Builds the application-detected 413 response with its configured limit. */
   const bodyTooLarge = (): Response =>
     bodyError(413, {
       error: 'request body too large',
       maxBytes: maxRequestBodyBytes,
     });
 
-  // Read a request body without retaining more than the configured maximum.
-  // Declared oversize bodies are rejected without pulling from their stream;
-  // undeclared or understated bodies are capped while their chunks arrive.
+  /**
+   * Reads a body without retaining more than the configured payload maximum.
+   * Declared overflow is rejected without pulling; streamed input is coalesced
+   * into bounded blocks before the exact bytes are assembled at end-of-stream.
+   */
   async function readRequestBody(req: Request): Promise<Uint8Array | Response> {
     const contentLength = req.headers.get('content-length');
     if (contentLength !== null) {
@@ -647,6 +655,7 @@ export function createServer(config: ServerConfig): Server {
     return body;
   }
 
+  /** Renders configured limits and fixed-label process-local rejection counts. */
   function metrics(): Response {
     const lines = [
       '# HELP thaddeus_http_request_body_limit_bytes Maximum request body bytes accepted by application routes.',
@@ -2093,12 +2102,14 @@ export function createServer(config: ServerConfig): Server {
       const url = new URL(req.url);
       const path = url.pathname;
       const emptyBody = new Uint8Array();
+      /** Loads a matched POST body before invoking authentication or handlers. */
       const withBody = async (
         handler: (body: Uint8Array) => Promise<Response>
       ): Promise<Response> => {
         const body = await readRequestBody(req);
         return body instanceof Response ? body : handler(body);
       };
+      /** Cancels a body before returning the route's stable malformed-path error. */
       const malformedPath = async (): Promise<Response> => {
         await cancelBody(req.body);
         return json(400, { error: 'malformed path' });
