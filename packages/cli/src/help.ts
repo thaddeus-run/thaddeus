@@ -43,7 +43,7 @@ Access & trust
   reveal <path>                                 trigger a due public reveal now
 
 Server
-  serve  [--port N] [--data DIR] [--host] [--min-merges N]  run a server
+  serve  [--port N] [--data DIR] [--max-request-body-bytes N]  run a server
 
 Global flags
   --version, -v                 print the version
@@ -313,12 +313,14 @@ thaddeus policy clear [--json]
   Only an attesting server ('serve --host') co-signs merges, so a non-attesting
   server reports attested: 0.`,
 
-  serve: `thaddeus serve [--port N] [--data DIR] [--host] [--min-merges N] [--trust-host <did> ...]
+  serve: `thaddeus serve [--port N] [--data DIR] [--host] [--min-merges N] [--trust-host <did> ...] [--max-request-body-bytes N]
 
   Run a durable Thaddeus server over a FileBackend at --data (default
   ./thaddeus-data) on --port (default 4000). --host makes it an attesting
   instance (co-signs reputation with the operator's identity); --min-merges
   gates land on that many trusted attested merges per op author. --trust-host
   is repeatable and allows a foreign host DID's imported attestations to count;
-  this server's own --host DID is always trusted automatically.`,
+  this server's own --host DID is always trusted automatically.
+  --max-request-body-bytes sets the inclusive request-body limit (default
+  16777216, or 16 MiB) and must be a positive safe integer.`,
 };

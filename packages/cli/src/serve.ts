@@ -1,7 +1,10 @@
 import type { Identity } from '@thaddeus.run/identity';
 import { FileBackend } from '@thaddeus.run/persist';
 import type { LandPolicy } from '@thaddeus.run/platform';
-import { createServer } from '@thaddeus.run/server';
+import {
+  createServer,
+  DEFAULT_MAX_REQUEST_BODY_BYTES,
+} from '@thaddeus.run/server';
 
 // Options for a local Thaddeus server.
 export interface ServeOptions {
@@ -11,6 +14,7 @@ export interface ServeOptions {
   host?: Identity; // attest reputation with this key (P07); omit to hold no keys
   minMerges?: number; // gate land on this many attested merges per op author
   trustedReputationHosts?: readonly string[]; // foreign host DIDs that count
+  maxRequestBodyBytes?: number; // default 16 MiB; must be a positive safe integer
   // Scheduler cadence. Public for deterministic integration tests; normal CLI
   // servers use one second.
   revealIntervalMs?: number;
@@ -27,8 +31,13 @@ export interface RunningServer {
 // block — returns a handle. The CLI `serve` command awaits indefinitely; tests
 // call this directly, fetch against `url`, then `stop()`.
 export function startServer(opts: ServeOptions): RunningServer {
+  let maxRequestBodyBytes = DEFAULT_MAX_REQUEST_BODY_BYTES;
+  if (opts.maxRequestBodyBytes !== undefined) {
+    maxRequestBodyBytes = opts.maxRequestBodyBytes;
+  }
   const srv = createServer({
     backend: new FileBackend(opts.dataDir),
+    maxRequestBodyBytes,
     policy: opts.policy,
     host: opts.host,
     minMerges: opts.minMerges,
@@ -38,7 +47,11 @@ export function startServer(opts: ServeOptions): RunningServer {
       console.error(`timed reveal ${context.operation} failed${scope}:`, error);
     },
   });
-  const http = Bun.serve({ port: opts.port ?? 4000, fetch: srv.fetch });
+  const http = Bun.serve({
+    port: opts.port ?? 4000,
+    maxRequestBodySize: maxRequestBodyBytes + 1,
+    fetch: srv.fetch,
+  });
   const revealIntervalMs = opts.revealIntervalMs ?? 1_000;
   if (!Number.isFinite(revealIntervalMs) || revealIntervalMs <= 0) {
     void http.stop(true);

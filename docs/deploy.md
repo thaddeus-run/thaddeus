@@ -21,13 +21,14 @@ as a serverless function.
 
 ### Configuration (environment)
 
-| Variable              | Default       | Meaning                                           |
-| --------------------- | ------------- | ------------------------------------------------- |
-| `PORT`                | `4000`        | listen port (Railway/Fly set this for you)        |
-| `THADDEUS_DATA`       | `/data`       | durable data dir (the volume)                     |
-| `THADDEUS_HOME`       | `/data/.home` | where the persistent host identity lives          |
-| `THADDEUS_HOST`       | —             | set to `1` to run an **attesting** instance (P07) |
-| `THADDEUS_MIN_MERGES` | —             | gate a land on N attested merges per op author    |
+| Variable                          | Default       | Meaning                                           |
+| --------------------------------- | ------------- | ------------------------------------------------- |
+| `PORT`                            | `4000`        | listen port (Railway/Fly set this for you)        |
+| `THADDEUS_DATA`                   | `/data`       | durable data dir (the volume)                     |
+| `THADDEUS_HOME`                   | `/data/.home` | where the persistent host identity lives          |
+| `THADDEUS_HOST`                   | —             | set to `1` to run an **attesting** instance (P07) |
+| `THADDEUS_MIN_MERGES`             | —             | gate a land on N attested merges per op author    |
+| `THADDEUS_MAX_REQUEST_BODY_BYTES` | `16777216`    | inclusive request-body limit (16 MiB)             |
 
 The entrypoint mints the host identity once (idempotent) on the volume, so
 attestations stay stable across restarts.
@@ -38,6 +39,7 @@ attestations stay stable across restarts.
 docker build -t thaddeus .
 docker run --rm -p 4000:4000 -v thaddeus_data:/data thaddeus
 curl http://localhost:4000/repos      # {"repos":[]}
+curl http://localhost:4000/metrics    # Prometheus request-limit metrics
 ```
 
 ## Railway

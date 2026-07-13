@@ -6,6 +6,7 @@
 #   THADDEUS_HOME        home for the persistent host identity (default /data/.home)
 #   THADDEUS_HOST=1      run as an ATTESTING instance (co-signs reputation)
 #   THADDEUS_MIN_MERGES  gate land on N attested merges per op author
+#   THADDEUS_MAX_REQUEST_BODY_BYTES maximum accepted request body (default 16 MiB)
 #   THADDEUS_TRUST_HOSTS comma-separated foreign host DIDs whose proofs count
 set -eu
 
@@ -32,6 +33,9 @@ case "${THADDEUS_HOST:-}" in
 esac
 if [ -n "${THADDEUS_MIN_MERGES:-}" ]; then
   set -- "$@" --min-merges "$THADDEUS_MIN_MERGES"
+fi
+if [ -n "${THADDEUS_MAX_REQUEST_BODY_BYTES:-}" ]; then
+  set -- "$@" --max-request-body-bytes "$THADDEUS_MAX_REQUEST_BODY_BYTES"
 fi
 if [ -n "${THADDEUS_TRUST_HOSTS:-}" ]; then
   old_ifs="$IFS"

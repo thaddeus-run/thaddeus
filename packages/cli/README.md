@@ -35,7 +35,15 @@ publish. All crypto is client-side; your identity seed lives in
 | `reputation <did>`                                                       | Show trusted/untrusted reputation      |
 | `reputation export <did> [--output path]`                                | Export a public reputation archive     |
 | `reputation import <path\|->` / `import --from URL`                      | Import or directly copy your archive   |
-| `serve [--port 4000] [--data DIR] [--trust-host <did>]`                  | Run a durable server                   |
+| `serve [--port 4000] [--data DIR] [--max-request-body-bytes N]`          | Run a durable server                   |
+
+## Server request limits
+
+`thaddeus serve` accepts request bodies through 16 MiB by default. Override the
+inclusive limit with `--max-request-body-bytes N`; invalid, non-positive, or
+unsafe-integer values stop startup before the listening socket opens. The
+container entrypoint exposes the same setting as
+`THADDEUS_MAX_REQUEST_BODY_BYTES`.
 
 ## Query the committed branch
 

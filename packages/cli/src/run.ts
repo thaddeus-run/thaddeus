@@ -27,6 +27,7 @@ import {
   signClaim,
 } from '@thaddeus.run/reputation';
 import { signVeto, VetoLog } from '@thaddeus.run/review';
+import { DEFAULT_MAX_REQUEST_BODY_BYTES } from '@thaddeus.run/server';
 import { type Backend, scoped } from '@thaddeus.run/store';
 import type { EventKind } from '@thaddeus.run/watch';
 import { createHash } from 'node:crypto';
@@ -2928,6 +2929,7 @@ export async function run(
             data: { type: 'string' },
             host: { type: 'boolean' },
             'min-merges': { type: 'string' },
+            'max-request-body-bytes': { type: 'string' },
             'trust-host': { type: 'string', multiple: true },
           },
           allowPositionals: true,
@@ -2936,6 +2938,21 @@ export async function run(
         const port = values.port !== undefined ? Number(values.port) : 4000;
         if (!Number.isInteger(port) || port < 0 || port > 65535) {
           out(`invalid --port: ${values.port}`);
+          return 2;
+        }
+        const rawMaxRequestBodyBytes = values['max-request-body-bytes'];
+        const maxRequestBodyBytes =
+          rawMaxRequestBodyBytes === undefined
+            ? DEFAULT_MAX_REQUEST_BODY_BYTES
+            : Number(rawMaxRequestBodyBytes);
+        if (
+          (rawMaxRequestBodyBytes !== undefined &&
+            !/^\d+$/.test(rawMaxRequestBodyBytes)) ||
+          !Number.isSafeInteger(maxRequestBodyBytes) ||
+          maxRequestBodyBytes <= 0 ||
+          maxRequestBodyBytes > Number.MAX_SAFE_INTEGER - 1
+        ) {
+          out(`invalid --max-request-body-bytes: ${rawMaxRequestBodyBytes}`);
           return 2;
         }
         // `--host` makes this an attesting instance, co-signing reputation
@@ -2964,10 +2981,11 @@ export async function run(
           port,
           host,
           minMerges,
+          maxRequestBodyBytes,
           trustedReputationHosts,
         });
         out(
-          `thaddeus serving on ${server.url} (data: ${dataDir}${
+          `thaddeus serving on ${server.url} (data: ${dataDir}, max body: ${maxRequestBodyBytes} bytes${
             host !== undefined ? `, attesting as ${host.did}` : ''
           }${
             trustedReputationHosts.length > 0
