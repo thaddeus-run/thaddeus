@@ -1,7 +1,17 @@
 import type { Delegation } from '@thaddeus.run/agent';
 import { type SymbolOp, SymbolOpLog } from '@thaddeus.run/graph';
 import type { Identity } from '@thaddeus.run/identity';
-import type { Conflict } from '@thaddeus.run/log';
+import {
+  type Conflict,
+  decodeHeadRecord,
+  encodeHeadRecord,
+  type HeadRecord,
+  type HeadRecordWire,
+  signHead,
+  verifyHead,
+  verifyHeadChain,
+  verifyHeadSnapshot,
+} from '@thaddeus.run/log';
 import {
   Platform,
   type Release,
@@ -74,6 +84,7 @@ export interface ScheduleRevealOutcome extends RevealOutcome {
 export interface LandOutcome {
   landed: boolean;
   into: string;
+  head?: HeadRecord;
   heads: string[];
   conflicts: Conflict[];
   reason?: string;
@@ -101,6 +112,53 @@ export interface ReputationImportOutcome {
 // constructs a Request before calling fetchImpl, so the narrower signature is
 // compatible with both the injected server handler and the global fetch.
 type FetchLike = (req: Request) => Promise<Response>;
+
+interface HeadResponse {
+  readonly view: string;
+  readonly head: HeadRecordWire;
+  readonly chain: readonly HeadRecordWire[];
+}
+
+function verificationError(
+  verification: Exclude<ReturnType<typeof verifyHeadChain>, { ok: true }>
+): Error {
+  return new Error(`${verification.code}: ${verification.message}`);
+}
+
+function decodeVerifiedChain(
+  body: HeadResponse,
+  repo: string,
+  view: string,
+  options?: {
+    owner?: string;
+    prefix?: readonly HeadRecord[];
+  }
+): { head: HeadRecord; chain: HeadRecord[] } {
+  if (body.view !== view || !Array.isArray(body.chain)) {
+    throw new Error('wrong_view: remote returned a different view');
+  }
+  let head: HeadRecord;
+  let chain: HeadRecord[];
+  try {
+    head = decodeHeadRecord(body.head);
+    chain = body.chain.map(decodeHeadRecord);
+  } catch (error) {
+    throw new Error(
+      `malformed_record: ${error instanceof Error ? error.message : 'invalid head response'}`
+    );
+  }
+  const verification = verifyHeadChain(chain, {
+    repo,
+    view,
+    owner: options?.owner,
+    prefix: options?.prefix,
+  });
+  if (!verification.ok) throw verificationError(verification);
+  if (chain.at(-1)?.id !== head.id) {
+    throw new Error('fork: current head does not match the returned chain');
+  }
+  return { head, chain };
+}
 
 function verifiedRelease(
   wire: string,
@@ -138,8 +196,22 @@ export class Client {
   }
 
   async createRepo(name: string): Promise<{ name: string; owner: string }> {
-    const res = await this.#signed('POST', '/repos', { name });
-    return (await this.#ok(res)) as { name: string; owner: string };
+    const head = signHead(
+      {
+        repo: name,
+        view: 'main',
+        version: 0,
+        previous: null,
+        heads: [],
+      },
+      this.#identity
+    );
+    const res = await this.#signed('POST', '/repos', {
+      name,
+      head: encodeHeadRecord(head),
+    });
+    const body = (await this.#ok(res)) as { name: string; owner: string };
+    return { name: body.name, owner: body.owner };
   }
 
   // Pull a view's reachable bundle in a single atomic request. The /pull
@@ -148,9 +220,11 @@ export class Client {
   async clone(
     name: string,
     backend: Backend,
-    view = 'main'
+    view = 'main',
+    options?: { expectedOwner?: string }
   ): Promise<{
     repo: Repo;
+    head: HeadRecord;
     heads: readonly string[];
     provenance: ProvenanceLog;
     vetoes: VetoLog;
@@ -160,12 +234,29 @@ export class Client {
     const res = await this.#fetch(
       new Request(`${this.#server}/repos/${enc(name)}/pull?view=${enc(view)}`)
     );
-    const body = (await this.#ok(res)) as { heads: string[] } & Parameters<
-      typeof decodeBundle
-    >[0];
-    const bundle = decodeBundle(body);
-
+    const body = (await this.#ok(res)) as HeadResponse &
+      Parameters<typeof decodeBundle>[0];
     const repo = await new Platform().openDurable(name, backend);
+    if (
+      options?.expectedOwner !== undefined &&
+      repo.headRecords.owner !== undefined &&
+      options.expectedOwner !== repo.headRecords.owner
+    ) {
+      throw new Error(
+        'wrong_owner: expected owner conflicts with the local pin'
+      );
+    }
+    const verified = decodeVerifiedChain(body, name, view, {
+      owner: options?.expectedOwner ?? repo.headRecords.owner,
+      prefix: repo.headRecords.history(view),
+    });
+    const bundle = decodeBundle(body);
+    const snapshot = verifyHeadSnapshot(verified.head, bundle.ops);
+    if (!snapshot.ok) throw verificationError(snapshot);
+    await repo.headRecords.import(
+      verified.chain,
+      options?.expectedOwner ?? repo.headRecords.owner
+    );
     for (const object of bundle.objects) {
       await repo.store.ingest(
         object,
@@ -175,7 +266,6 @@ export class Client {
     for (const op of bundle.ops) {
       await repo.log.ingest(op);
     }
-    await repo.log.repoint(view, body.heads);
     // Persist the pulled "why" (P04) and standing "no" (P10) into the working
     // copy's own scope, so `thaddeus log`/`why`/`vetoes` can read them offline —
     // same `repo/<name>/` namespace openDurable uses for the code, keeping the
@@ -193,7 +283,15 @@ export class Client {
     for (const s of bundle.symop) {
       await symbols.ingest(s);
     }
-    return { repo, heads: body.heads, provenance, vetoes, symbols };
+    await repo.log.repoint(view, verified.head.heads);
+    return {
+      repo,
+      head: verified.head,
+      heads: verified.head.heads,
+      provenance,
+      vetoes,
+      symbols,
+    };
   }
 
   // Fetch a view's current bundle into an EXISTING working copy: ingest the
@@ -207,6 +305,7 @@ export class Client {
     remoteView = 'main',
     localView?: string
   ): Promise<{
+    head: HeadRecord;
     heads: readonly string[];
     provenance: ProvenanceLog;
     vetoes: VetoLog;
@@ -219,10 +318,16 @@ export class Client {
         `${this.#server}/repos/${enc(name)}/pull?view=${enc(remoteView)}`
       )
     );
-    const body = (await this.#ok(res)) as { heads: string[] } & Parameters<
-      typeof decodeBundle
-    >[0];
+    const body = (await this.#ok(res)) as HeadResponse &
+      Parameters<typeof decodeBundle>[0];
+    const verified = decodeVerifiedChain(body, name, remoteView, {
+      owner: repo.headRecords.owner,
+      prefix: repo.headRecords.history(remoteView),
+    });
     const bundle = decodeBundle(body);
+    const snapshot = verifyHeadSnapshot(verified.head, bundle.ops);
+    if (!snapshot.ok) throw verificationError(snapshot);
+    await repo.headRecords.import(verified.chain, repo.headRecords.owner);
     for (const object of bundle.objects) {
       await repo.store.ingest(
         object,
@@ -232,7 +337,6 @@ export class Client {
     for (const op of bundle.ops) {
       await repo.log.ingest(op);
     }
-    await repo.log.repoint(targetView, body.heads);
     const metaScope = scoped(backend, `repo/${name}/`);
     const provenance = new ProvenanceLog(repo.store, metaScope);
     for (const p of bundle.prov) {
@@ -246,7 +350,14 @@ export class Client {
     for (const s of bundle.symop) {
       await symbols.ingest(s);
     }
-    return { heads: body.heads, provenance, vetoes, symbols };
+    await repo.log.repoint(targetView, verified.head.heads);
+    return {
+      head: verified.head,
+      heads: verified.head.heads,
+      provenance,
+      vetoes,
+      symbols,
+    };
   }
 
   // The repo's collaborators: its owner plus every non-revoked delegate (the
@@ -269,12 +380,45 @@ export class Client {
 
   // The repo's branches and their heads. A branch is a name over a head-set, so
   // this is cheap and never touches content. Public read, like the rest.
-  async listViews(name: string): Promise<Record<string, string[]>> {
+  async listViews(name: string, repo: Repo): Promise<Record<string, string[]>> {
     const res = await this.#fetch(
       new Request(`${this.#server}/repos/${encodeURIComponent(name)}/views`)
     );
-    const body = (await this.#ok(res)) as { views: Record<string, string[]> };
-    return body.views;
+    const body = (await this.#ok(res)) as {
+      views: Record<string, HeadRecordWire>;
+    };
+    if (
+      body.views === null ||
+      typeof body.views !== 'object' ||
+      Array.isArray(body.views)
+    ) {
+      throw new Error('malformed_record: views must be an object');
+    }
+    const expectedOwner = repo.headRecords.owner;
+    let listedOwner = expectedOwner;
+    const views: Record<string, string[]> = {};
+    for (const [view, wire] of Object.entries(body.views)) {
+      let head: HeadRecord;
+      try {
+        head = decodeHeadRecord(wire);
+      } catch (error) {
+        throw new Error(
+          `malformed_record: ${error instanceof Error ? error.message : 'invalid head record'}`
+        );
+      }
+      const verification = verifyHead(head);
+      if (!verification.ok) throw verificationError(verification);
+      if (head.repo !== name)
+        throw new Error('wrong_repo: view is for another repo');
+      if (head.view !== view)
+        throw new Error('wrong_view: view name does not match');
+      listedOwner ??= head.owner;
+      if (head.owner !== listedOwner) {
+        throw new Error('wrong_owner: listed views have inconsistent owners');
+      }
+      views[view] = [...head.heads];
+    }
+    return views;
   }
 
   async getPolicy(name: string): Promise<RepoPolicyRecord> {
@@ -349,15 +493,43 @@ export class Client {
   // ops, so no land policy applies; merging it back still goes through `land`.
   async createView(
     name: string,
+    repo: Repo,
     view: string,
     heads: readonly string[]
-  ): Promise<{ view: string; heads: string[] }> {
+  ): Promise<{ view: string; head: HeadRecord; heads: string[] }> {
+    if (
+      repo.headRecords.owner !== undefined &&
+      repo.headRecords.owner !== this.#identity.did
+    ) {
+      throw new Error('owner signature required to create a shared view');
+    }
+    const sortedHeads = [...new Set(heads)].sort();
+    const head = signHead(
+      {
+        repo: name,
+        view,
+        version: 0,
+        previous: null,
+        heads: sortedHeads,
+      },
+      this.#identity
+    );
     const res = await this.#signed(
       'POST',
       `/repos/${encodeURIComponent(name)}/views`,
-      { view, heads: [...heads] }
+      { head: encodeHeadRecord(head) }
     );
-    return (await this.#ok(res)) as { view: string; heads: string[] };
+    const body = (await this.#ok(res)) as {
+      view: string;
+      head: HeadRecordWire;
+    };
+    const returned = decodeHeadRecord(body.head);
+    if (body.view !== view || returned.id !== head.id) {
+      throw new Error('server returned a different signed view head');
+    }
+    await repo.headRecords.bootstrap(returned);
+    await repo.log.repoint(view, returned.heads);
+    return { view, head: returned, heads: [...returned.heads] };
   }
 
   async listRepos(): Promise<readonly string[]> {
@@ -534,16 +706,111 @@ export class Client {
   // the landed ops.
   async land(
     name: string,
+    repo: Repo,
     fromHeads: readonly string[],
     into = 'main',
     contrib: readonly ContributionClaim[] = []
   ): Promise<LandOutcome> {
+    const currentResponse = await this.#fetch(
+      new Request(
+        `${this.#server}/repos/${encodeURIComponent(name)}/views/${encodeURIComponent(into)}`
+      )
+    );
+    const currentBody = (await this.#ok(currentResponse)) as HeadResponse;
+    const current = decodeVerifiedChain(currentBody, name, into, {
+      owner: repo.headRecords.owner,
+      prefix: repo.headRecords.history(into),
+    });
+    await repo.headRecords.import(current.chain, repo.headRecords.owner);
+    if (current.head.owner !== this.#identity.did) {
+      throw new Error(
+        `owner signature required to land shared heads; uploaded heads: ${fromHeads.join(', ')}`
+      );
+    }
+    const heads = [...new Set([...current.head.heads, ...fromHeads])].sort();
+    const signed = signHead(
+      {
+        repo: name,
+        view: into,
+        version: current.head.version + 1,
+        previous: current.head.id,
+        heads,
+      },
+      this.#identity
+    );
     const res = await this.#signed(
       'POST',
       `/repos/${encodeURIComponent(name)}/land`,
-      { fromHeads: [...fromHeads], into, contrib: contrib.map(encodeClaim) }
+      {
+        fromHeads: [...fromHeads],
+        into,
+        contrib: contrib.map(encodeClaim),
+        head: encodeHeadRecord(signed),
+      }
     );
-    return (await this.#ok(res)) as LandOutcome;
+    const body = (await this.#ok(res)) as Omit<
+      LandOutcome,
+      'head' | 'heads'
+    > & {
+      head?: HeadRecordWire;
+    };
+    if (!body.landed) {
+      return {
+        landed: false,
+        into: body.into,
+        heads: [...current.head.heads],
+        conflicts: body.conflicts,
+        ...(body.reason === undefined ? {} : { reason: body.reason }),
+      };
+    }
+    if (body.head === undefined) {
+      throw new Error('land response omitted the signed head record');
+    }
+    const returned = decodeHeadRecord(body.head);
+    if (returned.id !== signed.id) {
+      throw new Error('server returned a different head than the owner signed');
+    }
+    await repo.headRecords.advance(returned);
+    return { ...body, head: returned, heads: [...returned.heads] };
+  }
+
+  async bootstrapHead(
+    name: string,
+    repo: Repo,
+    view: string,
+    heads: readonly string[]
+  ): Promise<HeadRecord> {
+    if (repo.headRecords.current(view) !== undefined) {
+      throw new Error(`signed head history already exists for ${view}`);
+    }
+    if (
+      repo.headRecords.owner !== undefined &&
+      repo.headRecords.owner !== this.#identity.did
+    ) {
+      throw new Error('owner signature required to bootstrap a shared head');
+    }
+    const signed = signHead(
+      {
+        repo: name,
+        view,
+        version: 0,
+        previous: null,
+        heads: [...new Set(heads)].sort(),
+      },
+      this.#identity
+    );
+    const res = await this.#signed(
+      'POST',
+      `/repos/${encodeURIComponent(name)}/heads/bootstrap`,
+      { head: encodeHeadRecord(signed) }
+    );
+    const body = (await this.#ok(res)) as { head: HeadRecordWire };
+    const returned = decodeHeadRecord(body.head);
+    if (returned.id !== signed.id) {
+      throw new Error('server returned a different bootstrap head');
+    }
+    await repo.headRecords.bootstrap(returned);
+    return returned;
   }
 
   // A subject's server-wide reputation profile (P07). Public read — no signature.

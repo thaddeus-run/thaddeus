@@ -1,6 +1,13 @@
 import { Workspace } from '@thaddeus.run/fs';
 import { Identity, ready } from '@thaddeus.run/identity';
-import { OpLog } from '@thaddeus.run/log';
+import {
+  decodeHeadRecord,
+  encodeHeadRecord,
+  type HeadRecord,
+  type HeadRecordWire,
+  OpLog,
+  signHead,
+} from '@thaddeus.run/log';
 import { MemoryBackend } from '@thaddeus.run/persist';
 import { MemoryStore } from '@thaddeus.run/store';
 import { beforeAll, describe, expect, test } from 'bun:test';
@@ -8,6 +15,7 @@ import { beforeAll, describe, expect, test } from 'bun:test';
 import { encodeBundle } from '../src/dto';
 import { createServer } from '../src/server';
 import { signRequest } from '../src/sign';
+import { createRepoBody, landBody } from './heads';
 
 beforeAll(async () => {
   await ready();
@@ -72,7 +80,7 @@ describe('writes', () => {
   test('an exact signed request can mutate the server only once', async () => {
     const owner = Identity.create();
     const srv = createServer({ backend: new MemoryBackend() });
-    const body = jbody({ name: 'replay-proof' });
+    const body = jbody(createRepoBody('replay-proof', owner));
     const signedHeaders = signRequest(
       'POST',
       '/repos',
@@ -105,7 +113,9 @@ describe('writes', () => {
     const a = Identity.create();
     const b = Identity.create();
     const srv = createServer({ backend: new MemoryBackend() });
-    await srv.fetch(signed('POST', '/repos', jbody({ name: 'acme/web' }), a));
+    await srv.fetch(
+      signed('POST', '/repos', jbody(createRepoBody('acme/web', a)), a)
+    );
 
     const { bundle, heads } = await localCommit(a);
 
@@ -132,7 +142,7 @@ describe('writes', () => {
       signed(
         'POST',
         '/repos/acme%2Fweb/land',
-        jbody({ fromHeads: heads, into: 'main' }),
+        jbody(await landBody(srv.fetch, 'acme/web', heads, a)),
         a
       )
     );
@@ -140,10 +150,125 @@ describe('writes', () => {
     expect(lr.landed).toBe(true);
   });
 
+  test('land rejects rollback, fork, gap, broken links, dropped heads, and forgery', async () => {
+    const owner = Identity.create();
+    const stranger = Identity.create();
+    const backend = new MemoryBackend();
+    const srv = createServer({ backend });
+    await srv.fetch(
+      signed('POST', '/repos', jbody(createRepoBody('monotonic', owner)), owner)
+    );
+    const { bundle, heads } = await localCommit(owner);
+    await srv.fetch(
+      signed('POST', '/repos/monotonic/push', jbody(bundle), owner)
+    );
+    const firstBody = await landBody(srv.fetch, 'monotonic', heads, owner);
+    const firstLand = await srv.fetch(
+      signed('POST', '/repos/monotonic/land', jbody(firstBody), owner)
+    );
+    expect(firstLand.status).toBe(200);
+    expect((await firstLand.json()) as { landed: boolean }).toMatchObject({
+      landed: true,
+    });
+
+    const view = (await (
+      await srv.fetch(new Request('http://t/repos/monotonic/views/main'))
+    ).json()) as { head: HeadRecordWire; chain: HeadRecordWire[] };
+    const current = decodeHeadRecord(view.head);
+    const genesis = decodeHeadRecord(view.chain[0]);
+    const successor = (
+      fields: Partial<HeadRecord>,
+      signer = owner
+    ): HeadRecord =>
+      signHead(
+        {
+          repo: fields.repo ?? 'monotonic',
+          view: fields.view ?? 'main',
+          version: fields.version ?? current.version + 1,
+          previous: fields.previous ?? current.id,
+          heads: fields.heads ?? current.heads,
+        },
+        signer
+      );
+    const attempt = async (
+      record: HeadRecord,
+      requestSigner = owner,
+      wire: HeadRecordWire = encodeHeadRecord(record)
+    ) => {
+      const response = await srv.fetch(
+        signed(
+          'POST',
+          '/repos/monotonic/land',
+          jbody({ fromHeads: heads, into: 'main', head: wire }),
+          requestSigner
+        )
+      );
+      return {
+        status: response.status,
+        body: (await response.json()) as { code?: string },
+      };
+    };
+
+    expect(await attempt(genesis)).toMatchObject({
+      status: 409,
+      body: { code: 'rollback' },
+    });
+    expect(
+      await attempt(
+        successor({
+          version: current.version,
+          previous: 'f'.repeat(64),
+        })
+      )
+    ).toMatchObject({ status: 409, body: { code: 'fork' } });
+    expect(
+      await attempt(successor({ version: current.version + 2 }))
+    ).toMatchObject({ status: 409, body: { code: 'gap' } });
+    expect(
+      await attempt(successor({ previous: 'e'.repeat(64) }))
+    ).toMatchObject({ status: 409, body: { code: 'broken_previous' } });
+    expect(await attempt(successor({ heads: [] }))).toMatchObject({
+      status: 409,
+      body: { code: 'dropped_heads' },
+    });
+    expect(await attempt(successor({ repo: 'other' }))).toMatchObject({
+      status: 400,
+      body: { code: 'wrong_repo' },
+    });
+    expect(await attempt(successor({}, stranger), owner)).toMatchObject({
+      status: 403,
+    });
+
+    const valid = successor({});
+    expect(
+      await attempt(valid, owner, {
+        ...encodeHeadRecord(valid),
+        id: '0'.repeat(64),
+      })
+    ).toMatchObject({ status: 400 });
+
+    const restarted = createServer({ backend });
+    const afterRestart = (await (
+      await restarted.fetch(new Request('http://t/repos/monotonic/views/main'))
+    ).json()) as { head: HeadRecordWire; chain: HeadRecordWire[] };
+    expect(afterRestart.head.id).toBe(current.id);
+    expect(afterRestart.chain).toHaveLength(2);
+
+    await backend.delete(`repo/monotonic/op/${heads[0]}`);
+    const incomplete = createServer({ backend });
+    const incompletePull = await incomplete.fetch(
+      new Request('http://t/repos/monotonic/pull?view=main')
+    );
+    expect(incompletePull.status).toBe(400);
+    expect(await incompletePull.json()).toMatchObject({
+      code: 'missing_operation',
+    });
+  });
+
   test('a forged op lands in rejected[], not stored', async () => {
     const a = Identity.create();
     const srv = createServer({ backend: new MemoryBackend() });
-    await srv.fetch(signed('POST', '/repos', jbody({ name: 'r' }), a));
+    await srv.fetch(signed('POST', '/repos', jbody(createRepoBody('r', a)), a));
     // A real commit, then zero the op's signature → verifyOp fails on the server.
     const store = new MemoryStore();
     const log = new OpLog(store);
@@ -178,7 +303,9 @@ describe('writes', () => {
   test('re-pushing the same content is idempotent', async () => {
     const a = Identity.create();
     const srv = createServer({ backend: new MemoryBackend() });
-    await srv.fetch(signed('POST', '/repos', jbody({ name: 'idem' }), a));
+    await srv.fetch(
+      signed('POST', '/repos', jbody(createRepoBody('idem', a)), a)
+    );
     const { bundle } = await localCommit(a);
     const first = (await (
       await srv.fetch(signed('POST', '/repos/idem/push', jbody(bundle), a))
@@ -197,7 +324,9 @@ describe('writes', () => {
   test('forged cap lands in rejected[], valid cap counted in accepted.caps', async () => {
     const a = Identity.create();
     const srv = createServer({ backend: new MemoryBackend() });
-    await srv.fetch(signed('POST', '/repos', jbody({ name: 'cap-test' }), a));
+    await srv.fetch(
+      signed('POST', '/repos', jbody(createRepoBody('cap-test', a)), a)
+    );
 
     // Build a local commit to get a real bundle with a valid cap.
     const store = new MemoryStore();
@@ -243,12 +372,15 @@ describe('writes', () => {
   test('land with an unknown head is 400', async () => {
     const a = Identity.create();
     const srv = createServer({ backend: new MemoryBackend() });
-    await srv.fetch(signed('POST', '/repos', jbody({ name: 'r2' }), a));
+    await srv.fetch(
+      signed('POST', '/repos', jbody(createRepoBody('r2', a)), a)
+    );
+    const unknown = 'a'.repeat(64);
     const res = await srv.fetch(
       signed(
         'POST',
         '/repos/r2/land',
-        jbody({ fromHeads: ['nope'], into: 'main' }),
+        jbody(await landBody(srv.fetch, 'r2', [unknown], a)),
         a
       )
     );
@@ -258,7 +390,9 @@ describe('writes', () => {
   test('a null JSON body to POST push is 400 not 500', async () => {
     const a = Identity.create();
     const srv = createServer({ backend: new MemoryBackend() });
-    await srv.fetch(signed('POST', '/repos', jbody({ name: 'null-push' }), a));
+    await srv.fetch(
+      signed('POST', '/repos', jbody(createRepoBody('null-push', a)), a)
+    );
     const nullBody = new TextEncoder().encode('null');
     const h = signRequest(
       'POST',
@@ -285,7 +419,9 @@ describe('writes', () => {
   test('a null JSON body to POST land is 400 not 500', async () => {
     const a = Identity.create();
     const srv = createServer({ backend: new MemoryBackend() });
-    await srv.fetch(signed('POST', '/repos', jbody({ name: 'null-land' }), a));
+    await srv.fetch(
+      signed('POST', '/repos', jbody(createRepoBody('null-land', a)), a)
+    );
     const nullBody = new TextEncoder().encode('null');
     const h = signRequest(
       'POST',

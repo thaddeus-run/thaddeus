@@ -6,6 +6,7 @@ import { beforeAll, describe, expect, test } from 'bun:test';
 import { decodeDelegation, encodeDelegation } from '../src/dto';
 import { createServer } from '../src/server';
 import { signRequest } from '../src/sign';
+import { createRepoBody } from './heads';
 
 beforeAll(async () => {
   await ready();
@@ -37,7 +38,7 @@ describe('grants', () => {
     const b = Identity.create(); // grantee
     const backend = new MemoryBackend();
     const srv = createServer({ backend });
-    await srv.fetch(signed('POST', '/repos', { name: 'r' }, a));
+    await srv.fetch(signed('POST', '/repos', createRepoBody('r', a), a));
 
     const deleg = signDelegation(
       { agent: b.did, paths: ['src/**'], maxChanges: 100, maxSpend: 1000 },
@@ -119,7 +120,9 @@ describe('grants', () => {
     const agent = Identity.create();
     const backend = new MemoryBackend();
     const srv = createServer({ backend });
-    await srv.fetch(signed('POST', '/repos', { name: 'rw' }, owner));
+    await srv.fetch(
+      signed('POST', '/repos', createRepoBody('rw', owner), owner)
+    );
     const capped = signDelegation(
       {
         agent: agent.did,

@@ -4,6 +4,7 @@ import { beforeAll, describe, expect, test } from 'bun:test';
 
 import { createServer } from '../src/server';
 import { signRequest } from '../src/sign';
+import { createRepoBody } from './heads';
 
 beforeAll(async () => {
   await ready();
@@ -52,10 +53,13 @@ describe('repos', () => {
     const srv = createServer({ backend: new MemoryBackend() });
 
     const created = await srv.fetch(
-      signedPost('/repos', { name: 'acme/web' }, a)
+      signedPost('/repos', createRepoBody('acme/web', a), a)
     );
     expect(created.status).toBe(201);
-    expect(await created.json()).toEqual({ name: 'acme/web', owner: a.did });
+    expect(await created.json()).toMatchObject({
+      name: 'acme/web',
+      owner: a.did,
+    });
 
     const list = await srv.fetch(new Request('http://t/repos'));
     expect(await list.json()).toEqual({
@@ -68,7 +72,9 @@ describe('repos', () => {
     const owner = Identity.create();
     const other = Identity.create();
     const srv = createServer({ backend: new MemoryBackend() });
-    await srv.fetch(signedPost('/repos', { name: 'del/me' }, owner));
+    await srv.fetch(
+      signedPost('/repos', createRepoBody('del/me', owner), owner)
+    );
 
     // Unsigned → 401.
     const unsigned = await srv.fetch(
@@ -106,8 +112,10 @@ describe('repos', () => {
   test('creating an existing repo is 409', async () => {
     const a = Identity.create();
     const srv = createServer({ backend: new MemoryBackend() });
-    await srv.fetch(signedPost('/repos', { name: 'dup' }, a));
-    const again = await srv.fetch(signedPost('/repos', { name: 'dup' }, a));
+    await srv.fetch(signedPost('/repos', createRepoBody('dup', a), a));
+    const again = await srv.fetch(
+      signedPost('/repos', createRepoBody('dup', a), a)
+    );
     expect(again.status).toBe(409);
   });
 

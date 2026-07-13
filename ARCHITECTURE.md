@@ -13,6 +13,7 @@ seam: the packages compose; Thaddeus is their composition.
 | Object (encrypted, content-addressed) | `@thaddeus.run/store`    | P01 · P02 membrane · P03 snapshots · P11 query          |
 | Capability (sealed key)               | `@thaddeus.run/store`    | P01 · P02 reveal · P09 revocation                       |
 | Op (operation log entry)              | `@thaddeus.run/log`      | P03 · P04 · P05 · P06 · P08 · P10 · P11 query           |
+| Head (owner-signed shared view)       | `@thaddeus.run/log`      | P03 · platform · server · client                        |
 
 ## Build order (each tier depends only on tiers below)
 
@@ -54,31 +55,38 @@ The substrate is now optionally **durable** behind a pluggable `Backend`
 take an optional backend (hot-cache write-through + static `open`/`load`); with
 none, behavior is unchanged. `Platform.createDurable`/`openDurable` compose a
 backend-backed repo, so **a repo survives a process restart** — the code.store
-"in-memory writes, cold storage" split. Signed-record-log persistence now ships
-too (provenance, veto, reputation, symbol-ops — see the Server section).
-SQLite/S3 backends, compaction/GC, and a Git gateway are the next steps.
+"in-memory writes, cold storage" split. `HeadStore` retains every owner-signed
+shared-view update as a contiguous versioned chain with no unsigned current
+pointer. Other signed-record-log persistence ships too (provenance, veto,
+reputation, symbol-ops — see the Server section). SQLite/S3 backends,
+compaction/GC, and a Git gateway are the next steps.
 
 ## Server (infrastructure, not a pillar)
 
 The durable `Platform` is reachable over HTTP via `@thaddeus.run/server` — a
 `Bun.serve` remote that is **untrusted** (no keys, verifies-don't-trust, serves
-ciphertext): reads are a public mirror, writes are owner-signed, `land` is
-key-free and policy-gated. Signed mutations bind a random nonce into the request
-signature; a bounded process-local cache rejects reuse throughout the
-five-minute timestamp window. Replay state is not shared across nodes or
-preserved over restart. The server is otherwise stateless over the shared
-`Backend`, so a node restart serves the same repos. It now carries **and
-persists the whole substrate** — not just code (P01 objects, P03 ops) but the
-meaning around it: the signed "why" (P04), the standing human veto (P10),
-server-wide reputation (P07), and semantic-graph ops (P08), each write-through
-under its own content-addressed key and rebuilt on load. The server may
-**optionally attest**: given a `host` identity it co-signs a client's reputation
-claim on a successful land (minting a host-vouched merge) and can gate land on
-that durable reputation (`--min-merges`). Reputation is portable across
-instances as a strict, subject-imported JSON proof archive. Foreign attestations
-are retained but count only when their host DID is in the destination's explicit
-trust set. Multi-node concurrency, dynamic federation discovery, and the Git
-gateway are the next steps.
+ciphertext): reads are a public mirror, writes are signed, and shared-view
+authority is owner-signed and policy-gated. Every public view exposes a complete
+monotonic `HeadRecord` chain. The server cannot use raw view pointers as public
+authority, and it refuses to serve a pull unless its operation bundle is exactly
+the current signed head's reachable closure. Delegates may upload signed
+operations, but only the repository owner can create a shared branch or sign a
+landing. Signed mutations bind a random nonce into the request signature; a
+bounded process-local cache rejects reuse throughout the five-minute timestamp
+window. Replay state is not shared across nodes or preserved over restart. The
+server is otherwise stateless over the shared `Backend`, so a node restart
+serves the same repos. It now carries **and persists the whole substrate** — not
+just code (P01 objects, P03 ops) but the meaning around it: the signed "why"
+(P04), the standing human veto (P10), server-wide reputation (P07), and
+semantic-graph ops (P08), each write-through under its own content-addressed key
+and rebuilt on load. The server may **optionally attest**: given a `host`
+identity it co-signs a client's reputation claim on a successful land (minting a
+host-vouched merge) and can gate land on that durable reputation
+(`--min-merges`). Reputation is portable across instances as a strict,
+subject-imported JSON proof archive. Foreign attestations are retained but count
+only when their host DID is in the destination's explicit trust set. Multi-node
+concurrency, dynamic federation discovery, and the Git gateway are the next
+steps.
 
 Timed reveal is the deliberate exception to that normal trust boundary. An owner
 uploads a public-wrapped capability before its start time so the server can
@@ -92,13 +100,15 @@ unattended reveal requires the deferred time-lock design.
 The remote is driven by a reusable `@thaddeus.run/client` SDK (a `Client`
 holding a self-owned identity: `createRepo`/`clone`/`push`/`land`, all crypto
 client-side) and the **`thaddeus`** CLI (`@thaddeus.run/cli`, alias `thad`) — a
-git-like client with a `.thaddeus/` durable working tree: `init` → `create` →
-`clone` → edit files → `push` (publish to `main`). The server is runnable in one
-command via **`thaddeus serve`**. The remote is now **multi-writer**: the owner
+git-like client with a `.thaddeus/` durable working tree. Clone uses an explicit
+expected owner or trust on first use, then every pull verifies the complete
+signed chain against its durable pin and checks the exact operation closure
+before moving a view. The server is runnable in one command via
+**`thaddeus serve`**. The remote is multi-writer for operation upload: the owner
 delegates scoped, budgeted push to other DIDs/agents via P09 `Delegation`s
-(`thaddeus grant`/`revoke`/`grants`); the server holds a durable `AgentRegistry`
-and enforces `delegationPolicy` at land — fail-closed, revocation terminal.
-Offline sync and conflict UX are next.
+(`thaddeus grant`/`revoke`/`grants`); the server evaluates `delegationPolicy`
+over those authors when the owner signs a landing. Delegates cannot
+independently advance shared heads. Offline sync and conflict UX are next.
 
 ## Per-primitive loop
 

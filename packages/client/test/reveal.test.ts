@@ -70,7 +70,7 @@ describe('Client timed reveal', () => {
     await workspace.commit(owner);
     const heads = [...repo.log.heads('feat')];
     await client.push('r', repo, heads);
-    await client.land('r', heads);
+    await client.land('r', repo, heads);
     const ref = repo.log.materialize('feat', owner).get('announcement.md')!.ref;
     if (ref === null) throw new Error('expected committed file ref');
     const at = '2099-01-01T00:00:00.000Z';
@@ -111,7 +111,7 @@ describe('Client timed reveal', () => {
     await workspace.commit(owner);
     const heads = [...repo.log.heads('feat')];
     await client.push('r', repo, heads);
-    await client.land('r', heads);
+    await client.land('r', repo, heads);
     const ref = repo.log.materialize('feat', owner).get('launch.md')!.ref;
     if (ref === null) throw new Error('expected committed file ref');
     const at = new Date(Date.parse(clock) + 60_000).toISOString();

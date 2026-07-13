@@ -6,7 +6,16 @@ import {
 } from '@thaddeus.run/agent';
 import { SymbolOpLog } from '@thaddeus.run/graph';
 import { type Identity, PublicIdentity } from '@thaddeus.run/identity';
-import type { Op } from '@thaddeus.run/log';
+import {
+  decodeHeadRecord,
+  encodeHeadRecord,
+  type HeadRecord,
+  type HeadRecordWire,
+  type HeadVerification,
+  type Op,
+  verifyHeadChain,
+  verifyHeadSnapshot,
+} from '@thaddeus.run/log';
 import {
   blockOnConflict,
   blockOnVeto,
@@ -442,10 +451,27 @@ export function createServer(config: ServerConfig): Server {
     if (cached !== undefined) {
       return cached;
     }
-    if ((await readMeta(name)) === undefined) {
+    const meta = await readMeta(name);
+    if (meta === undefined) {
       return undefined; // unknown repo
     }
     const repo = await platform.openDurable(name, config.backend);
+    if (
+      repo.headRecords.owner !== undefined &&
+      repo.headRecords.owner !== meta.owner
+    ) {
+      throw new Error(
+        `signed-head owner disagrees with repo metadata: ${name}`
+      );
+    }
+    // Signed history is authoritative for shared views. Raw view/* values may
+    // still hold local or legacy projections, but they are never trust input.
+    for (const view of repo.headRecords.views()) {
+      const current = repo.headRecords.current(view);
+      if (current !== undefined) {
+        repo.log.view(view, current.heads);
+      }
+    }
     repoCache.set(name, repo);
     return repo;
   }
@@ -504,6 +530,35 @@ export function createServer(config: ServerConfig): Server {
       status,
       headers: { 'content-type': 'application/json' },
     });
+
+  const headError = (
+    status: number,
+    verification: Exclude<HeadVerification, { ok: true }>
+  ): Response =>
+    json(status, {
+      error: verification.message,
+      code: verification.code,
+    });
+
+  function decodeHead(wire: unknown): HeadRecord | Response {
+    try {
+      return decodeHeadRecord(wire);
+    } catch (error) {
+      return json(400, {
+        error:
+          error instanceof Error
+            ? error.message
+            : 'malformed signed head record',
+        code: 'malformed_record',
+      });
+    }
+  }
+
+  function unsignedView(repo: Repo, view: string): boolean {
+    return (
+      repo.headRecords.current(view) === undefined && repo.log.hasView(view)
+    );
+  }
 
   const bodyRejections = {
     declared_too_large: 0,
@@ -695,9 +750,28 @@ export function createServer(config: ServerConfig): Server {
     if (parsed === undefined || parsed === null || typeof parsed !== 'object') {
       return json(400, { error: 'invalid JSON body' });
     }
-    const { name } = parsed as { name: string };
+    const { name, head: wire } = parsed as { name: string; head?: unknown };
     if (typeof name !== 'string' || name.length === 0) {
       return json(400, { error: 'missing repo name' });
+    }
+    const decoded = decodeHead(wire);
+    if (decoded instanceof Response) {
+      return decoded;
+    }
+    if (decoded.owner !== signer) {
+      return json(403, { error: 'head signer is not the repository owner' });
+    }
+    if (
+      decoded.repo !== name ||
+      decoded.view !== 'main' ||
+      decoded.version !== 0 ||
+      decoded.previous !== null ||
+      decoded.heads.length !== 0
+    ) {
+      return json(400, {
+        error: 'repository genesis must sign empty main at version 0',
+        code: 'wrong_repo',
+      });
     }
     // Wrap the existence-check-through-write in the per-repo lock so two
     // concurrent creates for the same name cannot both pass the existence check
@@ -706,10 +780,18 @@ export function createServer(config: ServerConfig): Server {
       if ((await readMeta(name)) !== undefined) {
         return json(409, { error: `repo ${name} already exists` });
       }
-      await metaBackend(name).put('meta/repo', encodeRecord({ owner: signer }));
       const repo = await platform.createDurable(name, config.backend);
+      await repo.headRecords.bootstrap(decoded);
+      repo.log.view('main', decoded.heads);
+      // Metadata is written last: it remains the repository visibility marker,
+      // so a failed signed-head write cannot expose an unsigned repository.
+      await metaBackend(name).put('meta/repo', encodeRecord({ owner: signer }));
       repoCache.set(name, repo);
-      return json(201, { name, owner: signer });
+      return json(201, {
+        name,
+        owner: signer,
+        head: encodeHeadRecord(decoded),
+      });
     });
   }
 
@@ -989,13 +1071,24 @@ export function createServer(config: ServerConfig): Server {
     });
   }
 
-  // Returns the heads of a named view for a repo; 404 if the repo doesn't exist.
+  // Public shared-view reads expose only owner-signed authority and its complete
+  // chain. A legacy raw pointer fails closed until the owner bootstraps it.
   async function getView(name: string, view: string): Promise<Response> {
     const repo = await getRepo(name);
     if (repo === undefined) {
       return json(404, { error: `no repo ${name}` });
     }
-    return json(200, { view, heads: [...repo.log.heads(view)] });
+    const head = repo.headRecords.current(view);
+    if (head === undefined) {
+      return unsignedView(repo, view)
+        ? json(428, { error: `view ${view} requires owner head bootstrap` })
+        : json(404, { error: `no view ${view}` });
+    }
+    return json(200, {
+      view,
+      head: encodeHeadRecord(head),
+      chain: repo.headRecords.history(view).map(encodeHeadRecord),
+    });
   }
 
   // GET /repos/:name/views — the repo's branches and their heads. A public read,
@@ -1005,9 +1098,20 @@ export function createServer(config: ServerConfig): Server {
     if (repo === undefined) {
       return json(404, { error: `no repo ${name}` });
     }
-    const views: Record<string, string[]> = {};
-    for (const branch of repo.branches()) {
-      views[branch] = [...repo.log.heads(branch)];
+    const unsigned = repo
+      .branches()
+      .find((view) => repo.headRecords.current(view) === undefined);
+    if (unsigned !== undefined) {
+      return json(428, {
+        error: `view ${unsigned} requires owner head bootstrap`,
+      });
+    }
+    const views: Record<string, HeadRecordWire> = {};
+    for (const view of repo.headRecords.views()) {
+      const head = repo.headRecords.current(view);
+      if (head !== undefined) {
+        views[view] = encodeHeadRecord(head);
+      }
     }
     return json(200, { views });
   }
@@ -1155,10 +1259,15 @@ export function createServer(config: ServerConfig): Server {
       if (repo === undefined) {
         return json(404, { error: `no repo ${name}` });
       }
-      if (!repo.log.hasView(release.view)) {
-        return json(404, { error: `no branch ${release.view}` });
+      const signedHead = repo.headRecords.current(release.view);
+      if (signedHead === undefined) {
+        return unsignedView(repo, release.view)
+          ? json(428, {
+              error: `view ${release.view} requires owner head bootstrap`,
+            })
+          : json(404, { error: `no branch ${release.view}` });
       }
-      const heads = [...repo.log.heads(release.view)];
+      const heads = [...signedHead.heads];
       const commits = reachableOps(repo.log.ops(), heads).map((op) => op.id);
       if (
         !sameStringSet(release.heads, heads) ||
@@ -1264,11 +1373,8 @@ export function createServer(config: ServerConfig): Server {
     });
   }
 
-  // POST /repos/:name/views — create a branch at an already-ingested head-set.
-  // Creating a branch introduces NO new ops, so no land policy applies (landing
-  // into a fresh view would otherwise re-check the entire history against a
-  // delegate's path/budget scope). CREATE-ONLY: re-pointing an existing view
-  // must go through `land`, so its policy gates always run.
+  // Owner-created branches begin their own signed version-0 history. Delegates
+  // may upload operations but cannot create shared authority records.
   async function createView(
     name: string,
     req: Request,
@@ -1288,43 +1394,110 @@ export function createServer(config: ServerConfig): Server {
     if (parsed === undefined || parsed === null || typeof parsed !== 'object') {
       return json(400, { error: 'invalid JSON body' });
     }
-    const { view, heads } = parsed as { view?: unknown; heads?: unknown };
-    if (typeof view !== 'string' || view.length === 0) {
-      return json(400, { error: 'missing view name' });
-    }
+    const decoded = decodeHead((parsed as { head?: unknown }).head);
+    if (decoded instanceof Response) return decoded;
+    const view = decoded.view;
     if (view.startsWith(INTERNAL_VIEW_PREFIX)) {
       return json(400, { error: `reserved view name ${view}` });
-    }
-    if (!Array.isArray(heads) || heads.some((h) => typeof h !== 'string')) {
-      return json(400, { error: 'heads must be an array of op ids' });
     }
     return withRepoLock(name, async () => {
       const meta = await readMeta(name);
       if (meta === undefined) {
         return json(404, { error: `no repo ${name}` });
       }
-      const reg = await registryFor(name);
-      if (
-        signer !== meta.owner &&
-        !(reg.delegationFor(signer) !== undefined && !reg.isRevoked(signer))
-      ) {
-        return json(403, { error: 'not authorized to write this repo' });
+      if (signer !== meta.owner || decoded.owner !== meta.owner) {
+        return json(403, {
+          error: 'shared view creation requires the repo owner',
+        });
       }
       const repo = await getRepo(name);
       if (repo === undefined) {
         return json(404, { error: `no repo ${name}` });
       }
-      if (repo.log.hasView(view)) {
+      if (
+        repo.headRecords.current(view) !== undefined ||
+        repo.log.hasView(view)
+      ) {
         return json(409, { error: `view ${view} already exists` });
       }
-      const known = new Set(repo.log.ops().map((o) => o.id));
-      for (const head of heads as string[]) {
-        if (!known.has(head)) {
-          return json(400, { error: `unknown head ${head}` });
-        }
+      if (
+        decoded.repo !== name ||
+        decoded.version !== 0 ||
+        decoded.previous !== null
+      ) {
+        return json(400, {
+          error: 'new view requires a scoped version-0 head',
+        });
       }
-      await repo.log.repoint(view, heads as string[]);
-      return json(201, { view, heads });
+      const snapshot = verifyHeadSnapshot(
+        decoded,
+        reachableOps(repo.log.ops(), decoded.heads)
+      );
+      if (!snapshot.ok) return headError(400, snapshot);
+      await repo.headRecords.bootstrap(decoded);
+      repo.log.view(view, decoded.heads);
+      return json(201, {
+        view,
+        head: encodeHeadRecord(decoded),
+        heads: [...decoded.heads],
+      });
+    });
+  }
+
+  // Legacy migration: the owner selects and signs a genesis head. The old raw
+  // pointer is checked only for view existence and is never used as trust input.
+  async function bootstrapHead(
+    name: string,
+    req: Request,
+    body: Uint8Array
+  ): Promise<Response> {
+    const signer = verifyRequest(
+      'POST',
+      new URL(req.url).pathname,
+      body,
+      headers(req),
+      Date.parse(now())
+    );
+    if (signer === null) {
+      return json(401, { error: 'unsigned or invalid request' });
+    }
+    const parsed = safeParseJson(body);
+    if (parsed === undefined || parsed === null || typeof parsed !== 'object') {
+      return json(400, { error: 'invalid JSON body' });
+    }
+    const decoded = decodeHead((parsed as { head?: unknown }).head);
+    if (decoded instanceof Response) return decoded;
+    return withRepoLock(name, async () => {
+      const meta = await readMeta(name);
+      if (meta === undefined) return json(404, { error: `no repo ${name}` });
+      if (signer !== meta.owner || decoded.owner !== meta.owner) {
+        return json(403, { error: 'head bootstrap requires the repo owner' });
+      }
+      const repo = await getRepo(name);
+      if (repo === undefined) return json(404, { error: `no repo ${name}` });
+      if (repo.headRecords.current(decoded.view) !== undefined) {
+        return json(409, { error: `view ${decoded.view} is already signed` });
+      }
+      if (!repo.log.hasView(decoded.view)) {
+        return json(404, { error: `no legacy view ${decoded.view}` });
+      }
+      if (
+        decoded.repo !== name ||
+        decoded.version !== 0 ||
+        decoded.previous !== null
+      ) {
+        return json(400, {
+          error: 'bootstrap requires a scoped version-0 head',
+        });
+      }
+      const snapshot = verifyHeadSnapshot(
+        decoded,
+        reachableOps(repo.log.ops(), decoded.heads)
+      );
+      if (!snapshot.ok) return headError(400, snapshot);
+      await repo.headRecords.bootstrap(decoded);
+      repo.log.view(decoded.view, decoded.heads);
+      return json(200, { head: encodeHeadRecord(decoded) });
     });
   }
 
@@ -1336,7 +1509,15 @@ export function createServer(config: ServerConfig): Server {
     if (repo === undefined) {
       return json(404, { error: `no repo ${name}` });
     }
-    const ops = reachableOps(repo.log.ops(), repo.log.heads(view));
+    const head = repo.headRecords.current(view);
+    if (head === undefined) {
+      return unsignedView(repo, view)
+        ? json(428, { error: `view ${view} requires owner head bootstrap` })
+        : json(404, { error: `no view ${view}` });
+    }
+    const ops = reachableOps(repo.log.ops(), head.heads);
+    const snapshot = verifyHeadSnapshot(head, ops);
+    if (!snapshot.ok) return headError(400, snapshot);
     // For every plaintext_id an op's payload references, the CURRENT ciphertext
     // object + its served caps (store.get decrypts the current object, so the
     // client needs current — not a historical version — to read after rotation).
@@ -1368,7 +1549,8 @@ export function createServer(config: ServerConfig): Server {
     const symop = [...symopLog.all()];
     return json(200, {
       view,
-      heads: [...repo.log.heads(view)],
+      head: encodeHeadRecord(head),
+      chain: repo.headRecords.history(view).map(encodeHeadRecord),
       ...encodeBundle(ops, objects, caps, prov, veto, symop),
     });
   }
@@ -1675,9 +1857,9 @@ export function createServer(config: ServerConfig): Server {
     });
   }
 
-  // Verify signature + owner, validate that every fromHead is a known ingested
-  // op, build an ephemeral in-memory source view (not persisted), and run
-  // policy-gated Repo.land with the signer as a key-less author.
+  // Only the owner may advance shared authority. Uploaded operations may still
+  // be delegate-authored; all existing policy gates run before the signed record
+  // is persisted and projected into the hot log.
   async function land(
     name: string,
     req: Request,
@@ -1701,14 +1883,28 @@ export function createServer(config: ServerConfig): Server {
     if (parsed === undefined || parsed === null || typeof parsed !== 'object') {
       return json(400, { error: 'invalid JSON body' });
     }
-    const { fromHeads, into, contrib } = parsed as {
+    const {
+      fromHeads,
+      into,
+      contrib,
+      head: wire,
+    } = parsed as {
       fromHeads: string[];
       into?: string;
       contrib?: string[];
+      head?: unknown;
     };
     if (into !== undefined && typeof into !== 'string') {
       return json(400, { error: 'into must be a string' });
     }
+    if (
+      !Array.isArray(fromHeads) ||
+      fromHeads.some((head) => typeof head !== 'string')
+    ) {
+      return json(400, { error: 'fromHeads must be an array of op ids' });
+    }
+    const decoded = decodeHead(wire);
+    if (decoded instanceof Response) return decoded;
     // Decode any client-pushed reputation claims (P07). A malformed entry is
     // dropped rather than failing the whole land.
     const claims: ContributionClaim[] = [];
@@ -1722,17 +1918,11 @@ export function createServer(config: ServerConfig): Server {
       }
     }
     return withRepoLock(name, async () => {
-      // Owner-or-delegate gate INSIDE the lock: re-check against the one-true
-      // registry AFTER acquiring the lock, so a revoke that ran just before is
-      // seen. The owner is always authorized; a non-owner must hold a
-      // non-revoked delegation for this repo. The same `reg` composes the
-      // delegationPolicy below.
+      // Shared head signatures are owner-only even when every incoming operation
+      // was validly authored and uploaded by a delegate.
       const reg = await registryFor(name);
-      if (
-        signer !== meta.owner &&
-        !(reg.delegationFor(signer) !== undefined && !reg.isRevoked(signer))
-      ) {
-        return json(403, { error: 'not authorized to write this repo' });
+      if (signer !== meta.owner || decoded.owner !== meta.owner) {
+        return json(403, { error: 'shared landing requires the repo owner' });
       }
       const repo = await getRepo(name);
       if (repo === undefined) {
@@ -1741,7 +1931,7 @@ export function createServer(config: ServerConfig): Server {
       // Every head must be an op the server has already ingested; a reference to
       // unknown history means the closure is partial and land would be wrong.
       const known = new Set(repo.log.ops().map((o) => o.id));
-      if (!Array.isArray(fromHeads) || fromHeads.some((h) => !known.has(h))) {
+      if (fromHeads.some((h) => !known.has(h))) {
         return json(400, {
           error: 'fromHeads references an op the server has not ingested',
         });
@@ -1751,7 +1941,67 @@ export function createServer(config: ServerConfig): Server {
       // NOTE: this `?? 'main'` default MUST match Repo.land's own `into` default
       // — they share the same frontier, and a drift would mis-meter delegates.
       const target = into ?? 'main';
-      const priorInto = [...repo.log.heads(target)];
+      const history = repo.headRecords.history(target);
+      const current = history.at(-1);
+      if (current === undefined) {
+        return unsignedView(repo, target)
+          ? json(428, { error: `view ${target} requires owner head bootstrap` })
+          : json(404, { error: `no view ${target}` });
+      }
+      if (decoded.repo !== name || decoded.view !== target) {
+        return json(400, {
+          error: 'head record is bound to the wrong repository or view',
+          code: decoded.repo !== name ? 'wrong_repo' : 'wrong_view',
+        });
+      }
+      if (decoded.version <= current.version) {
+        return headError(409, {
+          ok: false,
+          code:
+            decoded.version === current.version && decoded.id !== current.id
+              ? 'fork'
+              : 'rollback',
+          message:
+            decoded.version === current.version && decoded.id !== current.id
+              ? 'head record conflicts at the current version'
+              : 'head successor is stale',
+        });
+      }
+      if (decoded.version > current.version + 1) {
+        return headError(409, {
+          ok: false,
+          code: 'gap',
+          message: 'head successor skips one or more versions',
+        });
+      }
+      const chainVerification = verifyHeadChain([...history, decoded], {
+        repo: name,
+        view: target,
+        owner: meta.owner,
+        prefix: history,
+      });
+      if (!chainVerification.ok) {
+        return headError(409, chainVerification);
+      }
+      const expectedHeads = [
+        ...new Set([...current.heads, ...fromHeads]),
+      ].sort();
+      if (
+        decoded.heads.length !== expectedHeads.length ||
+        decoded.heads.some((head, index) => head !== expectedHeads[index])
+      ) {
+        return json(409, {
+          error: 'signed successor does not contain the exact merged heads',
+          code: 'dropped_heads',
+        });
+      }
+      const snapshot = verifyHeadSnapshot(
+        decoded,
+        reachableOps(repo.log.ops(), decoded.heads)
+      );
+      if (!snapshot.ok) return headError(400, snapshot);
+      const priorInto = [...current.heads];
+      repo.log.view(target, current.heads);
       // Ephemeral in-memory source view: reuse a constant name so the view
       // count stays bounded. Safe because withRepoLock serializes land calls
       // per repo — each land overwrites the view before reading it. It lives
@@ -1795,6 +2045,7 @@ export function createServer(config: ServerConfig): Server {
         into: target,
         author: PublicIdentity.fromDid(signer),
         policy: all(...gates),
+        headRecord: decoded,
       });
       if (result.landed) {
         // Record each delegate's landed-op count (owner exempt). incoming =
@@ -1844,7 +2095,10 @@ export function createServer(config: ServerConfig): Server {
           }
         }
       }
-      return json(200, result);
+      return json(200, {
+        ...result,
+        ...(result.landed ? { head: encodeHeadRecord(decoded) } : {}),
+      });
     });
   }
 
@@ -2232,6 +2486,16 @@ export function createServer(config: ServerConfig): Server {
           return malformedPath();
         }
         return pull(repoName, url.searchParams.get('view') ?? 'main');
+      }
+      const bootstrapHeadMatch = path.match(
+        /^\/repos\/(.+)\/heads\/bootstrap$/
+      );
+      if (bootstrapHeadMatch !== null && req.method === 'POST') {
+        const repoName = safeDecode(bootstrapHeadMatch[1]);
+        if (repoName === undefined) {
+          return malformedPath();
+        }
+        return withBody((body) => bootstrapHead(repoName, req, body));
       }
       // Timed public capabilities: owner schedules one for the current
       // ciphertext, or manually triggers a due reveal for one plaintext id.

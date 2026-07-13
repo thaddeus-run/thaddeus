@@ -55,7 +55,9 @@ describe('P10 portable reputation between real server instances', () => {
       subject
     );
     expect(
-      await source.land('source', sourceWork.heads, 'main', [sourceClaim])
+      await source.land('source', sourceWork.repo, sourceWork.heads, 'main', [
+        sourceClaim,
+      ])
     ).toMatchObject({ landed: true });
     const archive = await source.exportReputation(subject.did);
     expect(archive.contributions).toHaveLength(1);
@@ -99,9 +101,13 @@ describe('P10 portable reputation between real server instances', () => {
       subject
     );
     expect(
-      await untrusted.land('destination', destinationWork.heads, 'main', [
-        destinationClaim,
-      ])
+      await untrusted.land(
+        'destination',
+        destinationWork.repo,
+        destinationWork.heads,
+        'main',
+        [destinationClaim]
+      )
     ).toMatchObject({ landed: false });
 
     const trustedServer = createServer({
@@ -123,9 +129,13 @@ describe('P10 portable reputation between real server instances', () => {
       duplicates: 1,
     });
     expect(
-      await trusted.land('destination', destinationWork.heads, 'main', [
-        destinationClaim,
-      ])
+      await trusted.land(
+        'destination',
+        destinationWork.repo,
+        destinationWork.heads,
+        'main',
+        [destinationClaim]
+      )
     ).toMatchObject({ landed: true });
   });
 });

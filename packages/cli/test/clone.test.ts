@@ -8,6 +8,7 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
+import { loadIdentity } from '../src/identity';
 import { run } from '../src/run';
 
 beforeAll(async () => {
@@ -24,7 +25,6 @@ async function seededServer(home: string) {
   const fetchImpl = srv.fetch.bind(srv);
   await run(['init'], { cwd: home, home, fetchImpl, out: () => {} });
   // Use the SDK directly to seed (the CLI publish path is Task 6).
-  const { loadIdentity } = await import('../src/identity');
   const a = loadIdentity(home);
   const c = new Client('http://t', a, fetchImpl);
   await c.createRepo('r');
@@ -38,7 +38,7 @@ async function seededServer(home: string) {
   await ws.commit(a);
   const heads = [...repo.log.heads('work')];
   await c.push('r', repo, heads);
-  await c.land('r', heads, 'main');
+  await c.land('r', repo, heads, 'main');
   return fetchImpl;
 }
 
@@ -50,7 +50,12 @@ describe('thaddeus clone + status', () => {
 
     const out: string[] = [];
     const e = { cwd: dir, home, fetchImpl, out: (l: string) => out.push(l) };
-    expect(await run(['clone', 'http://t', 'r', dir], e)).toBe(0);
+    expect(
+      await run(
+        ['clone', 'http://t', 'r', dir, '--owner', loadIdentity(home).did],
+        e
+      )
+    ).toBe(0);
     // File materialized + config written.
     expect(readFileSync(join(dir, 'src', 'auth.rs'), 'utf8')).toBe(
       'fn refresh() {}'
@@ -69,5 +74,37 @@ describe('thaddeus clone + status', () => {
     out.length = 0;
     await run(['status'], { ...e, cwd: dir });
     expect(out.join('\n')).toContain('modified: src/auth.rs');
+  });
+
+  test('clone --owner rejects an out-of-band owner mismatch', async () => {
+    const ownerHome = mkdtempSync(join(tmp, 'owner-home-'));
+    const fetchImpl = await seededServer(ownerHome);
+    const otherHome = mkdtempSync(join(tmp, 'other-home-'));
+    await run(['init'], {
+      cwd: otherHome,
+      home: otherHome,
+      fetchImpl,
+      out: () => {},
+    });
+    const output: string[] = [];
+    expect(
+      await run(
+        [
+          'clone',
+          'http://t',
+          'r',
+          mkdtempSync(join(tmp, 'wrong-owner-')),
+          '--owner',
+          loadIdentity(otherHome).did,
+        ],
+        {
+          cwd: tmp,
+          home: otherHome,
+          fetchImpl,
+          out: (line) => output.push(line),
+        }
+      )
+    ).toBe(1);
+    expect(output.join('\n')).toContain('wrong_owner');
   });
 });

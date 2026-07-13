@@ -4,6 +4,7 @@ import { beforeAll, describe, expect, test } from 'bun:test';
 
 import { createServer } from '../src/server';
 import { signRequest } from '../src/sign';
+import { createRepoBody } from './heads';
 
 beforeAll(async () => {
   await ready();
@@ -31,7 +32,7 @@ describe('reads', () => {
     expect(
       (await srv.fetch(new Request('http://t/repos/nope/views/main'))).status
     ).toBe(404);
-    await srv.fetch(signedPost('/repos', { name: 'acme/web' }, a));
+    await srv.fetch(signedPost('/repos', createRepoBody('acme/web', a), a));
     const pull = await srv.fetch(
       new Request('http://t/repos/acme/web/pull?view=main')
     );
@@ -39,20 +40,20 @@ describe('reads', () => {
     expect(body).toMatchObject({ ops: [], objects: [], caps: [] });
   });
 
-  test('pull returns view + heads alongside the bundle', async () => {
+  test('pull returns view + signed head alongside the bundle', async () => {
     const a = Identity.create();
     const srv = createServer({ backend: new MemoryBackend() });
-    await srv.fetch(signedPost('/repos', { name: 'acme/web' }, a));
+    await srv.fetch(signedPost('/repos', createRepoBody('acme/web', a), a));
     const pull = await srv.fetch(
       new Request('http://t/repos/acme%2Fweb/pull?view=main')
     );
     const body = (await pull.json()) as {
       view: string;
-      heads: string[];
+      head: { heads: string[] };
       ops: string[];
     };
     expect(body.view).toBe('main');
-    expect(body.heads).toEqual([]);
+    expect(body.head.heads).toEqual([]);
     expect(body.ops).toEqual([]);
   });
 });

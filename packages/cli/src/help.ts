@@ -8,19 +8,19 @@ Working tree
   whoami                        print the current identity's DID
   use    [<url>] [--hosted]     set (or show) your default server
   create <repo> [--server URL]  create a repo on a server
-  clone  <repo> [dir] [--server URL]
+  clone  <repo> [dir] [--server URL] [--owner DID]
                                 clone a repo to a working tree
   repos  [--mine]               list server repos (--mine = owned by you)
   delete <repo> --yes           delete a repo you own (irreversible)
-  pull                          fetch landed changes into this working copy
+  pull [--bootstrap-head]       fetch verified landed changes into this copy
   watch  [symbol]               stream remote semantic changes without pulling files
-  branch [<name>]               list branches, or create one here
+  branch [<name>]               list branches, or owner-create one here
   workspace <branch> [dir]      open a branch as its own working copy (COW)
   status                        show working-tree changes
   show   [--view B] [path...]   inspect a committed view without touching files
   diff   [--staged] [path...]   show line diffs (or --from/--to views)
-  push   [-m "<why>"]           commit + upload (+ a signed why) + land
-  land   [<branch>] [--dry-run] land commits — or a branch — under policy
+  push   [-m "<why>"]           commit + upload; owner-sign the shared head
+  land   [<branch>] [--dry-run] owner-land commits or a branch under policy
 
 History & meaning
   log    [--since D] [--until D]  main's history with the why per change
@@ -78,13 +78,16 @@ export const HELP: Record<string, string> = {
 
   Create a repo you own on a server. The server is, in order: --server, else a
   leading https:// argument (create <url> <repo>), else your default
-  ('thaddeus use'). You become its owner; only you (or a delegate) may push.`,
+  ('thaddeus use'). You become its owner and sign the empty 'main' head.
+  Delegates may upload signed operations, but only you can sign shared heads.`,
 
-  clone: `thaddeus clone <repo> [dir] [--server <url>]
+  clone: `thaddeus clone <repo> [dir] [--server <url>] [--owner <did>]
 
   Clone <repo> into [dir] (defaults to the repo's last path segment) from a
   server resolved like 'create' (--server, else a leading https:// argument,
-  else your default). Materializes 'main' and records the remote.`,
+  else your default). The complete owner-signed head chain and exact operation
+  closure are verified before anything is accepted. --owner checks an owner DID
+  learned out of band; without it, the first valid owner is pinned on first use.`,
 
   repos: `thaddeus repos [--mine] [--server <url>] [--json]
 
@@ -96,12 +99,16 @@ export const HELP: Record<string, string> = {
   Delete a repo you own. Irreversible — there is no undo or GC yet — so --yes is
   required. The server rejects a delete from anyone but the repo's owner.`,
 
-  pull: `thaddeus pull
+  pull: `thaddeus pull [--bootstrap-head]
 
-  Fetch the landed changes on 'main' into this working copy: ingest the ops,
-  objects and capabilities, advance the base, and update the files on disk
-  (removing what was deleted upstream). Refuses when the working tree is dirty
-  or you hold unpublished commits — commit and push (or discard) first.`,
+  Verify the complete owner-signed head chain and exact operation closure, then
+  fetch landed changes into this working copy and update files on disk. Refuses
+  rollback, a conflicting history, withheld operations, a dirty tree, or local
+  unpublished commits.
+
+  --bootstrap-head migrates an unsigned legacy branch. It is owner-only, refuses
+  an existing signed history, requires a clean/not-ahead copy, and signs this
+  copy's saved base as version 0 before continuing with a normal verified pull.`,
 
   watch: `thaddeus watch [symbol] [--kind <event>]... [--interval <duration>] [--json]
 
@@ -119,7 +126,8 @@ export const HELP: Record<string, string> = {
   branch: `thaddeus branch [<name>] [--json]
 
   With no argument, list the repo's branches and mark this working copy's. With
-  a name, create a branch at your current branch's heads. A branch is a name
+  a name, the repository owner creates a branch at the current branch's heads.
+  A branch is a name
   over a head-set (copy-on-write) — it copies ids, never files — so creating one
   adds no operations and needs no land policy. Open it in its own directory with
   'thaddeus workspace <name>'; land it back with 'thaddeus land <name>'.`,
@@ -161,17 +169,19 @@ thaddeus diff [--from <branch>] [--to <branch>] [path...] [--json]
   push: `thaddeus push [-m "<why>"] [--no-land]
 
   Commit the working-tree diff, upload it, and land it on 'main'. -m attaches a
-  signed provenance "why" to each published op. --no-land uploads without
-  landing (finish later with 'thaddeus land').`,
+  signed provenance "why" to each uploaded op. --no-land uploads without
+  landing. Shared heads require the repository owner's signature: a delegate's
+  automatic landing stops after upload and prints the uploaded head IDs for the
+  owner; it never claims the change was published.`,
 
   land: `thaddeus land [<branch>] [--dry-run] [--json]
 
-  With no argument: land your already-uploaded but unmerged commits onto the
-  current branch, under the server's policy. With a branch: land THAT branch's
+  Owner-only. With no argument: sign and land your already-uploaded but unmerged
+  commits onto the current branch, under server policy. With a branch: land THAT branch's
   ops into the branch you're on — this is not a 3-way merge and there is no
-  merge ceremony; the ops were signed at commit, and landing is one re-point
-  gated by policy (conflict, delegation scope, standing veto, any reputation
-  floor). A blocked land reports the reason and leaves your branch untouched.
+  merge ceremony; the ops were signed at commit, and landing is one owner-signed
+  monotonic head update gated by policy (conflict, delegation scope, standing
+  veto, any reputation floor). A blocked land persists no head update.
   --dry-run previews a branch land locally — incoming ops and conflicts — without
   requiring a clean tree, calling server land, re-pointing, or writing files.`,
 
@@ -261,9 +271,10 @@ thaddeus query references <name> [--json]
   decryption capability for every object this working copy can read, so the
   delegate can clone and read the repo — run 'thaddeus pull' first if your copy
   is stale, since you can only share what you can decrypt.
-  --max-changes-per-hour caps how many ops the agent may land within any
-  trailing hour (default: no hourly cap); the server forgets the current hour
-  on restart.`,
+  Delegates upload signed operations but cannot create branches or sign shared
+  landings; the owner reviews their uploaded head IDs and signs the landing.
+  --max-changes-per-hour caps how many delegate-authored ops the owner may land
+  within any trailing hour (default: no hourly cap).`,
 
   revoke: `thaddeus revoke <did>
 

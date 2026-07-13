@@ -8,6 +8,19 @@ ops/objects/caps (`verifyOp`, content-address, `verifyCapability`), runs
 policy-gated `land`, and serves a public ciphertext mirror for clone. Writes are
 gated by a signed-request envelope checked against the per-repo owner.
 
+Public shared views are authorized by owner-signed, monotonic `HeadRecord`
+chains—not raw `OpLog` view pointers. Repository and branch creation require a
+signed version-0 record. A land must carry the owner's exact next record for the
+policy-approved merged heads; the server persists it before updating its
+projection. Delegates may upload signed operations, but cannot create shared
+branches or land them. A policy denial stores no candidate head.
+
+View and pull responses include the current record and complete chain. Before
+serving a pull, the server verifies that it holds exactly the signed heads'
+reachable operation closure. Legacy raw views return 428 until their owner uses
+the bootstrap endpoint to select a complete version-0 head; raw pointers are
+never used as bootstrap trust input.
+
 Timed reveals arrive as signed capabilities wrapped to the well-known public
 identity. They are persisted separately from served capabilities, never appear
 in a pull before their start time, and are promoted by the hosting CLI's
@@ -59,6 +72,5 @@ reset on restart and contain no request paths, identities, headers, or body
 content. Bun-native pre-handler rejections cannot increment an application
 counter; their status remains observable at the HTTP proxy.
 
-> **Status: spike.** Single process; reads are a fully public mirror; writes are
-> owner-only; replay is blocked within a process. No TLS, no client SDK (see the
-> server design spec).
+> **Status: spike.** Single process; reads are a fully public ciphertext mirror;
+> shared heads are owner-only; replay is blocked within a process. No TLS.

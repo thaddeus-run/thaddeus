@@ -1,4 +1,5 @@
 import { Identity, ready } from '@thaddeus.run/identity';
+import { encodeHeadRecord, signHead } from '@thaddeus.run/log';
 import {
   type Bundle,
   decodeBundle,
@@ -41,10 +42,31 @@ function signedHeaders(path: string, body: Uint8Array, signer: Identity) {
 }
 
 /** Produces a valid repository JSON body at an exact byte boundary. */
-function exactRepoBody(limit: number, fill: string): Uint8Array {
-  const emptyLength = encoder.encode(JSON.stringify({ name: '' })).byteLength;
+function exactRepoBody(
+  limit: number,
+  fill: string,
+  signer: Identity,
+  name: string
+): Uint8Array {
+  const head = encodeHeadRecord(
+    signHead(
+      {
+        repo: name,
+        view: 'main',
+        version: 0,
+        previous: null,
+        heads: [],
+      },
+      signer
+    )
+  );
+  const base = { name, head, padding: '' };
+  const emptyLength = encoder.encode(JSON.stringify(base)).byteLength;
   return encoder.encode(
-    JSON.stringify({ name: fill.repeat(limit - emptyLength) })
+    JSON.stringify({
+      ...base,
+      padding: fill.repeat(limit - emptyLength),
+    })
   );
 }
 
@@ -116,7 +138,7 @@ describe('startServer', () => {
   });
 
   test('enforces application and Bun limits on the real route with metrics and concurrency', async () => {
-    const limit = 64;
+    const limit = 1_024;
     const server = startServer({
       dataDir: mkdtempSync(join(tmp, 'body-limit-')),
       port: 0,
@@ -125,7 +147,7 @@ describe('startServer', () => {
     const signer = Identity.create();
     const path = '/repos';
     try {
-      const boundaryBody = exactRepoBody(limit, 'a');
+      const boundaryBody = exactRepoBody(limit, 'a', signer, 'boundary-a');
       expect(boundaryBody.byteLength).toBe(limit);
       const boundary = await fetch(`${server.url}${path}`, {
         method: 'POST',
@@ -134,7 +156,7 @@ describe('startServer', () => {
       });
       expect(boundary.status).toBe(201);
 
-      const streamedBody = exactRepoBody(limit, 'b');
+      const streamedBody = exactRepoBody(limit, 'b', signer, 'boundary-b');
       const streamedBoundary = await fetch(`${server.url}${path}`, {
         method: 'POST',
         headers: {
@@ -166,8 +188,8 @@ describe('startServer', () => {
         headers: { connection: 'close' },
         body: new ReadableStream<Uint8Array>({
           start(controller) {
-            controller.enqueue(new Uint8Array(32));
-            controller.enqueue(new Uint8Array(33));
+            controller.enqueue(new Uint8Array(512));
+            controller.enqueue(new Uint8Array(513));
             controller.close();
           },
         }),
@@ -196,9 +218,9 @@ describe('startServer', () => {
       expect(metricsResponse.headers.get('content-type')).toBe(
         'text/plain; version=0.0.4; charset=utf-8'
       );
-      expect(metrics).toContain('thaddeus_http_request_body_limit_bytes 64');
+      expect(metrics).toContain('thaddeus_http_request_body_limit_bytes 1024');
       expect(metrics).toContain(
-        'thaddeus_http_request_body_transport_limit_bytes 65'
+        'thaddeus_http_request_body_transport_limit_bytes 1025'
       );
       expect(metrics.split('\n')).toContain(
         'thaddeus_http_request_body_rejections_total{reason="declared_too_large"} 1'
@@ -248,11 +270,11 @@ describe('startServer', () => {
   test('restarts on the same port with durable state, enforcement, and fresh counters', async () => {
     const root = mkdtempSync(join(tmp, 'body-restart-'));
     const signer = Identity.create();
-    const body = encoder.encode(JSON.stringify({ name: 'persisted' }));
+    const body = exactRepoBody(1_024, 'p', signer, 'persisted');
     let server = startServer({
       dataDir: root,
       port: 0,
-      maxRequestBodyBytes: 32,
+      maxRequestBodyBytes: 1_024,
     });
     const port = server.port;
     try {
@@ -273,7 +295,7 @@ describe('startServer', () => {
     server = startServer({
       dataDir: root,
       port,
-      maxRequestBodyBytes: 32,
+      maxRequestBodyBytes: 1_024,
     });
     try {
       const before = await (await fetch(`${server.url}/metrics`)).text();
@@ -283,7 +305,7 @@ describe('startServer', () => {
 
       const rejected = await fetch(`${server.url}/repos`, {
         method: 'POST',
-        body: new Uint8Array(33),
+        body: new Uint8Array(1_025),
       });
       expect(rejected.status).toBe(413);
 
