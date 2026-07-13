@@ -46,6 +46,13 @@ for (const [name, make] of [
       await b.put('current/p', enc('b'));
       expect(dec((await b.get('current/p'))!)).toBe('b');
     });
+
+    test('putIfAbsent atomically preserves the first value', async () => {
+      const b = make();
+      expect(await b.putIfAbsent('head/0', enc('first'))).toBe(true);
+      expect(await b.putIfAbsent('head/0', enc('second'))).toBe(false);
+      expect(dec((await b.get('head/0'))!)).toBe('first');
+    });
   });
 }
 

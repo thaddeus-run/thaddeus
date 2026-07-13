@@ -3,7 +3,7 @@ import { Workspace } from '@thaddeus.run/fs';
 import { Identity, ready } from '@thaddeus.run/identity';
 import { OpLog } from '@thaddeus.run/log';
 import { MemoryBackend } from '@thaddeus.run/persist';
-import { MemoryStore } from '@thaddeus.run/store';
+import { type Backend, MemoryStore } from '@thaddeus.run/store';
 import { beforeAll, describe, expect, test } from 'bun:test';
 
 import { encodeBundle, encodeDelegation } from '../src/dto';
@@ -20,6 +20,37 @@ const enc = (s: string): Uint8Array => new TextEncoder().encode(s);
 interface LandResult {
   landed: boolean;
   reason?: string;
+}
+
+// Simulates the first durable usage-delta write failing after a signed head has
+// committed, while preserving every other backend operation.
+class FailFirstMeterDeltaWrite implements Backend {
+  readonly #inner = new MemoryBackend();
+  #failed = false;
+
+  async put(key: string, bytes: Uint8Array): Promise<void> {
+    await this.#inner.put(key, bytes);
+  }
+
+  async putIfAbsent(key: string, bytes: Uint8Array): Promise<boolean> {
+    if (!this.#failed && key.includes('/meter-land/')) {
+      this.#failed = true;
+      throw new Error('injected meter delta write failure');
+    }
+    return this.#inner.putIfAbsent(key, bytes);
+  }
+
+  async get(key: string): Promise<Uint8Array | undefined> {
+    return this.#inner.get(key);
+  }
+
+  async list(prefix: string): Promise<readonly string[]> {
+    return this.#inner.list(prefix);
+  }
+
+  async delete(key: string): Promise<void> {
+    await this.#inner.delete(key);
+  }
 }
 
 function signed(
@@ -186,6 +217,60 @@ describe('multi-writer land enforcement', () => {
           'POST',
           '/repos/r2/land',
           await landBody(srv2.fetch, 'r2', second.heads, a),
+          a
+        )
+      )
+    ).json()) as LandResult;
+    expect(over.landed).toBe(false);
+    expect(over.reason?.toLowerCase()).toContain('budget');
+  });
+
+  test('committed land recovers a failed durable meter write', async () => {
+    const a = Identity.create();
+    const b = Identity.create();
+    const backend = new FailFirstMeterDeltaWrite();
+    const srv = createServer({ backend });
+    await srv.fetch(signed('POST', '/repos', createRepoBody('r5', a), a));
+    await srv.fetch(
+      signed(
+        'POST',
+        '/repos/r5/grants',
+        {
+          delegation: encodeDelegation(
+            signDelegation(
+              { agent: b.did, paths: ['**'], maxChanges: 1, maxSpend: 1000 },
+              a
+            )
+          ),
+        },
+        a
+      )
+    );
+
+    const first = await authored(b, 'a.txt');
+    await srv.fetch(signed('POST', '/repos/r5/push', first.bundle, b));
+    const firstResponse = await srv.fetch(
+      signed(
+        'POST',
+        '/repos/r5/land',
+        await landBody(srv.fetch, 'r5', first.heads, a),
+        a
+      )
+    );
+    expect(firstResponse.status).toBe(200);
+    expect(((await firstResponse.json()) as LandResult).landed).toBe(true);
+
+    // Loading the repository on a fresh server drains the persisted outbox.
+    // A second delegate change must then observe the recovered lifetime usage.
+    const srv2 = createServer({ backend });
+    const second = await authored(b, 'b.txt');
+    await srv2.fetch(signed('POST', '/repos/r5/push', second.bundle, b));
+    const over = (await (
+      await srv2.fetch(
+        signed(
+          'POST',
+          '/repos/r5/land',
+          await landBody(srv2.fetch, 'r5', second.heads, a),
           a
         )
       )

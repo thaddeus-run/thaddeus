@@ -21,6 +21,7 @@ import {
   blockOnVeto,
   INTERNAL_VIEW_PREFIX,
   type LandPolicy,
+  type LandResult,
   Platform,
   type Release,
   type Repo,
@@ -30,12 +31,14 @@ import {
 import { ProvenanceLog } from '@thaddeus.run/provenance';
 import {
   attest,
+  type Contribution,
   type ContributionClaim,
   decodeReputationArchive,
   encodeReputationArchive,
   type ReputationArchive,
   ReputationLog,
   verifyClaim,
+  verifyContribution,
 } from '@thaddeus.run/reputation';
 import { VetoLog } from '@thaddeus.run/review';
 import {
@@ -151,6 +154,17 @@ export interface Server {
 
 interface RepoMeta {
   owner: string;
+}
+
+interface LandEffects {
+  readonly repo: string;
+  readonly view: string;
+  readonly head: string;
+  readonly meters: readonly {
+    readonly agent: string;
+    readonly changes: number;
+  }[];
+  readonly contributions: readonly Contribution[];
 }
 
 // Every op reachable from `heads` by walking parents (inclusive), in
@@ -409,6 +423,82 @@ export function createServer(config: ServerConfig): Server {
     return reputationPromise;
   }
 
+  // Apply a committed land's secondary durable effects from a write-ahead
+  // record. Fixed per-head meter keys and content-addressed contributions make
+  // retries idempotent after any partial failure.
+  async function recoverLandEffects(
+    name: string,
+    repo: Repo,
+    reg: AgentRegistry
+  ): Promise<void> {
+    const backend = metaBackend(name);
+    const keys = [...(await backend.list('meta/land-effects/'))].sort();
+    for (const key of keys) {
+      const bytes = await backend.get(key);
+      if (bytes === undefined) continue;
+      const effects = decodeRecord(bytes) as LandEffects;
+      if (
+        effects === null ||
+        typeof effects !== 'object' ||
+        effects.repo !== name ||
+        typeof effects.view !== 'string' ||
+        typeof effects.head !== 'string' ||
+        !Array.isArray(effects.meters) ||
+        !Array.isArray(effects.contributions)
+      ) {
+        throw new Error(`stored land effects are invalid: ${key}`);
+      }
+      const committed = repo.headRecords
+        .history(effects.view)
+        .some((record) => record.id === effects.head);
+      if (!committed) {
+        await backend.delete(key);
+        continue;
+      }
+      for (const meter of effects.meters) {
+        if (
+          typeof meter.agent !== 'string' ||
+          !Number.isSafeInteger(meter.changes) ||
+          meter.changes < 0
+        ) {
+          throw new Error(`stored land meter is invalid: ${key}`);
+        }
+        const meterKey = `meter-land/${effects.head}/${encodeURIComponent(meter.agent)}`;
+        const meterBytes = encodeRecord({
+          head: effects.head,
+          agent: meter.agent,
+          changes: meter.changes,
+          spend: 0,
+        });
+        let created = false;
+        if (backend.putIfAbsent !== undefined) {
+          created = await backend.putIfAbsent(meterKey, meterBytes);
+        } else if ((await backend.get(meterKey)) === undefined) {
+          await backend.put(meterKey, meterBytes);
+          created = true;
+        }
+        if (created && reg.delegationFor(meter.agent) !== undefined) {
+          reg.record(meter.agent, meter.changes, 0);
+        }
+      }
+      if (effects.contributions.length > 0) {
+        const reps = await reputationLog();
+        for (const contribution of effects.contributions) {
+          const verification = verifyContribution(contribution);
+          if (
+            contribution.repo !== name ||
+            !verification.authentic ||
+            !verification.attested
+          ) {
+            throw new Error(`stored land contribution is invalid: ${key}`);
+          }
+          await reps.ingest(contribution);
+        }
+      }
+      await backend.delete(key);
+    }
+  }
+
   // Build the durable AgentRegistry for a repo: register every persisted grant,
   // replay the persisted meters, then apply revocations. Load order matters —
   // record() throws for an unregistered agent, so grants must be registered
@@ -438,6 +528,20 @@ export function createServer(config: ServerConfig): Server {
         } catch {
           // a meter for an agent with no grant — skip
         }
+      }
+    }
+    for (const key of await b.list('meter-land/')) {
+      const bytes = await b.get(key);
+      if (bytes === undefined) continue;
+      try {
+        const meter = decodeRecord(bytes) as {
+          agent: string;
+          changes: number;
+          spend: number;
+        };
+        reg.replayMeter(meter.agent, meter.changes, meter.spend);
+      } catch {
+        // A corrupt or orphaned delta confers no additional usage authority.
       }
     }
     for (const key of await b.list('revoked/')) {
@@ -472,6 +576,7 @@ export function createServer(config: ServerConfig): Server {
         repo.log.view(view, current.heads);
       }
     }
+    await recoverLandEffects(name, repo, await registryFor(name));
     repoCache.set(name, repo);
     return repo;
   }
@@ -1097,14 +1202,6 @@ export function createServer(config: ServerConfig): Server {
     const repo = await getRepo(name);
     if (repo === undefined) {
       return json(404, { error: `no repo ${name}` });
-    }
-    const unsigned = repo
-      .branches()
-      .find((view) => repo.headRecords.current(view) === undefined);
-    if (unsigned !== undefined) {
-      return json(428, {
-        error: `view ${unsigned} requires owner head bootstrap`,
-      });
     }
     const views: Record<string, HeadRecordWire> = {};
     for (const view of repo.headRecords.views()) {
@@ -1928,6 +2025,15 @@ export function createServer(config: ServerConfig): Server {
       if (repo === undefined) {
         return json(404, { error: `no repo ${name}` });
       }
+      try {
+        await recoverLandEffects(name, repo, reg);
+      } catch (error) {
+        return json(500, {
+          error: `pending land bookkeeping could not be recovered: ${
+            error instanceof Error ? error.message : String(error)
+          }`,
+        });
+      }
       // Every head must be an op the server has already ingested; a reference to
       // unknown history means the closure is partial and land would be wrong.
       const known = new Set(repo.log.ops().map((o) => o.id));
@@ -2040,60 +2146,67 @@ export function createServer(config: ServerConfig): Server {
           )
         );
       }
-      const result = await repo.land({
-        from: src,
-        into: target,
-        author: PublicIdentity.fromDid(signer),
-        policy: all(...gates),
-        headRecord: decoded,
-      });
-      if (result.landed) {
-        // Record each delegate's landed-op count (owner exempt). incoming =
-        // ops reachable from fromHeads but not from the prior `into` frontier.
-        const priorSet = new Set(
-          reachableOps(repo.log.ops(), priorInto).map((o) => o.id)
-        );
-        const incoming = reachableOps(repo.log.ops(), fromHeads).filter(
-          (o) => !priorSet.has(o.id)
-        );
-        const countByAuthor = new Map<string, number>();
-        for (const op of incoming) {
-          if (op.author !== meta.owner) {
-            countByAuthor.set(
-              op.author,
-              (countByAuthor.get(op.author) ?? 0) + 1
-            );
+      // Prepare secondary effects before committing authority, then durably
+      // stage them. Recovery applies only outboxes whose head actually landed.
+      const priorSet = new Set(
+        reachableOps(repo.log.ops(), priorInto).map((op) => op.id)
+      );
+      const incoming = reachableOps(repo.log.ops(), fromHeads).filter(
+        (op) => !priorSet.has(op.id)
+      );
+      const countByAuthor = new Map<string, number>();
+      for (const op of incoming) {
+        if (op.author !== meta.owner) {
+          countByAuthor.set(op.author, (countByAuthor.get(op.author) ?? 0) + 1);
+        }
+      }
+      const meters = [...countByAuthor]
+        .filter(([agent]) => reg.delegationFor(agent) !== undefined)
+        .map(([agent, changes]) => ({ agent, changes }));
+      const contributions: Contribution[] = [];
+      if (config.host !== undefined && claims.length > 0) {
+        const byId = new Map(incoming.map((op) => [op.id, op]));
+        for (const claim of claims) {
+          const op = byId.get(claim.ref);
+          if (
+            op !== undefined &&
+            claim.subject === op.author &&
+            verifyClaim(claim)
+          ) {
+            contributions.push(attest(claim, config.host));
           }
         }
-        for (const [agent, count] of countByAuthor) {
-          if (reg.delegationFor(agent) !== undefined) {
-            reg.record(agent, count, 0);
-            const u = reg.usage(agent);
-            await metaBackend(name).put(
-              `meter/${agent}`,
-              encodeRecord({ changes: u.changes, spend: u.spend })
-            );
-          }
-        }
-        // Attest client-pushed reputation claims (P07) for the landed ops. Only
-        // an attesting instance (config.host) mints, and only for a claim whose
-        // subject is the ACTUAL author of the landed op it names — so no one can
-        // claim credit for another's merge, and a claim for an unlanded op is
-        // ignored. The result is a host-vouched, durable Contribution.
-        if (config.host !== undefined && claims.length > 0) {
-          const reps = await reputationLog();
-          const byId = new Map(incoming.map((o) => [o.id, o]));
-          for (const claim of claims) {
-            const op = byId.get(claim.ref);
-            if (
-              op !== undefined &&
-              claim.subject === op.author &&
-              verifyClaim(claim)
-            ) {
-              await reps.ingest(attest(claim, config.host));
-            }
-          }
-        }
+      }
+      const effects: LandEffects = {
+        repo: name,
+        view: target,
+        head: decoded.id,
+        meters,
+        contributions,
+      };
+      const effectsBackend = metaBackend(name);
+      const effectsKey = `meta/land-effects/${decoded.id}`;
+      await effectsBackend.put(effectsKey, encodeRecord(effects));
+
+      let result: LandResult;
+      try {
+        result = await repo.land({
+          from: src,
+          into: target,
+          author: PublicIdentity.fromDid(signer),
+          policy: all(...gates),
+          headRecord: decoded,
+        });
+      } catch (error) {
+        await effectsBackend.delete(effectsKey).catch(() => {});
+        throw error;
+      }
+      if (!result.landed) {
+        await effectsBackend.delete(effectsKey).catch(() => {});
+      } else {
+        // Authority is already committed. A secondary write failure must not
+        // turn success into a retryable error; the durable outbox remains.
+        await recoverLandEffects(name, repo, reg).catch(() => {});
       }
       return json(200, {
         ...result,

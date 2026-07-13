@@ -28,6 +28,10 @@ function mergeHeads(
   return [...new Set([...a, ...b])].sort();
 }
 
+function sameHeads(a: readonly string[], b: readonly string[]): boolean {
+  return a.length === b.length && a.every((head, index) => head === b[index]);
+}
+
 // Every op reachable from `heads` by walking parents, inclusive of the heads.
 // Deliberately re-implements an ancestor walk from the public log.ops()/Op.parents
 // surface — the log package's own #ancestorClosure is private; the spec forbids
@@ -176,7 +180,16 @@ export class Repo {
     if (opts.headRecord !== undefined) {
       await this.headRecords.advance(opts.headRecord);
     }
-    await this.log.repoint(into, mergedHeads);
+    try {
+      await this.log.repoint(into, mergedHeads);
+    } catch (error) {
+      if (opts.headRecord === undefined) {
+        throw error;
+      }
+      // The signed successor is the commit point. Keep the hot projection in
+      // sync and let reopen derive it from HeadStore if its raw write failed.
+      this.log.view(into, mergedHeads);
+    }
     return { landed: true, into, heads: [...mergedHeads], conflicts };
   }
 }
@@ -234,6 +247,23 @@ export class Platform {
     const store = await MemoryStore.open(scopedBackend);
     const log = await OpLogClass.load(store, scopedBackend);
     const headRecords = await HeadStore.load(name, scopedBackend);
+    // Repair raw projections that track an older signed version, including a
+    // failed post-commit repoint. A projection with other heads is unpublished
+    // local work and must remain untouched.
+    for (const view of headRecords.views()) {
+      const history = headRecords.history(view);
+      const current = history.at(-1);
+      const rawHeads = log.heads(view);
+      const knownOps = new Set(log.ops().map((op) => op.id));
+      if (
+        current !== undefined &&
+        current.heads.every((head) => knownOps.has(head)) &&
+        (!log.hasView(view) ||
+          history.some((record) => sameHeads(record.heads, rawHeads)))
+      ) {
+        log.view(view, current.heads);
+      }
+    }
     const repo = new Repo(name, log, store, headRecords);
     this.#repos.set(name, repo);
     return repo;

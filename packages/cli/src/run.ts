@@ -1,6 +1,7 @@
 import { signDelegation } from '@thaddeus.run/agent';
 import {
   Client,
+  type LandOutcome,
   reachablePids,
   type Release,
   type ReleaseArtifact,
@@ -376,6 +377,27 @@ function outConflicts(
 ): void {
   for (const c of conflicts) {
     out(`conflict: ${c.path} (${c.ops.length} op(s), winner ${c.winner})`);
+  }
+}
+
+// Delegates may upload operations but cannot sign shared authority. Normalize
+// that expected handoff across push, land, and rename without hiding real errors.
+async function landWithOwnerHandoff(
+  request: Promise<LandOutcome>,
+  heads: readonly string[],
+  out: (line: string) => void
+): Promise<LandOutcome | null> {
+  try {
+    return await request;
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    if (!message.includes('owner signature required')) {
+      throw error;
+    }
+    out(
+      `owner signature required to publish; uploaded head IDs: ${heads.join(', ')}`
+    );
+    return null;
   }
 }
 
@@ -1592,25 +1614,17 @@ export async function run(
           return 0;
         }
         // Ship a merge claim per published op; an attesting host co-signs it.
-        const landed = await client
-          .land(
+        const landed = await landWithOwnerHandoff(
+          client.land(
             cfg.repo,
             local,
             heads,
             view,
             mergeClaims(cfg.repo, whyTarget, identity)
-          )
-          .catch((error: unknown) => {
-            const message =
-              error instanceof Error ? error.message : String(error);
-            if (message.includes('owner signature required')) {
-              out(
-                `owner signature required to publish; uploaded head IDs: ${heads.join(', ')}`
-              );
-              return null;
-            }
-            throw error;
-          });
+          ),
+          heads,
+          out
+        );
         if (landed === null) {
           return 1;
         }
@@ -1720,13 +1734,20 @@ export async function run(
               return 0;
             }
             const { incoming } = previewLand(local, view, source);
-            const landed = await client.land(
-              cfg.repo,
-              local,
+            const landed = await landWithOwnerHandoff(
+              client.land(
+                cfg.repo,
+                local,
+                branchHeads,
+                view,
+                mergeClaims(cfg.repo, incoming, identity)
+              ),
               branchHeads,
-              view,
-              mergeClaims(cfg.repo, incoming, identity)
+              out
             );
+            if (landed === null) {
+              return 1;
+            }
             if (!landed.landed) {
               out(`not landed: ${landed.reason ?? 'blocked by policy'}`);
               outConflicts(landed.conflicts, out);
@@ -1758,7 +1779,14 @@ export async function run(
           opsAhead(local, cfg.base, view),
           identity
         );
-        const landed = await client.land(cfg.repo, local, heads, view, claims);
+        const landed = await landWithOwnerHandoff(
+          client.land(cfg.repo, local, heads, view, claims),
+          heads,
+          out
+        );
+        if (landed === null) {
+          return 1;
+        }
         if (!landed.landed) {
           out(`not landed: ${landed.reason ?? 'nothing to land'}`);
           outConflicts(landed.conflicts, out);
@@ -1869,25 +1897,17 @@ export async function run(
           out("uploaded (not landed — run 'thaddeus land' to publish)");
           return 0;
         }
-        const landed = await client
-          .land(
+        const landed = await landWithOwnerHandoff(
+          client.land(
             cfg.repo,
             local,
             heads,
             view,
             mergeClaims(cfg.repo, ops, identity)
-          )
-          .catch((error: unknown) => {
-            const message =
-              error instanceof Error ? error.message : String(error);
-            if (message.includes('owner signature required')) {
-              out(
-                `owner signature required to publish; uploaded head IDs: ${heads.join(', ')}`
-              );
-              return null;
-            }
-            throw error;
-          });
+          ),
+          heads,
+          out
+        );
         if (landed === null) {
           return 1;
         }

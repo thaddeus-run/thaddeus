@@ -37,6 +37,29 @@ describe('signed view head protocol', () => {
     expect(decodeHeadRecord(encodeHeadRecord(record))).toEqual(record);
   });
 
+  test('returned signature bytes cannot mutate signed or decoded records', () => {
+    const owner = Identity.create();
+    const signed = signHead(
+      {
+        repo: 'r',
+        view: 'main',
+        version: 0,
+        previous: null,
+        heads: [A],
+      },
+      owner
+    );
+    const decoded = decodeHeadRecord(encodeHeadRecord(signed));
+
+    signed.sig.fill(0);
+    decoded.sig.fill(0);
+
+    expect(verifyHead(signed)).toEqual({ ok: true });
+    expect(verifyHead(decoded)).toEqual({ ok: true });
+    expect(signed.sig).toEqual(decoded.sig);
+    expect(signed.sig.some((byte) => byte !== 0)).toBe(true);
+  });
+
   test('tampering with every signed field, id, owner, or signature fails', () => {
     const owner = Identity.create();
     const stranger = Identity.create();

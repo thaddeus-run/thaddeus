@@ -149,4 +149,73 @@ describe('Platform — durable repos', () => {
     expect(reopened.headRecords.current('main')?.id).toBe(next.id);
     expect(reopened.headRecords.history('main')).toHaveLength(2);
   });
+
+  test('signed authority survives a repoint failure without hiding unpublished work', async () => {
+    const inner = memoryBackend();
+    let failMainRepoint = false;
+    const backend: Backend = {
+      put: (key, bytes) => {
+        if (failMainRepoint && key === 'repo/fault/view/main') {
+          failMainRepoint = false;
+          return Promise.reject(new Error('simulated projection failure'));
+        }
+        return inner.put(key, bytes);
+      },
+      get: (key) => inner.get(key),
+      list: (prefix) => inner.list(prefix),
+      delete: (key) => inner.delete(key),
+    };
+    const owner = Identity.create();
+    const repo = await new Platform().createDurable('fault', backend);
+    const genesis = signHead(
+      {
+        repo: 'fault',
+        view: 'main',
+        version: 0,
+        previous: null,
+        heads: [],
+      },
+      owner
+    );
+    await repo.headRecords.bootstrap(genesis);
+    const workspace = Workspace.open(repo.log, repo.store, {
+      source: 'main',
+      reader: owner,
+      name: 'feature',
+    });
+    workspace.write('committed.rs', enc('committed'));
+    await workspace.commit(owner);
+    const next = signHead(
+      {
+        repo: 'fault',
+        view: 'main',
+        version: 1,
+        previous: genesis.id,
+        heads: [...repo.log.heads('feature')].sort(),
+      },
+      owner
+    );
+
+    failMainRepoint = true;
+    expect(
+      await repo.land({ from: 'feature', author: owner, headRecord: next })
+    ).toMatchObject({ landed: true, heads: [...next.heads] });
+    expect(repo.log.heads('main')).toEqual(next.heads);
+
+    const repaired = await new Platform().openDurable('fault', backend);
+    expect(repaired.headRecords.current('main')?.id).toBe(next.id);
+    expect(repaired.log.heads('main')).toEqual(next.heads);
+
+    const local = Workspace.open(repaired.log, repaired.store, {
+      source: 'main',
+      reader: owner,
+      name: 'main',
+    });
+    local.write('unpublished.rs', enc('local'));
+    await local.commit(owner);
+    const unpublishedHeads = [...repaired.log.heads('main')];
+    const reopened = await new Platform().openDurable('fault', backend);
+    expect(reopened.log.heads('main')).toEqual(unpublishedHeads);
+    expect(reopened.headRecords.current('main')?.id).toBe(next.id);
+  });
 });

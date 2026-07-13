@@ -1,5 +1,6 @@
 import type { Backend } from '@thaddeus.run/store';
 import {
+  link,
   mkdir,
   readdir,
   readFile,
@@ -69,6 +70,28 @@ export class FileBackend implements Backend {
     const tmp = join(staging, `${process.pid}-${tmpSeq++}`);
     await writeFile(tmp, bytes);
     await renameWithRetry(tmp, this.#path(key));
+  }
+
+  // Link a fully written staging file into place. A hard link is an atomic
+  // create-if-absent operation on the same filesystem and never replaces an
+  // existing monotonic record.
+  async putIfAbsent(key: string, bytes: Uint8Array): Promise<boolean> {
+    await mkdir(this.#root, { recursive: true });
+    const staging = join(this.#root, '.staging');
+    await mkdir(staging, { recursive: true });
+    const tmp = join(staging, `${process.pid}-${tmpSeq++}`);
+    await writeFile(tmp, bytes);
+    try {
+      await link(tmp, this.#path(key));
+      return true;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'EEXIST') {
+        return false;
+      }
+      throw error;
+    } finally {
+      await unlink(tmp).catch(() => {});
+    }
   }
 
   async get(key: string): Promise<Uint8Array | undefined> {
