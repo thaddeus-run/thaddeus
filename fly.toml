@@ -9,6 +9,7 @@ primary_region = "ams"
 PORT = "4000"
 THADDEUS_DATA = "/data"
 THADDEUS_HOST = "1"
+THADDEUS_MAX_REQUEST_BODY_BYTES = "16777216"
 # THADDEUS_MIN_MERGES = "0"    # gate land on N attested merges per author
 # THADDEUS_TRUST_HOSTS = "did:key:...,did:key:..." # foreign attesting hosts
 

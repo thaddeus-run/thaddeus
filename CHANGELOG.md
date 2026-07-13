@@ -18,7 +18,7 @@ All notable changes to Thaddeus. Format follows
 | ------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------- | ------------------------------------------------------------------------------------- |
 | P4–P10  | Policy, releases, query surface, timed reveal, watch, agent budgets + rate windows, rotate-and-recall, portable reputation (export/import + `--trust-host`) | **Shipped** — through v0.1.8-alpha | —                                                                                     |
 | **P11** | **Hardening & Proof** — benchmarks, outside-reviewer veto, lazythad write actions                                                                           | **In progress**                    | [P11](https://github.com/thaddeus-run/thaddeus/milestone/1) — #58, #59, #60, #73, #74 |
-| P12     | Single-node security hardening                                                                                                                              | Queued                             | [P12](https://github.com/thaddeus-run/thaddeus/milestone/2) — #61–#63, #75–#79        |
+| P12     | Single-node security hardening                                                                                                                              | **In progress** — #75 shipped      | [P12](https://github.com/thaddeus-run/thaddeus/milestone/2) — #61–#63, #75–#79        |
 | P13     | Product & collaboration UX                                                                                                                                  | Queued                             | [P13](https://github.com/thaddeus-run/thaddeus/milestone/3) — #64–#67, #80, #82       |
 | P14     | Backend implementation (behind flags): CAS, S3/SQLite, conformance, migration                                                                               | Queued                             | [P14](https://github.com/thaddeus-run/thaddeus/milestone/4) — #68–#71                 |
 
@@ -35,15 +35,15 @@ with `FileBackend`. The production infrastructure change (S3 / multi-node) is
   veto-injection DoS (#77); reproducible benchmarks + a `FileBackend` baseline
   with **no** code.store-scale claims (#58); the op-log / graph `O(n²)` fixes
   (#74); and lazythad signed write actions (#60).
-- **P12 — Single-node security hardening.** Cap/stream the request body before
-  buffering (#75, still open), per-identity repo/object quotas + rate limits
-  (#76), **persist** replay nonces across restart via a backend-neutral atomic
-  `consumeNonce()` (#61 — the in-window `ReplayNonceCache` shipped in 0.1.7;
-  only cross-restart durability + the cross-node CAS remain), size/count
-  limits + pagination (#62), per-signer rate + spam control (#63), meter or
-  remove `maxSpend` (#78, still a hard-coded 0), and the reputation anti-farming
-  hardening on top of the 0.1.7 `--trust-host` allowlist (#79). No replicas
-  required.
+- **P12 — Single-node security hardening.** Request bodies are now capped and
+  streamed before buffering (#75, shipped under Unreleased); next are
+  per-identity repo/object quotas + rate limits (#76), **persist** replay nonces
+  across restart via a backend-neutral atomic `consumeNonce()` (#61 — the
+  in-window `ReplayNonceCache` shipped in 0.1.7; only cross-restart durability +
+  the cross-node CAS remain), size/count limits + pagination (#62), per-signer
+  rate + spam control (#63), meter or remove `maxSpend` (#78, still a hard-coded
+  0), and the reputation anti-farming hardening on top of the 0.1.7
+  `--trust-host` allowlist (#79). No replicas required.
 - **P13 — Product & collaboration UX.** `thaddeus init` in-place + offline
   `commit` (#80), the getting-started clone-path fix + version drift + a
   runnable agent-governed demo (#82), plus `track`, workspace base sync, 3-way
@@ -65,6 +65,16 @@ restored successfully in a clean environment (#71).
 > **Correction:** the S3 backend was once cited as "#14," but PR #14 was
 > "Multi-writer collaboration: delegated push over P09," unrelated to storage.
 > The S3 backend is tracked as **#69** under milestone P14.
+
+### Security
+
+- **Request bodies are bounded before authentication or buffering (#75 /
+  THA-22).** Recognized POST routes enforce a configurable 16 MiB default with a
+  `Content-Length` fast rejection and a streamed cumulative guard, while the Bun
+  host adds a native one-byte-overflow sentinel ceiling. Oversize requests
+  return stable 413 responses before signature verification, parsing, locks, or
+  persistence. Prometheus metrics expose configured limits and fixed-label
+  application rejection counters without request content.
 
 ## [0.1.8-alpha] - 2026-07-12
 

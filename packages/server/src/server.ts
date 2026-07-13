@@ -83,8 +83,31 @@ function safeDecode(segment: string): string | undefined {
   }
 }
 
+export const DEFAULT_MAX_REQUEST_BODY_BYTES: number = 16 * 1024 * 1024;
+const REQUEST_BODY_BUFFER_BLOCK_BYTES = 64 * 1024;
+
+function requestBodyLimit(value: number | undefined): number {
+  let limit = DEFAULT_MAX_REQUEST_BODY_BYTES;
+  if (value !== undefined) {
+    limit = value;
+  }
+  if (
+    !Number.isSafeInteger(limit) ||
+    limit <= 0 ||
+    limit > Number.MAX_SAFE_INTEGER - 1
+  ) {
+    throw new RangeError(
+      'maxRequestBodyBytes must be a positive safe integer no greater than Number.MAX_SAFE_INTEGER - 1'
+    );
+  }
+  return limit;
+}
+
 export interface ServerConfig {
   backend: Backend;
+  // Largest request body accepted by application routes. Bun hosts use one
+  // additional sentinel byte so the streamed guard can observe the boundary.
+  maxRequestBodyBytes?: number;
   policy?: LandPolicy;
   now?: () => string;
   // Operational failures that can be isolated (for example, one repo's reveal
@@ -229,6 +252,7 @@ function replacesPendingReveal(
 // per-repo mutation lock, and replay-nonce cache. The first two rebuild from
 // the backend; accepted nonces intentionally do not survive restart.
 export function createServer(config: ServerConfig): Server {
+  const maxRequestBodyBytes = requestBodyLimit(config.maxRequestBodyBytes);
   const platform = new Platform();
   const policy = config.policy ?? blockOnConflict;
   const now = config.now ?? ((): string => new Date().toISOString());
@@ -477,6 +501,174 @@ export function createServer(config: ServerConfig): Server {
       status,
       headers: { 'content-type': 'application/json' },
     });
+
+  const bodyRejections = {
+    declared_too_large: 0,
+    streamed_too_large: 0,
+    invalid_content_length: 0,
+  };
+
+  const cancelBody = async (body: ReadableStream<Uint8Array> | null) => {
+    try {
+      await body?.cancel();
+    } catch {
+      // The response is already determined. Cancellation is best-effort cleanup
+      // and must not turn a stable client error into a 500.
+    }
+  };
+
+  const bodyError = (status: number, body: unknown): Response => {
+    const response = json(status, body);
+    response.headers.set('connection', 'close');
+    return response;
+  };
+
+  const bodyTooLarge = (): Response =>
+    bodyError(413, {
+      error: 'request body too large',
+      maxBytes: maxRequestBodyBytes,
+    });
+
+  // Read a request body without retaining more than the configured maximum.
+  // Declared oversize bodies are rejected without pulling from their stream;
+  // undeclared or understated bodies are capped while their chunks arrive.
+  async function readRequestBody(req: Request): Promise<Uint8Array | Response> {
+    const contentLength = req.headers.get('content-length');
+    if (contentLength !== null) {
+      if (!/^\d+$/.test(contentLength)) {
+        bodyRejections.invalid_content_length += 1;
+        await cancelBody(req.body);
+        return bodyError(400, { error: 'invalid content-length header' });
+      }
+      const declaredBytes = Number(contentLength);
+      if (!Number.isSafeInteger(declaredBytes)) {
+        bodyRejections.invalid_content_length += 1;
+        await cancelBody(req.body);
+        return bodyError(400, { error: 'invalid content-length header' });
+      }
+      if (declaredBytes > maxRequestBodyBytes) {
+        bodyRejections.declared_too_large += 1;
+        await cancelBody(req.body);
+        return bodyTooLarge();
+      }
+    }
+
+    if (req.body === null) {
+      return new Uint8Array();
+    }
+
+    const bodyStream = req.body;
+    const reader = (() => {
+      try {
+        return bodyStream.getReader();
+      } catch {
+        return undefined;
+      }
+    })();
+    if (reader === undefined) {
+      await cancelBody(req.body);
+      return bodyError(400, { error: 'invalid request body' });
+    }
+    const chunks: Uint8Array[] = [];
+    let pendingChunk: Uint8Array | undefined;
+    let pendingChunkBytes = 0;
+    let totalBytes = 0;
+    try {
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) {
+          break;
+        }
+        if (value.byteLength > maxRequestBodyBytes - totalBytes) {
+          bodyRejections.streamed_too_large += 1;
+          try {
+            await reader.cancel();
+          } catch {
+            // Best-effort cleanup; preserve the stable 413 response.
+          }
+          return bodyTooLarge();
+        }
+        if (value.byteLength === 0) {
+          continue;
+        }
+
+        // Coalesce arbitrarily small stream reads into fixed-size blocks. This
+        // keeps object overhead bounded alongside payload bytes instead of
+        // retaining one Uint8Array wrapper per adversarial one-byte read.
+        let valueOffset = 0;
+        while (valueOffset < value.byteLength) {
+          if (pendingChunk === undefined) {
+            pendingChunk = new Uint8Array(
+              Math.min(
+                REQUEST_BODY_BUFFER_BLOCK_BYTES,
+                maxRequestBodyBytes - totalBytes - valueOffset
+              )
+            );
+            pendingChunkBytes = 0;
+          }
+          const copiedBytes = Math.min(
+            pendingChunk.byteLength - pendingChunkBytes,
+            value.byteLength - valueOffset
+          );
+          pendingChunk.set(
+            value.subarray(valueOffset, valueOffset + copiedBytes),
+            pendingChunkBytes
+          );
+          pendingChunkBytes += copiedBytes;
+          valueOffset += copiedBytes;
+          if (pendingChunkBytes === pendingChunk.byteLength) {
+            chunks.push(pendingChunk);
+            pendingChunk = undefined;
+            pendingChunkBytes = 0;
+          }
+        }
+        totalBytes += value.byteLength;
+      }
+    } catch {
+      try {
+        await reader.cancel();
+      } catch {
+        // The stream has already failed; there is nothing else to clean up.
+      }
+      return bodyError(400, { error: 'invalid request body' });
+    } finally {
+      reader.releaseLock();
+    }
+
+    if (pendingChunk !== undefined && pendingChunkBytes > 0) {
+      chunks.push(pendingChunk.subarray(0, pendingChunkBytes));
+    }
+    const body = new Uint8Array(totalBytes);
+    let offset = 0;
+    for (const chunk of chunks) {
+      body.set(chunk, offset);
+      offset += chunk.byteLength;
+    }
+    return body;
+  }
+
+  function metrics(): Response {
+    const lines = [
+      '# HELP thaddeus_http_request_body_limit_bytes Maximum request body bytes accepted by application routes.',
+      '# TYPE thaddeus_http_request_body_limit_bytes gauge',
+      `thaddeus_http_request_body_limit_bytes ${maxRequestBodyBytes}`,
+      '# HELP thaddeus_http_request_body_transport_limit_bytes Bun transport request body ceiling, including the overflow sentinel byte.',
+      '# TYPE thaddeus_http_request_body_transport_limit_bytes gauge',
+      `thaddeus_http_request_body_transport_limit_bytes ${maxRequestBodyBytes + 1}`,
+      '# HELP thaddeus_http_request_body_rejections_total Request bodies rejected by the application guard.',
+      '# TYPE thaddeus_http_request_body_rejections_total counter',
+      `thaddeus_http_request_body_rejections_total{reason="declared_too_large"} ${bodyRejections.declared_too_large}`,
+      `thaddeus_http_request_body_rejections_total{reason="streamed_too_large"} ${bodyRejections.streamed_too_large}`,
+      `thaddeus_http_request_body_rejections_total{reason="invalid_content_length"} ${bodyRejections.invalid_content_length}`,
+      '',
+    ];
+    return new Response(lines.join('\n'), {
+      headers: {
+        'cache-control': 'no-store',
+        'content-type': 'text/plain; version=0.0.4; charset=utf-8',
+      },
+    });
+  }
 
   async function createRepo(req: Request, body: Uint8Array): Promise<Response> {
     const signer = verifyRequest(
@@ -1900,21 +2092,35 @@ export function createServer(config: ServerConfig): Server {
     async fetch(req: Request): Promise<Response> {
       const url = new URL(req.url);
       const path = url.pathname;
-      const body =
-        req.method === 'POST'
-          ? new Uint8Array(await req.arrayBuffer())
-          : new Uint8Array();
+      const emptyBody = new Uint8Array();
+      const withBody = async (
+        handler: (body: Uint8Array) => Promise<Response>
+      ): Promise<Response> => {
+        const body = await readRequestBody(req);
+        return body instanceof Response ? body : handler(body);
+      };
+      const malformedPath = async (): Promise<Response> => {
+        await cancelBody(req.body);
+        return json(400, { error: 'malformed path' });
+      };
+
+      if (req.method !== 'POST') {
+        await cancelBody(req.body);
+      }
 
       if (path === '/repos' && req.method === 'GET') {
         return listRepos();
       }
+      if (path === '/metrics' && req.method === 'GET') {
+        return metrics();
+      }
       if (path === '/reputation/import' && req.method === 'POST') {
-        return reputationImport(req, body);
+        return withBody((body) => reputationImport(req, body));
       }
       const repExportMatch = path.match(/^\/reputation\/(.+)\/export$/);
       if (repExportMatch !== null && req.method === 'GET') {
         const did = safeDecode(repExportMatch[1]);
-        if (did === undefined) return json(400, { error: 'malformed path' });
+        if (did === undefined) return malformedPath();
         return reputationExport(did);
       }
       // GET /reputation/:did — the subject's server-wide profile.
@@ -1922,12 +2128,12 @@ export function createServer(config: ServerConfig): Server {
       if (repMatch !== null && req.method === 'GET') {
         const did = safeDecode(repMatch[1]);
         if (did === undefined) {
-          return json(400, { error: 'malformed path' });
+          return malformedPath();
         }
         return reputationProfile(did);
       }
       if (path === '/repos' && req.method === 'POST') {
-        return createRepo(req, body);
+        return withBody((body) => createRepo(req, body));
       }
       // DELETE /repos/:name — owner-only. (Suffixed routes below are GET/POST,
       // so this bare-name match never steals a push/land/grants path.)
@@ -1935,25 +2141,25 @@ export function createServer(config: ServerConfig): Server {
       if (deleteMatch !== null && req.method === 'DELETE') {
         const repoName = safeDecode(deleteMatch[1]);
         if (repoName === undefined) {
-          return json(400, { error: 'malformed path' });
+          return malformedPath();
         }
-        return deleteRepo(repoName, req, body);
+        return deleteRepo(repoName, req, emptyBody);
       }
       // /repos/:name/policy — read or owner-select the active land policy.
       const policyMatch = path.match(/^\/repos\/(.+)\/policy$/);
       if (policyMatch !== null && req.method === 'GET') {
         const repoName = safeDecode(policyMatch[1]);
         if (repoName === undefined) {
-          return json(400, { error: 'malformed path' });
+          return malformedPath();
         }
         return getPolicy(repoName);
       }
       if (policyMatch !== null && req.method === 'POST') {
         const repoName = safeDecode(policyMatch[1]);
         if (repoName === undefined) {
-          return json(400, { error: 'malformed path' });
+          return malformedPath();
         }
-        return setPolicy(repoName, req, body);
+        return withBody((body) => setPolicy(repoName, req, body));
       }
       // /repos/:name/releases and /repos/:name/releases/:tag — immutable
       // signed release metadata. Match detail first so it is not a collection.
@@ -1962,7 +2168,7 @@ export function createServer(config: ServerConfig): Server {
         const repoName = safeDecode(releaseMatch[1]);
         const tag = safeDecode(releaseMatch[2]);
         if (repoName === undefined || tag === undefined) {
-          return json(400, { error: 'malformed path' });
+          return malformedPath();
         }
         return getRelease(repoName, tag);
       }
@@ -1970,32 +2176,32 @@ export function createServer(config: ServerConfig): Server {
       if (releasesMatch !== null && req.method === 'GET') {
         const repoName = safeDecode(releasesMatch[1]);
         if (repoName === undefined) {
-          return json(400, { error: 'malformed path' });
+          return malformedPath();
         }
         return listReleases(repoName);
       }
       if (releasesMatch !== null && req.method === 'POST') {
         const repoName = safeDecode(releasesMatch[1]);
         if (repoName === undefined) {
-          return json(400, { error: 'malformed path' });
+          return malformedPath();
         }
-        return createRelease(repoName, req, body);
+        return withBody((body) => createRelease(repoName, req, body));
       }
       // /repos/:name/views — list the branches, or create one.
       const viewsMatch = path.match(/^\/repos\/(.+)\/views$/);
       if (viewsMatch !== null && req.method === 'GET') {
         const repoName = safeDecode(viewsMatch[1]);
         if (repoName === undefined) {
-          return json(400, { error: 'malformed path' });
+          return malformedPath();
         }
         return listViews(repoName);
       }
       if (viewsMatch !== null && req.method === 'POST') {
         const repoName = safeDecode(viewsMatch[1]);
         if (repoName === undefined) {
-          return json(400, { error: 'malformed path' });
+          return malformedPath();
         }
-        return createView(repoName, req, body);
+        return withBody((body) => createView(repoName, req, body));
       }
       // /repos/:name/views/:view  and  /repos/:name/pull
       // Names can contain '/' (e.g. "acme/web"); split on the fixed suffixes.
@@ -2004,7 +2210,7 @@ export function createServer(config: ServerConfig): Server {
         const repoName = safeDecode(viewMatch[1]);
         const viewName = safeDecode(viewMatch[2]);
         if (repoName === undefined || viewName === undefined) {
-          return json(400, { error: 'malformed path' });
+          return malformedPath();
         }
         return getView(repoName, viewName);
       }
@@ -2012,7 +2218,7 @@ export function createServer(config: ServerConfig): Server {
       if (pullMatch !== null && req.method === 'GET') {
         const repoName = safeDecode(pullMatch[1]);
         if (repoName === undefined) {
-          return json(400, { error: 'malformed path' });
+          return malformedPath();
         }
         return pull(repoName, url.searchParams.get('view') ?? 'main');
       }
@@ -2024,26 +2230,26 @@ export function createServer(config: ServerConfig): Server {
       if (pendingRevealsMatch !== null && req.method === 'POST') {
         const repoName = safeDecode(pendingRevealsMatch[1]);
         if (repoName === undefined) {
-          return json(400, { error: 'malformed path' });
+          return malformedPath();
         }
-        return pendingReveals(repoName, req, body);
+        return withBody((body) => pendingReveals(repoName, req, body));
       }
       const revealMatch = path.match(/^\/repos\/(.+)\/reveals\/([^/]+)$/);
       if (revealMatch !== null && req.method === 'POST') {
         const repoName = safeDecode(revealMatch[1]);
         const plaintextId = safeDecode(revealMatch[2]);
         if (repoName === undefined || plaintextId === undefined) {
-          return json(400, { error: 'malformed path' });
+          return malformedPath();
         }
-        return reveal(repoName, plaintextId, req, body);
+        return withBody((body) => reveal(repoName, plaintextId, req, body));
       }
       const revealsMatch = path.match(/^\/repos\/(.+)\/reveals$/);
       if (revealsMatch !== null && req.method === 'POST') {
         const repoName = safeDecode(revealsMatch[1]);
         if (repoName === undefined) {
-          return json(400, { error: 'malformed path' });
+          return malformedPath();
         }
-        return scheduleReveal(repoName, req, body);
+        return withBody((body) => scheduleReveal(repoName, req, body));
       }
       // push / land: POST /repos/:name/push and POST /repos/:name/land
       // Match before the generic catch-all; names can contain '/'.
@@ -2051,31 +2257,31 @@ export function createServer(config: ServerConfig): Server {
       if (pushMatch !== null && req.method === 'POST') {
         const repoName = safeDecode(pushMatch[1]);
         if (repoName === undefined) {
-          return json(400, { error: 'malformed path' });
+          return malformedPath();
         }
-        return push(repoName, req, body);
+        return withBody((body) => push(repoName, req, body));
       }
       const landMatch = path.match(/^\/repos\/(.+)\/land$/);
       if (landMatch !== null && req.method === 'POST') {
         const repoName = safeDecode(landMatch[1]);
         if (repoName === undefined) {
-          return json(400, { error: 'malformed path' });
+          return malformedPath();
         }
-        return land(repoName, req, body);
+        return withBody((body) => land(repoName, req, body));
       }
       // grants / revoke: GET+POST /repos/:name/grants and POST /repos/:name/revoke
       const grantsMatch = path.match(/^\/repos\/(.+)\/grants$/);
       if (grantsMatch !== null && req.method === 'POST') {
         const repoName = safeDecode(grantsMatch[1]);
         if (repoName === undefined) {
-          return json(400, { error: 'malformed path' });
+          return malformedPath();
         }
-        return grant(repoName, req, body);
+        return withBody((body) => grant(repoName, req, body));
       }
       if (grantsMatch !== null && req.method === 'GET') {
         const repoName = safeDecode(grantsMatch[1]);
         if (repoName === undefined) {
-          return json(400, { error: 'malformed path' });
+          return malformedPath();
         }
         return listGrants(repoName);
       }
@@ -2083,10 +2289,11 @@ export function createServer(config: ServerConfig): Server {
       if (revokeMatch !== null && req.method === 'POST') {
         const repoName = safeDecode(revokeMatch[1]);
         if (repoName === undefined) {
-          return json(400, { error: 'malformed path' });
+          return malformedPath();
         }
-        return revoke(repoName, req, body);
+        return withBody((body) => revoke(repoName, req, body));
       }
+      await cancelBody(req.body);
       return json(404, { error: 'not found' });
     },
   };

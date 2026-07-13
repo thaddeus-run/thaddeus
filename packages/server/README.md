@@ -29,6 +29,34 @@ for the rest of its five-minute timestamp-validity window. A full cache fails
 closed. The cache is intentionally not durable or shared between nodes, so a
 restart or a request routed to another process begins a new replay boundary.
 
+## Bounded request bodies
+
+Recognized POST routes stream request bodies through a bounded reader before
+signature verification or JSON decoding. `ServerConfig.maxRequestBodyBytes` sets
+the inclusive application limit and defaults to the exported
+`DEFAULT_MAX_REQUEST_BODY_BYTES` value of 16 MiB. It must be a positive safe
+integer no greater than `Number.MAX_SAFE_INTEGER - 1`.
+
+The CLI host configures Bun's native transport ceiling one sentinel byte above
+the application limit. This lets the application detect the exact overflow
+boundary while Bun rejects larger declarations before routing. Application
+rejections use these stable JSON responses:
+
+- `413 {"error":"request body too large","maxBytes":<limit>}` for a declared or
+  streamed overflow.
+- `400 {"error":"invalid content-length header"}` for a malformed or unsafe
+  `Content-Length`.
+- `400 {"error":"invalid request body"}` when a request stream fails.
+
+Bun-native transport rejections happen before the handler and return 413 with an
+empty body. Unmatched request bodies are cancelled without buffering.
+
+`GET /metrics` exposes Prometheus gauges for the application and transport
+limits plus process-local rejection counters with fixed reason labels. Counters
+reset on restart and contain no request paths, identities, headers, or body
+content. Bun-native pre-handler rejections cannot increment an application
+counter; their status remains observable at the HTTP proxy.
+
 > **Status: spike.** Single process; reads are a fully public mirror; writes are
 > owner-only; replay is blocked within a process. No TLS, no client SDK (see the
 > server design spec).
