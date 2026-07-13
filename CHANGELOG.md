@@ -26,12 +26,12 @@ Everything through P14 is **Part 1** — it ships on the current single Fly node
 with `FileBackend`. The production infrastructure change (S3 / multi-node) is
 **Part 2**, gated by the exit criteria below.
 
-- **P11 — Hardening & Proof (current).** The first trust binding the "untrusted
-  server" thesis depends on shipped in 0.1.8-alpha: capability signatures cover
-  `wrapped_key`, and reads re-check the object↔op plaintext binding (#72). Next,
-  sign view/branch heads so a server cannot roll back / fork / withhold
-  undetectably (#73). Then wire the outside-reviewer veto capability (#59) as
-  the `blockOnVeto` allowlist the server does not yet pass, closing the
+- **P11 — Hardening & Proof (current).** The first trust bindings behind the
+  "untrusted server" thesis now ship: capability signatures cover `wrapped_key`,
+  reads re-check the object↔op plaintext binding (#72), and owner-signed
+  monotonic view heads detect rollback, pinned-history forks, and withheld pull
+  operations (#73 / THA-20). Next, wire the outside-reviewer veto capability
+  (#59) as the `blockOnVeto` allowlist the server does not yet pass, closing the
   veto-injection DoS (#77); reproducible benchmarks + a `FileBackend` baseline
   with **no** code.store-scale claims (#58); the op-log / graph `O(n²)` fixes
   (#74); and lazythad signed write actions (#60).
@@ -67,6 +67,17 @@ restored successfully in a clean environment (#71).
 > The S3 backend is tracked as **#69** under milestone P14.
 
 ### Security
+
+- **Shared view heads are owner-signed and monotonic (#73 / THA-20).** The log
+  package now defines canonical `HeadRecord`s, complete-chain and exact-snapshot
+  verification, and a durable fail-closed `HeadStore`. Server shared views no
+  longer trust raw pointers: create, branch, pull, bootstrap, and land use full
+  signed chains, with owner-only shared-head authority. Clone and pull pin the
+  owner and accepted prefix, reject rollback/fork/gap/scope/signature and
+  withheld/injected-operation attacks, and move local views only from verified
+  heads. CLI clone supports `--owner`; unsigned legacy views migrate with the
+  clean-copy, owner-only `pull --bootstrap-head` flow. Delegates may upload
+  signed operations but cannot claim publication without an owner-signed land.
 
 - **Request bodies are bounded before authentication or buffering (#75 /
   THA-22).** Recognized POST routes enforce a configurable 16 MiB default with a
@@ -464,25 +475,27 @@ CLI, and the lazythad TUI.
 - `@thaddeus.run/client` + `@thaddeus.run/cli` — the client SDK and the
   `thaddeus`/`thad` CLI. `Client` holds a self-owned `Identity` and drives the
   remote (`createRepo`/`clone`/`push`/`land`), signing every write and doing all
-  crypto client-side; `clone` reads view heads explicitly (closing the server's
-  pull-infers-heads follow-up). The CLI is a git-like client over a `.thaddeus/`
+  crypto client-side; `clone` reads the view authority explicitly (now the
+  complete owner-signed chain). The CLI is a git-like client over a `.thaddeus/`
   durable working copy: `init` (identity seed in `~/.config/thaddeus/`),
   `create`, `clone` (materializes files), `status`, `push` (commit → upload →
   land into `main`), `land`. The product is now **Thaddeus** (the working name
   "Strata" is retired; a repo-wide doc rename follows).
 - `thaddeus serve` + atomic pull — run a durable server in one command
   (`thaddeus serve [--port] [--data]`, over a `FileBackend`), and `GET /pull`
-  now returns `{ view, heads, …bundle }` so `Client.clone` is a single race-free
-  request (closing the clone read-read race). The product name **Thaddeus**
-  replaces the working name "Strata" in forward-facing docs.
-- Multi-writer collaboration — a repo owner grants push/land to other DIDs and
-  agents via owner-signed P09 `Delegation`s over the wire (`thaddeus grant`/
+  returns view authority and the bundle in one response so `Client.clone` is a
+  single race-free request. THA-20 replaces the original unsigned `heads` field
+  with `{ view, head, chain, …bundle }`. The product name **Thaddeus** replaces
+  the working name "Strata" in forward-facing docs.
+- Multi-writer operation upload — a repo owner grants scoped push to other DIDs
+  and agents via owner-signed P09 `Delegation`s over the wire (`thaddeus grant`/
   `revoke`/`grants`; `POST /grants`, `POST /revoke`, `GET /grants`). The server
   holds a **durable per-repo `AgentRegistry`** (grants/meter/revocations rebuilt
-  from the backend), widens push/land to **owner-or-delegate**, and enforces
-  `delegationPolicy` per incoming op at land — paths and `maxChanges` (the owner
-  is exempt; fail-closed; revocation terminal). `maxSpend` is carried but not
-  yet metered (no cost model).
+  from the backend), accepts delegate-authored operation uploads, and enforces
+  `delegationPolicy` per incoming op when the owner signs a land—paths and
+  `maxChanges` (the owner is exempt; fail-closed; revocation terminal). THA-20
+  makes shared branch creation and landing authority owner-only. `maxSpend` is
+  carried but not yet metered (no cost model).
 - `@thaddeus.run/review` — review as policy, proof, and reputation (Pillar 10):
   merge becomes a function of pluggable `LandPolicy` gates rather than one human
   reading a diff — a `requireReputationTier` gate (a landing must clear a
@@ -607,13 +620,12 @@ CLI, and the lazythad TUI.
 > `[Unreleased]` above (P11–P14).
 >
 > **Security debt (highest priority — P11/P12, verified open as of 0.1.8).**
-> Surfaced by the 2026-07-12 audit (<https://4xibq00df3aj.postplan.dev/>): (1)
-> view/branch heads are unsigned, so a server can roll back, fork, or withhold
-> history undetectably (#73); (2) the request body is buffered before auth with
-> no size cap (#75); (3) `blockOnVeto` is called with no reviewer allowlist, so
-> any writer can mount a durable land-blocking veto DoS (#77); and (4)
-> `maxSpend` is recorded as a hard-coded 0, so the advertised budget is a no-op
-> (#78). Close these before inviting external contributors or going multi-node.
+> Surfaced by the 2026-07-12 audit (<https://4xibq00df3aj.postplan.dev/>).
+> Signed heads (#73) and bounded request bodies (#75) now ship. Remaining: (1)
+> `blockOnVeto` is called with no reviewer allowlist, so any writer can mount a
+> durable land-blocking veto DoS (#77); and (2) `maxSpend` is recorded as a
+> hard-coded 0, so the advertised budget is a no-op (#78). Close these before
+> inviting external contributors or going multi-node.
 
 ### Research — open/hard problems (the "do it great" list)
 
@@ -760,13 +772,13 @@ CLI, and the lazythad TUI.
 - **Server / network API — shipped** as `@thaddeus.run/server` (single node).
   Still deferred: **multi-node concurrency** (optimistic-concurrency on the
   `land` re-point + the `scope()` delimiter-encode), a **grant list / richer
-  ACLs** (owner-only writes today), **replay-proof request nonces** (a signed
-  timestamp window today), **TLS / deployment**, and **incremental pull /
-  pagination**.
+  ACLs** (delegates have scoped upload while shared heads remain owner-only),
+  durable cross-restart request nonces, **TLS / deployment**, and **incremental
+  pull / pagination**.
 - **Client SDK + CLI — shipped** as `@thaddeus.run/client` + `@thaddeus.run/cli`
-  (single-owner, online, full-set sync). Still deferred: multi-writer /
-  agent-delegation CLI, incremental/offline sync, conflict-resolution UX,
-  `log`/`diff`/`--json`, and a published-binary install story.
+  (owner-signed shared heads, delegated operation upload, online full-set sync).
+  Still deferred: incremental/offline sync, conflict-resolution UX, and richer
+  owner review/handoff for delegate head IDs.
 - **Git gateway** — emit a Git history (commits/blobs/branches) for
   compatibility, over the durable/served substrate. The optional on-ramp, later.
 - **Reputation network transport / federation wire (P07→later) — shipped.** The

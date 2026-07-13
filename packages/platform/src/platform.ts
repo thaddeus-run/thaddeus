@@ -1,6 +1,6 @@
 import type { Identity, PublicIdentity } from '@thaddeus.run/identity';
-import type { Conflict, Op, OpLog } from '@thaddeus.run/log';
-import { OpLog as OpLogClass } from '@thaddeus.run/log';
+import type { Conflict, HeadRecord, Op, OpLog } from '@thaddeus.run/log';
+import { HeadStore, OpLog as OpLogClass, verifyHead } from '@thaddeus.run/log';
 import {
   type Backend,
   MemoryStore,
@@ -56,11 +56,13 @@ export class Repo {
   readonly name: string;
   readonly log: OpLog;
   readonly store: Store;
+  readonly headRecords: HeadStore;
 
-  constructor(name: string, log: OpLog, store: Store) {
+  constructor(name: string, log: OpLog, store: Store, headRecords: HeadStore) {
     this.name = name;
     this.log = log;
     this.store = store;
+    this.headRecords = headRecords;
   }
 
   // A shared view's current heads (P03 passthrough).
@@ -82,20 +84,47 @@ export class Repo {
   // Land a workspace's committed view onto a shared view, gated by policy.
   // Dry-runs the merge on a throwaway view to build the proposal, runs the
   // policy, and re-points `into` ONLY on allow (fail-closed: a rejected landing
-  // leaves into's heads unchanged). Signs nothing — the ops were already signed
-  // by the workspace's commit (P05); landing is one re-point under a gate.
+  // leaves into's heads unchanged). Local callers may still use a raw re-point;
+  // shared callers supply the repository owner's exact signed successor.
   async land(opts: {
     from: string;
     into?: string;
     author?: Identity | PublicIdentity;
     policy?: LandPolicy;
+    headRecord?: HeadRecord;
   }): Promise<LandResult> {
-    // `author` is part of the public landing interface (Pillar 10 review gates will use it); land itself signs nothing and only re-points a view.
+    // `author` remains part of the policy proposal; the optional headRecord is
+    // separately verified as the owner's authority for a shared projection.
     const into = opts.into ?? 'main';
     const policy = opts.policy ?? blockOnConflict;
     const intoHeads = this.log.heads(into);
     const incomingHeads = this.log.heads(opts.from);
     const mergedHeads = mergeHeads(intoHeads, incomingHeads);
+
+    if (opts.headRecord !== undefined) {
+      const record = opts.headRecord;
+      const current = this.headRecords.current(into);
+      const verified = verifyHead(record);
+      if (!verified.ok) {
+        throw new TypeError(verified.message);
+      }
+      if (
+        current === undefined ||
+        record.repo !== this.name ||
+        record.view !== into ||
+        record.owner !== this.headRecords.owner ||
+        record.version !== current.version + 1 ||
+        record.previous !== current.id
+      ) {
+        throw new TypeError('head record is not the exact signed successor');
+      }
+      if (
+        record.heads.length !== mergedHeads.length ||
+        record.heads.some((head, index) => head !== mergedHeads[index])
+      ) {
+        throw new TypeError('head record does not sign the merged heads');
+      }
+    }
 
     // Dry-run on a throwaway view; `into` is untouched until the policy allows.
     // The tmp view is intentionally left in the log's view map (no GC — spec §11 spike non-goal).
@@ -142,7 +171,11 @@ export class Repo {
         reason: decision.reason,
       };
     }
-    // The single re-point that IS the landing (durable when the log is backed).
+    // Persist signed authority before its derived in-memory/server projection.
+    // If a later projection write fails, reopening hydrates it from HeadStore.
+    if (opts.headRecord !== undefined) {
+      await this.headRecords.advance(opts.headRecord);
+    }
     await this.log.repoint(into, mergedHeads);
     return { landed: true, into, heads: [...mergedHeads], conflicts };
   }
@@ -162,7 +195,7 @@ export class Platform {
     const store = new MemoryStore();
     const log = new OpLogClass(store);
     log.view('main', []); // seed an explicit, empty shared view
-    const repo = new Repo(name, log, store);
+    const repo = new Repo(name, log, store, new HeadStore(name));
     this.#repos.set(name, repo);
     return repo;
   }
@@ -188,8 +221,9 @@ export class Platform {
     const scopedBackend = scoped(backend, `repo/${name}/`);
     const store = new MemoryStore(scopedBackend);
     const log = new OpLogClass(store, scopedBackend);
+    const headRecords = await HeadStore.load(name, scopedBackend);
     log.view('main', []); // empty seed; absence on reload also reads as empty
-    const repo = new Repo(name, log, store);
+    const repo = new Repo(name, log, store, headRecords);
     this.#repos.set(name, repo);
     return repo;
   }
@@ -199,7 +233,8 @@ export class Platform {
     const scopedBackend = scoped(backend, `repo/${name}/`);
     const store = await MemoryStore.open(scopedBackend);
     const log = await OpLogClass.load(store, scopedBackend);
-    const repo = new Repo(name, log, store);
+    const headRecords = await HeadStore.load(name, scopedBackend);
+    const repo = new Repo(name, log, store, headRecords);
     this.#repos.set(name, repo);
     return repo;
   }

@@ -25,6 +25,7 @@ import {
 } from '../src/dto';
 import { createServer } from '../src/server';
 import { signRequest } from '../src/sign';
+import { createRepoBody, landBody } from './heads';
 
 beforeAll(async () => {
   await ready();
@@ -90,7 +91,11 @@ async function createRepoWithHistory(
   name = 'r'
 ): Promise<{ heads: string[]; commits: string[] }> {
   expect(
-    (await srv.fetch(signed('POST', '/repos', { name }, owner))).status
+    (
+      await srv.fetch(
+        signed('POST', '/repos', createRepoBody(name, owner), owner)
+      )
+    ).status
   ).toBe(201);
 
   const store = new MemoryStore();
@@ -131,7 +136,7 @@ async function createRepoWithHistory(
     signed(
       'POST',
       `/repos/${name}/land`,
-      { fromHeads: heads, into: 'main' },
+      await landBody(srv.fetch, name, heads, owner),
       owner
     )
   );

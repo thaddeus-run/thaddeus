@@ -1,7 +1,13 @@
 import { Workspace } from '@thaddeus.run/fs';
 import { signSymbolOp } from '@thaddeus.run/graph';
 import { Identity, ready } from '@thaddeus.run/identity';
-import { OpLog } from '@thaddeus.run/log';
+import {
+  decodeHeadRecord,
+  encodeHeadRecord,
+  type HeadRecordWire,
+  OpLog,
+  signHead,
+} from '@thaddeus.run/log';
 import { FileBackend } from '@thaddeus.run/persist';
 import { signProvenance } from '@thaddeus.run/provenance';
 import { signClaim } from '@thaddeus.run/reputation';
@@ -20,6 +26,7 @@ import {
 } from '../src/dto';
 import { createServer } from '../src/server';
 import { signRequest } from '../src/sign';
+import { createRepoBody } from './heads';
 import { expectRejects } from './reject';
 
 beforeAll(async () => {
@@ -52,7 +59,36 @@ function client(base: string) {
     });
   };
   const get = (path: string): Promise<Response> => fetch(`${base}${path}`);
-  return { post, get };
+  const landBody = async (
+    name: string,
+    heads: readonly string[],
+    owner: Identity,
+    extra: Record<string, unknown> = {}
+  ): Promise<Record<string, unknown>> => {
+    const response = await get(`/repos/${encodeURIComponent(name)}/views/main`);
+    const current = decodeHeadRecord(
+      ((await response.json()) as { head: HeadRecordWire }).head
+    );
+    const merged = [...new Set([...current.heads, ...heads])].sort();
+    return {
+      fromHeads: [...heads],
+      into: 'main',
+      ...extra,
+      head: encodeHeadRecord(
+        signHead(
+          {
+            repo: name,
+            view: 'main',
+            version: current.version + 1,
+            previous: current.id,
+            heads: merged,
+          },
+          owner
+        )
+      ),
+    };
+  };
+  return { post, get, landBody };
 }
 
 // Locally commit `content` to `path` and return the push bundle, branch heads,
@@ -106,7 +142,7 @@ describe('server e2e', () => {
 
     let pulled: ReturnType<typeof decodeBundle>;
     try {
-      await c1.post('/repos', { name: 'acme/web' }, a);
+      await c1.post('/repos', createRepoBody('acme/web', a), a);
       const { bundle, heads } = await commitLocally(
         a,
         'src/auth.rs',
@@ -116,7 +152,7 @@ describe('server e2e', () => {
       const landed = (await (
         await c1.post(
           '/repos/acme%2Fweb/land',
-          { fromHeads: heads, into: 'main' },
+          await c1.landBody('acme/web', heads, a),
           a
         )
       ).json()) as { landed: boolean };
@@ -191,7 +227,7 @@ describe('server e2e', () => {
     const c1 = client(`http://localhost:${http1.port}`);
     let opId = '';
     try {
-      await c1.post('/repos', { name: 'r' }, a);
+      await c1.post('/repos', createRepoBody('r', a), a);
       const { bundle, heads, log } = await commitLocally(
         a,
         'src/auth.rs',
@@ -217,7 +253,7 @@ describe('server e2e', () => {
         prov: encodeBundle([], [], [], [why]).prov,
       };
       await c1.post('/repos/r/push', withWhy, a);
-      await c1.post('/repos/r/land', { fromHeads: heads, into: 'main' }, a);
+      await c1.post('/repos/r/land', await c1.landBody('r', heads, a), a);
 
       const pulled = decodeBundle(
         (await (await c1.get('/repos/r/pull?view=main')).json()) as Bundle
@@ -253,7 +289,7 @@ describe('server e2e', () => {
     const http1 = Bun.serve({ port: 0, fetch: srv1.fetch });
     const c1 = client(`http://localhost:${http1.port}`);
     try {
-      await c1.post('/repos', { name: 'r' }, a);
+      await c1.post('/repos', createRepoBody('r', a), a);
       const committed = await commitLocally(a, 'src/a.rs', 'fn a() {}');
       const op1 = committed.log.ops()[0];
       await c1.post('/repos/r/push', committed.bundle, a);
@@ -264,11 +300,9 @@ describe('server e2e', () => {
       const landed = (await (
         await c1.post(
           '/repos/r/land',
-          {
-            fromHeads: committed.heads,
-            into: 'main',
+          await c1.landBody('r', committed.heads, a, {
             contrib: [encodeClaim(claim)],
-          },
+          }),
           a
         )
       ).json()) as { landed: boolean };
@@ -310,11 +344,9 @@ describe('server e2e', () => {
       const landed = (await (
         await c2.post(
           '/repos/r/land',
-          {
-            fromHeads: committed.heads,
-            into: 'main',
+          await c2.landBody('r', committed.heads, a, {
             contrib: [encodeClaim(claim)],
-          },
+          }),
           a
         )
       ).json()) as { landed: boolean; reason?: string };
@@ -331,7 +363,7 @@ describe('server e2e', () => {
     const http1 = Bun.serve({ port: 0, fetch: srv1.fetch });
     const c1 = client(`http://localhost:${http1.port}`);
     try {
-      await c1.post('/repos', { name: 'r' }, a);
+      await c1.post('/repos', createRepoBody('r', a), a);
       const committed = await commitLocally(
         a,
         'src/auth.rs',
@@ -358,7 +390,7 @@ describe('server e2e', () => {
       expect(pushed.accepted.symop).toBe(1);
       await c1.post(
         '/repos/r/land',
-        { fromHeads: committed.heads, into: 'main' },
+        await c1.landBody('r', committed.heads, a),
         a
       );
 
@@ -393,7 +425,7 @@ describe('server e2e', () => {
     const c1 = client(`http://localhost:${http1.port}`);
     let heads: string[] = [];
     try {
-      await c1.post('/repos', { name: 'r' }, a);
+      await c1.post('/repos', createRepoBody('r', a), a);
       const committed = await commitLocally(
         a,
         'src/auth.rs',
@@ -415,7 +447,7 @@ describe('server e2e', () => {
 
       // The verified veto blocks the land — main is untouched.
       const blocked = (await (
-        await c1.post('/repos/r/land', { fromHeads: heads, into: 'main' }, a)
+        await c1.post('/repos/r/land', await c1.landBody('r', heads, a), a)
       ).json()) as { landed: boolean; reason?: string };
       expect(blocked.landed).toBe(false);
       expect(blocked.reason).toContain('veto');
@@ -429,7 +461,7 @@ describe('server e2e', () => {
     const c2 = client(`http://localhost:${http2.port}`);
     try {
       const stillBlocked = (await (
-        await c2.post('/repos/r/land', { fromHeads: heads, into: 'main' }, a)
+        await c2.post('/repos/r/land', await c2.landBody('r', heads, a), a)
       ).json()) as { landed: boolean; reason?: string };
       expect(stillBlocked.landed).toBe(false);
       expect(stillBlocked.reason).toContain('veto');
@@ -447,7 +479,7 @@ describe('server e2e', () => {
     const c = client(`http://localhost:${http.port}`);
 
     try {
-      await c.post('/repos', { name: 'r' }, a);
+      await c.post('/repos', createRepoBody('r', a), a);
       // Keep aStore and aRef in scope: needed for the grant step below.
       const {
         bundle,
@@ -456,7 +488,7 @@ describe('server e2e', () => {
         ref: aRef,
       } = await commitLocally(a, 'f.rs', 'secret');
       await c.post('/repos/r/push', bundle, a);
-      await c.post('/repos/r/land', { fromHeads: heads, into: 'main' }, a);
+      await c.post('/repos/r/land', await c.landBody('r', heads, a), a);
 
       // B pulls the ciphertext but cannot decrypt (no cap).
       const pulled = decodeBundle(

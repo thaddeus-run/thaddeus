@@ -4,6 +4,7 @@ import { beforeAll, describe, expect, test } from 'bun:test';
 
 import { createServer, DEFAULT_MAX_REQUEST_BODY_BYTES } from '../src/server';
 import { signRequest } from '../src/sign';
+import { createRepoBody } from './heads';
 
 beforeAll(async () => {
   await ready();
@@ -198,9 +199,13 @@ describe('request body limits', () => {
       maxRequestBodyBytes,
     });
     const signer = Identity.create();
-    const prefix = new TextEncoder().encode(JSON.stringify({ name: '' }));
+    const base = { ...createRepoBody('boundary', signer), padding: '' };
+    const prefix = new TextEncoder().encode(JSON.stringify(base));
     const body = new TextEncoder().encode(
-      JSON.stringify({ name: 'x'.repeat(maxRequestBodyBytes - prefix.length) })
+      JSON.stringify({
+        ...base,
+        padding: 'x'.repeat(maxRequestBodyBytes - prefix.length),
+      })
     );
     const signed = signRequest(
       'POST',

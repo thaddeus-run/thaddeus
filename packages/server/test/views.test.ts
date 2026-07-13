@@ -4,6 +4,7 @@ import { beforeAll, describe, expect, test } from 'bun:test';
 
 import { createServer } from '../src/server';
 import { signRequest } from '../src/sign';
+import { createRepoBody, createViewBody } from './heads';
 
 beforeAll(async () => {
   await ready();
@@ -30,16 +31,22 @@ describe('views (branches)', () => {
     const owner = Identity.create();
     const stranger = Identity.create();
     const srv = createServer({ backend: new MemoryBackend() });
-    await srv.fetch(signedPost('/repos', { name: 'r' }, owner));
+    await srv.fetch(signedPost('/repos', createRepoBody('r', owner), owner));
 
     // A fresh repo has only `main` (seeded empty).
     const listed = await srv.fetch(new Request('http://t/repos/r/views'));
     expect(listed.status).toBe(200);
-    expect(await listed.json()).toEqual({ views: { main: [] } });
+    expect(
+      Object.keys(((await listed.json()) as { views: object }).views)
+    ).toEqual(['main']);
 
     // Create a branch at main's (empty) head-set.
     const made = await srv.fetch(
-      signedPost('/repos/r/views', { view: 'feature', heads: [] }, owner)
+      signedPost(
+        '/repos/r/views',
+        createViewBody('r', 'feature', [], owner),
+        owner
+      )
     );
     expect(made.status).toBe(201);
     const after = (await (
@@ -49,19 +56,31 @@ describe('views (branches)', () => {
 
     // Create-only: re-pointing an existing view must go through `land`.
     const dup = await srv.fetch(
-      signedPost('/repos/r/views', { view: 'feature', heads: [] }, owner)
+      signedPost(
+        '/repos/r/views',
+        createViewBody('r', 'feature', [], owner),
+        owner
+      )
     );
     expect(dup.status).toBe(409);
 
     // The internal prefix is reserved.
     const reserved = await srv.fetch(
-      signedPost('/repos/r/views', { view: 'land/x', heads: [] }, owner)
+      signedPost(
+        '/repos/r/views',
+        createViewBody('r', 'land/x', [], owner),
+        owner
+      )
     );
     expect(reserved.status).toBe(400);
 
     // Heads must already be ingested.
     const unknown = await srv.fetch(
-      signedPost('/repos/r/views', { view: 'b', heads: ['deadbeef'] }, owner)
+      signedPost(
+        '/repos/r/views',
+        createViewBody('r', 'b', ['d'.repeat(64)], owner),
+        owner
+      )
     );
     expect(unknown.status).toBe(400);
 
@@ -76,7 +95,11 @@ describe('views (branches)', () => {
     );
     expect(unsigned.status).toBe(401);
     const forbidden = await srv.fetch(
-      signedPost('/repos/r/views', { view: 'z', heads: [] }, stranger)
+      signedPost(
+        '/repos/r/views',
+        createViewBody('r', 'z', [], stranger),
+        stranger
+      )
     );
     expect(forbidden.status).toBe(403);
   });

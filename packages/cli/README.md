@@ -10,9 +10,10 @@ thaddeus clone http://localhost:4000 me/notes ~/notes
 cd ~/notes && echo "# notes" > readme.md && thaddeus push
 ```
 
-A git-like client over the untrusted remote: edit files on disk, `push` to
-publish. All crypto is client-side; your identity seed lives in
-`~/.config/thaddeus/`.
+A git-like client over the untrusted remote: edit files on disk, then upload and
+owner-sign shared updates. Pulls verify complete signed head history and exact
+operation closure before moving a working view. All crypto is client-side; your
+identity seed lives in `~/.config/thaddeus/`.
 
 ## Commands
 
@@ -20,10 +21,11 @@ publish. All crypto is client-side; your identity seed lives in
 | ------------------------------------------------------------------------ | -------------------------------------- |
 | `init`                                                                   | Create a self-owned `did:key` identity |
 | `create <server> <repo>`                                                 | Create a repo on a server              |
-| `clone <server> <repo> [dir]`                                            | Clone a repo to a working tree         |
+| `clone <server> <repo> [dir] [--owner DID]`                              | Clone and pin a signed head chain      |
+| `pull [--bootstrap-head]`                                                | Verify and fetch signed remote changes |
 | `status`                                                                 | Show working-tree changes              |
-| `push [--no-land]`                                                       | Commit + upload + land into `main`     |
-| `land`                                                                   | Land uploaded-but-unmerged commits     |
+| `push [--no-land]`                                                       | Commit/upload; owner-sign the landing  |
+| `land`                                                                   | Owner-land uploaded commits            |
 | `grant <did> [--paths a,b] [--max-changes N] [--max-changes-per-hour N]` | Grant push rights to a DID/agent       |
 | `revoke <did>`                                                           | Revoke a previously granted delegation |
 | `grants`                                                                 | List active grants for this repo       |
@@ -36,6 +38,18 @@ publish. All crypto is client-side; your identity seed lives in
 | `reputation export <did> [--output path]`                                | Export a public reputation archive     |
 | `reputation import <path\|->` / `import --from URL`                      | Import or directly copy your archive   |
 | `serve [--port 4000] [--data DIR] [--max-request-body-bytes N]`          | Run a durable server                   |
+
+## Signed remote heads
+
+`create` signs an empty `main` genesis. `clone` verifies the complete signed
+chain and pins its owner; use `--owner did:key:...` when you have an owner DID
+through another trusted channel. Without it, the first valid owner is trusted on
+first use. Every later pull rejects an owner change, rollback, conflicting
+history, broken link, or a bundle that omits or injects operations.
+
+Unsigned legacy views fail closed. Their owner can migrate a clean, not-ahead
+working copy with `thaddeus pull --bootstrap-head`; it signs the copy's saved
+base, never the server's raw view pointer or unpublished local heads.
 
 ## Server request limits
 
@@ -101,14 +115,18 @@ already visible on the ciphertext mirror—and ignore dirty disk edits.
 # Owner: grant a teammate scoped push rights on src/**
 thaddeus grant did:key:z6Mk… --paths 'src/**'
 
-# Teammate: clone, edit, push — lands because src/ is in scope
+# Teammate: clone, edit, and upload signed operations
 thaddeus clone http://localhost:4000 proj ~/proj
 cd ~/proj && mkdir -p src && echo "fn main() {}" > src/main.rs && thaddeus push
-#   published to main (1 head(s))
+#   owner signature required to publish; uploaded head IDs: 8c4d…
 
-# A push outside the granted paths is scope-blocked at land:
+# The owner reviews the uploaded heads and signs the landing. Delegation scope,
+# budget, conflict, provenance, veto, and reputation policy run at that landing.
+# A delegate cannot create a shared branch or land independently.
+
+# An upload outside the grant is accepted as content but cannot pass owner land:
 echo "oops" > README.md && thaddeus push
-#   not landed: README.md is outside …'s delegated scope (content uploaded)
+#   owner signature required to publish; uploaded head IDs: 1ae2…
 
 # Owner: revoke to cut off further pushes
 thaddeus revoke did:key:z6Mk…

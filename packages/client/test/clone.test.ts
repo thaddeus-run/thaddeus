@@ -57,9 +57,9 @@ describe('Client.clone', () => {
     await main.commit(a);
     await repo.log.repoint('main', repo.log.heads('main-work'));
     await c.push('r', repo, repo.log.heads('main'));
-    await c.land('r', repo.log.heads('main'), 'main');
+    await c.land('r', repo, repo.log.heads('main'), 'main');
 
-    await c.createView('r', 'feature', repo.log.heads('main'));
+    await c.createView('r', repo, 'feature', repo.log.heads('main'));
     const feature = Workspace.open(repo.log, repo.store, {
       source: 'main',
       reader: a,
@@ -69,7 +69,12 @@ describe('Client.clone', () => {
     await feature.commit(a);
     await repo.log.repoint('feature', repo.log.heads('feature-work'));
     await c.push('r', repo, repo.log.heads('feature'));
-    const featureLand = await c.land('r', repo.log.heads('feature'), 'feature');
+    const featureLand = await c.land(
+      'r',
+      repo,
+      repo.log.heads('feature'),
+      'feature'
+    );
     expect(featureLand.landed).toBe(true);
 
     const mirrorBackend = new MemoryBackend();
@@ -80,6 +85,7 @@ describe('Client.clone', () => {
     const pulled = await c.pull('r', mirror, mirrorBackend, 'feature', inspect);
     expect([...mirror.log.heads(inspect)]).toEqual([...pulled.heads]);
     expect(mirror.log.hasView('feature')).toBe(false);
+    expect(mirror.headRecords.current('feature')?.id).toBe(pulled.head.id);
 
     const entry = mirror.log.materialize(inspect, a).get('a.txt');
     expect(entry?.ref).toBeDefined();

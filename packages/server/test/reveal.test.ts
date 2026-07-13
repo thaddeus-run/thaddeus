@@ -24,6 +24,7 @@ import {
 } from '../src/dto';
 import { createServer } from '../src/server';
 import { signRequest } from '../src/sign';
+import { createRepoBody, landBody } from './heads';
 import { expectRejects } from './reject';
 
 beforeAll(async () => {
@@ -89,12 +90,14 @@ describe('timed reveal', () => {
       backend: new MemoryBackend(),
       now: () => clock,
     });
-    await srv.fetch(signedPost('/repos', { name: 'r' }, owner, clock));
+    await srv.fetch(
+      signedPost('/repos', createRepoBody('r', owner), owner, clock)
+    );
     await srv.fetch(signedPost('/repos/r/push', local.bundle, owner, clock));
     await srv.fetch(
       signedPost(
         '/repos/r/land',
-        { fromHeads: local.heads, into: 'main' },
+        await landBody(srv.fetch, 'r', local.heads, owner),
         owner,
         clock
       )
@@ -188,7 +191,9 @@ describe('timed reveal', () => {
       backend: new MemoryBackend(),
       now: () => before,
     });
-    await srv.fetch(signedPost('/repos', { name: 'r' }, owner, before));
+    await srv.fetch(
+      signedPost('/repos', createRepoBody('r', owner), owner, before)
+    );
     await srv.fetch(signedPost('/repos/r/push', local.bundle, owner, before));
     const capability = await local.store.scheduleReveal(local.ref, at, owner);
     const body = {
@@ -222,7 +227,9 @@ describe('timed reveal', () => {
       backend: new MemoryBackend(),
       now: () => before,
     });
-    await srv.fetch(signedPost('/repos', { name: 'r' }, owner, before));
+    await srv.fetch(
+      signedPost('/repos', createRepoBody('r', owner), owner, before)
+    );
     await srv.fetch(signedPost('/repos/r/push', local.bundle, owner, before));
     const forged = issueCapability({
       object: local.ref.plaintext_id,
@@ -262,7 +269,9 @@ describe('timed reveal', () => {
       backend: new MemoryBackend(),
       now: () => before,
     });
-    await srv.fetch(signedPost('/repos', { name: 'r' }, owner, before));
+    await srv.fetch(
+      signedPost('/repos', createRepoBody('r', owner), owner, before)
+    );
     await srv.fetch(signedPost('/repos/r/push', local.bundle, owner, before));
     const capability = await local.store.scheduleReveal(local.ref, at, owner);
     const bundle = encodeBundle(
@@ -297,7 +306,9 @@ describe('timed reveal', () => {
       backend: new MemoryBackend(),
       now: () => before,
     });
-    await srv.fetch(signedPost('/repos', { name: 'r' }, owner, before));
+    await srv.fetch(
+      signedPost('/repos', createRepoBody('r', owner), owner, before)
+    );
     await srv.fetch(signedPost('/repos/r/push', local.bundle, owner, before));
     const capability = issueCapability({
       object: local.ref.plaintext_id,
@@ -332,12 +343,14 @@ describe('timed reveal', () => {
       backend: new MemoryBackend(),
       now: () => before,
     });
-    await srv.fetch(signedPost('/repos', { name: 'r' }, owner, before));
+    await srv.fetch(
+      signedPost('/repos', createRepoBody('r', owner), owner, before)
+    );
     await srv.fetch(signedPost('/repos/r/push', local.bundle, owner, before));
     await srv.fetch(
       signedPost(
         '/repos/r/land',
-        { fromHeads: local.heads, into: 'main' },
+        await landBody(srv.fetch, 'r', local.heads, owner),
         owner,
         before
       )
@@ -429,12 +442,14 @@ describe('timed reveal', () => {
       backend: new MemoryBackend(),
       now: () => before,
     });
-    await srv.fetch(signedPost('/repos', { name: 'r' }, owner, before));
+    await srv.fetch(
+      signedPost('/repos', createRepoBody('r', owner), owner, before)
+    );
     await srv.fetch(signedPost('/repos/r/push', local.bundle, owner, before));
     await srv.fetch(
       signedPost(
         '/repos/r/land',
-        { fromHeads: local.heads, into: 'main' },
+        await landBody(srv.fetch, 'r', local.heads, owner),
         owner,
         before
       )
@@ -493,7 +508,9 @@ describe('timed reveal', () => {
       backend: new MemoryBackend(),
       now: () => clock,
     });
-    await srv.fetch(signedPost('/repos', { name: 'r' }, owner, clock));
+    await srv.fetch(
+      signedPost('/repos', createRepoBody('r', owner), owner, clock)
+    );
     await srv.fetch(signedPost('/repos/r/push', local.bundle, owner, clock));
     const capability = await local.store.scheduleReveal(local.ref, at, owner);
     const object = local.store.current(local.ref.plaintext_id)!.id;
@@ -526,12 +543,14 @@ describe('timed reveal', () => {
     const local = await committed(owner);
     const backend = new MemoryBackend();
     const first = createServer({ backend, now: () => clock });
-    await first.fetch(signedPost('/repos', { name: 'r' }, owner, clock));
+    await first.fetch(
+      signedPost('/repos', createRepoBody('r', owner), owner, clock)
+    );
     await first.fetch(signedPost('/repos/r/push', local.bundle, owner, clock));
     await first.fetch(
       signedPost(
         '/repos/r/land',
-        { fromHeads: local.heads, into: 'main' },
+        await landBody(first.fetch, 'r', local.heads, owner),
         owner,
         clock
       )
@@ -587,14 +606,16 @@ describe('timed reveal', () => {
     for (const name of ['a', 'b']) {
       const owner = Identity.create();
       const local = await committed(owner);
-      await srv.fetch(signedPost('/repos', { name }, owner, clock));
+      await srv.fetch(
+        signedPost('/repos', createRepoBody(name, owner), owner, clock)
+      );
       await srv.fetch(
         signedPost(`/repos/${name}/push`, local.bundle, owner, clock)
       );
       await srv.fetch(
         signedPost(
           `/repos/${name}/land`,
-          { fromHeads: local.heads, into: 'main' },
+          await landBody(srv.fetch, name, local.heads, owner),
           owner,
           clock
         )

@@ -19,6 +19,7 @@ import {
 } from '../src/index';
 import { createServer } from '../src/server';
 import { signRequest } from '../src/sign';
+import { createRepoBody, landBody } from './heads';
 
 beforeAll(async () => {
   await ready();
@@ -131,7 +132,9 @@ async function createRepo(
   repo: string,
   owner: Identity
 ): Promise<void> {
-  const res = await srv.fetch(signed('POST', '/repos', { name: repo }, owner));
+  const res = await srv.fetch(
+    signed('POST', '/repos', createRepoBody(repo, owner), owner)
+  );
   expect(res.status).toBe(201);
 }
 
@@ -151,7 +154,8 @@ async function pushAndLand(
   srv: ReturnType<typeof createServer>,
   repo: string,
   change: Awaited<ReturnType<typeof authored>>,
-  signer: Identity
+  signer: Identity,
+  owner: Identity = signer
 ): Promise<LandResult> {
   const pushed = await srv.fetch(
     signed('POST', `/repos/${repo}/push`, change.bundle, signer)
@@ -161,8 +165,8 @@ async function pushAndLand(
     signed(
       'POST',
       `/repos/${repo}/land`,
-      { fromHeads: change.heads, into: 'main' },
-      signer
+      await landBody(srv.fetch, repo, change.heads, owner),
+      owner
     )
   );
   expect(landed.status).toBe(200);
@@ -282,7 +286,7 @@ describe('repo policy', () => {
       signed(
         'POST',
         '/repos/r/land',
-        { fromHeads: change.heads, into: 'main' },
+        await landBody(srv.fetch, 'r', change.heads, owner),
         owner
       )
     );
@@ -335,7 +339,8 @@ describe('repo policy', () => {
       srv,
       'r',
       await authored(delegate, 'src/auth/login.rs'),
-      delegate
+      delegate,
+      owner
     );
     expect(blocked.landed).toBe(false);
     expect(blocked.reason).toContain('no untrusted auth edits');
@@ -344,7 +349,8 @@ describe('repo policy', () => {
       srv,
       'r',
       await authored(delegate, 'docs/readme.md'),
-      delegate
+      delegate,
+      owner
     );
     expect(allowed.landed).toBe(true);
   });

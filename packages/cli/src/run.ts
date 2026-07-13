@@ -131,7 +131,8 @@ async function fetchInspectView(opts: {
   views?: Record<string, string[]>;
   out: (line: string) => void;
 }): Promise<string | null> {
-  const views = opts.views ?? (await opts.client.listViews(opts.repoName));
+  const views =
+    opts.views ?? (await opts.client.listViews(opts.repoName, opts.local));
   if (views[opts.remoteView] === undefined) {
     opts.out(
       `no branch ${opts.remoteView} — create it with 'thaddeus branch ${opts.remoteView}'`
@@ -820,7 +821,10 @@ export async function run(
       case 'clone': {
         const { values, positionals } = parseArgs({
           args: [...rest],
-          options: { server: { type: 'string' } },
+          options: {
+            server: { type: 'string' },
+            owner: { type: 'string' },
+          },
           allowPositionals: true,
         });
         if (values.server !== undefined && !isServerUrl(values.server)) {
@@ -835,7 +839,9 @@ export async function run(
         const { server, rest: args } = resolved;
         const [repo, dirArg] = args;
         if (repo === undefined) {
-          out('usage: thaddeus clone <repo> [dir] [--server <url>]');
+          out(
+            'usage: thaddeus clone <repo> [dir] [--server <url>] [--owner <did>]'
+          );
           return 2;
         }
         const dir = dirArg ?? repo.split('/').pop() ?? repo;
@@ -845,7 +851,9 @@ export async function run(
         const client = new Client(server, identity, env.fetchImpl);
         const { repo: local, heads } = await client.clone(
           repo,
-          new FileBackend(join(target, '.thaddeus', 'store'))
+          new FileBackend(join(target, '.thaddeus', 'store')),
+          'main',
+          { expectedOwner: values.owner }
         );
         await materializeToDisk(local, 'main', identity, target);
         const cfg: Config = { server, repo, base: [...heads], view: 'main' };
@@ -856,6 +864,11 @@ export async function run(
         return 0;
       }
       case 'pull': {
+        const { values } = parseArgs({
+          args: [...rest],
+          options: { 'bootstrap-head': { type: 'boolean' } },
+          allowPositionals: true,
+        });
         const root = findRoot(env.cwd);
         if (root === undefined) {
           out("not a thaddeus working copy — run 'thaddeus clone' first");
@@ -878,7 +891,27 @@ export async function run(
           return 2;
         }
         const client = new Client(cfg.server, identity, env.fetchImpl);
-        const { heads } = await client.pull(cfg.repo, local, backend, view);
+        let bootstrapped = false;
+        if (values['bootstrap-head'] === true) {
+          if (local.headRecords.current(view) !== undefined) {
+            out(`signed head history already exists for ${view}`);
+            return 2;
+          }
+          await client.bootstrapHead(cfg.repo, local, view, cfg.base);
+          bootstrapped = true;
+        }
+        let heads: readonly string[];
+        try {
+          ({ heads } = await client.pull(cfg.repo, local, backend, view));
+        } catch (error) {
+          if (bootstrapped) {
+            out(
+              `head bootstrap succeeded, but pull failed (${error instanceof Error ? error.message : String(error)}); rerun ordinary 'thaddeus pull'`
+            );
+            return 1;
+          }
+          throw error;
+        }
         await retree(root, local, view, identity, before);
         saveConfig(root, { ...cfg, base: [...heads] });
         out(`pulled ${cfg.repo}@${view} (${heads.length} head(s))`);
@@ -999,9 +1032,10 @@ export async function run(
         const view = viewOf(cfg);
         const identity = loadIdentity(env.home);
         const client = new Client(cfg.server, identity, env.fetchImpl);
+        const local = await openLocal(root, cfg);
         const name = rest.find((a) => !a.startsWith('-'));
         if (name === undefined) {
-          const views = await client.listViews(cfg.repo);
+          const views = await client.listViews(cfg.repo, local);
           const names = Object.keys(views).sort();
           if (wantsJson(rest)) {
             out(JSON.stringify({ current: view, branches: names }));
@@ -1013,8 +1047,8 @@ export async function run(
           return 0;
         }
         // A branch is a name over the current head-set — copy-on-write, never a
-        // copy of files. It carries no new ops, so it needs no land policy.
-        const local = await openLocal(root, cfg);
+        // copy of files. Its genesis is still shared authority, so the client
+        // requires the pinned repository owner's signature.
         // The server only accepts heads it has ingested; local-only commits
         // would fail with a cryptic "unknown head". Ask for a push instead.
         if (headsAhead(local, cfg.base, view) > 0) {
@@ -1022,8 +1056,7 @@ export async function run(
           return 2;
         }
         const heads = [...local.log.heads(view)];
-        const created = await client.createView(cfg.repo, name, heads);
-        await local.log.repoint(name, created.heads);
+        const created = await client.createView(cfg.repo, local, name, heads);
         out(
           `created branch ${name} at ${created.heads.length} head(s) — open it with 'thaddeus workspace ${name}'`
         );
@@ -1072,7 +1105,7 @@ export async function run(
         const client = new Client(cfg.server, identity, env.fetchImpl);
         // The branch must exist server-side ('branch' always registers it
         // there); pulling an unknown view would silently repoint to empty.
-        const views = await client.listViews(cfg.repo);
+        const views = await client.listViews(cfg.repo, local);
         if (views[name] === undefined) {
           out(`no branch ${name} — create it with 'thaddeus branch ${name}'`);
           return 1;
@@ -1330,7 +1363,7 @@ export async function run(
         const local = await new Platform().openDurable(cfg.repo, backend);
         const client = new Client(cfg.server, identity, env.fetchImpl);
         if (values.from !== undefined || values.to !== undefined) {
-          const views = await client.listViews(cfg.repo);
+          const views = await client.listViews(cfg.repo, local);
           const fetched = new Map<string, string>();
           const resolve = async (
             remoteView: string | undefined
@@ -1559,12 +1592,28 @@ export async function run(
           return 0;
         }
         // Ship a merge claim per published op; an attesting host co-signs it.
-        const landed = await client.land(
-          cfg.repo,
-          heads,
-          view,
-          mergeClaims(cfg.repo, whyTarget, identity)
-        );
+        const landed = await client
+          .land(
+            cfg.repo,
+            local,
+            heads,
+            view,
+            mergeClaims(cfg.repo, whyTarget, identity)
+          )
+          .catch((error: unknown) => {
+            const message =
+              error instanceof Error ? error.message : String(error);
+            if (message.includes('owner signature required')) {
+              out(
+                `owner signature required to publish; uploaded head IDs: ${heads.join(', ')}`
+              );
+              return null;
+            }
+            throw error;
+          });
+        if (landed === null) {
+          return 1;
+        }
         if (!landed.landed) {
           out(
             `not landed: ${landed.reason ?? 'blocked by policy'} (content uploaded)`
@@ -1617,7 +1666,7 @@ export async function run(
           }
           const backend = new FileBackend(storePath(root, cfg));
           const local = await new Platform().openDurable(cfg.repo, backend);
-          const views = await client.listViews(cfg.repo);
+          const views = await client.listViews(cfg.repo, local);
           const source = await fetchInspectView({
             client,
             repoName: cfg.repo,
@@ -1673,6 +1722,7 @@ export async function run(
             const { incoming } = previewLand(local, view, source);
             const landed = await client.land(
               cfg.repo,
+              local,
               branchHeads,
               view,
               mergeClaims(cfg.repo, incoming, identity)
@@ -1708,7 +1758,7 @@ export async function run(
           opsAhead(local, cfg.base, view),
           identity
         );
-        const landed = await client.land(cfg.repo, heads, view, claims);
+        const landed = await client.land(cfg.repo, local, heads, view, claims);
         if (!landed.landed) {
           out(`not landed: ${landed.reason ?? 'nothing to land'}`);
           outConflicts(landed.conflicts, out);
@@ -1819,12 +1869,28 @@ export async function run(
           out("uploaded (not landed — run 'thaddeus land' to publish)");
           return 0;
         }
-        const landed = await client.land(
-          cfg.repo,
-          heads,
-          view,
-          mergeClaims(cfg.repo, ops, identity)
-        );
+        const landed = await client
+          .land(
+            cfg.repo,
+            local,
+            heads,
+            view,
+            mergeClaims(cfg.repo, ops, identity)
+          )
+          .catch((error: unknown) => {
+            const message =
+              error instanceof Error ? error.message : String(error);
+            if (message.includes('owner signature required')) {
+              out(
+                `owner signature required to publish; uploaded head IDs: ${heads.join(', ')}`
+              );
+              return null;
+            }
+            throw error;
+          });
+        if (landed === null) {
+          return 1;
+        }
         if (!landed.landed) {
           out(
             `not landed: ${landed.reason ?? 'blocked by policy'} (content uploaded)`

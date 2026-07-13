@@ -34,7 +34,7 @@ describe('Client.push / land — round-trip', () => {
     const pushed = await c.push('r', repo, heads);
     expect(pushed.accepted.ops).toBeGreaterThan(0);
     expect(pushed.rejected).toHaveLength(0);
-    const landed = await c.land('r', heads, 'main');
+    const landed = await c.land('r', repo, heads, 'main');
     expect(landed.landed).toBe(true);
 
     // A second clone (fresh backend) materializes + decrypts.

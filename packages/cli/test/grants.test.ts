@@ -1,3 +1,4 @@
+import { Client } from '@thaddeus.run/client';
 import { ready } from '@thaddeus.run/identity';
 import { FileBackend } from '@thaddeus.run/persist';
 import { Platform } from '@thaddeus.run/platform';
@@ -13,6 +14,7 @@ import {
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
+import { loadIdentity } from '../src/identity';
 import { run } from '../src/run';
 import { startServer } from '../src/serve';
 
@@ -66,7 +68,8 @@ describe('thaddeus grant/revoke/grants', () => {
       ).toBe(0);
       expect(out.join('\n')).toContain(teammateDid);
 
-      // Teammate clones, edits in scope → push lands.
+      // Teammate clones and uploads an in-scope edit. Shared landing requires
+      // the owner, and the CLI prints the head IDs for that handoff.
       const mateWc = mkdtempSync(join(tmp, 'matewc-'));
       await run(['clone', s.url, 'proj', mateWc], e(mateWc, teammateHome));
       expect(readFileSync(join(mateWc, 'src', 'secret.rs'), 'utf8')).toBe(
@@ -75,16 +78,36 @@ describe('thaddeus grant/revoke/grants', () => {
       mkdirSync(join(mateWc, 'src'), { recursive: true });
       writeFileSync(join(mateWc, 'src', 'x.rs'), 'fn x() {}');
       out.length = 0;
-      expect(await run(['push'], e(mateWc, teammateHome))).toBe(0);
-      expect(out.join('\n').toLowerCase()).toContain('published');
+      expect(await run(['push'], e(mateWc, teammateHome))).toBe(1);
+      expect(out.join('\n')).toContain('owner signature required');
+      expect(out.join('\n')).toContain('uploaded head IDs');
+      expect(out.join('\n').toLowerCase()).not.toContain('published to');
+      const ownerClient = new Client(s.url, loadIdentity(ownerHome));
+      let mateLocal = await new Platform().openDurable(
+        'proj',
+        new FileBackend(join(mateWc, '.thaddeus', 'store'))
+      );
+      expect(
+        await ownerClient.land('proj', mateLocal, mateLocal.log.heads('main'))
+      ).toMatchObject({ landed: true });
 
-      // Out of scope → push reports the blocked land, and the reason names the
-      // delegated-scope violation (not just "didn't land for some reason").
+      // The delegate can still upload an out-of-scope edit, but the owner's
+      // attempted landing runs policy and rejects the delegated-scope violation.
       writeFileSync(join(mateWc, 'readme.md'), 'hi');
       out.length = 0;
       expect(await run(['push'], e(mateWc, teammateHome))).toBe(1);
-      expect(out.join('\n').toLowerCase()).toContain('not landed');
-      expect(out.join('\n').toLowerCase()).toContain('scope');
+      expect(out.join('\n')).toContain('owner signature required');
+      mateLocal = await new Platform().openDurable(
+        'proj',
+        new FileBackend(join(mateWc, '.thaddeus', 'store'))
+      );
+      const scopeDenied = await ownerClient.land(
+        'proj',
+        mateLocal,
+        mateLocal.log.heads('main')
+      );
+      expect(scopeDenied).toMatchObject({ landed: false });
+      expect(scopeDenied.reason).toContain('scope');
 
       // grants lists the active grant; revoke then blocks the teammate.
       out.length = 0;
@@ -204,20 +227,39 @@ describe('thaddeus grant/revoke/grants', () => {
       expect(await run(['grants'], e(ownerWc, ownerHome))).toBe(0);
       expect(out.join('\n')).toContain('1/h');
 
-      // First in-scope landing fits the window.
+      // First in-scope upload is handed to the owner and fits the window.
       const mateWc = mkdtempSync(join(tmp, 'matewc2-'));
       await run(['clone', s.url, 'proj2', mateWc], e(mateWc, mateHome));
       writeFileSync(join(mateWc, 'src', 'a.rs'), 'fn a() {}');
       out.length = 0;
-      expect(await run(['push', '-m', 'a'], e(mateWc, mateHome))).toBe(0);
-      expect(out.join('\n').toLowerCase()).toContain('published');
+      expect(await run(['push', '-m', 'a'], e(mateWc, mateHome))).toBe(1);
+      expect(out.join('\n')).toContain('owner signature required');
+      const ownerClient = new Client(s.url, loadIdentity(ownerHome));
+      let mateLocal = await new Platform().openDurable(
+        'proj2',
+        new FileBackend(join(mateWc, '.thaddeus', 'store'))
+      );
+      expect(
+        await ownerClient.land('proj2', mateLocal, mateLocal.log.heads('main'))
+      ).toMatchObject({ landed: true });
 
-      // Second landing within the hour exceeds the cap → rejected.
+      // Second upload is accepted, but the owner-signed landing exceeds the cap.
       writeFileSync(join(mateWc, 'src', 'b.rs'), 'fn b() {}');
       out.length = 0;
       const code = await run(['push', '-m', 'b'], e(mateWc, mateHome));
       expect(code).not.toBe(0);
-      expect(out.join('\n')).toContain('hourly rate window');
+      expect(out.join('\n')).toContain('owner signature required');
+      mateLocal = await new Platform().openDurable(
+        'proj2',
+        new FileBackend(join(mateWc, '.thaddeus', 'store'))
+      );
+      const rateDenied = await ownerClient.land(
+        'proj2',
+        mateLocal,
+        mateLocal.log.heads('main')
+      );
+      expect(rateDenied).toMatchObject({ landed: false });
+      expect(rateDenied.reason).toContain('hourly rate window');
     } finally {
       await s.stop();
     }

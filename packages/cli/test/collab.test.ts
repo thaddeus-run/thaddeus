@@ -1,5 +1,7 @@
+import { Client } from '@thaddeus.run/client';
 import { ready } from '@thaddeus.run/identity';
-import { MemoryBackend } from '@thaddeus.run/persist';
+import { FileBackend, MemoryBackend } from '@thaddeus.run/persist';
+import { Platform } from '@thaddeus.run/platform';
 import { createServer } from '@thaddeus.run/server';
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
@@ -80,11 +82,39 @@ describe('owner ⇄ delegate collaboration', () => {
     ).toBe(0);
     expect(readFileSync(join(dirB, 'a.txt'), 'utf8')).toBe('hello');
 
-    // The delegate lands a file of its own; push reshares the key to the owner.
+    // The delegate uploads a file of its own and receives a clear owner-signature
+    // handoff instead of a false publication claim.
     writeFileSync(join(dirB, 'b.txt'), 'world');
-    expect(await run(['push', '-m', 'add b'], quiet(delHome, dirB))).toBe(0);
+    const delegateOut: string[] = [];
+    expect(
+      await run(
+        ['push', '-m', 'add b'],
+        env(delHome, dirB, (line) => delegateOut.push(line))
+      )
+    ).toBe(1);
+    expect(delegateOut.join('\n')).toContain('owner signature required');
+    expect(delegateOut.join('\n')).toContain('uploaded head IDs');
+    expect(delegateOut.join('\n')).not.toContain('published to');
 
-    // The owner pulls and CAN read the delegate's file (the other half of the bug).
+    // The owner reviews those uploaded heads and signs the shared-head update.
+    const delegateRepo = await new Platform().openDurable(
+      'proj',
+      new FileBackend(join(dirB, '.thaddeus', 'store'))
+    );
+    const ownerClient = new Client(
+      'http://t',
+      loadIdentity(ownerHome),
+      fetchImpl
+    );
+    expect(
+      await ownerClient.land(
+        'proj',
+        delegateRepo,
+        delegateRepo.log.heads('main')
+      )
+    ).toMatchObject({ landed: true });
+
+    // The owner pulls and CAN read the now-owner-landed delegate file.
     const pullOut: string[] = [];
     expect(
       await run(

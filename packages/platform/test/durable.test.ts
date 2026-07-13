@@ -1,5 +1,6 @@
 import { Workspace } from '@thaddeus.run/fs';
 import { Identity, ready } from '@thaddeus.run/identity';
+import { signHead } from '@thaddeus.run/log';
 import type { Backend } from '@thaddeus.run/store';
 import { beforeAll, describe, expect, test } from 'bun:test';
 
@@ -73,5 +74,79 @@ describe('Platform — durable repos', () => {
 
     const b = await new Platform().openDurable('b', backend); // never written
     expect(b.log.materialize('main').size).toBe(0);
+  });
+
+  test('signed land persists the exact successor and policy denial leaves it unchanged', async () => {
+    const backend = memoryBackend();
+    const owner = Identity.create();
+    const repo = await new Platform().createDurable('signed', backend);
+    const genesis = signHead(
+      {
+        repo: 'signed',
+        view: 'main',
+        version: 0,
+        previous: null,
+        heads: [],
+      },
+      owner
+    );
+    await repo.headRecords.bootstrap(genesis);
+
+    const ws = Workspace.open(repo.log, repo.store, {
+      source: 'main',
+      reader: owner,
+      name: 'feature',
+    });
+    ws.write('signed.rs', enc('fn signed() {}'));
+    await ws.commit(owner);
+    const next = signHead(
+      {
+        repo: 'signed',
+        view: 'main',
+        version: 1,
+        previous: genesis.id,
+        heads: [...repo.log.heads('feature')].sort(),
+      },
+      owner
+    );
+    expect(
+      await repo.land({
+        from: 'feature',
+        author: owner,
+        headRecord: next,
+      })
+    ).toMatchObject({ landed: true, heads: [...next.heads] });
+
+    const deniedWorkspace = Workspace.open(repo.log, repo.store, {
+      source: 'main',
+      reader: owner,
+      name: 'denied',
+    });
+    deniedWorkspace.write('denied.rs', enc('fn denied() {}'));
+    await deniedWorkspace.commit(owner);
+    const deniedHead = signHead(
+      {
+        repo: 'signed',
+        view: 'main',
+        version: 2,
+        previous: next.id,
+        heads: [
+          ...new Set([...repo.log.heads('main'), ...repo.log.heads('denied')]),
+        ].sort(),
+      },
+      owner
+    );
+    const denied = await repo.land({
+      from: 'denied',
+      author: owner,
+      headRecord: deniedHead,
+      policy: () => ({ allow: false, reason: 'not today' }),
+    });
+    expect(denied).toMatchObject({ landed: false, reason: 'not today' });
+    expect(repo.headRecords.current('main')?.id).toBe(next.id);
+
+    const reopened = await new Platform().openDurable('signed', backend);
+    expect(reopened.headRecords.current('main')?.id).toBe(next.id);
+    expect(reopened.headRecords.history('main')).toHaveLength(2);
   });
 });

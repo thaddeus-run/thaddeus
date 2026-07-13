@@ -33,7 +33,7 @@ async function seeded(
   await ws.commit(owner);
   const heads = [...repo.log.heads('w')];
   await client.push('r', repo, heads);
-  await client.land('r', heads, 'main');
+  await client.land('r', repo, heads, 'main');
   return { client, repo, heads };
 }
 
