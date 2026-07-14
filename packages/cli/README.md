@@ -95,9 +95,10 @@ into the owner's repository. Merge and release issuance shares a durable
 per-subject rolling-hour cap of 20; `--attestation-rate-limit 0` disables
 issuance and values above 20 are rejected. These controls do not eliminate
 colluding allowed hosts or Sybil identities, and the current proof cannot
-reconstruct historical repository ownership independently. Positive
-`--min-merges` values require `--trust-host` or an active local/KMS attester; an
-empty effective trust set is rejected before startup.
+reconstruct historical repository ownership independently. `--min-merges`
+installs a reputation gate only when the effective trust set contains an
+explicitly allowed host or the active local/KMS attester. With no trust source,
+the server retains proofs for audit but does not install an unusable gate.
 
 Ordinary hosting still has no repository decryption keys. Timed reveal is a
 deliberate exception: the server temporarily handles a deliberately publishable

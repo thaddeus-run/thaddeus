@@ -118,11 +118,6 @@ describe('reputation attestation security', () => {
     ).not.toThrow();
     expect(() =>
       createServer({ backend: new MemoryBackend(), minMerges: 1 })
-    ).toThrow(
-      'positive minMerges requires a trusted reputation host or attester'
-    );
-    expect(() =>
-      createServer({ backend: new MemoryBackend(), minMerges: 0 })
     ).not.toThrow();
     expect(() =>
       createServer({
@@ -131,6 +126,41 @@ describe('reputation attestation security', () => {
         trustedReputationHosts: [host.did],
       })
     ).not.toThrow();
+  });
+
+  test('does not install a reputation gate without a trust source', async () => {
+    const owner = Identity.create();
+    const author = Identity.create();
+    const server = createServer({
+      backend: new MemoryBackend(),
+      minMerges: 1,
+    });
+    await createDelegatedRepo(server, 'no-trust-source', owner, author);
+    const op = signOp(
+      {
+        path: 'available.ts',
+        parents: [],
+        lamport: 0,
+        at: '2026-07-14T00:00:00.000Z',
+        payload: null,
+      },
+      author
+    );
+    await server.fetch(
+      signedPost(
+        '/repos/no-trust-source/push',
+        encodeBundle([op], [], []),
+        author
+      )
+    );
+    const response = await server.fetch(
+      signedPost(
+        '/repos/no-trust-source/land',
+        await landBody(server.fetch, 'no-trust-source', [op.id], owner, 'main'),
+        owner
+      )
+    );
+    expect(await response.json()).toMatchObject({ landed: true });
   });
 
   test('reports issuance disabled when the configured ceiling is zero', async () => {
