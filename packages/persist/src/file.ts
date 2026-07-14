@@ -357,6 +357,7 @@ export class FileBackend implements Backend, ReplayNonceBackend {
     return parsed as ReplayNonceRecord;
   }
 
+  /** Returns the hidden directory reserved for durable replay nonce records. */
   #nonceDirectory(): string {
     return join(this.#root, REPLAY_NONCE_DIRECTORY);
   }
