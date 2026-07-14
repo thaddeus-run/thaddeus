@@ -1,6 +1,6 @@
 {
   "name": "@thaddeus.run/client",
-  "version": "0.1.8-alpha",
+  "version": "0.1.9-alpha",
   "description": "The Thaddeus client SDK: clone/push/land over the untrusted HTTP remote, holding a self-owned identity and doing all crypto client-side.",
   "keywords": [
     "client",
