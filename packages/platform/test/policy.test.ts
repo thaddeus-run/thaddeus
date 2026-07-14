@@ -136,7 +136,8 @@ describe('policy — requireReputationTier', () => {
 
     const d = await requireReputationTier(
       reps,
-      3
+      3,
+      new Set([host.did])
     )(proposal({ incomingOps: [op] }));
     expect(d.allow).toBe(true);
   });
@@ -152,7 +153,8 @@ describe('policy — requireReputationTier', () => {
 
     const d = await requireReputationTier(
       reps,
-      3
+      3,
+      new Set([host.did])
     )(proposal({ incomingOps: [op] }));
     expect(d.allow).toBe(false);
     expect(d.reason).toContain('1 op(s)');
@@ -187,7 +189,8 @@ describe('policy — requireReputationTier', () => {
 
     const d = await requireReputationTier(
       reps,
-      1
+      1,
+      new Set([host.did])
     )(proposal({ incomingOps: [op] }));
     expect(d.allow).toBe(false);
   });
@@ -201,7 +204,8 @@ describe('policy — requireReputationTier', () => {
 
     const d = await requireReputationTier(
       reps,
-      0
+      0,
+      new Set()
     )(proposal({ incomingOps: [op] }));
     expect(d.allow).toBe(true);
   });
@@ -220,7 +224,8 @@ describe('policy — requireReputationTier', () => {
 
     const d = await requireReputationTier(
       reps,
-      3
+      3,
+      new Set([host.did])
     )(proposal({ incomingOps: [opSenior, opJunior] }));
     expect(d.allow).toBe(false);
     expect(d.reason).toContain('1 op(s)');
@@ -228,8 +233,12 @@ describe('policy — requireReputationTier', () => {
 
   test('a negative or non-integer tier is rejected at construction', () => {
     const reps = new ReputationLog();
-    expect(() => requireReputationTier(reps, -1)).toThrow(RangeError);
-    expect(() => requireReputationTier(reps, 1.5)).toThrow(RangeError);
+    expect(() => requireReputationTier(reps, -1, new Set())).toThrow(
+      RangeError
+    );
+    expect(() => requireReputationTier(reps, 1.5, new Set())).toThrow(
+      RangeError
+    );
   });
 
   test('a reputation tier can require an explicitly trusted host', async () => {
@@ -263,9 +272,6 @@ describe('policy — requireReputationTier', () => {
       allow: false,
       reason: '1 op(s) authored below the required tier (1 attested merge(s))',
     });
-    expect(
-      await requireReputationTier(reps, 1)(proposal({ incomingOps: [op] }))
-    ).toEqual({ allow: true });
   });
 });
 

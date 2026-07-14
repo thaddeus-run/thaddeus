@@ -1,6 +1,7 @@
 import type { Identity } from '@thaddeus.run/identity';
 import { FileBackend } from '@thaddeus.run/persist';
 import type { LandPolicy } from '@thaddeus.run/platform';
+import type { AttestationSigner } from '@thaddeus.run/reputation';
 import {
   createServer,
   DEFAULT_MAX_REQUEST_BODY_BYTES,
@@ -17,9 +18,12 @@ export interface ServeOptions {
   dataDir: string; // FileBackend root (the durable cold tier)
   port?: number; // default 4000; pass 0 for an OS-assigned port (tests)
   policy?: LandPolicy; // default blockOnConflict (createServer's default)
-  host?: Identity; // attest reputation with this key (P07); omit to hold no keys
+  attester?: AttestationSigner; // production signer, normally managed KMS
+  /** @deprecated Development-only local private-key signer. */
+  host?: Identity;
+  attestationRateLimit?: number;
   minMerges?: number; // gate land on this many attested merges per op author
-  trustedReputationHosts?: readonly string[]; // foreign host DIDs that count
+  trustedReputationHosts?: readonly string[]; // exact foreign-host allowlist
   // Default 16 MiB; accepts positive integers through
   // Number.MAX_SAFE_INTEGER - 1.
   maxRequestBodyBytes?: number;
@@ -52,7 +56,9 @@ export function startServer(opts: ServeOptions): RunningServer {
     backend: new FileBackend(opts.dataDir),
     maxRequestBodyBytes,
     policy: opts.policy,
+    attester: opts.attester,
     host: opts.host,
+    attestationRateLimit: opts.attestationRateLimit,
     minMerges: opts.minMerges,
     trustedReputationHosts: opts.trustedReputationHosts,
     replayNonceCapacity:
@@ -63,6 +69,14 @@ export function startServer(opts: ServeOptions): RunningServer {
         // Backend errors can carry opaque durable filenames. Keep operator
         // logging fixed and let callers attach their own privacy-safe telemetry.
         console.error('replay protection nonce consumption failed');
+        return;
+      }
+      if (context.operation === 'attestation-sign') {
+        console.error('reputation attestation signer unavailable');
+        return;
+      }
+      if (context.operation === 'attestation-rate-store') {
+        console.error('reputation attestation rate storage unavailable');
         return;
       }
       const scope = context.repo === undefined ? '' : ` for ${context.repo}`;

@@ -12,32 +12,33 @@ cd ~/notes && echo "# notes" > readme.md && thaddeus push
 
 A git-like client over the untrusted remote: edit files on disk, then upload and
 owner-sign shared updates. Pulls verify complete signed head history and exact
-operation closure before moving a working view. All crypto is client-side; your
-identity seed lives in `~/.config/thaddeus/`.
+operation closure before moving a working view. Repository content crypto is
+client-side; your identity seed lives in `~/.config/thaddeus/`. An optional
+server reputation attester is a separate host-security role described below.
 
 ## Commands
 
-| Command                                                                              | Description                            |
-| ------------------------------------------------------------------------------------ | -------------------------------------- |
-| `init`                                                                               | Create a self-owned `did:key` identity |
-| `create <server> <repo>`                                                             | Create a repo on a server              |
-| `clone <server> <repo> [dir] [--owner DID]`                                          | Clone and pin a signed head chain      |
-| `pull [--bootstrap-head]`                                                            | Verify and fetch signed remote changes |
-| `status`                                                                             | Show working-tree changes              |
-| `push [--no-land]`                                                                   | Commit/upload; owner-sign the landing  |
-| `land`                                                                               | Owner-land uploaded commits            |
-| `grant <did> [--paths a,b] [--max-changes N] [--max-changes-per-hour N]`             | Grant push rights to a DID/agent       |
-| `revoke <did>`                                                                       | Revoke a previously granted delegation |
-| `grants`                                                                             | List active grants for this repo       |
-| `policy [set\|clear]`                                                                | Show or select repo land policy        |
-| `query <kind> ...`                                                                   | Query history and the semantic graph   |
-| `watch [symbol] [--kind <event>]...`                                                 | Stream remote semantic changes         |
-| `schedule-reveal <path> --at <ISO>`                                                  | Make committed content public later    |
-| `reveal <path>`                                                                      | Trigger a due public reveal            |
-| `reputation <did>`                                                                   | Show trusted/untrusted reputation      |
-| `reputation export <did> [--output path]`                                            | Export a public reputation archive     |
-| `reputation import <path\|->` / `import --from URL`                                  | Import or directly copy your archive   |
-| `serve [--port 4000] [--data DIR] [--replay-nonce-capacity N] [--request-skew-ms N]` | Run a durable server                   |
+| Command                                                                  | Description                            |
+| ------------------------------------------------------------------------ | -------------------------------------- |
+| `init`                                                                   | Create a self-owned `did:key` identity |
+| `create <server> <repo>`                                                 | Create a repo on a server              |
+| `clone <server> <repo> [dir] [--owner DID]`                              | Clone and pin a signed head chain      |
+| `pull [--bootstrap-head]`                                                | Verify and fetch signed remote changes |
+| `status`                                                                 | Show working-tree changes              |
+| `push [--no-land]`                                                       | Commit/upload; owner-sign the landing  |
+| `land`                                                                   | Owner-land uploaded commits            |
+| `grant <did> [--paths a,b] [--max-changes N] [--max-changes-per-hour N]` | Grant push rights to a DID/agent       |
+| `revoke <did>`                                                           | Revoke a previously granted delegation |
+| `grants`                                                                 | List active grants for this repo       |
+| `policy [set\|clear]`                                                    | Show or select repo land policy        |
+| `query <kind> ...`                                                       | Query history and the semantic graph   |
+| `watch [symbol] [--kind <event>]...`                                     | Stream remote semantic changes         |
+| `schedule-reveal <path> --at <ISO>`                                      | Make committed content public later    |
+| `reveal <path>`                                                          | Trigger a due public reveal            |
+| `reputation <did>`                                                       | Show trusted/untrusted reputation      |
+| `reputation export <did> [--output path]`                                | Export a public reputation archive     |
+| `reputation import <path\|->` / `import --from URL`                      | Import or directly copy your archive   |
+| `serve [--port 4000] [--data DIR] [--attestation-aws-kms-key-arn ARN]`   | Run a durable server                   |
 
 ## Signed remote heads
 
@@ -66,6 +67,39 @@ default. `--replay-nonce-capacity N` accepts positive decimal integers through
 `THADDEUS_REPLAY_NONCE_CAPACITY` and `THADDEUS_REQUEST_SKEW_MS`. Invalid,
 fractional, signed, whitespace-padded, notation, unsafe, zero, or over-limit
 values stop startup before a listener opens.
+
+## Reputation attestation
+
+Production servers attest with an exact AWS KMS key ARN:
+
+```sh
+thaddeus serve --data ./srv-data \
+  --attestation-aws-kms-key-arn arn:aws:kms:eu-west-1:123456789012:key/... \
+  --attestation-rate-limit 20 \
+  --trust-host did:key:z6Mk...
+```
+
+Startup validates that the ARN names an enabled, AWS-origin, customer-managed
+Ed25519 `SIGN_VERIFY` key before opening the HTTP port. The default credential
+chain supports short-lived Fly/AWS workload identity. The process receives no
+private signing key bytes, although its IAM authorization to request signatures
+is security-sensitive. `serve --host` instead loads the local identity seed and
+is retained only for development; it is mutually exclusive with KMS and prints a
+warning.
+
+`--trust-host` is an exact, repeatable DID allowlist, not a web of trust. The
+active attester is added automatically. All valid proofs remain visible, but
+gates count one event per `(subject, repo, kind, ref)`, regardless of timestamp
+or how many trusted hosts signed it. Hosts do not attest owner-authored merges
+into the owner's repository. Merge and release issuance shares a durable
+per-subject rolling-hour cap of 20; `--attestation-rate-limit 0` disables
+issuance and values above 20 are rejected. These controls do not eliminate
+colluding allowed hosts or Sybil identities, and the current proof cannot
+reconstruct historical repository ownership independently.
+
+Ordinary hosting still has no repository decryption keys. Timed reveal is a
+deliberate exception: the server temporarily handles a deliberately publishable
+content key through the world-known public identity seed.
 
 ## Query the committed branch
 

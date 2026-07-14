@@ -1,3 +1,4 @@
+import { signDelegation } from '@thaddeus.run/agent';
 import { Identity, ready } from '@thaddeus.run/identity';
 import {
   decodeHeadRecord,
@@ -17,7 +18,7 @@ import {
 } from '@thaddeus.run/store';
 import { beforeAll, describe, expect, test } from 'bun:test';
 
-import { encodeBundle, encodeClaim } from '../src/dto';
+import { encodeBundle, encodeClaim, encodeDelegation } from '../src/dto';
 import { createServer } from '../src/server';
 import { signRequest } from '../src/sign';
 import { createRepoBody, landBody } from './heads';
@@ -275,6 +276,7 @@ describe('server signed shared heads', () => {
 
   test('committed land survives and recovers failed reputation bookkeeping', async () => {
     const owner = Identity.create();
+    const author = Identity.create();
     const host = Identity.create();
     const backend = new FailFirstReputationWrite();
     const first = createServer({ backend, host });
@@ -285,6 +287,29 @@ describe('server signed shared heads', () => {
         )
       ).status
     ).toBe(201);
+    expect(
+      (
+        await first.fetch(
+          signedPost(
+            '/repos/effects/grants',
+            {
+              delegation: encodeDelegation(
+                signDelegation(
+                  {
+                    agent: author.did,
+                    paths: ['**'],
+                    maxChanges: 100,
+                    maxSpend: 100,
+                  },
+                  owner
+                )
+              ),
+            },
+            owner
+          )
+        )
+      ).status
+    ).toBe(200);
     const op = signOp(
       {
         path: 'README.md',
@@ -293,12 +318,12 @@ describe('server signed shared heads', () => {
         at: '2026-07-13T00:00:00.000Z',
         payload: null,
       },
-      owner
+      author
     );
     expect(
       (
         await first.fetch(
-          signedPost('/repos/effects/push', encodeBundle([op], [], []), owner)
+          signedPost('/repos/effects/push', encodeBundle([op], [], []), author)
         )
       ).status
     ).toBe(200);
@@ -309,7 +334,7 @@ describe('server signed shared heads', () => {
         kind: 'merge',
         at: op.at,
       },
-      owner
+      author
     );
     const landed = await first.fetch(
       signedPost(
@@ -335,7 +360,7 @@ describe('server signed shared heads', () => {
     ).toBe(200);
     const profile = (await (
       await restarted.fetch(
-        new Request(`http://t/reputation/${encodeURIComponent(owner.did)}`)
+        new Request(`http://t/reputation/${encodeURIComponent(author.did)}`)
       )
     ).json()) as { byKind: Record<string, number> };
     expect(profile.byKind.merge).toBe(1);

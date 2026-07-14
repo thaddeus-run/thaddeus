@@ -19,11 +19,12 @@ import {
 } from './contribution';
 
 // A gathered, verified profile. Reputation IS this record set, not a number:
-// `attested` is the trustworthy set (a host vouched for it), `claimed` is
-// self-asserted but unattested, and byKind counts only the attested records.
+// `attested` retains every proof from an allowed host, while `counted` selects
+// one proof per semantic event. Gates and byKind use only the counted events.
 export interface Profile {
   readonly subject: string;
   readonly attested: readonly Contribution[];
+  readonly counted: readonly Contribution[];
   readonly untrusted: readonly Contribution[];
   readonly claimed: readonly Contribution[];
   readonly byKind: Readonly<Record<ContributionKind, number>>;
@@ -158,11 +159,12 @@ export class ReputationLog {
     return verifyContribution(c);
   }
 
-  // Partition `subject`'s records: attested (authentic ∧ attested), claimed
-  // (authentic ∧ ¬attested); non-authentic records are dropped (not the
-  // subject's claim). byKind counts the attested set.
-  profile(subject: string, trustedHosts?: ReadonlySet<string>): Profile {
+  // Partition `subject`'s records: attested (authentic ∧ trusted host),
+  // untrusted (authentic ∧ unlisted host), and claimed (authentic without a
+  // host). Invalid subject proofs are dropped. byKind counts unique events.
+  profile(subject: string, trustedHosts: ReadonlySet<string>): Profile {
     const attested: Contribution[] = [];
+    const counted: Contribution[] = [];
     const untrusted: Contribution[] = [];
     const claimed: Contribution[] = [];
     const byKind: Record<ContributionKind, number> = {
@@ -170,15 +172,21 @@ export class ReputationLog {
       review: 0,
       release: 0,
     };
+    const countedEvents = new Set<string>();
     for (const c of this.forSubject(subject)) {
       const v = verifyContribution(c);
       if (!v.authentic) {
         continue;
       }
       if (v.attested) {
-        if (trustedHosts === undefined || trustedHosts.has(c.host)) {
+        if (trustedHosts.has(c.host)) {
           attested.push(c);
-          byKind[c.kind] += 1;
+          const event = JSON.stringify([c.subject, c.repo, c.kind, c.ref]);
+          if (!countedEvents.has(event)) {
+            countedEvents.add(event);
+            counted.push(c);
+            byKind[c.kind] += 1;
+          }
         } else {
           untrusted.push(c);
         }
@@ -186,6 +194,6 @@ export class ReputationLog {
         claimed.push(c);
       }
     }
-    return { subject, attested, untrusted, claimed, byKind };
+    return { subject, attested, counted, untrusted, claimed, byKind };
   }
 }

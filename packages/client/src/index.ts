@@ -1,9 +1,12 @@
 export {
   Client,
+  type AttestationSkipReason,
+  type AttestationSummary,
   type LandOutcome,
   type PushResult,
   type ReputationImportOutcome,
   type ReputationProfile,
+  type ReleaseCreationOutcome,
   type RevokeOutcome,
   type RevealOutcome,
   type ScheduleRevealOutcome,

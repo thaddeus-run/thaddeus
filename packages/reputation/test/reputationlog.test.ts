@@ -77,7 +77,7 @@ describe('ReputationLog — aggregate, verify, profile', () => {
     log.append(claimed);
     log.append(dropped);
 
-    const p = log.profile(alice.did);
+    const p = log.profile(alice.did, new Set([host.did]));
     expect(p.attested.map((c) => c.ref)).toEqual(['op-a']);
     expect(p.untrusted).toEqual([]);
     expect(p.claimed.map((c) => c.ref)).toEqual(['op-b']);
@@ -98,8 +98,53 @@ describe('ReputationLog — aggregate, verify, profile', () => {
     expect(filtered.attested.map((c) => c.ref)).toEqual(['trusted']);
     expect(filtered.untrusted.map((c) => c.ref)).toEqual(['foreign']);
     expect(filtered.byKind.merge).toBe(1);
-    expect(log.profile(alice.did).attested).toHaveLength(2);
     expect(log.profile(alice.did, new Set()).attested).toHaveLength(0);
+  });
+
+  test('counts one event across timestamps and trusted hosts', () => {
+    const alice = Identity.create();
+    const firstHost = Identity.create();
+    const secondHost = Identity.create();
+    const first = signContribution(fields(), alice, firstHost);
+    const second = signContribution(
+      fields({ at: '2026-06-25T00:00:00.000Z' }),
+      alice,
+      secondHost
+    );
+    const log = new ReputationLog();
+    log.append(first);
+    log.append(second);
+
+    const profile = log.profile(
+      alice.did,
+      new Set([firstHost.did, secondHost.did])
+    );
+    expect(profile.attested).toHaveLength(2);
+    expect(profile.counted).toHaveLength(1);
+    expect(profile.byKind.merge).toBe(1);
+
+    const reversed = new ReputationLog();
+    reversed.append(second);
+    reversed.append(first);
+    expect(
+      reversed.profile(alice.did, new Set([firstHost.did, secondHost.did]))
+        .counted
+    ).toEqual(profile.counted);
+  });
+
+  test('removing a rotated host DID immediately makes its proofs untrusted', () => {
+    const alice = Identity.create();
+    const outgoingHost = Identity.create();
+    const log = new ReputationLog();
+    log.append(signContribution(fields(), alice, outgoingHost));
+
+    expect(
+      log.profile(alice.did, new Set([outgoingHost.did])).counted
+    ).toHaveLength(1);
+    const removed = log.profile(alice.did, new Set());
+    expect(removed.counted).toHaveLength(0);
+    expect(removed.attested).toHaveLength(0);
+    expect(removed.untrusted).toHaveLength(1);
   });
 
   test('forSubject returns a deterministic order regardless of append order', () => {

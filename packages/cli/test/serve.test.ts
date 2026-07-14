@@ -3,7 +3,9 @@ import { encodeHeadRecord, signHead } from '@thaddeus.run/log';
 import {
   type Bundle,
   decodeBundle,
+  DEFAULT_ATTESTATION_RATE_LIMIT,
   DEFAULT_MAX_REQUEST_BODY_BYTES,
+  MAX_ATTESTATION_RATE_LIMIT,
   MAX_REPLAY_NONCE_CAPACITY,
   REQUEST_SKEW_MS,
   signRequest,
@@ -172,6 +174,111 @@ describe('startServer', () => {
       ).toBe(2);
       expect(output).toEqual([`invalid --max-request-body-bytes: ${value}`]);
     }
+  });
+
+  test('validates attestation signer and rate-limit options before startup', async () => {
+    const keyArn =
+      'arn:aws:kms:eu-west-1:123456789012:key/12345678-1234-1234-1234-123456789012';
+    const conflicting: string[] = [];
+    expect(
+      await run(['serve', '--host', '--attestation-aws-kms-key-arn', keyArn], {
+        cwd: tmp,
+        home: tmp,
+        out: (line) => conflicting.push(line),
+      })
+    ).toBe(2);
+    expect(conflicting).toEqual([
+      'use either --host or --attestation-aws-kms-key-arn, not both',
+    ]);
+
+    for (const value of [
+      '-1',
+      '1.5',
+      '1e1',
+      String(MAX_ATTESTATION_RATE_LIMIT + 1),
+    ]) {
+      const output: string[] = [];
+      const option = value.startsWith('-')
+        ? `--attestation-rate-limit=${value}`
+        : '--attestation-rate-limit';
+      expect(
+        await run(
+          ['serve', option, ...(value.startsWith('-') ? [] : [value])],
+          {
+            cwd: tmp,
+            home: tmp,
+            out: (line) => output.push(line),
+          }
+        )
+      ).toBe(2);
+      expect(output).toEqual([`invalid --attestation-rate-limit: ${value}`]);
+    }
+
+    const missingSigner: string[] = [];
+    expect(
+      await run(
+        [
+          'serve',
+          '--attestation-rate-limit',
+          String(DEFAULT_ATTESTATION_RATE_LIMIT),
+        ],
+        {
+          cwd: tmp,
+          home: tmp,
+          out: (line) => missingSigner.push(line),
+        }
+      )
+    ).toBe(2);
+    expect(missingSigner).toEqual([
+      '--attestation-rate-limit requires --host or --attestation-aws-kms-key-arn',
+    ]);
+  });
+
+  test('warns before starting with the development-only local host seed', async () => {
+    const home = mkdtempSync(join(tmp, 'local-host-home-'));
+    expect(
+      await run(['init'], {
+        cwd: tmp,
+        home,
+        out: () => {},
+      })
+    ).toBe(0);
+    const occupied = Bun.serve({
+      port: 0,
+      fetch: () => new Response('occupied'),
+    });
+    const errors: string[] = [];
+    try {
+      expect(
+        await run(['serve', '--host', '--port', String(occupied.port)], {
+          cwd: tmp,
+          home,
+          out: () => {},
+          err: (line) => errors.push(line),
+        })
+      ).toBe(1);
+    } finally {
+      await occupied.stop(true);
+    }
+    expect(errors).toContain(
+      'warning: serve --host loads a local private signing seed; use AWS KMS in production'
+    );
+  });
+
+  test('keeps KMS startup failures free of infrastructure identifiers', async () => {
+    const output: string[] = [];
+    const sensitiveKeyId = 'alias/private-infrastructure-name';
+    expect(
+      await run(['serve', '--attestation-aws-kms-key-arn', sensitiveKeyId], {
+        cwd: tmp,
+        home: tmp,
+        out: (line) => output.push(line),
+      })
+    ).toBe(1);
+    expect(output).toEqual([
+      'error: AWS KMS attester startup validation failed',
+    ]);
+    expect(output.join('\n')).not.toContain(sensitiveKeyId);
   });
 
   test('rejects non-decimal and out-of-range replay CLI values', async () => {

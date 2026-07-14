@@ -1,4 +1,9 @@
-export { createServer, DEFAULT_MAX_REQUEST_BODY_BYTES } from './server';
+export {
+  createServer,
+  DEFAULT_ATTESTATION_RATE_LIMIT,
+  DEFAULT_MAX_REQUEST_BODY_BYTES,
+  MAX_ATTESTATION_RATE_LIMIT,
+} from './server';
 export type { Server, ServerConfig } from './server';
 export { DEFAULT_REPO_POLICY, normalizeRepoPolicy } from './repo-policy';
 export type {

@@ -38,11 +38,12 @@ with `FileBackend`. The production infrastructure change (S3 / multi-node) is
 - **P12 — Single-node security hardening.** Request bodies are now capped and
   streamed before authentication or buffering (#75), and backend-neutral atomic
   replay consumption now persists nonce expiries across single-node restarts
-  (#61 / THA-8, both shipped under Unreleased). Next are per-identity
-  repo/object quotas + rate limits (#76), size/count limits + pagination (#62),
-  per-signer rate + spam control (#63), meter or remove `maxSpend` (#78, still a
-  hard-coded 0), and the reputation anti-farming hardening on top of the 0.1.7
-  `--trust-host` allowlist (#79). No replicas required.
+  (#61 / THA-8), while reputation now has exact host trust, anti-farming, a
+  durable issuance ceiling, and managed KMS custody (#79 / THA-26; all shipped
+  under Unreleased). Next are per-identity repo/object quotas + rate limits
+  (#76), size/count limits + pagination (#62), per-signer rate + spam control
+  (#63), meter or remove `maxSpend` (#78, still a hard-coded 0). No replicas
+  required.
 - **P13 — Product & collaboration UX.** `thaddeus init` in-place + offline
   `commit` (#80), the getting-started clone-path fix + version drift + a
   runnable agent-governed demo (#82), plus `track`, workspace base sync, 3-way
@@ -66,6 +67,18 @@ restored successfully in a clean environment (#71).
 > The S3 backend is tracked as **#69** under milestone P14.
 
 ### Security
+
+- **Reputation attestations now fail closed against farming (#79 / THA-26).**
+  Reputation gates require an exact host-DID allowlist and count one event per
+  `(subject, repo, kind, ref)` while retaining every trusted proof for audit.
+  Merge issuance verifies repository/ref/author bindings and excludes
+  owner-authored operations in the owner's repository. Merge and release proofs
+  share a durable per-subject rolling-hour ceiling of 20, with fixed-label
+  metrics and fail-soft repository operations when signing or limiter storage is
+  unavailable. Production signing uses a validated customer-managed AWS KMS
+  Ed25519 key through short-lived Fly workload identity; the data volume no
+  longer contains or initializes a host seed. The local `serve --host` path is
+  retained as development-only compatibility.
 
 - **Replay nonces survive single-node restarts (#61 / THA-8).** Signed routes
   now atomically consume opaque, domain-separated nonce keys through a required

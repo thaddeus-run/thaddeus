@@ -45,6 +45,7 @@
     "prepublishOnly": "moon run cli:prepublish"
   },
   "dependencies": {
+    "@aws-sdk/client-kms": "catalog:",
     "@thaddeus.run/agent": "workspace:*",
     "@thaddeus.run/client": "workspace:*",
     "@thaddeus.run/fs": "workspace:*",

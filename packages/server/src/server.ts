@@ -30,7 +30,8 @@ import {
 } from '@thaddeus.run/platform';
 import { ProvenanceLog } from '@thaddeus.run/provenance';
 import {
-  attest,
+  type AttestationSigner,
+  attestWithSigner,
   type Contribution,
   type ContributionClaim,
   decodeReputationArchive,
@@ -54,6 +55,7 @@ import {
   verifyCapability,
 } from '@thaddeus.run/store';
 
+import { AttestationRateLimiter } from './attestation-rate';
 import {
   type Bundle,
   decodeBundle,
@@ -100,6 +102,8 @@ function safeDecode(segment: string): string | undefined {
 }
 
 export const DEFAULT_MAX_REQUEST_BODY_BYTES: number = 16 * 1024 * 1024;
+export const DEFAULT_ATTESTATION_RATE_LIMIT = 20;
+export const MAX_ATTESTATION_RATE_LIMIT = 20;
 const REQUEST_BODY_BUFFER_BLOCK_BYTES = 64 * 1024;
 
 /** Resolves the inclusive application limit and rejects unsafe host values. */
@@ -157,6 +161,21 @@ function requestTimestampSkew(value: number | undefined): number {
   return skew;
 }
 
+/** Resolves the per-subject rolling-hour attestation security ceiling. */
+function attestationRateLimit(value: number | undefined): number {
+  const limit = value ?? DEFAULT_ATTESTATION_RATE_LIMIT;
+  if (
+    !Number.isSafeInteger(limit) ||
+    limit < 0 ||
+    limit > MAX_ATTESTATION_RATE_LIMIT
+  ) {
+    throw new RangeError(
+      `attestationRateLimit must be an integer between 0 and ${MAX_ATTESTATION_RATE_LIMIT}`
+    );
+  }
+  return limit;
+}
+
 export interface ServerConfig {
   backend: Backend & ReplayNonceBackend;
   // Largest request body accepted by application routes. Bun hosts use one
@@ -171,17 +190,22 @@ export interface ServerConfig {
     context:
       | { operation: 'reveal'; repo?: string }
       | { operation: 'nonce-consumption' }
+      | { operation: 'attestation-sign' }
+      | { operation: 'attestation-rate-store' }
   ) => void;
-  // An optional host identity turns this into an ATTESTING instance: on a
-  // successful land it co-signs each client-pushed reputation claim (P07) for a
-  // landed op, minting a host-vouched Contribution. Without it, the server holds
-  // no keys and reputation does not accrue.
+  // Preferred production attester. Managed implementations keep private key
+  // bytes outside this process, though authorization to sign remains sensitive.
+  attester?: AttestationSigner;
+  /** @deprecated Development-only local signer; use attester in production. */
   host?: Identity;
+  // Per-subject rolling-hour security ceiling. Operators may tighten but never
+  // raise the compiled maximum; zero disables issuance.
+  attestationRateLimit?: number;
   // When set, land is additionally gated on durable server-wide reputation:
   // every incoming op's author must have at least this many ATTESTED merges.
   minMerges?: number;
-  // Host DIDs whose valid attestations count in this instance's profile and
-  // reputation gates. The local `host`, when present, is trusted automatically.
+  // Exact host-DID allowlist for profiles and gates. There is no transitive
+  // trust; the active local or managed attester is added automatically.
   trustedReputationHosts?: readonly string[];
   // Maximum live durable nonces. Full stores fail closed until the oldest live
   // record passes its exact expiry boundary.
@@ -212,6 +236,39 @@ interface LandEffects {
     readonly changes: number;
   }[];
   readonly contributions: readonly Contribution[];
+  readonly attestationReservations?: readonly string[];
+}
+
+const ATTESTATION_SKIP_REASONS = [
+  'not_attesting',
+  'ineligible',
+  'duplicate',
+  'rate_limited',
+  'limiter_unavailable',
+  'signer_unavailable',
+] as const;
+
+type AttestationSkipReason = (typeof ATTESTATION_SKIP_REASONS)[number];
+
+interface AttestationSummary {
+  received: number;
+  issued: number;
+  skipped: Record<AttestationSkipReason, number>;
+}
+
+function emptyAttestationSummary(received: number): AttestationSummary {
+  return {
+    received,
+    issued: 0,
+    skipped: {
+      not_attesting: 0,
+      ineligible: 0,
+      duplicate: 0,
+      rate_limited: 0,
+      limiter_unavailable: 0,
+      signer_unavailable: 0,
+    },
+  };
 }
 
 // Every op reachable from `heads` by walking parents (inclusive), in
@@ -328,6 +385,21 @@ export function createServer(config: ServerConfig): Server {
   const maxRequestBodyBytes = requestBodyLimit(config.maxRequestBodyBytes);
   const configuredReplayNonceCapacity = replayNonceCapacity(config);
   const configuredRequestSkewMs = requestTimestampSkew(config.requestSkewMs);
+  const configuredAttestationRateLimit = attestationRateLimit(
+    config.attestationRateLimit
+  );
+  if (config.attester !== undefined && config.host !== undefined) {
+    throw new TypeError('attester and host cannot both be set');
+  }
+  const localHost = config.host;
+  const attester: AttestationSigner | undefined =
+    config.attester ??
+    (localHost === undefined
+      ? undefined
+      : {
+          did: localHost.did,
+          sign: (message) => Promise.resolve(localHost.sign(message)),
+        });
   const platform = new Platform();
   const policy = config.policy ?? blockOnConflict;
   const now = config.now ?? ((): string => new Date().toISOString());
@@ -340,7 +412,18 @@ export function createServer(config: ServerConfig): Server {
     }
     trustedReputationHosts.add(did);
   }
-  if (config.host !== undefined) trustedReputationHosts.add(config.host.did);
+  if (attester !== undefined) {
+    try {
+      PublicIdentity.fromDid(attester.did);
+    } catch {
+      throw new TypeError(`invalid attester DID: ${attester.did}`);
+    }
+    trustedReputationHosts.add(attester.did);
+  }
+  const attestationLimiter = new AttestationRateLimiter(
+    config.backend,
+    configuredAttestationRateLimit
+  );
   const repoCache = new Map<string, Repo>();
   // Per-repo promise chain: each mutation awaits the previous, so a land's
   // read-heads -> re-point can't interleave with a concurrent push.
@@ -471,6 +554,100 @@ export function createServer(config: ServerConfig): Server {
     return reputationPromise;
   }
 
+  const attestationOutcomes: Record<'issued' | AttestationSkipReason, number> =
+    {
+      issued: 0,
+      not_attesting: 0,
+      ineligible: 0,
+      duplicate: 0,
+      rate_limited: 0,
+      limiter_unavailable: 0,
+      signer_unavailable: 0,
+    };
+  let cleanedAttestationRateRecords = 0;
+
+  interface PreparedAttestations {
+    readonly contributions: Contribution[];
+    readonly reservations: string[];
+  }
+
+  function recordAttestationSummary(summary: AttestationSummary): void {
+    attestationOutcomes.issued += summary.issued;
+    for (const reason of ATTESTATION_SKIP_REASONS) {
+      attestationOutcomes[reason] += summary.skipped[reason];
+    }
+  }
+
+  async function releaseAttestationReservations(
+    reservations: readonly string[]
+  ): Promise<void> {
+    for (const key of reservations) {
+      try {
+        await attestationLimiter.release(key);
+      } catch (error) {
+        config.onError?.(error, { operation: 'attestation-rate-store' });
+      }
+    }
+  }
+
+  // Reserve and sign eligible claims in deterministic caller order. A signer
+  // failure trips a request-local circuit so one batch cannot hammer KMS.
+  async function prepareAttestations(
+    claims: readonly ContributionClaim[],
+    summary: AttestationSummary
+  ): Promise<PreparedAttestations> {
+    const contributions: Contribution[] = [];
+    const reservations: string[] = [];
+    let signerUnavailable = false;
+    for (const claim of claims) {
+      if (signerUnavailable || attester === undefined) {
+        summary.skipped.signer_unavailable += 1;
+        continue;
+      }
+      const issuedAt = Date.parse(now());
+      if (!Number.isSafeInteger(issuedAt) || issuedAt < 0) {
+        summary.skipped.limiter_unavailable += 1;
+        config.onError?.(new Error('server clock is invalid'), {
+          operation: 'attestation-rate-store',
+        });
+        continue;
+      }
+      const event = JSON.stringify([
+        claim.subject,
+        claim.repo,
+        claim.kind,
+        claim.ref,
+      ]);
+      let reservation: Awaited<ReturnType<AttestationRateLimiter['reserve']>>;
+      try {
+        reservation = await attestationLimiter.reserve(
+          claim.subject,
+          event,
+          issuedAt
+        );
+        cleanedAttestationRateRecords += reservation.cleaned;
+      } catch (error) {
+        summary.skipped.limiter_unavailable += 1;
+        config.onError?.(error, { operation: 'attestation-rate-store' });
+        continue;
+      }
+      if (reservation.status === 'rate_limited') {
+        summary.skipped.rate_limited += 1;
+        continue;
+      }
+      try {
+        contributions.push(await attestWithSigner(claim, attester));
+        reservations.push(reservation.key);
+      } catch (error) {
+        await releaseAttestationReservations([reservation.key]);
+        summary.skipped.signer_unavailable += 1;
+        signerUnavailable = true;
+        config.onError?.(error, { operation: 'attestation-sign' });
+      }
+    }
+    return { contributions, reservations };
+  }
+
   // Apply a committed land's secondary durable effects from a write-ahead
   // record. Fixed per-head meter keys and content-addressed contributions make
   // retries idempotent after any partial failure.
@@ -492,7 +669,9 @@ export function createServer(config: ServerConfig): Server {
         typeof effects.view !== 'string' ||
         typeof effects.head !== 'string' ||
         !Array.isArray(effects.meters) ||
-        !Array.isArray(effects.contributions)
+        !Array.isArray(effects.contributions) ||
+        (effects.attestationReservations !== undefined &&
+          !Array.isArray(effects.attestationReservations))
       ) {
         throw new Error(`stored land effects are invalid: ${key}`);
       }
@@ -500,6 +679,9 @@ export function createServer(config: ServerConfig): Server {
         .history(effects.view)
         .some((record) => record.id === effects.head);
       if (!committed) {
+        await releaseAttestationReservations(
+          effects.attestationReservations ?? []
+        );
         await backend.delete(key);
         continue;
       }
@@ -943,6 +1125,22 @@ export function createServer(config: ServerConfig): Server {
       '# HELP thaddeus_replay_nonce_records_cleaned_total Expired replay nonce records cleaned by signed requests.',
       '# TYPE thaddeus_replay_nonce_records_cleaned_total counter',
       `thaddeus_replay_nonce_records_cleaned_total ${cleanedReplayNonceRecords}`,
+      '# HELP thaddeus_attestation_enabled Whether reputation attestation issuance is enabled.',
+      '# TYPE thaddeus_attestation_enabled gauge',
+      `thaddeus_attestation_enabled ${attester === undefined || configuredAttestationRateLimit === 0 ? 0 : 1}`,
+      '# HELP thaddeus_attestation_rate_limit Per-subject rolling-hour attestation ceiling.',
+      '# TYPE thaddeus_attestation_rate_limit gauge',
+      `thaddeus_attestation_rate_limit ${configuredAttestationRateLimit}`,
+      '# HELP thaddeus_attestation_outcomes_total Reputation attestation outcomes.',
+      '# TYPE thaddeus_attestation_outcomes_total counter',
+      `thaddeus_attestation_outcomes_total{outcome="issued"} ${attestationOutcomes.issued}`,
+      ...ATTESTATION_SKIP_REASONS.map(
+        (outcome) =>
+          `thaddeus_attestation_outcomes_total{outcome="${outcome}"} ${attestationOutcomes[outcome]}`
+      ),
+      '# HELP thaddeus_attestation_rate_records_cleaned_total Expired attestation rate records cleaned by issuance attempts.',
+      '# TYPE thaddeus_attestation_rate_records_cleaned_total counter',
+      `thaddeus_attestation_rate_records_cleaned_total ${cleanedAttestationRateRecords}`,
       '',
     ];
     return new Response(lines.join('\n'), {
@@ -1420,6 +1618,7 @@ export function createServer(config: ServerConfig): Server {
       return json(400, { error: `release repo must be ${name}` });
     }
     let claim: ContributionClaim | undefined;
+    const receivedClaims = claimWire === undefined ? 0 : 1;
     if (typeof claimWire === 'string') {
       try {
         claim = decodeClaim(claimWire);
@@ -1483,18 +1682,39 @@ export function createServer(config: ServerConfig): Server {
         });
       }
 
-      await backend.put(key, encodeRecord(release));
-      if (
-        config.host !== undefined &&
-        claim !== undefined &&
+      const attestationSummary = emptyAttestationSummary(receivedClaims);
+      let prepared: PreparedAttestations = {
+        contributions: [],
+        reservations: [],
+      };
+      if (attester === undefined || configuredAttestationRateLimit === 0) {
+        attestationSummary.skipped.not_attesting = receivedClaims;
+      } else if (claim === undefined) {
+        attestationSummary.skipped.ineligible = receivedClaims;
+      } else if (
         claim.repo === name &&
         claim.ref === release.id &&
         claim.kind === 'release' &&
         claim.subject === release.signed_by &&
         verifyClaim(claim)
       ) {
+        prepared = await prepareAttestations([claim], attestationSummary);
+      } else {
+        attestationSummary.skipped.ineligible = 1;
+      }
+
+      try {
+        await backend.put(key, encodeRecord(release));
+      } catch (error) {
+        await releaseAttestationReservations(prepared.reservations);
+        throw error;
+      }
+      if (prepared.contributions.length > 0) {
         try {
-          await (await reputationLog()).ingest(attest(claim, config.host));
+          const contribution = prepared.contributions[0];
+          if (contribution !== undefined) {
+            await (await reputationLog()).ingest(contribution);
+          }
         } catch {
           // The release and its host-vouched contribution are one create from
           // the caller's perspective. If the second durable write fails, remove
@@ -1508,12 +1728,18 @@ export function createServer(config: ServerConfig): Server {
                 'release attestation failed and release rollback failed; inspect the stored tag before retrying',
             });
           }
+          await releaseAttestationReservations(prepared.reservations);
           return json(500, {
             error: 'release attestation failed; release was rolled back',
           });
         }
       }
-      return json(201, { release: encodeRelease(release) });
+      attestationSummary.issued = prepared.contributions.length;
+      recordAttestationSummary(attestationSummary);
+      return json(201, {
+        release: encodeRelease(release),
+        attestations: attestationSummary,
+      });
     });
   }
 
@@ -2107,13 +2333,15 @@ export function createServer(config: ServerConfig): Server {
     if (decoded instanceof Response) return decoded;
     // Decode any client-pushed reputation claims (P07). A malformed entry is
     // dropped rather than failing the whole land.
+    const receivedClaims = Array.isArray(contrib) ? contrib.length : 0;
+    let malformedClaims = 0;
     const claims: ContributionClaim[] = [];
     if (Array.isArray(contrib)) {
       for (const s of contrib) {
         try {
           claims.push(decodeClaim(s));
         } catch {
-          // skip a malformed claim
+          malformedClaims += 1;
         }
       }
     }
@@ -2266,30 +2494,65 @@ export function createServer(config: ServerConfig): Server {
       const meters = [...countByAuthor]
         .filter(([agent]) => reg.delegationFor(agent) !== undefined)
         .map(([agent, changes]) => ({ agent, changes }));
-      const contributions: Contribution[] = [];
-      if (config.host !== undefined && claims.length > 0) {
+      const attestationSummary = emptyAttestationSummary(receivedClaims);
+      let prepared: PreparedAttestations = {
+        contributions: [],
+        reservations: [],
+      };
+      if (attester === undefined || configuredAttestationRateLimit === 0) {
+        attestationSummary.skipped.not_attesting = receivedClaims;
+      } else if (claims.length > 0 || malformedClaims > 0) {
+        attestationSummary.skipped.ineligible = malformedClaims;
         const byId = new Map(incoming.map((op) => [op.id, op]));
+        const eligible = new Map<string, ContributionClaim>();
         for (const claim of claims) {
           const op = byId.get(claim.ref);
           if (
             op !== undefined &&
+            claim.kind === 'merge' &&
+            claim.repo === name &&
             claim.subject === op.author &&
+            claim.subject !== meta.owner &&
             verifyClaim(claim)
           ) {
-            contributions.push(attest(claim, config.host));
+            const event = JSON.stringify([
+              claim.subject,
+              claim.repo,
+              claim.kind,
+              claim.ref,
+            ]);
+            if (eligible.has(event)) {
+              attestationSummary.skipped.duplicate += 1;
+            } else {
+              eligible.set(event, claim);
+            }
+          } else {
+            attestationSummary.skipped.ineligible += 1;
           }
         }
+        prepared = await prepareAttestations(
+          [...eligible.entries()]
+            .sort(([left], [right]) => left.localeCompare(right))
+            .map(([, claim]) => claim),
+          attestationSummary
+        );
       }
       const effects: LandEffects = {
         repo: name,
         view: target,
         head: decoded.id,
         meters,
-        contributions,
+        contributions: prepared.contributions,
+        attestationReservations: prepared.reservations,
       };
       const effectsBackend = metaBackend(name);
       const effectsKey = `meta/land-effects/${decoded.id}`;
-      await effectsBackend.put(effectsKey, encodeRecord(effects));
+      try {
+        await effectsBackend.put(effectsKey, encodeRecord(effects));
+      } catch (error) {
+        await releaseAttestationReservations(prepared.reservations);
+        throw error;
+      }
 
       let result: LandResult;
       try {
@@ -2302,18 +2565,23 @@ export function createServer(config: ServerConfig): Server {
         });
       } catch (error) {
         await effectsBackend.delete(effectsKey).catch(() => {});
+        await releaseAttestationReservations(prepared.reservations);
         throw error;
       }
       if (!result.landed) {
         await effectsBackend.delete(effectsKey).catch(() => {});
+        await releaseAttestationReservations(prepared.reservations);
       } else {
         // Authority is already committed. A secondary write failure must not
         // turn success into a retryable error; the durable outbox remains.
         await recoverLandEffects(name, repo, reg).catch(() => {});
+        attestationSummary.issued = prepared.contributions.length;
+        recordAttestationSummary(attestationSummary);
       }
       return json(200, {
         ...result,
         ...(result.landed ? { head: encodeHeadRecord(decoded) } : {}),
+        ...(result.landed ? { attestations: attestationSummary } : {}),
       });
     });
   }
@@ -2481,6 +2749,7 @@ export function createServer(config: ServerConfig): Server {
     return json(200, {
       subject: profile.subject,
       attested: profile.attested.length,
+      counted: profile.counted.length,
       untrusted: profile.untrusted.length,
       claimed: profile.claimed.length,
       byKind: profile.byKind,

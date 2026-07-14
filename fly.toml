@@ -8,12 +8,13 @@ primary_region = "ams"
 [env]
 PORT = "4000"
 THADDEUS_DATA = "/data"
-THADDEUS_HOST = "1"
 THADDEUS_MAX_REQUEST_BODY_BYTES = "16777216"
+# AWS_ROLE_ARN and THADDEUS_ATTESTATION_AWS_KMS_KEY_ARN are deploy-specific
+# Fly secrets. Fly OIDC supplies short-lived AWS credentials at runtime.
 # THADDEUS_MIN_MERGES = "0"    # gate land on N attested merges per author
 # THADDEUS_TRUST_HOSTS = "did:key:...,did:key:..." # foreign attesting hosts
 
-# Existing durable volume, mounted where the FileBackend + host identity live.
+# Existing durable volume, mounted for the FileBackend substrate only.
 # Do not create, rename, or migrate it: `data` is attached in `ams`.
 [[mounts]]
 source = "data"
@@ -31,7 +32,7 @@ min_machines_running = 1
 
 # HTTP health check — restart the machine if the server stops answering
 # (a TCP-only check misses a crashed HTTP handler). /repos always returns 200.
-# grace_period lets the server boot + mint its identity before checks count.
+# grace_period lets the server validate KMS and load durable state before checks.
 [[http_service.checks]]
 grace_period = "10s"
 interval = "15s"

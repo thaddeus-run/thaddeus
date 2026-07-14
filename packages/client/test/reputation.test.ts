@@ -48,6 +48,7 @@ describe('Client — portable reputation', () => {
     });
     expect(await client.reputation(subject.did)).toMatchObject({
       attested: 0,
+      counted: 0,
       untrusted: 1,
       claimed: 0,
     });
@@ -71,6 +72,7 @@ describe('Client — portable reputation', () => {
     );
     expect(await afterRestart.reputation(subject.did)).toMatchObject({
       attested: 1,
+      counted: 1,
       untrusted: 0,
       byKind: { merge: 1 },
     });

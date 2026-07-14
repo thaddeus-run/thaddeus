@@ -267,7 +267,7 @@ describe('north-star: one edit, end to end', () => {
         attested: true,
       });
 
-      const profile = elsewhere.profile(author.did);
+      const profile = elsewhere.profile(author.did, new Set([instance.did]));
       expect(profile.attested).toHaveLength(1);
       expect(profile.attested[0]?.ref).toBe(op.id);
       expect(profile.byKind.merge).toBe(1);

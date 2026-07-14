@@ -81,6 +81,20 @@ export interface ScheduleRevealOutcome extends RevealOutcome {
   scheduled: boolean;
 }
 
+export type AttestationSkipReason =
+  | 'not_attesting'
+  | 'ineligible'
+  | 'duplicate'
+  | 'rate_limited'
+  | 'limiter_unavailable'
+  | 'signer_unavailable';
+
+export interface AttestationSummary {
+  readonly received: number;
+  readonly issued: number;
+  readonly skipped: Readonly<Record<AttestationSkipReason, number>>;
+}
+
 export interface LandOutcome {
   landed: boolean;
   into: string;
@@ -88,14 +102,20 @@ export interface LandOutcome {
   heads: string[];
   conflicts: Conflict[];
   reason?: string;
+  attestations?: AttestationSummary;
 }
 
-// A subject's server-wide reputation profile (P07): counts of attested
-// (host-vouched) vs claimed (self-asserted) contributions, plus the attested
-// tally by kind.
+export interface ReleaseCreationOutcome {
+  readonly release: Release;
+  readonly attestations?: AttestationSummary;
+}
+
+// A subject's server-wide profile: all trusted proofs remain visible in
+// `attested`, while `counted` and byKind deduplicate semantic events.
 export interface ReputationProfile {
   subject: string;
   attested: number;
+  counted: number;
   untrusted: number;
   claimed: number;
   byKind: Record<string, number>;
@@ -475,6 +495,14 @@ export class Client {
     release: Release,
     claim?: ContributionClaim
   ): Promise<Release> {
+    return (await this.createReleaseWithOutcome(name, release, claim)).release;
+  }
+
+  async createReleaseWithOutcome(
+    name: string,
+    release: Release,
+    claim?: ContributionClaim
+  ): Promise<ReleaseCreationOutcome> {
     const res = await this.#signed(
       'POST',
       `/repos/${encodeURIComponent(name)}/releases`,
@@ -483,12 +511,20 @@ export class Client {
         ...(claim === undefined ? {} : { claim: encodeClaim(claim) }),
       }
     );
-    const body = (await this.#ok(res)) as { release: string };
+    const body = (await this.#ok(res)) as {
+      release: string;
+      attestations?: AttestationSummary;
+    };
     const created = verifiedRelease(body.release, name, release.tag);
     if (created.id !== release.id) {
       throw new Error('server returned a different release record');
     }
-    return created;
+    return {
+      release: created,
+      ...(body.attestations === undefined
+        ? {}
+        : { attestations: body.attestations }),
+    };
   }
 
   async listReleases(name: string): Promise<Release[]> {

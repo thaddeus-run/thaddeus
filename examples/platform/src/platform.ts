@@ -158,7 +158,7 @@ for (let i = 0; i < 3; i++) {
     )
   );
 }
-const tier = requireReputationTier(reps, 3);
+const tier = requireReputationTier(reps, 3, new Set([attester.did]));
 
 const seniorWs = Workspace.open(svc.log, svc.store, {
   source: 'main',

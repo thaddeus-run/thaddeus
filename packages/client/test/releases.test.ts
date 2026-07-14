@@ -40,7 +40,18 @@ describe('Client releases', () => {
     );
 
     expect(await client.createRelease('r', release)).toEqual(release);
-    expect(await client.listReleases('r')).toEqual([release]);
+    const second = signRelease(
+      {
+        ...release,
+        tag: 'v2',
+      },
+      owner
+    );
+    expect(await client.createReleaseWithOutcome('r', second)).toMatchObject({
+      release: second,
+      attestations: { received: 0, issued: 0 },
+    });
+    expect(await client.listReleases('r')).toEqual([release, second]);
     expect(await client.getRelease('r', 'v1')).toEqual(release);
     expect(await errorMessage(client.createRelease('r', release))).toContain(
       'release tag v1 already exists'
