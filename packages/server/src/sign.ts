@@ -177,9 +177,10 @@ export function signRequest(
   };
 }
 
-// Server side: verify headers against the body. Returns the verified signer DID,
-// or null on any failure (missing/invalid signature, expired/early timestamp,
-// invalid/replayed nonce, saturated replay cache, or undecodable DID).
+/**
+ * Verifies signed request headers and returns the signer DID on success.
+ * Missing, malformed, expired, replayed, or undecodable envelopes return null.
+ */
 export function verifyRequest(
   method: string,
   pathWithQuery: string,

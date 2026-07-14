@@ -668,8 +668,10 @@ export function createServer(config: ServerConfig): Server {
   };
   let cleanedReplayNonceRecords = 0;
 
-  // Every signed route uses this wrapper so a valid envelope is durably
-  // consumed before parsing, repo locking, or any persistence mutation.
+  /**
+   * Verifies and durably consumes a signed envelope before route processing.
+   * No parsing, locking, or persistence mutation happens before this returns.
+   */
   async function verifyRequest(
     method: string,
     pathWithQuery: string,
@@ -951,6 +953,7 @@ export function createServer(config: ServerConfig): Server {
     });
   }
 
+  /** Creates a repository after consuming and authorizing its signed envelope. */
   async function createRepo(req: Request, body: Uint8Array): Promise<Response> {
     const signer = await verifyRequest(
       'POST',
@@ -1059,6 +1062,7 @@ export function createServer(config: ServerConfig): Server {
 
   // Owner schedules a client-created public capability. The server validates
   // its signature and current ciphertext, then holds it as embargo custodian.
+  /** Schedules a signed public reveal for an encrypted object. */
   async function scheduleReveal(
     name: string,
     req: Request,
@@ -1135,6 +1139,7 @@ export function createServer(config: ServerConfig): Server {
 
   // Owner-triggered reveal. A trigger cannot bypass the embargo because the
   // store receives the server's trusted clock, never a client-provided time.
+  /** Applies a due signed reveal and publishes its object capability. */
   async function reveal(
     name: string,
     plaintextId: string,
@@ -1187,6 +1192,7 @@ export function createServer(config: ServerConfig): Server {
   // Owner-only read of reveal schedules. Include both withheld capabilities
   // and already-served public capabilities so promotion between pull and this
   // request cannot make recall erase a newly public grant.
+  /** Lists pending reveal schedules visible to the repository owner. */
   async function pendingReveals(
     name: string,
     req: Request,
@@ -1244,6 +1250,7 @@ export function createServer(config: ServerConfig): Server {
   // DELETE /repos/:name — owner-only. Drops every backend key under the repo's
   // scope and evicts its per-repo caches. Irreversible (no GC/undo yet). The
   // server-wide ReputationLog (top-level `rep/`) spans repos and is NOT removed.
+  /** Deletes a repository after owner-envelope authentication. */
   async function deleteRepo(
     name: string,
     req: Request,
@@ -1370,6 +1377,7 @@ export function createServer(config: ServerConfig): Server {
   // Signed create under the repo lock: policy, active delegation, current view
   // snapshot, duplicate tag, persistence, and optional attestation are one
   // serialized decision against server-side committed history.
+  /** Persists a signed immutable release record for a repository tag. */
   async function createRelease(
     name: string,
     req: Request,
@@ -1522,6 +1530,7 @@ export function createServer(config: ServerConfig): Server {
   }
 
   // POST /repos/:name/policy — owner-selectable repo policy, no restart.
+  /** Replaces a repository's signed policy record. */
   async function setPolicy(
     name: string,
     req: Request,
@@ -1570,6 +1579,7 @@ export function createServer(config: ServerConfig): Server {
 
   // Owner-created branches begin their own signed version-0 history. Delegates
   // may upload operations but cannot create shared authority records.
+  /** Creates a signed repository view rooted at an existing frontier. */
   async function createView(
     name: string,
     req: Request,
@@ -1639,6 +1649,7 @@ export function createServer(config: ServerConfig): Server {
 
   // Legacy migration: the owner selects and signs a genesis head. The old raw
   // pointer is checked only for view existence and is never used as trust input.
+  /** Establishes the first signed monotonic head for a repository view. */
   async function bootstrapHead(
     name: string,
     req: Request,
@@ -1999,6 +2010,7 @@ export function createServer(config: ServerConfig): Server {
   // op under the repo lock. Per-item failures go to rejected[] — a single bad
   // item does not abort the whole request. Views are never advanced here; only
   // land moves views.
+  /** Ingests a signed encrypted bundle without advancing the shared head. */
   async function push(
     name: string,
     req: Request,
@@ -2049,6 +2061,7 @@ export function createServer(config: ServerConfig): Server {
   // Only the owner may advance shared authority. Uploaded operations may still
   // be delegate-authored; all existing policy gates run before the signed record
   // is persisted and projected into the hot log.
+  /** Lands signed operations and advances the repository's shared head. */
   async function land(
     name: string,
     req: Request,
@@ -2308,6 +2321,7 @@ export function createServer(config: ServerConfig): Server {
   // Owner-signed grant: register + persist a P09 Delegation for the repo. The
   // delegation's operator must be the repo owner too, so an owner cannot launder
   // a third-party-issued grant through their own signed request.
+  /** Persists an owner-signed agent delegation for a repository. */
   async function grant(
     name: string,
     req: Request,
@@ -2379,6 +2393,7 @@ export function createServer(config: ServerConfig): Server {
 
   // Owner-signed revoke: quarantine + persist (terminal). A revoked agent stays
   // blocked across reloads.
+  /** Persists an owner-signed agent revocation for a repository. */
   async function revoke(
     name: string,
     req: Request,
@@ -2485,6 +2500,7 @@ export function createServer(config: ServerConfig): Server {
 
   // Subject-authorized strict import. Every contribution is independently
   // verified by decodeReputationArchive before the one-write durable merge.
+  /** Imports a signed reputation archive through an authenticated envelope. */
   async function reputationImport(
     req: Request,
     body: Uint8Array
