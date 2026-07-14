@@ -1,5 +1,15 @@
-export type { Backend } from './backend';
-export { decodeRecord, encodeRecord } from './backend';
+export type {
+  Backend,
+  ConsumeNonceInput,
+  ConsumeNonceResult,
+  ReplayNonceBackend,
+} from './backend';
+export {
+  decodeRecord,
+  DEFAULT_REPLAY_NONCE_CAPACITY,
+  encodeRecord,
+  MAX_REPLAY_NONCE_CAPACITY,
+} from './backend';
 export { ALG, address, decrypt, encrypt, newContentKey } from './object';
 export type { EncryptedObject } from './object';
 export { issueCapability, unwrapKey, verifyCapability } from './capability';

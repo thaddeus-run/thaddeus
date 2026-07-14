@@ -3,7 +3,13 @@ import { Workspace } from '@thaddeus.run/fs';
 import { Identity, ready } from '@thaddeus.run/identity';
 import { OpLog } from '@thaddeus.run/log';
 import { MemoryBackend } from '@thaddeus.run/persist';
-import { type Backend, MemoryStore } from '@thaddeus.run/store';
+import {
+  type Backend,
+  type ConsumeNonceInput,
+  type ConsumeNonceResult,
+  MemoryStore,
+  type ReplayNonceBackend,
+} from '@thaddeus.run/store';
 import { beforeAll, describe, expect, test } from 'bun:test';
 
 import { encodeBundle, encodeDelegation } from '../src/dto';
@@ -24,7 +30,7 @@ interface LandResult {
 
 // Simulates the first durable usage-delta write failing after a signed head has
 // committed, while preserving every other backend operation.
-class FailFirstMeterDeltaWrite implements Backend {
+class FailFirstMeterDeltaWrite implements Backend, ReplayNonceBackend {
   readonly #inner = new MemoryBackend();
   #failed = false;
 
@@ -50,6 +56,10 @@ class FailFirstMeterDeltaWrite implements Backend {
 
   async delete(key: string): Promise<void> {
     await this.#inner.delete(key);
+  }
+
+  consumeNonce(input: ConsumeNonceInput): Promise<ConsumeNonceResult> {
+    return this.#inner.consumeNonce(input);
   }
 }
 

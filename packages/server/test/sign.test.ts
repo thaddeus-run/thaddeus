@@ -2,7 +2,11 @@ import { Identity, ready } from '@thaddeus.run/identity';
 import { beforeAll, describe, expect, test } from 'bun:test';
 
 import {
+  DEFAULT_REPLAY_CACHE_CAPACITY,
+  DEFAULT_REPLAY_NONCE_CAPACITY,
+  MAX_REPLAY_NONCE_CAPACITY,
   ReplayNonceCache,
+  replayNonceKey,
   REQUEST_SKEW_MS,
   signRequest,
   verifyRequest,
@@ -49,6 +53,20 @@ describe('request signing', () => {
     const h = signRequest('POST', '/repos', body, a, NOW);
     expect(
       verifyRequest('POST', '/repos', body, h, nowMs + 6 * 60 * 1000)
+    ).toBeNull();
+  });
+
+  test('configurable skew accepts its exact boundary only', () => {
+    const a = Identity.create();
+    const h = signRequest('POST', '/repos', body, a, NOW);
+    expect(verifyRequest('POST', '/repos', body, h, nowMs + 1_000, 1_000)).toBe(
+      a.did
+    );
+    expect(
+      verifyRequest('POST', '/repos', body, h, nowMs + 1_001, 1_000)
+    ).toBeNull();
+    expect(
+      verifyRequest('POST', '/repos', body, h, nowMs, REQUEST_SKEW_MS + 1)
     ).toBeNull();
   });
 
@@ -174,5 +192,19 @@ describe('request signing', () => {
     expect(verifyRequest('POST', '/repos', body, missing, nowMs)).toBeNull();
     expect(verifyRequest('POST', '/repos', body, oversized, nowMs)).toBeNull();
     expect(() => new ReplayNonceCache(0)).toThrow(RangeError);
+    expect(() => new ReplayNonceCache(MAX_REPLAY_NONCE_CAPACITY + 1)).toThrow(
+      RangeError
+    );
+  });
+
+  test('canonical capacity alias and opaque nonce-key derivation stay stable', () => {
+    expect(DEFAULT_REPLAY_NONCE_CAPACITY).toBe(100_000);
+    expect(DEFAULT_REPLAY_CACHE_CAPACITY).toBe(DEFAULT_REPLAY_NONCE_CAPACITY);
+    const first = Identity.create();
+    const second = Identity.create();
+    const key = replayNonceKey(first.did, 'marker-nonce');
+    expect(key).toMatch(/^[0-9a-f]{64}$/);
+    expect(key).not.toContain(first.did);
+    expect(replayNonceKey(second.did, 'marker-nonce')).not.toBe(key);
   });
 });

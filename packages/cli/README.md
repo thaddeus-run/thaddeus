@@ -17,27 +17,27 @@ identity seed lives in `~/.config/thaddeus/`.
 
 ## Commands
 
-| Command                                                                  | Description                            |
-| ------------------------------------------------------------------------ | -------------------------------------- |
-| `init`                                                                   | Create a self-owned `did:key` identity |
-| `create <server> <repo>`                                                 | Create a repo on a server              |
-| `clone <server> <repo> [dir] [--owner DID]`                              | Clone and pin a signed head chain      |
-| `pull [--bootstrap-head]`                                                | Verify and fetch signed remote changes |
-| `status`                                                                 | Show working-tree changes              |
-| `push [--no-land]`                                                       | Commit/upload; owner-sign the landing  |
-| `land`                                                                   | Owner-land uploaded commits            |
-| `grant <did> [--paths a,b] [--max-changes N] [--max-changes-per-hour N]` | Grant push rights to a DID/agent       |
-| `revoke <did>`                                                           | Revoke a previously granted delegation |
-| `grants`                                                                 | List active grants for this repo       |
-| `policy [set\|clear]`                                                    | Show or select repo land policy        |
-| `query <kind> ...`                                                       | Query history and the semantic graph   |
-| `watch [symbol] [--kind <event>]...`                                     | Stream remote semantic changes         |
-| `schedule-reveal <path> --at <ISO>`                                      | Make committed content public later    |
-| `reveal <path>`                                                          | Trigger a due public reveal            |
-| `reputation <did>`                                                       | Show trusted/untrusted reputation      |
-| `reputation export <did> [--output path]`                                | Export a public reputation archive     |
-| `reputation import <path\|->` / `import --from URL`                      | Import or directly copy your archive   |
-| `serve [--port 4000] [--data DIR] [--max-request-body-bytes N]`          | Run a durable server                   |
+| Command                                                                              | Description                            |
+| ------------------------------------------------------------------------------------ | -------------------------------------- |
+| `init`                                                                               | Create a self-owned `did:key` identity |
+| `create <server> <repo>`                                                             | Create a repo on a server              |
+| `clone <server> <repo> [dir] [--owner DID]`                                          | Clone and pin a signed head chain      |
+| `pull [--bootstrap-head]`                                                            | Verify and fetch signed remote changes |
+| `status`                                                                             | Show working-tree changes              |
+| `push [--no-land]`                                                                   | Commit/upload; owner-sign the landing  |
+| `land`                                                                               | Owner-land uploaded commits            |
+| `grant <did> [--paths a,b] [--max-changes N] [--max-changes-per-hour N]`             | Grant push rights to a DID/agent       |
+| `revoke <did>`                                                                       | Revoke a previously granted delegation |
+| `grants`                                                                             | List active grants for this repo       |
+| `policy [set\|clear]`                                                                | Show or select repo land policy        |
+| `query <kind> ...`                                                                   | Query history and the semantic graph   |
+| `watch [symbol] [--kind <event>]...`                                                 | Stream remote semantic changes         |
+| `schedule-reveal <path> --at <ISO>`                                                  | Make committed content public later    |
+| `reveal <path>`                                                                      | Trigger a due public reveal            |
+| `reputation <did>`                                                                   | Show trusted/untrusted reputation      |
+| `reputation export <did> [--output path]`                                            | Export a public reputation archive     |
+| `reputation import <path\|->` / `import --from URL`                                  | Import or directly copy your archive   |
+| `serve [--port 4000] [--data DIR] [--replay-nonce-capacity N] [--request-skew-ms N]` | Run a durable server                   |
 
 ## Signed remote heads
 
@@ -58,6 +58,14 @@ inclusive limit with `--max-request-body-bytes N`; values must be positive
 integers no greater than `Number.MAX_SAFE_INTEGER - 1`. Invalid values stop
 startup before the listening socket opens. The container entrypoint exposes the
 same setting as `THADDEUS_MAX_REQUEST_BODY_BYTES`.
+
+Durable replay protection retains up to 100,000 live signed-request nonces by
+default. `--replay-nonce-capacity N` accepts positive decimal integers through
+1,000,000. `--request-skew-ms N` narrows timestamp acceptance from the
+300,000-ms default/protocol ceiling down to 1 ms. The container equivalents are
+`THADDEUS_REPLAY_NONCE_CAPACITY` and `THADDEUS_REQUEST_SKEW_MS`. Invalid,
+fractional, signed, whitespace-padded, notation, unsafe, zero, or over-limit
+values stop startup before a listener opens.
 
 ## Query the committed branch
 

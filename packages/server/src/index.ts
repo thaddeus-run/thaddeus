@@ -11,7 +11,10 @@ export type {
 export {
   canonicalRequest,
   DEFAULT_REPLAY_CACHE_CAPACITY,
+  DEFAULT_REPLAY_NONCE_CAPACITY,
+  MAX_REPLAY_NONCE_CAPACITY,
   ReplayNonceCache,
+  replayNonceKey,
   REQUEST_SKEW_MS,
   signRequest,
   verifyRequest,

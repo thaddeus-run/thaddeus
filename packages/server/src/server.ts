@@ -45,8 +45,11 @@ import {
   type Backend,
   type Capability,
   decodeRecord,
+  DEFAULT_REPLAY_NONCE_CAPACITY,
   encodeRecord,
+  MAX_REPLAY_NONCE_CAPACITY,
   publicDid,
+  type ReplayNonceBackend,
   scoped,
   verifyCapability,
 } from '@thaddeus.run/store';
@@ -70,7 +73,8 @@ import {
   type RepoPolicyRecord,
 } from './repo-policy';
 import {
-  ReplayNonceCache,
+  replayNonceKey,
+  REQUEST_SKEW_MS,
   type SignedHeaders,
   verifyRequest as verifySignedEnvelope,
 } from './sign';
@@ -116,8 +120,45 @@ function requestBodyLimit(value: number | undefined): number {
   return limit;
 }
 
+/** Resolves the canonical replay capacity and its deprecated alias. */
+function replayNonceCapacity(config: ServerConfig): number {
+  if (
+    config.replayNonceCapacity !== undefined &&
+    config.replayCacheCapacity !== undefined
+  ) {
+    throw new TypeError(
+      'replayNonceCapacity and replayCacheCapacity cannot both be set'
+    );
+  }
+  const capacity =
+    config.replayNonceCapacity ??
+    config.replayCacheCapacity ??
+    DEFAULT_REPLAY_NONCE_CAPACITY;
+  if (
+    !Number.isSafeInteger(capacity) ||
+    capacity <= 0 ||
+    capacity > MAX_REPLAY_NONCE_CAPACITY
+  ) {
+    throw new RangeError(
+      `replayNonceCapacity must be a positive safe integer no greater than ${MAX_REPLAY_NONCE_CAPACITY}`
+    );
+  }
+  return capacity;
+}
+
+/** Resolves the accepted timestamp skew within the protocol's five-minute cap. */
+function requestTimestampSkew(value: number | undefined): number {
+  const skew = value ?? REQUEST_SKEW_MS;
+  if (!Number.isSafeInteger(skew) || skew < 1 || skew > REQUEST_SKEW_MS) {
+    throw new RangeError(
+      `requestSkewMs must be a positive safe integer no greater than ${REQUEST_SKEW_MS}`
+    );
+  }
+  return skew;
+}
+
 export interface ServerConfig {
-  backend: Backend;
+  backend: Backend & ReplayNonceBackend;
   // Largest request body accepted by application routes. Bun hosts use one
   // additional sentinel byte so the streamed guard can observe the boundary.
   maxRequestBodyBytes?: number;
@@ -127,7 +168,9 @@ export interface ServerConfig {
   // scan) are reported here while work for other repos continues.
   onError?: (
     error: unknown,
-    context: { operation: 'reveal'; repo?: string }
+    context:
+      | { operation: 'reveal'; repo?: string }
+      | { operation: 'nonce-consumption' }
   ) => void;
   // An optional host identity turns this into an ATTESTING instance: on a
   // successful land it co-signs each client-pushed reputation claim (P07) for a
@@ -140,9 +183,13 @@ export interface ServerConfig {
   // Host DIDs whose valid attestations count in this instance's profile and
   // reputation gates. The local `host`, when present, is trusted automatically.
   trustedReputationHosts?: readonly string[];
-  // Maximum live signed-request nonces retained during the five-minute replay
-  // window. When full, writes fail closed until the oldest nonce expires.
+  // Maximum live durable nonces. Full stores fail closed until the oldest live
+  // record passes its exact expiry boundary.
+  replayNonceCapacity?: number;
+  /** @deprecated Use replayNonceCapacity. */
   replayCacheCapacity?: number;
+  // Accepted signed timestamp skew. The protocol ceiling is five minutes.
+  requestSkewMs?: number;
 }
 
 export interface Server {
@@ -279,10 +326,11 @@ function replacesPendingReveal(
  */
 export function createServer(config: ServerConfig): Server {
   const maxRequestBodyBytes = requestBodyLimit(config.maxRequestBodyBytes);
+  const configuredReplayNonceCapacity = replayNonceCapacity(config);
+  const configuredRequestSkewMs = requestTimestampSkew(config.requestSkewMs);
   const platform = new Platform();
   const policy = config.policy ?? blockOnConflict;
   const now = config.now ?? ((): string => new Date().toISOString());
-  const replayNonces = new ReplayNonceCache(config.replayCacheCapacity);
   const trustedReputationHosts = new Set<string>();
   for (const did of config.trustedReputationHosts ?? []) {
     try {
@@ -611,23 +659,71 @@ export function createServer(config: ServerConfig): Server {
     return { did, timestamp, nonce, signature };
   }
 
-  // Every signed route uses this local wrapper so adding a new mutation cannot
-  // accidentally verify freshness without consuming the server's nonce cache.
-  function verifyRequest(
+  const signedRequestOutcomes = {
+    accepted: 0,
+    invalid: 0,
+    replayed: 0,
+    capacity: 0,
+    store_error: 0,
+  };
+  let cleanedReplayNonceRecords = 0;
+
+  // Every signed route uses this wrapper so a valid envelope is durably
+  // consumed before parsing, repo locking, or any persistence mutation.
+  async function verifyRequest(
     method: string,
     pathWithQuery: string,
     body: Uint8Array,
     signedHeaders: SignedHeaders | null,
     nowMs: number
-  ): string | null {
-    return verifySignedEnvelope(
+  ): Promise<string | Response> {
+    const signer = verifySignedEnvelope(
       method,
       pathWithQuery,
       body,
       signedHeaders,
       nowMs,
-      replayNonces
+      configuredRequestSkewMs
     );
+    if (signer === null || signedHeaders === null) {
+      signedRequestOutcomes.invalid += 1;
+      return json(401, { error: 'unsigned or invalid request' });
+    }
+
+    try {
+      const result = await config.backend.consumeNonce({
+        key: replayNonceKey(signer, signedHeaders.nonce),
+        expiresAt: Date.parse(signedHeaders.timestamp) + REQUEST_SKEW_MS,
+        now: nowMs,
+        capacity: configuredReplayNonceCapacity,
+      });
+      cleanedReplayNonceRecords += result.cleanedCount;
+      if (result.status === 'replayed') {
+        signedRequestOutcomes.replayed += 1;
+        return json(401, { error: 'unsigned or invalid request' });
+      }
+      if (result.status === 'capacity') {
+        signedRequestOutcomes.capacity += 1;
+        const response = json(429, {
+          error: 'replay protection capacity exceeded',
+          code: 'replay_capacity_exceeded',
+        });
+        response.headers.set(
+          'retry-after',
+          String(Math.max(1, Math.ceil((result.retryAt - nowMs) / 1_000)))
+        );
+        return response;
+      }
+      signedRequestOutcomes.accepted += 1;
+      return signer;
+    } catch (error) {
+      signedRequestOutcomes.store_error += 1;
+      config.onError?.(error, { operation: 'nonce-consumption' });
+      return json(503, {
+        error: 'replay protection unavailable',
+        code: 'replay_store_unavailable',
+      });
+    }
   }
 
   const json = (status: number, body: unknown): Response =>
@@ -829,6 +925,22 @@ export function createServer(config: ServerConfig): Server {
       `thaddeus_http_request_body_rejections_total{reason="declared_too_large"} ${bodyRejections.declared_too_large}`,
       `thaddeus_http_request_body_rejections_total{reason="streamed_too_large"} ${bodyRejections.streamed_too_large}`,
       `thaddeus_http_request_body_rejections_total{reason="invalid_content_length"} ${bodyRejections.invalid_content_length}`,
+      '# HELP thaddeus_replay_nonce_capacity Maximum live replay nonces configured for this process.',
+      '# TYPE thaddeus_replay_nonce_capacity gauge',
+      `thaddeus_replay_nonce_capacity ${configuredReplayNonceCapacity}`,
+      '# HELP thaddeus_request_skew_ms Accepted signed request timestamp skew in milliseconds.',
+      '# TYPE thaddeus_request_skew_ms gauge',
+      `thaddeus_request_skew_ms ${configuredRequestSkewMs}`,
+      '# HELP thaddeus_signed_request_outcomes_total Signed request authentication outcomes.',
+      '# TYPE thaddeus_signed_request_outcomes_total counter',
+      `thaddeus_signed_request_outcomes_total{outcome="accepted"} ${signedRequestOutcomes.accepted}`,
+      `thaddeus_signed_request_outcomes_total{outcome="invalid"} ${signedRequestOutcomes.invalid}`,
+      `thaddeus_signed_request_outcomes_total{outcome="replayed"} ${signedRequestOutcomes.replayed}`,
+      `thaddeus_signed_request_outcomes_total{outcome="capacity"} ${signedRequestOutcomes.capacity}`,
+      `thaddeus_signed_request_outcomes_total{outcome="store_error"} ${signedRequestOutcomes.store_error}`,
+      '# HELP thaddeus_replay_nonce_records_cleaned_total Expired replay nonce records cleaned by signed requests.',
+      '# TYPE thaddeus_replay_nonce_records_cleaned_total counter',
+      `thaddeus_replay_nonce_records_cleaned_total ${cleanedReplayNonceRecords}`,
       '',
     ];
     return new Response(lines.join('\n'), {
@@ -840,17 +952,15 @@ export function createServer(config: ServerConfig): Server {
   }
 
   async function createRepo(req: Request, body: Uint8Array): Promise<Response> {
-    const signer = verifyRequest(
+    const signer = await verifyRequest(
       'POST',
       '/repos',
       body,
       headers(req),
       Date.parse(now())
     );
-    if (signer === null) {
-      return json(401, { error: 'unsigned or invalid request' });
-    }
-    // Signature verification is read-only and can stay outside the lock.
+    if (signer instanceof Response) return signer;
+    // Authentication and nonce persistence stay outside the repository lock.
     const parsed = safeParseJson(body);
     if (parsed === undefined || parsed === null || typeof parsed !== 'object') {
       return json(400, { error: 'invalid JSON body' });
@@ -954,16 +1064,14 @@ export function createServer(config: ServerConfig): Server {
     req: Request,
     body: Uint8Array
   ): Promise<Response> {
-    const signer = verifyRequest(
+    const signer = await verifyRequest(
       'POST',
       new URL(req.url).pathname,
       body,
       headers(req),
       Date.parse(now())
     );
-    if (signer === null) {
-      return json(401, { error: 'unsigned or invalid request' });
-    }
+    if (signer instanceof Response) return signer;
     const meta = await readMeta(name);
     if (meta === undefined) {
       return json(404, { error: `no repo ${name}` });
@@ -1033,16 +1141,14 @@ export function createServer(config: ServerConfig): Server {
     req: Request,
     body: Uint8Array
   ): Promise<Response> {
-    const signer = verifyRequest(
+    const signer = await verifyRequest(
       'POST',
       new URL(req.url).pathname,
       body,
       headers(req),
       Date.parse(now())
     );
-    if (signer === null) {
-      return json(401, { error: 'unsigned or invalid request' });
-    }
+    if (signer instanceof Response) return signer;
     const meta = await readMeta(name);
     if (meta === undefined) {
       return json(404, { error: `no repo ${name}` });
@@ -1086,16 +1192,14 @@ export function createServer(config: ServerConfig): Server {
     req: Request,
     body: Uint8Array
   ): Promise<Response> {
-    const signer = verifyRequest(
+    const signer = await verifyRequest(
       'POST',
       new URL(req.url).pathname,
       body,
       headers(req),
       Date.parse(now())
     );
-    if (signer === null) {
-      return json(401, { error: 'unsigned or invalid request' });
-    }
+    if (signer instanceof Response) return signer;
     const meta = await readMeta(name);
     if (meta === undefined) {
       return json(404, { error: `no repo ${name}` });
@@ -1145,16 +1249,14 @@ export function createServer(config: ServerConfig): Server {
     req: Request,
     body: Uint8Array
   ): Promise<Response> {
-    const signer = verifyRequest(
+    const signer = await verifyRequest(
       'DELETE',
       new URL(req.url).pathname,
       body,
       headers(req),
       Date.parse(now())
     );
-    if (signer === null) {
-      return json(401, { error: 'unsigned or invalid request' });
-    }
+    if (signer instanceof Response) return signer;
     return withRepoLock(name, async () => {
       const meta = await readMeta(name);
       if (meta === undefined) {
@@ -1273,16 +1375,14 @@ export function createServer(config: ServerConfig): Server {
     req: Request,
     body: Uint8Array
   ): Promise<Response> {
-    const signer = verifyRequest(
+    const signer = await verifyRequest(
       'POST',
       new URL(req.url).pathname,
       body,
       headers(req),
       Date.parse(now())
     );
-    if (signer === null) {
-      return json(401, { error: 'unsigned or invalid request' });
-    }
+    if (signer instanceof Response) return signer;
     const parsed = safeParseJson(body);
     if (parsed === undefined || parsed === null || typeof parsed !== 'object') {
       return json(400, { error: 'invalid JSON body' });
@@ -1427,16 +1527,14 @@ export function createServer(config: ServerConfig): Server {
     req: Request,
     body: Uint8Array
   ): Promise<Response> {
-    const signer = verifyRequest(
+    const signer = await verifyRequest(
       'POST',
       new URL(req.url).pathname,
       body,
       headers(req),
       Date.parse(now())
     );
-    if (signer === null) {
-      return json(401, { error: 'unsigned or invalid request' });
-    }
+    if (signer instanceof Response) return signer;
     const parsed = safeParseJson(body);
     if (parsed === undefined || parsed === null || typeof parsed !== 'object') {
       return json(400, { error: 'invalid JSON body' });
@@ -1477,16 +1575,14 @@ export function createServer(config: ServerConfig): Server {
     req: Request,
     body: Uint8Array
   ): Promise<Response> {
-    const signer = verifyRequest(
+    const signer = await verifyRequest(
       'POST',
       new URL(req.url).pathname,
       body,
       headers(req),
       Date.parse(now())
     );
-    if (signer === null) {
-      return json(401, { error: 'unsigned or invalid request' });
-    }
+    if (signer instanceof Response) return signer;
     const parsed = safeParseJson(body);
     if (parsed === undefined || parsed === null || typeof parsed !== 'object') {
       return json(400, { error: 'invalid JSON body' });
@@ -1548,16 +1644,14 @@ export function createServer(config: ServerConfig): Server {
     req: Request,
     body: Uint8Array
   ): Promise<Response> {
-    const signer = verifyRequest(
+    const signer = await verifyRequest(
       'POST',
       new URL(req.url).pathname,
       body,
       headers(req),
       Date.parse(now())
     );
-    if (signer === null) {
-      return json(401, { error: 'unsigned or invalid request' });
-    }
+    if (signer instanceof Response) return signer;
     const parsed = safeParseJson(body);
     if (parsed === undefined || parsed === null || typeof parsed !== 'object') {
       return json(400, { error: 'invalid JSON body' });
@@ -1910,16 +2004,14 @@ export function createServer(config: ServerConfig): Server {
     req: Request,
     body: Uint8Array
   ): Promise<Response> {
-    const signer = verifyRequest(
+    const signer = await verifyRequest(
       'POST',
       new URL(req.url).pathname,
       body,
       headers(req),
       Date.parse(now())
     );
-    if (signer === null) {
-      return json(401, { error: 'unsigned or invalid request' });
-    }
+    if (signer instanceof Response) return signer;
     const meta = await readMeta(name);
     if (meta === undefined) {
       return json(404, { error: `no repo ${name}` });
@@ -1962,16 +2054,14 @@ export function createServer(config: ServerConfig): Server {
     req: Request,
     body: Uint8Array
   ): Promise<Response> {
-    const signer = verifyRequest(
+    const signer = await verifyRequest(
       'POST',
       new URL(req.url).pathname,
       body,
       headers(req),
       Date.parse(now())
     );
-    if (signer === null) {
-      return json(401, { error: 'unsigned or invalid request' });
-    }
+    if (signer instanceof Response) return signer;
     const meta = await readMeta(name);
     if (meta === undefined) {
       return json(404, { error: `no repo ${name}` });
@@ -2223,16 +2313,14 @@ export function createServer(config: ServerConfig): Server {
     req: Request,
     body: Uint8Array
   ): Promise<Response> {
-    const signer = verifyRequest(
+    const signer = await verifyRequest(
       'POST',
       new URL(req.url).pathname,
       body,
       headers(req),
       Date.parse(now())
     );
-    if (signer === null) {
-      return json(401, { error: 'unsigned or invalid request' });
-    }
+    if (signer instanceof Response) return signer;
     const meta = await readMeta(name);
     if (meta === undefined) {
       return json(404, { error: `no repo ${name}` });
@@ -2296,16 +2384,14 @@ export function createServer(config: ServerConfig): Server {
     req: Request,
     body: Uint8Array
   ): Promise<Response> {
-    const signer = verifyRequest(
+    const signer = await verifyRequest(
       'POST',
       new URL(req.url).pathname,
       body,
       headers(req),
       Date.parse(now())
     );
-    if (signer === null) {
-      return json(401, { error: 'unsigned or invalid request' });
-    }
+    if (signer instanceof Response) return signer;
     const meta = await readMeta(name);
     if (meta === undefined) {
       return json(404, { error: `no repo ${name}` });
@@ -2403,16 +2489,14 @@ export function createServer(config: ServerConfig): Server {
     req: Request,
     body: Uint8Array
   ): Promise<Response> {
-    const signer = verifyRequest(
+    const signer = await verifyRequest(
       'POST',
       new URL(req.url).pathname,
       body,
       headers(req),
       Date.parse(now())
     );
-    if (signer === null) {
-      return json(401, { error: 'unsigned or invalid request' });
-    }
+    if (signer instanceof Response) return signer;
     const parsed = safeParseJson(body);
     if (parsed === undefined || parsed === null || typeof parsed !== 'object') {
       return json(400, { error: 'invalid JSON body' });

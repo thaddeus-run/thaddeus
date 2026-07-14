@@ -12,7 +12,10 @@ import { signClaim } from '@thaddeus.run/reputation';
 import {
   type Backend,
   type Capability,
+  type ConsumeNonceInput,
+  type ConsumeNonceResult,
   MemoryStore,
+  type ReplayNonceBackend,
 } from '@thaddeus.run/store';
 import { beforeAll, describe, expect, test } from 'bun:test';
 
@@ -33,7 +36,7 @@ beforeAll(async () => {
 
 const enc = (value: string): Uint8Array => new TextEncoder().encode(value);
 
-class FailFirstReputationWrite implements Backend {
+class FailFirstReputationWrite implements Backend, ReplayNonceBackend {
   readonly #inner = new MemoryBackend();
   #failed = false;
 
@@ -55,6 +58,10 @@ class FailFirstReputationWrite implements Backend {
 
   delete(key: string): Promise<void> {
     return this.#inner.delete(key);
+  }
+
+  consumeNonce(input: ConsumeNonceInput): Promise<ConsumeNonceResult> {
+    return this.#inner.consumeNonce(input);
   }
 }
 

@@ -1,11 +1,20 @@
 import { blake3 } from '@noble/hashes/blake3';
 import { bytesToHex } from '@noble/hashes/utils';
 import { type Identity, PublicIdentity } from '@thaddeus.run/identity';
+import {
+  MAX_REPLAY_NONCE_CAPACITY,
+  DEFAULT_REPLAY_NONCE_CAPACITY as STORE_DEFAULT_REPLAY_NONCE_CAPACITY,
+} from '@thaddeus.run/store';
 
 // A signed write request must arrive within this clock skew. The server retains
 // each accepted nonce until its timestamp can no longer pass this window.
 export const REQUEST_SKEW_MS: number = 5 * 60 * 1000;
-export const DEFAULT_REPLAY_CACHE_CAPACITY: number = 100_000;
+export const DEFAULT_REPLAY_NONCE_CAPACITY: number =
+  STORE_DEFAULT_REPLAY_NONCE_CAPACITY;
+/** @deprecated Use DEFAULT_REPLAY_NONCE_CAPACITY. */
+export const DEFAULT_REPLAY_CACHE_CAPACITY: number =
+  DEFAULT_REPLAY_NONCE_CAPACITY;
+export { MAX_REPLAY_NONCE_CAPACITY };
 
 export interface SignedHeaders {
   did: string;
@@ -30,8 +39,14 @@ export class ReplayNonceCache {
   readonly #expirations: Expiration[] = [];
 
   constructor(capacity: number = DEFAULT_REPLAY_CACHE_CAPACITY) {
-    if (!Number.isInteger(capacity) || capacity <= 0) {
-      throw new RangeError('replay cache capacity must be a positive integer');
+    if (
+      !Number.isSafeInteger(capacity) ||
+      capacity <= 0 ||
+      capacity > MAX_REPLAY_NONCE_CAPACITY
+    ) {
+      throw new RangeError(
+        `replay cache capacity must be a positive safe integer no greater than ${MAX_REPLAY_NONCE_CAPACITY}`
+      );
     }
     this.#capacity = capacity;
   }
@@ -131,6 +146,16 @@ export function canonicalRequest(
   );
 }
 
+// Domain separation prevents a replay key from being confused with another
+// BLAKE3-addressed object. JSON tuple encoding keeps signer/nonce boundaries
+// unambiguous, while only the opaque digest reaches persistence and metrics.
+export function replayNonceKey(signerDid: string, nonce: string): string {
+  const tuple = JSON.stringify([signerDid, nonce]);
+  return bytesToHex(
+    blake3(new TextEncoder().encode(`thaddeus/replay-nonce/v1\0${tuple}`))
+  );
+}
+
 // Client side: produce the four header values for a request.
 export function signRequest(
   method: string,
@@ -160,15 +185,27 @@ export function verifyRequest(
   body: Uint8Array,
   headers: SignedHeaders | null,
   nowMs: number,
-  replayCache?: ReplayNonceCache
+  replayCacheOrRequestSkew?: ReplayNonceCache | number,
+  configuredRequestSkewMs: number = REQUEST_SKEW_MS
 ): string | null {
+  const replayCache =
+    typeof replayCacheOrRequestSkew === 'number'
+      ? undefined
+      : replayCacheOrRequestSkew;
+  const requestSkewMs =
+    typeof replayCacheOrRequestSkew === 'number'
+      ? replayCacheOrRequestSkew
+      : configuredRequestSkewMs;
   if (headers === null) {
     return null;
   }
   // Fail closed: a misconfigured server clock (NaN nowMs) must reject rather
   // than silently disable the skew/replay window.
   if (
-    Number.isNaN(nowMs) ||
+    !Number.isSafeInteger(nowMs) ||
+    !Number.isSafeInteger(requestSkewMs) ||
+    requestSkewMs < 1 ||
+    requestSkewMs > REQUEST_SKEW_MS ||
     typeof headers.nonce !== 'string' ||
     headers.nonce.length === 0 ||
     headers.nonce.length > 128
@@ -176,7 +213,7 @@ export function verifyRequest(
     return null;
   }
   const t = Date.parse(headers.timestamp);
-  if (Number.isNaN(t) || Math.abs(nowMs - t) > REQUEST_SKEW_MS) {
+  if (Number.isNaN(t) || Math.abs(nowMs - t) > requestSkewMs) {
     return null;
   }
   try {

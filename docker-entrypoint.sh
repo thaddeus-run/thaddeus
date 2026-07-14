@@ -7,6 +7,8 @@
 #   THADDEUS_HOST=1      run as an ATTESTING instance (co-signs reputation)
 #   THADDEUS_MIN_MERGES  gate land on N attested merges per op author
 #   THADDEUS_MAX_REQUEST_BODY_BYTES maximum accepted request body (default 16 MiB)
+#   THADDEUS_REPLAY_NONCE_CAPACITY maximum live durable replay nonces (default 100000)
+#   THADDEUS_REQUEST_SKEW_MS accepted signed timestamp skew (default/max 300000)
 #   THADDEUS_TRUST_HOSTS comma-separated foreign host DIDs whose proofs count
 set -eu
 
@@ -36,6 +38,12 @@ if [ -n "${THADDEUS_MIN_MERGES:-}" ]; then
 fi
 if [ -n "${THADDEUS_MAX_REQUEST_BODY_BYTES:-}" ]; then
   set -- "$@" --max-request-body-bytes "$THADDEUS_MAX_REQUEST_BODY_BYTES"
+fi
+if [ -n "${THADDEUS_REPLAY_NONCE_CAPACITY:-}" ]; then
+  set -- "$@" --replay-nonce-capacity "$THADDEUS_REPLAY_NONCE_CAPACITY"
+fi
+if [ -n "${THADDEUS_REQUEST_SKEW_MS:-}" ]; then
+  set -- "$@" --request-skew-ms "$THADDEUS_REQUEST_SKEW_MS"
 fi
 if [ -n "${THADDEUS_TRUST_HOSTS:-}" ]; then
   old_ifs="$IFS"
