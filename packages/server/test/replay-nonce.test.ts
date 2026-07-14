@@ -21,6 +21,7 @@ beforeAll(async () => {
 
 const encoder = new TextEncoder();
 
+/** Signs a repository-creation envelope for replay-route tests. */
 function envelope(
   body: Uint8Array,
   signer: Identity,
@@ -30,6 +31,7 @@ function envelope(
   return signRequest('POST', '/repos', body, signer, timestamp, nonce);
 }
 
+/** Converts a signed envelope into the HTTP request exercised by the server. */
 function request(body: Uint8Array, signed: SignedHeaders): Request {
   return new Request('http://t/repos', {
     method: 'POST',
@@ -47,26 +49,32 @@ class FailingNonceBackend implements Backend, ReplayNonceBackend {
   readonly inner = new MemoryBackend();
   fail = true;
 
+  /** Forwards generic writes to the in-memory backend. */
   put(key: string, bytes: Uint8Array): Promise<void> {
     return this.inner.put(key, bytes);
   }
 
+  /** Forwards atomic generic writes to the in-memory backend. */
   putIfAbsent(key: string, bytes: Uint8Array): Promise<boolean> {
     return this.inner.putIfAbsent(key, bytes);
   }
 
+  /** Forwards generic reads to the in-memory backend. */
   get(key: string): Promise<Uint8Array | undefined> {
     return this.inner.get(key);
   }
 
+  /** Forwards generic listings to the in-memory backend. */
   list(prefix: string): Promise<readonly string[]> {
     return this.inner.list(prefix);
   }
 
+  /** Forwards generic deletes to the in-memory backend. */
   delete(key: string): Promise<void> {
     return this.inner.delete(key);
   }
 
+  /** Injects nonce-storage failures while leaving generic persistence usable. */
   consumeNonce(input: ConsumeNonceInput): Promise<ConsumeNonceResult> {
     return this.fail
       ? Promise.reject(new Error('adversarial-nonce-store-filename-marker'))
