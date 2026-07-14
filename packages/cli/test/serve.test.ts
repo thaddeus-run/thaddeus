@@ -4,6 +4,8 @@ import {
   type Bundle,
   decodeBundle,
   DEFAULT_MAX_REQUEST_BODY_BYTES,
+  MAX_REPLAY_NONCE_CAPACITY,
+  REQUEST_SKEW_MS,
   signRequest,
 } from '@thaddeus.run/server';
 import { publicDid } from '@thaddeus.run/store';
@@ -106,6 +108,41 @@ describe('startServer', () => {
     }
   });
 
+  test('rejects invalid replay controls before opening a listener', () => {
+    for (const replayNonceCapacity of [
+      0,
+      -1,
+      1.5,
+      Number.NaN,
+      Number.POSITIVE_INFINITY,
+      MAX_REPLAY_NONCE_CAPACITY + 1,
+    ]) {
+      expect(() =>
+        startServer({
+          dataDir: mkdtempSync(join(tmp, 'invalid-replay-capacity-')),
+          port: 0,
+          replayNonceCapacity,
+        })
+      ).toThrow(RangeError);
+    }
+    for (const requestSkewMs of [
+      0,
+      -1,
+      1.5,
+      Number.NaN,
+      Number.POSITIVE_INFINITY,
+      REQUEST_SKEW_MS + 1,
+    ]) {
+      expect(() =>
+        startServer({
+          dataDir: mkdtempSync(join(tmp, 'invalid-request-skew-')),
+          port: 0,
+          requestSkewMs,
+        })
+      ).toThrow(RangeError);
+    }
+  });
+
   test('rejects invalid --max-request-body-bytes values', async () => {
     for (const value of [
       '0',
@@ -134,6 +171,53 @@ describe('startServer', () => {
         )
       ).toBe(2);
       expect(output).toEqual([`invalid --max-request-body-bytes: ${value}`]);
+    }
+  });
+
+  test('rejects non-decimal and out-of-range replay CLI values', async () => {
+    for (const [flag, values] of [
+      [
+        '--replay-nonce-capacity',
+        [
+          '0',
+          '-1',
+          '1.5',
+          '1e3',
+          '0x40',
+          ' 64',
+          String(Number.MAX_SAFE_INTEGER),
+          String(MAX_REPLAY_NONCE_CAPACITY + 1),
+        ],
+      ],
+      [
+        '--request-skew-ms',
+        [
+          '0',
+          '-1',
+          '1.5',
+          '1e3',
+          '0x40',
+          ' 64',
+          String(Number.MAX_SAFE_INTEGER),
+          String(REQUEST_SKEW_MS + 1),
+        ],
+      ],
+    ] as const) {
+      for (const value of values) {
+        const output: string[] = [];
+        const option = value.startsWith('-') ? `${flag}=${value}` : flag;
+        expect(
+          await run(
+            ['serve', option, ...(value.startsWith('-') ? [] : [value])],
+            {
+              cwd: tmp,
+              home: tmp,
+              out: (line) => output.push(line),
+            }
+          )
+        ).toBe(2);
+        expect(output).toEqual([`invalid ${flag}: ${value}`]);
+      }
     }
   });
 
@@ -271,6 +355,7 @@ describe('startServer', () => {
     const root = mkdtempSync(join(tmp, 'body-restart-'));
     const signer = Identity.create();
     const body = exactRepoBody(1_024, 'p', signer, 'persisted');
+    const capturedHeaders = signedHeaders('/repos', body, signer);
     let server = startServer({
       dataDir: root,
       port: 0,
@@ -280,7 +365,7 @@ describe('startServer', () => {
     try {
       const created = await fetch(`${server.url}/repos`, {
         method: 'POST',
-        headers: signedHeaders('/repos', body, signer),
+        headers: capturedHeaders,
         body,
       });
       expect(created.status).toBe(201);
@@ -302,6 +387,16 @@ describe('startServer', () => {
       expect(before.split('\n')).toContain(
         'thaddeus_http_request_body_rejections_total{reason="declared_too_large"} 0'
       );
+
+      const replayed = await fetch(`${server.url}/repos`, {
+        method: 'POST',
+        headers: capturedHeaders,
+        body,
+      });
+      expect(replayed.status).toBe(401);
+      expect(await replayed.json()).toEqual({
+        error: 'unsigned or invalid request',
+      });
 
       const rejected = await fetch(`${server.url}/repos`, {
         method: 'POST',

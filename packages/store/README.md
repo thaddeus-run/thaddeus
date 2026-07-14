@@ -34,4 +34,18 @@ well-known, so its holder can unwrap or publish the capability early. This
 store-honest membrane supports unattended release; trustless release requires
 time-lock crypto.
 
+## Replay nonce backend capability
+
+`ReplayNonceBackend.consumeNonce()` is the backend-neutral atomic contract used
+by signed HTTP mutations. It accepts only an opaque 64-character lowercase
+BLAKE3 key, an absolute expiry, the current time, and a bounded capacity. Its
+result distinguishes `consumed`, `replayed`, and `capacity`, and reports active
+and cleaned counts plus the earliest safe retry time when full.
+
+The default capacity is 100,000 live records and the hard maximum is 1,000,000.
+Capacities must be positive safe integers. Within an implementation's
+coordination domain, concurrent calls for one live key produce exactly one
+`consumed` result. Records remain live at the exact expiry millisecond and are
+released only when `now > expiresAt`.
+
 Apache-2.0.

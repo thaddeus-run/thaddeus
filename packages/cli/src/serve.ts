@@ -4,6 +4,8 @@ import type { LandPolicy } from '@thaddeus.run/platform';
 import {
   createServer,
   DEFAULT_MAX_REQUEST_BODY_BYTES,
+  DEFAULT_REPLAY_NONCE_CAPACITY,
+  REQUEST_SKEW_MS,
 } from '@thaddeus.run/server';
 
 // Pin Bun's documented default so slow-body protection cannot drift across
@@ -21,6 +23,10 @@ export interface ServeOptions {
   // Default 16 MiB; accepts positive integers through
   // Number.MAX_SAFE_INTEGER - 1.
   maxRequestBodyBytes?: number;
+  // Bounded durable signed-envelope replay protection (default 100,000).
+  replayNonceCapacity?: number;
+  // Accepted request timestamp skew in milliseconds (default/max 300,000).
+  requestSkewMs?: number;
   // Scheduler cadence. Public for deterministic integration tests; normal CLI
   // servers use one second.
   revealIntervalMs?: number;
@@ -49,7 +55,16 @@ export function startServer(opts: ServeOptions): RunningServer {
     host: opts.host,
     minMerges: opts.minMerges,
     trustedReputationHosts: opts.trustedReputationHosts,
+    replayNonceCapacity:
+      opts.replayNonceCapacity ?? DEFAULT_REPLAY_NONCE_CAPACITY,
+    requestSkewMs: opts.requestSkewMs ?? REQUEST_SKEW_MS,
     onError: (error, context) => {
+      if (context.operation === 'nonce-consumption') {
+        // Backend errors can carry opaque durable filenames. Keep operator
+        // logging fixed and let callers attach their own privacy-safe telemetry.
+        console.error('replay protection nonce consumption failed');
+        return;
+      }
       const scope = context.repo === undefined ? '' : ` for ${context.repo}`;
       console.error(`timed reveal ${context.operation} failed${scope}:`, error);
     },

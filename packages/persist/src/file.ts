@@ -1,7 +1,14 @@
-import type { Backend } from '@thaddeus.run/store';
+import {
+  type Backend,
+  type ConsumeNonceInput,
+  type ConsumeNonceResult,
+  MAX_REPLAY_NONCE_CAPACITY,
+  type ReplayNonceBackend,
+} from '@thaddeus.run/store';
 import {
   link,
   mkdir,
+  opendir,
   readdir,
   readFile,
   rename,
@@ -10,10 +17,31 @@ import {
 } from 'node:fs/promises';
 import { join } from 'node:path';
 
+import {
+  type NonceExpiration,
+  popExpiration,
+  pushExpiration,
+  validateConsumeNonceInput,
+} from './replay';
+
 // Process-local monotonic counter — used to make temp-file names unique within
 // a single process, preventing same-key concurrent puts from clobbering each
 // other's temp file.
 let tmpSeq = 0;
+
+const REPLAY_NONCE_DIRECTORY = '.replay-nonces-v1';
+const REPLAY_NONCE_STAGING_DIRECTORY = '.staging';
+const REPLAY_NONCE_RECORD_VERSION = 'thaddeus-replay-nonce-v1';
+
+interface ReplayNonceRecord {
+  readonly v: typeof REPLAY_NONCE_RECORD_VERSION;
+  readonly expiresAt: number;
+}
+
+interface ReplayNonceIndex {
+  readonly byKey: Map<string, number>;
+  readonly expirations: NonceExpiration[];
+}
 
 // Codes for a transient lock on the rename destination (a virus scanner or the
 // Windows Search indexer momentarily holding the file) — worth retrying. A
@@ -56,8 +84,10 @@ async function renameWithRetry(from: string, to: string): Promise<void> {
 // `list`. Zero dependencies beyond node:fs. Flat directory (dir sharding is a
 // later optimization); keys never contain a literal '%' collision because
 // encodeKey is a bijection.
-export class FileBackend implements Backend {
+export class FileBackend implements Backend, ReplayNonceBackend {
   readonly #root: string;
+  #nonceIndex: ReplayNonceIndex | undefined;
+  #nonceQueue: Promise<void> = Promise.resolve();
 
   constructor(root: string) {
     this.#root = root;
@@ -145,6 +175,167 @@ export class FileBackend implements Backend {
       }
       throw err; // a real error must surface, not look like success
     }
+  }
+
+  // Serializing consumption within this instance makes capacity checks, atomic
+  // links, and index updates one coordination domain. FileBackend intentionally
+  // remains a single-process backend; distributed CAS is deferred to P14.
+  consumeNonce(input: ConsumeNonceInput): Promise<ConsumeNonceResult> {
+    const consume = this.#nonceQueue.then(() => this.#consumeNonce(input));
+    this.#nonceQueue = consume.then(
+      () => undefined,
+      () => undefined
+    );
+    return consume;
+  }
+
+  async #consumeNonce(input: ConsumeNonceInput): Promise<ConsumeNonceResult> {
+    validateConsumeNonceInput(input);
+    const index = await this.#nonceIndexForConsumption();
+    const cleanedCount = await this.#cleanExpiredNonces(index, input.now);
+
+    if (index.byKey.has(input.key)) {
+      return {
+        status: 'replayed',
+        activeCount: index.byKey.size,
+        cleanedCount,
+      };
+    }
+    if (index.byKey.size >= input.capacity) {
+      const first = index.expirations[0];
+      if (first === undefined) {
+        throw new Error('replay nonce index is inconsistent');
+      }
+      return {
+        status: 'capacity',
+        activeCount: index.byKey.size,
+        cleanedCount,
+        retryAt: first.expiresAt + 1,
+      };
+    }
+
+    const nonceDir = this.#nonceDirectory();
+    const staging = join(nonceDir, REPLAY_NONCE_STAGING_DIRECTORY);
+    await mkdir(staging, { recursive: true });
+    const tmp = join(staging, `${process.pid}-${tmpSeq++}`);
+    const record: ReplayNonceRecord = {
+      v: REPLAY_NONCE_RECORD_VERSION,
+      expiresAt: input.expiresAt,
+    };
+    await writeFile(tmp, JSON.stringify(record));
+    try {
+      await link(tmp, join(nonceDir, input.key));
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
+      // Another coordinator won the atomic link. Validate and index its record
+      // before reporting the request as a replay; malformed state fails closed.
+      if (index.byKey.size >= MAX_REPLAY_NONCE_CAPACITY) {
+        throw new Error('replay nonce store exceeds its hard maximum');
+      }
+      const existing = await this.#readNonceRecord(
+        join(nonceDir, input.key),
+        input.key
+      );
+      index.byKey.set(input.key, existing.expiresAt);
+      pushExpiration(index.expirations, {
+        key: input.key,
+        expiresAt: existing.expiresAt,
+      });
+      return {
+        status: 'replayed',
+        activeCount: index.byKey.size,
+        cleanedCount,
+      };
+    } finally {
+      await unlink(tmp).catch(() => {});
+    }
+
+    index.byKey.set(input.key, input.expiresAt);
+    pushExpiration(index.expirations, input);
+    return {
+      status: 'consumed',
+      activeCount: index.byKey.size,
+      cleanedCount,
+    };
+  }
+
+  // Rebuild lazily on the first signed request. Streaming directory iteration
+  // bounds allocation and lets the hard maximum fail before an unbounded list
+  // of attacker-controlled filenames is trusted.
+  async #nonceIndexForConsumption(): Promise<ReplayNonceIndex> {
+    if (this.#nonceIndex !== undefined) return this.#nonceIndex;
+
+    const nonceDir = this.#nonceDirectory();
+    await mkdir(nonceDir, { recursive: true });
+    const byKey = new Map<string, number>();
+    const expirations: NonceExpiration[] = [];
+    const directory = await opendir(nonceDir);
+    for await (const entry of directory) {
+      const name = String(entry.name);
+      if (name === REPLAY_NONCE_STAGING_DIRECTORY && entry.isDirectory()) {
+        continue;
+      }
+      if (!entry.isFile() || !/^[0-9a-f]{64}$/.test(name)) {
+        throw new Error('replay nonce store contains a malformed record');
+      }
+      if (byKey.size >= MAX_REPLAY_NONCE_CAPACITY) {
+        throw new Error('replay nonce store exceeds its hard maximum');
+      }
+      const record = await this.#readNonceRecord(join(nonceDir, name), name);
+      byKey.set(name, record.expiresAt);
+      pushExpiration(expirations, { key: name, expiresAt: record.expiresAt });
+    }
+    this.#nonceIndex = { byKey, expirations };
+    return this.#nonceIndex;
+  }
+
+  async #readNonceRecord(
+    path: string,
+    expectedKey: string
+  ): Promise<ReplayNonceRecord> {
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(await readFile(path, 'utf8'));
+    } catch {
+      throw new Error('replay nonce store contains a malformed record');
+    }
+    if (
+      parsed === null ||
+      typeof parsed !== 'object' ||
+      Object.keys(parsed).sort().join(',') !== 'expiresAt,v' ||
+      (parsed as { v?: unknown }).v !== REPLAY_NONCE_RECORD_VERSION ||
+      !Number.isSafeInteger((parsed as { expiresAt?: unknown }).expiresAt) ||
+      (parsed as { expiresAt: number }).expiresAt < 0 ||
+      !/^[0-9a-f]{64}$/.test(expectedKey)
+    ) {
+      throw new Error('replay nonce store contains a malformed record');
+    }
+    return parsed as ReplayNonceRecord;
+  }
+
+  async #cleanExpiredNonces(
+    index: ReplayNonceIndex,
+    now: number
+  ): Promise<number> {
+    let cleaned = 0;
+    for (;;) {
+      const first = index.expirations[0];
+      if (first === undefined || first.expiresAt >= now) return cleaned;
+      try {
+        await unlink(join(this.#nonceDirectory(), first.key));
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+      }
+      popExpiration(index.expirations);
+      if (index.byKey.get(first.key) === first.expiresAt) {
+        index.byKey.delete(first.key);
+        cleaned += 1;
+      }
+    }
+  }
+
+  #nonceDirectory(): string {
+    return join(this.#root, REPLAY_NONCE_DIRECTORY);
   }
 
   #path(key: string): string {

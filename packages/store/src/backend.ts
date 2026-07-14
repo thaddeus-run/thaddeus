@@ -12,6 +12,40 @@ export interface Backend {
   delete(key: string): Promise<void>;
 }
 
+// Atomic replay protection is a separate backend capability because generic
+// key/value operations cannot express consume-once plus bounded cleanup without
+// a race. Implementations define their coordination domain (process-local for
+// MemoryBackend and one FileBackend process for the filesystem implementation).
+export interface ReplayNonceBackend {
+  consumeNonce(input: ConsumeNonceInput): Promise<ConsumeNonceResult>;
+}
+
+export interface ConsumeNonceInput {
+  // Lowercase hexadecimal BLAKE3 output. The backend never receives the signer
+  // DID or signed nonce that produced this opaque key.
+  readonly key: string;
+  readonly expiresAt: number;
+  readonly now: number;
+  readonly capacity: number;
+}
+
+export type ConsumeNonceResult =
+  | {
+      readonly status: 'consumed' | 'replayed';
+      readonly activeCount: number;
+      readonly cleanedCount: number;
+    }
+  | {
+      readonly status: 'capacity';
+      readonly activeCount: number;
+      readonly cleanedCount: number;
+      // First millisecond at which the oldest live record may be cleaned.
+      readonly retryAt: number;
+    };
+
+export const DEFAULT_REPLAY_NONCE_CAPACITY: number = 100_000;
+export const MAX_REPLAY_NONCE_CAPACITY: number = 1_000_000;
+
 // A versioned JSON record codec. Records carry Uint8Array fields (nonce,
 // ciphertext, sig), so a plain Uint8Array is encoded as {"$u8": base64} and
 // decoded back. Deterministic; a leading version field lets a future binary

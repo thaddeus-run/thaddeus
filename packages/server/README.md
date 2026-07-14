@@ -37,10 +37,28 @@ which foreign host attestations count toward profiles and reputation policy; the
 server's own host identity is always trusted.
 
 Every signed mutation includes an `x-thaddeus-nonce` value covered by the
-signature. A bounded process-local cache rejects an accepted `(signer, nonce)`
-for the rest of its five-minute timestamp-validity window. A full cache fails
-closed. The cache is intentionally not durable or shared between nodes, so a
-restart or a request routed to another process begins a new replay boundary.
+signature. After signature verification, the server derives an opaque,
+domain-separated BLAKE3 key and atomically consumes it through the configured
+`Backend & ReplayNonceBackend` before parsing JSON, taking repository locks, or
+persisting state. Validly signed semantic failures still consume their one-shot
+envelope; invalid signatures never reserve capacity.
+
+`ServerConfig.replayNonceCapacity` defaults to 100,000 and is capped at
+1,000,000. The deprecated `replayCacheCapacity` programmatic alias remains for
+compatibility, but both names cannot be set together. `requestSkewMs` may narrow
+timestamp acceptance from the default/protocol maximum of 300,000 ms down to 1
+ms. Accepted nonces are always retained through `signed timestamp + 300,000 ms`
+so narrowing and later widening the configured skew cannot reopen a replay.
+
+Replay failures have stable responses:
+
+- Invalid, expired, or replayed envelopes:
+  `401 {"error":"unsigned or invalid request"}`.
+- Full nonce store:
+  `429 {"error":"replay protection capacity exceeded","code":"replay_capacity_exceeded"}`
+  with `Retry-After`.
+- Failed or corrupt nonce storage:
+  `503 {"error":"replay protection unavailable","code":"replay_store_unavailable"}`.
 
 ## Bounded request bodies
 
@@ -66,11 +84,16 @@ stable JSON responses:
 Bun-native transport rejections happen before the handler and return 413 with an
 empty body. Unmatched request bodies are cancelled without buffering.
 
-`GET /metrics` exposes Prometheus gauges for the application and transport
-limits plus process-local rejection counters with fixed reason labels. Counters
-reset on restart and contain no request paths, identities, headers, or body
-content. Bun-native pre-handler rejections cannot increment an application
-counter; their status remains observable at the HTTP proxy.
+`GET /metrics` exposes Prometheus gauges for the application/transport body
+limits, replay nonce capacity, and request timestamp skew. Fixed-label
+process-local counters cover body rejections; signed-request `accepted`,
+`invalid`, `replayed`, `capacity`, and `store_error` outcomes; and expired nonce
+records cleaned. Counters reset on restart and contain no request paths,
+identities, nonces, signatures, filenames, headers, or body content. Bun-native
+pre-handler rejections cannot increment an application counter; their status
+remains observable at the HTTP proxy.
 
 > **Status: spike.** Single process; reads are a fully public ciphertext mirror;
-> shared heads are owner-only; replay is blocked within a process. No TLS.
+> shared heads are owner-only. `FileBackend` replay state survives process
+> restart on one node, but cross-node linearizability remains deferred to P14.
+> No TLS.

@@ -73,7 +73,8 @@ SDK/CLI; TLS / deployment; incremental pull / pagination; the Git gateway.
 
 > **P11 update (2026-07-11):** replay-proof request nonces have shipped. See
 > `docs/superpowers/specs/2026-07-11-p11-replay-nonce-cache-design.md` for the
-> current protocol and its process-local boundary.
+> current protocol. Its P12 follow-up persists the single-node replay boundary
+> across restart; cross-node CAS remains deferred to P14.
 
 ## 4. Decisions taken (brainstorm outcomes)
 
@@ -201,12 +202,12 @@ X-Thaddeus-Signature  sign( `${method}\n${pathWithQuery}\n${blake3(body)}\n${tim
 ```
 
 The server: (1) verifies the signature with the DID's public key; (2) requires
-the timestamp within ±5 minutes; (3) consumes the `(signer, nonce)` pair in the
-server's bounded replay cache; and (4) for `push`/`land`, requires
-`signer === repo.owner`. Failures: `401` (missing/invalid/expired/replayed
-signature), `403` (valid signature, not owner). Binding the signature to
-`blake3(body)` and the nonce means a tampered payload or nonce fails — the owner
-authorizes exactly these bytes.
+the configured skew (at most ±5 minutes); (3) atomically consumes an opaque
+digest of `(signer, nonce)` through the durable replay backend; and (4) for
+`push`/`land`, requires `signer === repo.owner`. Failures: `401`
+(missing/invalid/expired/replayed signature), `403` (valid signature, not
+owner). Binding the signature to `blake3(body)` and the nonce means a tampered
+payload or nonce fails — the owner authorizes exactly these bytes.
 
 ### 6.3 Substrate seams (additive)
 
@@ -322,11 +323,9 @@ ciphertext**. Shut the server down.
 - **Single process.** One node; the in-process per-repo lock serializes
   push/land. Multi-node needs optimistic-concurrency on the re-point and the
   `scope()` delimiter-encode — deferred.
-- **Replay within the window.** A captured write request can be replayed within
-  ±5 min (no nonce store). Forgery is still impossible (signature-bound to the
-  body + signer DID); a duplicate push is content-addressed (idempotent) and a
-  duplicate land is a no-op once landed — so the practical blast radius is
-  small. A nonce store closes it later.
+- **Cross-node replay.** A captured write request is rejected across restarts by
+  one `FileBackend` node. Multiple replicas still need a shared linearizable CAS
+  backend; that coordination boundary remains deferred to P14.
 - **Owner-only writes.** No grant list / delegation-to-push yet; the owner is
   the sole writer. (Agent delegation, P09, gates _landing_ via policy, which is
   separate and already works.)

@@ -18,7 +18,7 @@ All notable changes to Thaddeus. Format follows
 | ------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------- | ------------------------------------------------------------------------------------- |
 | P4–P10  | Policy, releases, query surface, timed reveal, watch, agent budgets + rate windows, rotate-and-recall, portable reputation (export/import + `--trust-host`) | **Shipped** — through v0.1.8-alpha | —                                                                                     |
 | **P11** | **Hardening & Proof** — benchmarks, outside-reviewer veto, lazythad write actions                                                                           | **In progress**                    | [P11](https://github.com/thaddeus-run/thaddeus/milestone/1) — #58, #59, #60, #73, #74 |
-| P12     | Single-node security hardening                                                                                                                              | **In progress** — #75 shipped      | [P12](https://github.com/thaddeus-run/thaddeus/milestone/2) — #61–#63, #75–#79        |
+| P12     | Single-node security hardening                                                                                                                              | **In progress** — #61, #75 shipped | [P12](https://github.com/thaddeus-run/thaddeus/milestone/2) — #61–#63, #75–#79        |
 | P13     | Product & collaboration UX                                                                                                                                  | Queued                             | [P13](https://github.com/thaddeus-run/thaddeus/milestone/3) — #64–#67, #80, #82       |
 | P14     | Backend implementation (behind flags): CAS, S3/SQLite, conformance, migration                                                                               | Queued                             | [P14](https://github.com/thaddeus-run/thaddeus/milestone/4) — #68–#71                 |
 
@@ -36,11 +36,10 @@ with `FileBackend`. The production infrastructure change (S3 / multi-node) is
   with **no** code.store-scale claims (#58); the op-log / graph `O(n²)` fixes
   (#74); and lazythad signed write actions (#60).
 - **P12 — Single-node security hardening.** Request bodies are now capped and
-  streamed before authentication or buffering (#75, shipped under Unreleased);
-  next are per-identity repo/object quotas + rate limits (#76), **persist**
-  replay nonces across restart via a backend-neutral atomic `consumeNonce()`
-  (#61 — the in-window `ReplayNonceCache` shipped in 0.1.7; only cross-restart
-  durability + the cross-node CAS remain), size/count limits + pagination (#62),
+  streamed before authentication or buffering (#75), and backend-neutral atomic
+  replay consumption now persists nonce expiries across single-node restarts
+  (#61 / THA-8, both shipped under Unreleased). Next are per-identity
+  repo/object quotas + rate limits (#76), size/count limits + pagination (#62),
   per-signer rate + spam control (#63), meter or remove `maxSpend` (#78, still a
   hard-coded 0), and the reputation anti-farming hardening on top of the 0.1.7
   `--trust-host` allowlist (#79). No replicas required.
@@ -67,6 +66,16 @@ restored successfully in a clean environment (#71).
 > The S3 backend is tracked as **#69** under milestone P14.
 
 ### Security
+
+- **Replay nonces survive single-node restarts (#61 / THA-8).** Signed routes
+  now atomically consume opaque, domain-separated nonce keys through a required
+  backend capability before parsing or mutation. `MemoryBackend` and the
+  single-node `FileBackend` provide bounded map/min-heap indexes; the file
+  backend stages and hard-links versioned hidden records, lazily rebuilds after
+  restart, and fails closed on corrupt or excessive state. Operators gain
+  capacity/skew controls, stable generic 401, saturation 429 + `Retry-After`,
+  unavailable 503 responses, and fixed-label privacy-safe metrics. The public
+  in-memory cache remains compatible; distributed CAS stays deferred to P14.
 
 - **Shared view heads are owner-signed and monotonic (#73 / THA-20).** The log
   package now defines canonical `HeadRecord`s, complete-chain and exact-snapshot

@@ -28,7 +28,12 @@ import {
   signClaim,
 } from '@thaddeus.run/reputation';
 import { signVeto, VetoLog } from '@thaddeus.run/review';
-import { DEFAULT_MAX_REQUEST_BODY_BYTES } from '@thaddeus.run/server';
+import {
+  DEFAULT_MAX_REQUEST_BODY_BYTES,
+  DEFAULT_REPLAY_NONCE_CAPACITY,
+  MAX_REPLAY_NONCE_CAPACITY,
+  REQUEST_SKEW_MS,
+} from '@thaddeus.run/server';
 import { type Backend, scoped } from '@thaddeus.run/store';
 import type { EventKind } from '@thaddeus.run/watch';
 import { createHash } from 'node:crypto';
@@ -3016,6 +3021,8 @@ export async function run(
             host: { type: 'boolean' },
             'min-merges': { type: 'string' },
             'max-request-body-bytes': { type: 'string' },
+            'replay-nonce-capacity': { type: 'string' },
+            'request-skew-ms': { type: 'string' },
             'trust-host': { type: 'string', multiple: true },
           },
           allowPositionals: true,
@@ -3039,6 +3046,35 @@ export async function run(
           maxRequestBodyBytes > Number.MAX_SAFE_INTEGER - 1
         ) {
           out(`invalid --max-request-body-bytes: ${rawMaxRequestBodyBytes}`);
+          return 2;
+        }
+        const rawReplayNonceCapacity = values['replay-nonce-capacity'];
+        const replayNonceCapacity =
+          rawReplayNonceCapacity === undefined
+            ? DEFAULT_REPLAY_NONCE_CAPACITY
+            : Number(rawReplayNonceCapacity);
+        if (
+          (rawReplayNonceCapacity !== undefined &&
+            !/^\d+$/.test(rawReplayNonceCapacity)) ||
+          !Number.isSafeInteger(replayNonceCapacity) ||
+          replayNonceCapacity <= 0 ||
+          replayNonceCapacity > MAX_REPLAY_NONCE_CAPACITY
+        ) {
+          out(`invalid --replay-nonce-capacity: ${rawReplayNonceCapacity}`);
+          return 2;
+        }
+        const rawRequestSkewMs = values['request-skew-ms'];
+        const requestSkewMs =
+          rawRequestSkewMs === undefined
+            ? REQUEST_SKEW_MS
+            : Number(rawRequestSkewMs);
+        if (
+          (rawRequestSkewMs !== undefined && !/^\d+$/.test(rawRequestSkewMs)) ||
+          !Number.isSafeInteger(requestSkewMs) ||
+          requestSkewMs <= 0 ||
+          requestSkewMs > REQUEST_SKEW_MS
+        ) {
+          out(`invalid --request-skew-ms: ${rawRequestSkewMs}`);
           return 2;
         }
         // `--host` makes this an attesting instance, co-signing reputation
@@ -3068,10 +3104,12 @@ export async function run(
           host,
           minMerges,
           maxRequestBodyBytes,
+          replayNonceCapacity,
+          requestSkewMs,
           trustedReputationHosts,
         });
         out(
-          `thaddeus serving on ${server.url} (data: ${dataDir}, max body: ${maxRequestBodyBytes} bytes${
+          `thaddeus serving on ${server.url} (data: ${dataDir}, max body: ${maxRequestBodyBytes} bytes, replay nonces: ${replayNonceCapacity}, request skew: ${requestSkewMs} ms${
             host !== undefined ? `, attesting as ${host.did}` : ''
           }${
             trustedReputationHosts.length > 0

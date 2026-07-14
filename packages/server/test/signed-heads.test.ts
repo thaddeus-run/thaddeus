@@ -8,7 +8,13 @@ import {
 } from '@thaddeus.run/log';
 import { MemoryBackend } from '@thaddeus.run/persist';
 import { signClaim } from '@thaddeus.run/reputation';
-import { type Backend, encodeRecord } from '@thaddeus.run/store';
+import {
+  type Backend,
+  type ConsumeNonceInput,
+  type ConsumeNonceResult,
+  encodeRecord,
+  type ReplayNonceBackend,
+} from '@thaddeus.run/store';
 import { beforeAll, describe, expect, test } from 'bun:test';
 
 import { encodeBundle, encodeClaim } from '../src/dto';
@@ -20,7 +26,7 @@ beforeAll(async () => {
   await ready();
 });
 
-class FailFirstReputationWrite implements Backend {
+class FailFirstReputationWrite implements Backend, ReplayNonceBackend {
   readonly inner = new MemoryBackend();
   #failed = false;
 
@@ -46,6 +52,10 @@ class FailFirstReputationWrite implements Backend {
 
   delete(key: string): Promise<void> {
     return this.inner.delete(key);
+  }
+
+  consumeNonce(input: ConsumeNonceInput): Promise<ConsumeNonceResult> {
+    return this.inner.consumeNonce(input);
   }
 }
 

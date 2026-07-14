@@ -29,6 +29,8 @@ as a serverless function.
 | `THADDEUS_HOST`                   | —             | set to `1` to run an **attesting** instance (P07) |
 | `THADDEUS_MIN_MERGES`             | —             | gate a land on N attested merges per op author    |
 | `THADDEUS_MAX_REQUEST_BODY_BYTES` | `16777216`    | inclusive request-body limit (16 MiB)             |
+| `THADDEUS_REPLAY_NONCE_CAPACITY`  | `100000`      | maximum live durable replay nonces (max 1000000)  |
+| `THADDEUS_REQUEST_SKEW_MS`        | `300000`      | accepted signed timestamp skew (max 300000)       |
 
 The entrypoint mints the host identity once (idempotent) on the volume, so
 attestations stay stable across restarts.
@@ -113,7 +115,7 @@ and write-once, so incremental backups are cheap.
   container then runs against **AWS S3**, **Cloudflare R2**, or self-hosted
   **MinIO**, making a host switch a config change and enabling multiple server
   replicas.
-- **Distributed replay protection.** The server rejects reused signed nonces
-  throughout their ±5-minute timestamp window, but the cache is process-local. A
-  restart or another replica starts a separate replay boundary; a durable atomic
-  consume mechanism remains deferred for multi-replica deployments.
+- **Distributed replay protection.** The single-node `FileBackend` atomically
+  persists replay nonces across server restarts. Multiple replicas still lack a
+  shared linearizable consume operation; backend CAS and multi-node conformance
+  remain explicitly deferred to P14.

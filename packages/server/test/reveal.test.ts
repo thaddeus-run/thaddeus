@@ -12,6 +12,7 @@ import {
   newContentKey,
   publicDid,
   publicIdentity,
+  type ReplayNonceBackend,
 } from '@thaddeus.run/store';
 import { beforeAll, describe, expect, test } from 'bun:test';
 
@@ -583,7 +584,7 @@ describe('timed reveal', () => {
     const inner = new MemoryBackend();
     let armed = false;
     let failed = false;
-    const backend: Backend = {
+    const backend: Backend & ReplayNonceBackend = {
       put: async (key, bytes) => {
         if (armed && !failed && key.startsWith('repo/a/cap/')) {
           failed = true;
@@ -594,9 +595,13 @@ describe('timed reveal', () => {
       get: (key) => inner.get(key),
       list: (prefix) => inner.list(prefix),
       delete: (key) => inner.delete(key),
+      consumeNonce: (input) => inner.consumeNonce(input),
     };
     let clock = before;
-    const errors: { operation: 'reveal'; repo?: string }[] = [];
+    const errors: {
+      operation: 'reveal' | 'nonce-consumption';
+      repo?: string;
+    }[] = [];
     const srv = createServer({
       backend,
       now: () => clock,

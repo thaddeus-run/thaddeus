@@ -43,7 +43,7 @@ Access & trust
   reveal <path>                                 trigger a due public reveal now
 
 Server
-  serve  [--port N] [--data DIR] [--max-request-body-bytes N]  run a server
+  serve  [--port N] [--data DIR] [--replay-nonce-capacity N] [--request-skew-ms N]  run a server
 
 Global flags
   --version, -v                 print the version
@@ -324,7 +324,7 @@ thaddeus policy clear [--json]
   Only an attesting server ('serve --host') co-signs merges, so a non-attesting
   server reports attested: 0.`,
 
-  serve: `thaddeus serve [--port N] [--data DIR] [--host] [--min-merges N] [--trust-host <did> ...] [--max-request-body-bytes N]
+  serve: `thaddeus serve [--port N] [--data DIR] [--host] [--min-merges N] [--trust-host <did> ...] [--max-request-body-bytes N] [--replay-nonce-capacity N] [--request-skew-ms N]
 
   Run a durable Thaddeus server over a FileBackend at --data (default
   ./thaddeus-data) on --port (default 4000). --host makes it an attesting
@@ -332,6 +332,9 @@ thaddeus policy clear [--json]
   gates land on that many trusted attested merges per op author. --trust-host
   is repeatable and allows a foreign host DID's imported attestations to count;
   this server's own --host DID is always trusted automatically.
+  --replay-nonce-capacity bounds live durable signed-request nonces (default
+  100000, maximum 1000000). --request-skew-ms narrows accepted timestamp skew
+  from the protocol maximum/default of 300000 ms.
   --max-request-body-bytes sets the inclusive request-body limit (default
   16777216, or 16 MiB) and must be a positive integer no greater than
   Number.MAX_SAFE_INTEGER - 1.`,

@@ -1,6 +1,6 @@
 # P11 Replay-Nonce Cache Design
 
-**Date:** 2026-07-11 **Status:** Shipped
+**Date:** 2026-07-11 **Status:** Shipped; durability followed up in P12
 
 ## Problem
 
@@ -37,8 +37,18 @@ one.
 
 ## Security boundary
 
-The cache is deliberately process-local. It closes exact-envelope replay against
-one running server process but does not survive restart and is not shared by
-multiple nodes. The current backend interface has no conditional put primitive
-from which to build an atomic distributed consume operation. Durable or
-multi-node replay protection therefore remains a later hardening step.
+The public `ReplayNonceCache` remains process-local for standalone
+compatibility.
+
+> **P12 durability follow-up (2026-07-14, THA-8/#61):** HTTP routes now consume
+> opaque nonce keys through the backend-neutral atomic `ReplayNonceBackend`.
+> `MemoryBackend` and the single-node `FileBackend` implement the contract;
+> `FileBackend` persists versioned expiries in a hidden namespace, rebuilds a
+> bounded index after restart, and fails closed on corrupt or excessive state.
+> Operators can bound capacity and narrow request skew, and stable 429/503
+> responses plus fixed-label metrics expose saturation and availability. The
+> original cache API remains available but is no longer the server route's
+> replay boundary.
+
+Cross-node linearizability is still outside this design. Shared CAS, distributed
+backend conformance, and multi-replica replay protection remain deferred to P14.
