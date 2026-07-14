@@ -34,7 +34,7 @@ describe('ReputationLog — durability', () => {
 
     // Reopen from the same backend — the attested merge survives and counts.
     const reopened = await ReputationLog.load(backend);
-    const profile = reopened.profile(subject.did);
+    const profile = reopened.profile(subject.did, new Set([host.did]));
     expect(profile.attested).toHaveLength(1);
     expect(profile.byKind.merge).toBe(1);
   });
@@ -57,7 +57,9 @@ describe('ReputationLog — durability', () => {
     );
 
     const reopened = await ReputationLog.load(backend);
-    expect(reopened.profile(subject.did).byKind.merge).toBe(1);
+    expect(
+      reopened.profile(subject.did, new Set([host.did])).byKind.merge
+    ).toBe(1);
   });
 
   test('without a backend, behavior is unchanged (in-memory only)', async () => {
@@ -65,7 +67,7 @@ describe('ReputationLog — durability', () => {
     const host = Identity.create();
     const reps = new ReputationLog(); // no backend
     await reps.ingest(signContribution(fields('op-3'), subject, host));
-    expect(reps.profile(subject.did).byKind.merge).toBe(1);
+    expect(reps.profile(subject.did, new Set([host.did])).byKind.merge).toBe(1);
   });
 
   test('a subject can mint and self-verify a claim without the host key', () => {

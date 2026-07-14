@@ -43,7 +43,7 @@ Access & trust
   reveal <path>                                 trigger a due public reveal now
 
 Server
-  serve  [--port N] [--data DIR] [--replay-nonce-capacity N] [--request-skew-ms N]  run a server
+  serve  [--port N] [--data DIR] [--attestation-aws-kms-key-arn ARN]  run a server
 
 Global flags
   --version, -v                 print the version
@@ -313,25 +313,30 @@ thaddeus policy clear [--json]
   thaddeus reputation import <path|-> [--server <url>] [--json]
   thaddeus reputation import --from <source-url> [--server <destination>] [--json]
 
-  Show a DID's server-wide reputation: trusted host-attested, valid but
-  untrusted-host, and claimed contributions, plus the trusted tally by kind.
+  Show a DID's server-wide reputation: all trusted-host proofs, unique counted
+  events, valid but untrusted-host proofs, claimed contributions, and the
+  counted tally by kind.
   Export writes a public versioned JSON proof archive to stdout (or --output).
   Import reads a file or '-' from stdin; --from copies your current identity's
   archive directly between instances. Only the archive subject may import it.
   Reputation is
   server-wide, not repo-scoped: the server is resolved like 'repos' (--server,
   else your default), so this works from anywhere — no working copy needed.
-  Only an attesting server ('serve --host') co-signs merges, so a non-attesting
-  server reports attested: 0.`,
+  Only an attesting server co-signs eligible events. Production uses
+  --attestation-aws-kms-key-arn; --host loads a local private seed and is for
+  development only. A non-attesting server reports attested: 0.`,
 
-  serve: `thaddeus serve [--port N] [--data DIR] [--host] [--min-merges N] [--trust-host <did> ...] [--max-request-body-bytes N] [--replay-nonce-capacity N] [--request-skew-ms N]
+  serve: `thaddeus serve [--port N] [--data DIR] [--attestation-aws-kms-key-arn <exact-key-arn>] [--attestation-rate-limit <0..20>] [--host] [--min-merges N] [--trust-host <did> ...] [--max-request-body-bytes N] [--replay-nonce-capacity N] [--request-skew-ms N]
 
   Run a durable Thaddeus server over a FileBackend at --data (default
-  ./thaddeus-data) on --port (default 4000). --host makes it an attesting
-  instance (co-signs reputation with the operator's identity); --min-merges
-  gates land on that many trusted attested merges per op author. --trust-host
-  is repeatable and allows a foreign host DID's imported attestations to count;
-  this server's own --host DID is always trusted automatically.
+  ./thaddeus-data) on --port (default 4000). Production attestation uses an
+  exact AWS KMS Ed25519 key ARN; startup validates KMS before binding. --host
+  is mutually exclusive and development-only because it loads the operator's
+  local private signing seed. --attestation-rate-limit sets the subject-wide
+  rolling-hour issuance cap (default/max 20; 0 disables issuance).
+  --min-merges gates land on unique trusted merge events per op author.
+  --trust-host is repeatable and forms an exact foreign-host DID allowlist;
+  the active attester DID is trusted automatically and trust is not transitive.
   --replay-nonce-capacity bounds live durable signed-request nonces (default
   100000, maximum 1000000). --request-skew-ms narrows accepted timestamp skew
   from the protocol maximum/default of 300000 ms.

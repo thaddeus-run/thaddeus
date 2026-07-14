@@ -1,5 +1,6 @@
 import { signDelegation } from '@thaddeus.run/agent';
 import {
+  type AttestationSummary,
   Client,
   type LandOutcome,
   reachablePids,
@@ -21,6 +22,7 @@ import { FileBackend } from '@thaddeus.run/persist';
 import { Platform, type Repo, signRelease } from '@thaddeus.run/platform';
 import { type Provenance, ProvenanceLog } from '@thaddeus.run/provenance';
 import {
+  type AttestationSigner,
   type ContributionClaim,
   decodeReputationArchive,
   encodeReputationArchive,
@@ -29,8 +31,10 @@ import {
 } from '@thaddeus.run/reputation';
 import { signVeto, VetoLog } from '@thaddeus.run/review';
 import {
+  DEFAULT_ATTESTATION_RATE_LIMIT,
   DEFAULT_MAX_REQUEST_BODY_BYTES,
   DEFAULT_REPLAY_NONCE_CAPACITY,
+  MAX_ATTESTATION_RATE_LIMIT,
   MAX_REPLAY_NONCE_CAPACITY,
   REQUEST_SKEW_MS,
 } from '@thaddeus.run/server';
@@ -41,6 +45,7 @@ import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { basename, dirname, isAbsolute, join, relative } from 'node:path';
 import { parseArgs } from 'node:util';
 
+import { createAwsKmsAttestationSigner } from './aws-kms';
 import {
   HOSTED_SERVER,
   isServerUrl,
@@ -403,6 +408,23 @@ async function landWithOwnerHandoff(
       `owner signature required to publish; uploaded head IDs: ${heads.join(', ')}`
     );
     return null;
+  }
+}
+
+function reportAttestationWarnings(
+  summary: AttestationSummary | undefined,
+  err: (line: string) => void
+): void {
+  if (summary === undefined) return;
+  for (const reason of [
+    'rate_limited',
+    'limiter_unavailable',
+    'signer_unavailable',
+  ] as const) {
+    const count = summary.skipped[reason];
+    if (count > 0) {
+      err(`warning: ${count} reputation attestation(s) skipped: ${reason}`);
+    }
   }
 }
 
@@ -1639,6 +1661,7 @@ export async function run(
           );
           return 1;
         }
+        reportAttestationWarnings(landed.attestations, err);
         const localOps = new Set(local.log.ops().map((o) => o.id));
         const allPresent = landed.heads.every((h) => localOps.has(h));
         if (allPresent) {
@@ -1758,6 +1781,7 @@ export async function run(
               outConflicts(landed.conflicts, out);
               return 1;
             }
+            reportAttestationWarnings(landed.attestations, err);
             const localOps = new Set(local.log.ops().map((o) => o.id));
             if (!landed.heads.every((h) => localOps.has(h))) {
               out(
@@ -1797,6 +1821,7 @@ export async function run(
           outConflicts(landed.conflicts, out);
           return 1;
         }
+        reportAttestationWarnings(landed.attestations, err);
         const localOps = new Set(local.log.ops().map((o) => o.id));
         const allPresent = landed.heads.every((h) => localOps.has(h));
         if (allPresent) {
@@ -1922,6 +1947,7 @@ export async function run(
           );
           return 1;
         }
+        reportAttestationWarnings(landed.attestations, err);
         const localOps = new Set(local.log.ops().map((o) => o.id));
         if (landed.heads.every((h) => localOps.has(h))) {
           await local.log.repoint(view, landed.heads);
@@ -2393,7 +2419,13 @@ export async function run(
             { repo: cfg.repo, ref: release.id, kind: 'release', at },
             identity
           );
-          const created = await client.createRelease(cfg.repo, release, claim);
+          const outcome = await client.createReleaseWithOutcome(
+            cfg.repo,
+            release,
+            claim
+          );
+          const created = outcome.release;
+          reportAttestationWarnings(outcome.attestations, err);
           if (values.json === true) {
             out(JSON.stringify(releaseJson(created)));
           } else {
@@ -3003,7 +3035,7 @@ export async function run(
         }
         out(profile.subject);
         out(
-          `  attested: ${profile.attested}  untrusted: ${profile.untrusted}  claimed: ${profile.claimed}`
+          `  attested: ${profile.attested}  counted: ${profile.counted}  untrusted: ${profile.untrusted}  claimed: ${profile.claimed}`
         );
         const kinds = Object.entries(profile.byKind)
           .filter(([, n]) => n > 0)
@@ -3019,6 +3051,8 @@ export async function run(
             port: { type: 'string' },
             data: { type: 'string' },
             host: { type: 'boolean' },
+            'attestation-aws-kms-key-arn': { type: 'string' },
+            'attestation-rate-limit': { type: 'string' },
             'min-merges': { type: 'string' },
             'max-request-body-bytes': { type: 'string' },
             'replay-nonce-capacity': { type: 'string' },
@@ -3077,10 +3111,55 @@ export async function run(
           out(`invalid --request-skew-ms: ${rawRequestSkewMs}`);
           return 2;
         }
-        // `--host` makes this an attesting instance, co-signing reputation
-        // claims with the operator's own identity; `--min-merges` gates land on
-        // that many attested merges per op author.
+        const kmsKeyArn = values['attestation-aws-kms-key-arn'];
+        if (values.host === true && kmsKeyArn !== undefined) {
+          out('use either --host or --attestation-aws-kms-key-arn, not both');
+          return 2;
+        }
+        const rawAttestationRateLimit = values['attestation-rate-limit'];
+        const configuredAttestationRateLimit =
+          rawAttestationRateLimit === undefined
+            ? DEFAULT_ATTESTATION_RATE_LIMIT
+            : Number(rawAttestationRateLimit);
+        if (
+          (rawAttestationRateLimit !== undefined &&
+            !/^\d+$/.test(rawAttestationRateLimit)) ||
+          !Number.isSafeInteger(configuredAttestationRateLimit) ||
+          configuredAttestationRateLimit < 0 ||
+          configuredAttestationRateLimit > MAX_ATTESTATION_RATE_LIMIT
+        ) {
+          out(`invalid --attestation-rate-limit: ${rawAttestationRateLimit}`);
+          return 2;
+        }
+        if (
+          rawAttestationRateLimit !== undefined &&
+          values.host !== true &&
+          kmsKeyArn === undefined
+        ) {
+          out(
+            '--attestation-rate-limit requires --host or --attestation-aws-kms-key-arn'
+          );
+          return 2;
+        }
+
+        // `--host` is retained for local development only. Production resolves
+        // a KMS public key before opening the listener.
         const host = values.host === true ? loadIdentity(env.home) : undefined;
+        if (host !== undefined) {
+          err(
+            'warning: serve --host loads a local private signing seed; use AWS KMS in production'
+          );
+        }
+        let attester: AttestationSigner | undefined;
+        if (kmsKeyArn !== undefined) {
+          try {
+            attester = await createAwsKmsAttestationSigner(kmsKeyArn);
+          } catch {
+            // AWS errors may echo role and key ARNs. Keep CLI output fixed so
+            // credentials and infrastructure identifiers never reach logs.
+            throw new Error('AWS KMS attester startup validation failed');
+          }
+        }
         let minMerges: number | undefined;
         if (values['min-merges'] !== undefined) {
           minMerges = Number(values['min-merges']);
@@ -3101,7 +3180,9 @@ export async function run(
         const server = startServer({
           dataDir,
           port,
+          attester,
           host,
+          attestationRateLimit: configuredAttestationRateLimit,
           minMerges,
           maxRequestBodyBytes,
           replayNonceCapacity,
@@ -3110,7 +3191,11 @@ export async function run(
         });
         out(
           `thaddeus serving on ${server.url} (data: ${dataDir}, max body: ${maxRequestBodyBytes} bytes, replay nonces: ${replayNonceCapacity}, request skew: ${requestSkewMs} ms${
-            host !== undefined ? `, attesting as ${host.did}` : ''
+            attester !== undefined
+              ? `, attesting as ${attester.did} via AWS KMS`
+              : host !== undefined
+                ? `, attesting as ${host.did} (development key)`
+                : ''
           }${
             trustedReputationHosts.length > 0
               ? `, trusting ${trustedReputationHosts.length} reputation host(s)`

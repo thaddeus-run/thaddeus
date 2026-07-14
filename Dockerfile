@@ -3,7 +3,7 @@
 # A container for `thaddeus serve` — the untrusted HTTP remote. Two stages: a
 # builder that compiles the self-contained `thaddeus` binary (no Bun at runtime),
 # and a slim runtime that ships only the binary + entrypoint. State (the
-# FileBackend + the host identity) lives on the /data volume.
+# FileBackend) lives on the /data volume. Production signing stays in KMS.
 
 # ---- builder: compile the standalone binary ----
 FROM debian:bookworm-slim AS builder
@@ -36,9 +36,8 @@ RUN apt-get update \
 COPY --from=builder /app/thaddeus /usr/local/bin/thaddeus
 COPY docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
 RUN chmod +x /usr/local/bin/docker-entrypoint.sh
-# The durable substrate (FileBackend) and the persistent host identity live here.
+# Only the durable substrate lives here; no private host signing seed is minted.
 ENV THADDEUS_DATA=/data \
-    THADDEUS_HOME=/data/.home \
     PORT=4000
 VOLUME /data
 EXPOSE 4000

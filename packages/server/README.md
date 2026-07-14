@@ -33,8 +33,29 @@ requires time-lock crypto.
 Portable reputation is public on `GET /reputation/:did/export` and imported by
 the subject on signed `POST /reputation/import`. Imports are strict and durable
 in one content-addressed record. `ServerConfig.trustedReputationHosts` controls
-which foreign host attestations count toward profiles and reputation policy; the
-server's own host identity is always trusted.
+an exact allowlist: foreign proofs remain visible but only listed host DIDs and
+the active local or managed attester count. Trust is never recursive or
+transitive. Every trusted proof remains available for audit/export, while gates
+count one deterministic proof per `(subject, repo, kind, ref)` event.
+
+Merge issuance verifies that the subject authored an operation newly entering
+the requested repository and excludes operations authored by that repository's
+owner. Release binding retains its existing rules and owner-authored releases
+remain eligible. Merge and release proofs share a durable per-subject rolling
+hour limit of 20; invalid and duplicate claims consume no capacity. Limiter or
+signer outages fail closed for proofs but do not prevent repository operations.
+This blocks straightforward owner farming and duplicate/multi-host counting, but
+allowed colluding hosts and Sybil identities remain residual risks. Because the
+current proof does not encode historical repository control, consumers trust
+each allowed host to have enforced this policy when it signed.
+
+Production callers provide an `AttestationSigner`, normally backed by AWS KMS.
+The server process then holds no private signing key bytes, but its short-lived
+IAM permission to request signatures is security-sensitive. The deprecated
+`host` compatibility setting loads a private seed and is development-only.
+Neither mode changes the ordinary content boundary: the server has no repository
+decryption keys. Timed reveal is the explicit world-known-seed exception
+described above.
 
 Every signed mutation includes an `x-thaddeus-nonce` value covered by the
 signature. After signature verification, the server derives an opaque,
@@ -85,11 +106,11 @@ Bun-native transport rejections happen before the handler and return 413 with an
 empty body. Unmatched request bodies are cancelled without buffering.
 
 `GET /metrics` exposes Prometheus gauges for the application/transport body
-limits, replay nonce capacity, and request timestamp skew. Fixed-label
-process-local counters cover body rejections; signed-request `accepted`,
-`invalid`, `replayed`, `capacity`, and `store_error` outcomes; and expired nonce
-records cleaned. Counters reset on restart and contain no request paths,
-identities, nonces, signatures, filenames, headers, or body content. Bun-native
+limits, replay controls, and attestation enabled/rate-limit state. Fixed-label
+process-local counters cover body rejections; signed-request outcomes; expired
+nonce records; attestation outcomes; and expired rate records. Counters reset on
+restart and contain no request paths, identities, repository names, refs,
+nonces, signatures, KMS ARNs, filenames, headers, or body content. Bun-native
 pre-handler rejections cannot increment an application counter; their status
 remains observable at the HTTP proxy.
 

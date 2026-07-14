@@ -1,5 +1,6 @@
 export {
   attest,
+  attestWithSigner,
   canonicalContribution,
   signClaim,
   signContribution,
@@ -7,6 +8,7 @@ export {
   verifyContribution,
 } from './contribution';
 export type {
+  AttestationSigner,
   Contribution,
   ContributionClaim,
   ContributionFields,

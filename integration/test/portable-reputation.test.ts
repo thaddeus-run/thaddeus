@@ -1,3 +1,4 @@
+import { signDelegation } from '@thaddeus.run/agent';
 import { Client } from '@thaddeus.run/client';
 import { Workspace } from '@thaddeus.run/fs';
 import { Identity, ready } from '@thaddeus.run/identity';
@@ -27,6 +28,7 @@ async function committedRepo(subject: Identity, name: string, path: string) {
 describe('P10 portable reputation between real server instances', () => {
   test('foreign proofs are retained, policy-trusted explicitly, and durable', async () => {
     const subject = Identity.create();
+    const sourceOwnerIdentity = Identity.create();
     const sourceHost = Identity.create();
     const sourceBackend = new MemoryBackend();
     const sourceServer = createServer({
@@ -38,7 +40,24 @@ describe('P10 portable reputation between real server instances', () => {
       subject,
       sourceServer.fetch.bind(sourceServer)
     );
-    await source.createRepo('source');
+    const sourceOwner = new Client(
+      'http://source',
+      sourceOwnerIdentity,
+      sourceServer.fetch.bind(sourceServer)
+    );
+    await sourceOwner.createRepo('source');
+    await sourceOwner.grant(
+      'source',
+      signDelegation(
+        {
+          agent: subject.did,
+          paths: ['**'],
+          maxChanges: 10,
+          maxSpend: 100,
+        },
+        sourceOwnerIdentity
+      )
+    );
     const sourceWork = await committedRepo(
       subject,
       'source',
@@ -55,9 +74,13 @@ describe('P10 portable reputation between real server instances', () => {
       subject
     );
     expect(
-      await source.land('source', sourceWork.repo, sourceWork.heads, 'main', [
-        sourceClaim,
-      ])
+      await sourceOwner.land(
+        'source',
+        sourceWork.repo,
+        sourceWork.heads,
+        'main',
+        [sourceClaim]
+      )
     ).toMatchObject({ landed: true });
     const archive = await source.exportReputation(subject.did);
     expect(archive.contributions).toHaveLength(1);

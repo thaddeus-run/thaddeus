@@ -599,7 +599,11 @@ describe('timed reveal', () => {
     };
     let clock = before;
     const errors: {
-      operation: 'reveal' | 'nonce-consumption';
+      operation:
+        | 'reveal'
+        | 'nonce-consumption'
+        | 'attestation-sign'
+        | 'attestation-rate-store';
       repo?: string;
     }[] = [];
     const srv = createServer({

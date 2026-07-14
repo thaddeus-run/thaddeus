@@ -71,22 +71,35 @@ monotonic `HeadRecord` chain. The server cannot use raw view pointers as public
 authority, and it refuses to serve a pull unless its operation bundle is exactly
 the current signed head's reachable closure. Delegates may upload signed
 operations, but only the repository owner can create a shared branch or sign a
-landing. Signed mutations bind a random nonce into the request signature; a
-bounded process-local cache rejects reuse throughout the five-minute timestamp
-window. Replay state is not shared across nodes or preserved over restart. The
-server is otherwise stateless over the shared `Backend`, so a node restart
-serves the same repos. It now carries **and persists the whole substrate** — not
-just code (P01 objects, P03 ops) but the meaning around it: the signed "why"
-(P04), the standing human veto (P10), server-wide reputation (P07), and
-semantic-graph ops (P08), each write-through under its own content-addressed key
-and rebuilt on load. The server may **optionally attest**: given a `host`
-identity it co-signs a client's reputation claim on a successful land (minting a
-host-vouched merge) and can gate land on that durable reputation
-(`--min-merges`). Reputation is portable across instances as a strict,
-subject-imported JSON proof archive. Foreign attestations are retained but count
-only when their host DID is in the destination's explicit trust set. Multi-node
-concurrency, dynamic federation discovery, and the Git gateway are the next
-steps.
+landing. Signed mutations bind a random nonce into the request signature;
+single-node durable replay state rejects reuse throughout the five-minute
+timestamp window. The server is otherwise stateless over the shared `Backend`,
+so a node restart serves the same repos. It now carries **and persists the whole
+substrate** — not just code (P01 objects, P03 ops) but the meaning around it:
+the signed "why" (P04), the standing human veto (P10), server-wide reputation
+(P07), and semantic-graph ops (P08), each write-through under its own
+content-addressed key and rebuilt on load.
+
+The server may **optionally attest** successful merge and release events. Its
+trust set is an exact DID allowlist: configured foreign hosts plus the active
+local or KMS attester, with no recursive or transitive trust. Portable archives
+retain every valid proof for audit, but reputation gates count one deterministic
+proof per `(subject, repo, kind, ref)` event. A merge earns no host proof when
+the operation author owns the target repository, and all issuance shares a
+durable per-subject rolling-hour ceiling of 20. These checks make simple replay,
+multi-host duplication, and owner farming ineffective; they do not prevent
+colluding trusted hosts or Sybil identities. The proof schema cannot reconstruct
+historical repository ownership independently, so an allowed host remains
+trusted to have enforced issuance policy at the time.
+
+Production attestation uses AWS KMS. The process never receives private signing
+key bytes, although its short-lived IAM authorization can request signatures and
+is therefore security-sensitive. The compatibility `serve --host` path does load
+a private seed and is development-only. Ordinary content hosting still has no
+repository decryption keys. Timed reveal remains the deliberate exception
+described below: it temporarily handles a deliberately publishable content key
+using a world-known public seed. Multi-node concurrency, dynamic federation
+discovery, and the Git gateway are the next steps.
 
 Timed reveal is the deliberate exception to that normal trust boundary. An owner
 uploads a public-wrapped capability before its start time so the server can

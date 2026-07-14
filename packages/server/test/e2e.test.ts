@@ -1,3 +1,4 @@
+import { signDelegation } from '@thaddeus.run/agent';
 import { Workspace } from '@thaddeus.run/fs';
 import { signSymbolOp } from '@thaddeus.run/graph';
 import { Identity, ready } from '@thaddeus.run/identity';
@@ -17,6 +18,7 @@ import {
   decodeBundle,
   encodeBundle,
   encodeClaim,
+  encodeDelegation,
 } from '../src/dto';
 import { createServer } from '../src/server';
 import { signRequest } from '../src/sign';
@@ -262,6 +264,7 @@ describe('server e2e', () => {
 
   test('landing mints an attested merge (P07) that survives a restart and honors the tier gate', async () => {
     const root = mkdtempSync(join(tmp, 'rep-'));
+    const owner = Identity.create();
     const a = Identity.create();
     const host = Identity.create(); // the attesting host key
 
@@ -271,7 +274,24 @@ describe('server e2e', () => {
     const http1 = Bun.serve({ port: 0, fetch: srv1.fetch });
     const c1 = client(`http://localhost:${http1.port}`);
     try {
-      await c1.post('/repos', createRepoBody('r', a), a);
+      await c1.post('/repos', createRepoBody('r', owner), owner);
+      await c1.post(
+        '/repos/r/grants',
+        {
+          delegation: encodeDelegation(
+            signDelegation(
+              {
+                agent: a.did,
+                paths: ['**'],
+                maxChanges: 100,
+                maxSpend: 100,
+              },
+              owner
+            )
+          ),
+        },
+        owner
+      );
       const committed = await commitLocally(a, 'src/a.rs', 'fn a() {}');
       const op1 = committed.log.ops()[0];
       await c1.post('/repos/r/push', committed.bundle, a);
@@ -282,10 +302,10 @@ describe('server e2e', () => {
       const landed = (await (
         await c1.post(
           '/repos/r/land',
-          await c1.landBody('r', committed.heads, a, {
+          await c1.landBody('r', committed.heads, owner, {
             contrib: [encodeClaim(claim)],
           }),
-          a
+          owner
         )
       ).json()) as { landed: boolean };
       expect(landed.landed).toBe(true);
@@ -326,10 +346,10 @@ describe('server e2e', () => {
       const landed = (await (
         await c2.post(
           '/repos/r/land',
-          await c2.landBody('r', committed.heads, a, {
+          await c2.landBody('r', committed.heads, owner, {
             contrib: [encodeClaim(claim)],
           }),
-          a
+          owner
         )
       ).json()) as { landed: boolean; reason?: string };
       expect(landed.landed).toBe(true);

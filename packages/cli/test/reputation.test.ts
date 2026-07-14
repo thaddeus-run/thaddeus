@@ -1,5 +1,7 @@
+import { Client } from '@thaddeus.run/client';
 import { Identity, ready } from '@thaddeus.run/identity';
 import { MemoryBackend } from '@thaddeus.run/persist';
+import { signContribution } from '@thaddeus.run/reputation';
 import { createServer } from '@thaddeus.run/server';
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
@@ -27,7 +29,7 @@ async function clientHome(
 }
 
 describe('thaddeus reputation', () => {
-  test('push mints an attested merge on an attesting server; reputation shows it', async () => {
+  test('an owner push does not mint merge reputation in its own repository', async () => {
     // An attesting server co-signs each landed op's merge claim with `host`.
     const host = Identity.create();
     const srv = createServer({ backend: new MemoryBackend(), host });
@@ -49,17 +51,17 @@ describe('thaddeus reputation', () => {
     const a = mkdtempSync(join(tmp, 'a-'));
     await run(['clone', 'http://t', 'proj', a], e(a));
     writeFileSync(join(a, 'auth.rs'), 'fn refresh() {}');
-    // Publish: the push auto-lands and ships a merge claim the host attests.
+    // Publish ships a claim, but the host rejects owner-controlled self-credit.
     expect(await run(['push', '-m', 'add auth'], e(a))).toBe(0);
 
     out.length = 0;
     expect(await run(['reputation', owner!], e(a))).toBe(0);
     const repOut = out.join('\n');
-    expect(repOut).toContain('attested: 1');
-    expect(repOut).toContain('merge=1');
+    expect(repOut).toContain('attested: 0');
+    expect(repOut).toContain('by kind: (none)');
   });
 
-  test('without a host key, no reputation accrues (server holds no keys)', async () => {
+  test('without an attester, no reputation proof is issued', async () => {
     const srv = createServer({ backend: new MemoryBackend() }); // no host
     const fetchImpl = srv.fetch.bind(srv);
     const home = await clientHome(fetchImpl, 'nohost');
@@ -98,6 +100,22 @@ describe('thaddeus reputation', () => {
     };
     const home = await clientHome(fetchImpl, 'portable');
     const identity = loadIdentity(home);
+    await new Client('http://source', identity, fetchImpl).importReputation({
+      format: 'thaddeus.reputation.v1',
+      subject: identity.did,
+      contributions: [
+        signContribution(
+          {
+            repo: 'independent/project',
+            ref: 'merge-proof',
+            kind: 'merge',
+            at: '2026-07-14T00:00:00.000Z',
+          },
+          identity,
+          host
+        ),
+      ],
+    });
     const out: string[] = [];
     const env = (cwd: string, stdin?: () => Promise<string>) => ({
       cwd,

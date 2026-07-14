@@ -178,7 +178,7 @@ describe('Repo.land — reputation-tier gate (Pillar 10)', () => {
         )
       );
     }
-    const gate = requireReputationTier(reps, 3);
+    const gate = requireReputationTier(reps, 3, new Set([host.did]));
 
     await branch(repo, 'senior/feat', 'src/a.rs', 'fn a() {}', senior);
     const ok = await repo.land({

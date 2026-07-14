@@ -139,5 +139,5 @@ console.log(
 await http.stop(true);
 rule();
 console.log(
-  'Acceptance: push/land/clone over HTTP; server holds no keys; ciphertext on the wire.'
+  'Acceptance: push/land/clone over HTTP; server holds no repository decryption keys; ciphertext on the wire.'
 );

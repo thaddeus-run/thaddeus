@@ -2,8 +2,10 @@ import { Identity, ready } from '@thaddeus.run/identity';
 import { beforeAll, describe, expect, test } from 'bun:test';
 
 import {
+  attestWithSigner,
   canonicalContribution,
   type ContributionFields,
+  signClaim,
   signContribution,
   verifyContribution,
 } from '../src/contribution';
@@ -11,6 +13,15 @@ import {
 beforeAll(async () => {
   await ready();
 });
+
+async function rejectionMessage(promise: Promise<unknown>): Promise<string> {
+  try {
+    await promise;
+  } catch (error) {
+    return error instanceof Error ? error.message : String(error);
+  }
+  throw new Error('expected promise to reject');
+}
 
 const FIELDS: ContributionFields = {
   repo: 'forgejo.example/acme/web',
@@ -25,6 +36,33 @@ describe('Contribution — sign & verify', () => {
     const host = Identity.create();
     const c = signContribution(FIELDS, subject, host);
     expect(verifyContribution(c)).toEqual({ authentic: true, attested: true });
+  });
+
+  test('an asynchronous signer produces the same verified contribution', async () => {
+    const subject = Identity.create();
+    const host = Identity.create();
+    const claim = signClaim(FIELDS, subject);
+    const contribution = await attestWithSigner(claim, {
+      did: host.did,
+      sign: (message) => Promise.resolve(host.sign(message)),
+    });
+    expect(verifyContribution(contribution)).toEqual({
+      authentic: true,
+      attested: true,
+    });
+  });
+
+  test('an asynchronous signer response is verified locally', async () => {
+    const subject = Identity.create();
+    const host = Identity.create();
+    expect(
+      await rejectionMessage(
+        attestWithSigner(signClaim(FIELDS, subject), {
+          did: host.did,
+          sign: () => Promise.resolve(new Uint8Array(64)),
+        })
+      )
+    ).toContain('invalid signature');
   });
 
   test('subject and host dids are derived from the signing identities', () => {

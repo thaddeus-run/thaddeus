@@ -31,11 +31,17 @@ export interface Verification {
 // no host yet. A subject can mint this alone (it never needs the host key,
 // because the subject core deliberately excludes `host`); an attesting instance
 // then co-signs it with `attest` to produce a full, attested Contribution. This
-// is how reputation travels the wire: the client ships a claim, the host (if it
-// holds a key) attests on land.
+// is how reputation travels the wire: the client ships a claim, then an
+// authorized local or managed host signer attests on land.
 export interface ContributionClaim extends ContributionFields {
   readonly subject: string; // = subject.did
   readonly subj_sig: Uint8Array;
+}
+
+/** An asynchronous contribution signer, such as a managed KMS key. */
+export interface AttestationSigner {
+  readonly did: string;
+  sign(message: Uint8Array): Promise<Uint8Array>;
 }
 
 // Domain tag prefixed into the signed tuple so a contribution signature can
@@ -216,22 +222,57 @@ export function verifyClaim(claim: ContributionClaim): boolean {
 // The claim's subject signature is carried through unchanged (so `authentic`
 // still holds) and the host signs the six-field core (so `attested` holds).
 export function attest(claim: ContributionClaim, host: Identity): Contribution {
-  const core: ContributionCore = {
-    repo: claim.repo,
-    ref: claim.ref,
-    kind: claim.kind,
-    at: claim.at,
-    subject: claim.subject,
-    host: host.did,
-  };
+  const core = attestationCore(claim, host.did);
+  return contributionFromClaim(
+    claim,
+    host.did,
+    host.sign(canonicalContribution(core))
+  );
+}
+
+// Build the exact host-signed core once so local and remote signers cannot
+// diverge in their wire-compatible contribution construction.
+function attestationCore(
+  claim: ContributionClaim,
+  host: string
+): ContributionCore {
   return {
     repo: claim.repo,
     ref: claim.ref,
     kind: claim.kind,
     at: claim.at,
     subject: claim.subject,
-    host: host.did,
-    subj_sig: claim.subj_sig,
-    host_sig: host.sign(canonicalContribution(core)),
+    host,
   };
+}
+
+function contributionFromClaim(
+  claim: ContributionClaim,
+  host: string,
+  hostSig: Uint8Array
+): Contribution {
+  return {
+    repo: claim.repo,
+    ref: claim.ref,
+    kind: claim.kind,
+    at: claim.at,
+    subject: claim.subject,
+    host,
+    subj_sig: claim.subj_sig,
+    host_sig: hostSig,
+  };
+}
+
+/** Co-signs a claim through an asynchronous signer and verifies its response. */
+export async function attestWithSigner(
+  claim: ContributionClaim,
+  signer: AttestationSigner
+): Promise<Contribution> {
+  const core = attestationCore(claim, signer.did);
+  const message = canonicalContribution(core);
+  const signature = await signer.sign(message);
+  if (!PublicIdentity.fromDid(signer.did).verify(message, signature)) {
+    throw new Error('attestation signer returned an invalid signature');
+  }
+  return contributionFromClaim(claim, signer.did, signature);
 }

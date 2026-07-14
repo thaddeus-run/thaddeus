@@ -10,6 +10,7 @@
     ],
     "catalog": {
       "@moonrepo/cli": "2.3.3",
+      "@aws-sdk/client-kms": "3.1086.0",
       "@noble/hashes": "^1.8.0",
       "@scure/base": "^1.2.4",
       "@tailwindcss/postcss": "4.1.13",

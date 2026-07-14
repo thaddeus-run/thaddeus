@@ -46,7 +46,7 @@ console.log('2. instance B honors it with no shared state — only the dids:');
 console.log('   B.verify:', instanceB.verify(c));
 console.log(
   '   B.profile(alice).attested:',
-  instanceB.profile(alice.did).attested.length
+  instanceB.profile(alice.did, new Set([instanceA.did])).attested.length
 );
 
 // Act 3 — the verifier catches forgery.
@@ -63,7 +63,7 @@ console.log('   self-claimed (bad host_sig) →', verifyContribution(claimed));
 
 // Act 4 — portability: the same records yield the same profile anywhere.
 instanceB.append(claimed);
-const profile = instanceB.profile(alice.did);
+const profile = instanceB.profile(alice.did, new Set([instanceA.did]));
 rule();
 console.log('4. portability — reputation is the gathered record set:');
 console.log(
