@@ -45,10 +45,11 @@ compatibility.
 > `MemoryBackend` and the single-node `FileBackend` implement the contract;
 > `FileBackend` persists versioned expiries in a hidden namespace, rebuilds a
 > bounded index after restart, and fails closed on corrupt or excessive state.
-> Operators can bound capacity and narrow request skew, and stable 429/503
-> responses plus fixed-label metrics expose saturation and availability. The
-> original cache API remains available but is no longer the server route's
-> replay boundary.
+> Operators can bound capacity and narrow request skew, but every durable nonce
+> expires exactly five minutes after issuance regardless of the configured
+> `THADDEUS_REQUEST_SKEW_MS` value. Stable 429/503 responses plus fixed-label
+> metrics expose saturation and availability. The original cache API remains
+> available but is no longer the server route's replay boundary.
 
 Cross-node linearizability is still outside this design. Shared CAS, distributed
 backend conformance, and multi-replica replay protection remain deferred to P14.

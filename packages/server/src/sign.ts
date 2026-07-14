@@ -146,9 +146,10 @@ export function canonicalRequest(
   );
 }
 
-// Domain separation prevents a replay key from being confused with another
-// BLAKE3-addressed object. JSON tuple encoding keeps signer/nonce boundaries
-// unambiguous, while only the opaque digest reaches persistence and metrics.
+/**
+ * Derives an opaque, domain-separated replay key from a signer and nonce.
+ * JSON tuple encoding keeps their boundaries unambiguous.
+ */
 export function replayNonceKey(signerDid: string, nonce: string): string {
   const tuple = JSON.stringify([signerDid, nonce]);
   return bytesToHex(

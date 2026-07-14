@@ -1,11 +1,23 @@
 import {
   type ConsumeNonceInput,
+  type ConsumeNonceResult,
   MAX_REPLAY_NONCE_CAPACITY,
 } from '@thaddeus.run/store';
 
 export interface NonceExpiration {
   readonly key: string;
   readonly expiresAt: number;
+}
+
+export interface ReplayNonceState {
+  readonly byKey: Map<string, number>;
+  readonly expirations: NonceExpiration[];
+}
+
+export interface ReplayNonceDecision {
+  readonly cleaned: readonly NonceExpiration[];
+  readonly record?: NonceExpiration;
+  readonly result: ConsumeNonceResult;
 }
 
 const OPAQUE_NONCE_KEY = /^[0-9a-f]{64}$/;
@@ -38,6 +50,68 @@ export function validateConsumeNonceInput(input: ConsumeNonceInput): void {
   }
 }
 
+/** Applies the backend-neutral replay state machine and describes durable work. */
+export function consumeNonceState(
+  state: ReplayNonceState,
+  input: ConsumeNonceInput
+): ReplayNonceDecision {
+  validateConsumeNonceInput(input);
+  const cleaned: NonceExpiration[] = [];
+  for (;;) {
+    const first = state.expirations[0];
+    // A nonce remains live at its exact expiry boundary.
+    if (first === undefined || first.expiresAt >= input.now) break;
+    const expired = popExpiration(state.expirations);
+    if (
+      expired !== undefined &&
+      state.byKey.get(expired.key) === expired.expiresAt
+    ) {
+      state.byKey.delete(expired.key);
+      cleaned.push(expired);
+    }
+  }
+
+  if (state.byKey.has(input.key)) {
+    return {
+      cleaned,
+      result: {
+        status: 'replayed',
+        activeCount: state.byKey.size,
+        cleanedCount: cleaned.length,
+      },
+    };
+  }
+  if (state.byKey.size >= input.capacity) {
+    const first = state.expirations[0];
+    if (first === undefined) {
+      throw new Error('replay nonce index is inconsistent');
+    }
+    return {
+      cleaned,
+      result: {
+        status: 'capacity',
+        activeCount: state.byKey.size,
+        cleanedCount: cleaned.length,
+        retryAt: first.expiresAt + 1,
+      },
+    };
+  }
+
+  const record = { key: input.key, expiresAt: input.expiresAt };
+  state.byKey.set(record.key, record.expiresAt);
+  pushExpiration(state.expirations, record);
+  return {
+    cleaned,
+    record,
+    result: {
+      status: 'consumed',
+      activeCount: state.byKey.size,
+      cleanedCount: cleaned.length,
+    },
+  };
+}
+
+/** Inserts one expiry into the min-heap used for bounded cleanup. */
 export function pushExpiration(
   heap: NonceExpiration[],
   value: NonceExpiration
@@ -59,6 +133,7 @@ export function pushExpiration(
   heap[index] = value;
 }
 
+/** Removes and returns the earliest expiry from the cleanup heap. */
 export function popExpiration(
   heap: NonceExpiration[]
 ): NonceExpiration | undefined {
@@ -90,6 +165,7 @@ export function popExpiration(
   return first;
 }
 
+/** Orders expiries deterministically for the cleanup min-heap. */
 function compareExpiration(
   left: NonceExpiration,
   right: NonceExpiration

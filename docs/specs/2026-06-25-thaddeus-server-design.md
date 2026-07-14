@@ -206,8 +206,10 @@ the configured skew (at most ±5 minutes); (3) atomically consumes an opaque
 digest of `(signer, nonce)` through the durable replay backend; and (4) for
 `push`/`land`, requires `signer === repo.owner`. Failures: `401`
 (missing/invalid/expired/replayed signature), `403` (valid signature, not
-owner). Binding the signature to `blake3(body)` and the nonce means a tampered
-payload or nonce fails — the owner authorizes exactly these bytes.
+owner), `429` with `Retry-After` (replay-backend capacity saturation), and `503`
+(replay storage unavailable or corrupt). Binding the signature to `blake3(body)`
+and the nonce means a tampered payload or nonce fails — the owner authorizes
+exactly these bytes.
 
 ### 6.3 Substrate seams (additive)
 

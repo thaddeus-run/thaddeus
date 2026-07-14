@@ -3,7 +3,13 @@ import {
   type ReplayNonceBackend,
 } from '@thaddeus.run/store';
 import { afterAll, describe, expect, test } from 'bun:test';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -142,6 +148,23 @@ for (const [name, make] of [
 }
 
 describe('FileBackend — durable replay nonce state', () => {
+  test('live instances sharing a directory enforce one capacity bound', async () => {
+    const root = mkdtempSync(join(tmp, 'shared-capacity-'));
+    const first = new FileBackend(root);
+    const second = new FileBackend(root);
+
+    const results = await Promise.all([
+      first.consumeNonce(input(key('a'), 1_000, 2_000, 1)),
+      second.consumeNonce(input(key('b'), 1_000, 2_000, 1)),
+    ]);
+    expect(
+      results.filter((result) => result.status === 'consumed')
+    ).toHaveLength(1);
+    expect(
+      results.filter((result) => result.status === 'capacity')
+    ).toHaveLength(1);
+  });
+
   test('a new instance rejects a previously consumed live nonce', async () => {
     const root = mkdtempSync(join(tmp, 'restart-'));
     await new FileBackend(root).consumeNonce(input(key('a')));
@@ -174,6 +197,17 @@ describe('FileBackend — durable replay nonce state', () => {
     await backend.put('obj/visible', new Uint8Array([1]));
     await backend.consumeNonce(input(key('a')));
     expect(await backend.list('')).toEqual(['obj/visible']);
+  });
+
+  test('restart rebuild removes orphaned nonce staging files', async () => {
+    const root = mkdtempSync(join(tmp, 'orphan-staging-'));
+    const staging = join(root, '.replay-nonces-v1', '.staging');
+    const orphan = join(staging, 'orphan');
+    mkdirSync(staging, { recursive: true });
+    writeFileSync(orphan, 'partial record');
+
+    await new FileBackend(root).consumeNonce(input(key('a')));
+    expect(existsSync(orphan)).toBeFalse();
   });
 
   test('corrupt durable nonce records fail closed after restart', async () => {
