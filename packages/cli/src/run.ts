@@ -3177,6 +3177,18 @@ export async function run(
             return 2;
           }
         }
+        if (
+          minMerges !== undefined &&
+          minMerges > 0 &&
+          attester === undefined &&
+          host === undefined &&
+          trustedReputationHosts.length === 0
+        ) {
+          out(
+            '--min-merges requires --trust-host, --host, or --attestation-aws-kms-key-arn'
+          );
+          return 2;
+        }
         const server = startServer({
           dataDir,
           port,
