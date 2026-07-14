@@ -130,9 +130,10 @@ export class ReplayNonceCache {
   }
 }
 
-// The canonical bytes a request signature covers: method, path+query, a hash of
-// the body, timestamp, and nonce. Hashing the body binds the signature to
-// exactly these bytes, so a tampered payload fails verification.
+/**
+ * Builds the canonical bytes covered by a request signature.
+ * Hashing the body binds the signature to its exact payload.
+ */
 export function canonicalRequest(
   method: string,
   pathWithQuery: string,
@@ -157,7 +158,7 @@ export function replayNonceKey(signerDid: string, nonce: string): string {
   );
 }
 
-// Client side: produce the four header values for a request.
+/** Produces the four signed header values for a client request. */
 export function signRequest(
   method: string,
   pathWithQuery: string,

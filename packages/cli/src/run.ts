@@ -648,7 +648,7 @@ async function readProcessStdin(): Promise<string> {
   return text;
 }
 
-// The injectable entry point. Returns a process exit code.
+/** Runs the injectable CLI entry point and returns its process exit code. */
 export async function run(
   argv: readonly string[],
   env: CliEnv

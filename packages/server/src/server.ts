@@ -193,9 +193,9 @@ export interface ServerConfig {
 }
 
 export interface Server {
+  /** Handles one HTTP request against the configured server. */
   fetch(req: Request): Promise<Response>;
-  // Promote every scheduled public capability whose not_before is due. The
-  // HTTP host calls this on an interval; exposing it keeps tests deterministic.
+  /** Promotes every scheduled public capability whose not-before time is due. */
   revealDue(): Promise<number>;
 }
 
@@ -2543,6 +2543,7 @@ export function createServer(config: ServerConfig): Server {
   }
 
   return {
+    /** Promotes every scheduled public capability whose not-before time is due. */
     async revealDue(): Promise<number> {
       let released = 0;
       let names: readonly string[];
@@ -2565,6 +2566,7 @@ export function createServer(config: ServerConfig): Server {
       return released;
     },
 
+    /** Handles one HTTP request against the configured server. */
     async fetch(req: Request): Promise<Response> {
       const url = new URL(req.url);
       const path = url.pathname;
