@@ -47,10 +47,10 @@ export type ConsumeNonceResult =
 export const DEFAULT_REPLAY_NONCE_CAPACITY: number = 100_000;
 export const MAX_REPLAY_NONCE_CAPACITY: number = 1_000_000;
 
-// A versioned JSON record codec. Records carry Uint8Array fields (nonce,
-// ciphertext, sig), so a plain Uint8Array is encoded as {"$u8": base64} and
-// decoded back. Deterministic; a leading version field lets a future binary
-// encoding supersede it behind the unchanged Backend.
+/**
+ * Encodes a value as a versioned JSON record while preserving byte arrays.
+ * The leading version lets a future codec replace this format transparently.
+ */
 export function encodeRecord(value: unknown): Uint8Array {
   const json = JSON.stringify({ v: 'tplv1', d: value }, (_k, v) =>
     v instanceof Uint8Array ? { $u8: Buffer.from(v).toString('base64') } : v
@@ -58,6 +58,7 @@ export function encodeRecord(value: unknown): Uint8Array {
   return new TextEncoder().encode(json);
 }
 
+/** Decodes a versioned backend record and restores encoded byte arrays. */
 export function decodeRecord(bytes: Uint8Array): unknown {
   const parsed = JSON.parse(new TextDecoder().decode(bytes), (_k, v) =>
     v !== null &&
