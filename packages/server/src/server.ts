@@ -420,6 +420,15 @@ export function createServer(config: ServerConfig): Server {
     }
     trustedReputationHosts.add(attester.did);
   }
+  if (
+    config.minMerges !== undefined &&
+    config.minMerges > 0 &&
+    trustedReputationHosts.size === 0
+  ) {
+    throw new TypeError(
+      'positive minMerges requires a trusted reputation host or attester'
+    );
+  }
   const attestationLimiter = new AttestationRateLimiter(
     config.backend,
     configuredAttestationRateLimit

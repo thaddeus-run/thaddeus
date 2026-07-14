@@ -36,7 +36,9 @@ in one content-addressed record. `ServerConfig.trustedReputationHosts` controls
 an exact allowlist: foreign proofs remain visible but only listed host DIDs and
 the active local or managed attester count. Trust is never recursive or
 transitive. Every trusted proof remains available for audit/export, while gates
-count one deterministic proof per `(subject, repo, kind, ref)` event.
+count one deterministic proof per `(subject, repo, kind, ref)` event. A positive
+`minMerges` configuration is rejected at startup unless this exact allowlist
+contains a host or an active attester supplies one automatically.
 
 Merge issuance verifies that the subject authored an operation newly entering
 the requested repository and excludes operations authored by that repository's

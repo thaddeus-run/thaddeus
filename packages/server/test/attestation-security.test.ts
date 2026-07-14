@@ -116,6 +116,21 @@ describe('reputation attestation security', () => {
         trustedReputationHosts: [host.did, host.did],
       })
     ).not.toThrow();
+    expect(() =>
+      createServer({ backend: new MemoryBackend(), minMerges: 1 })
+    ).toThrow(
+      'positive minMerges requires a trusted reputation host or attester'
+    );
+    expect(() =>
+      createServer({ backend: new MemoryBackend(), minMerges: 0 })
+    ).not.toThrow();
+    expect(() =>
+      createServer({
+        backend: new MemoryBackend(),
+        minMerges: 1,
+        trustedReputationHosts: [host.did],
+      })
+    ).not.toThrow();
   });
 
   test('reports issuance disabled when the configured ceiling is zero', async () => {
