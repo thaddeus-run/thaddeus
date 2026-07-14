@@ -19,7 +19,10 @@ import { MemoryBackend } from '../src/memory';
 const tmp = mkdtempSync(join(tmpdir(), 'thaddeus-replay-nonce-'));
 afterAll(() => rmSync(tmp, { recursive: true, force: true }));
 
+/** Builds a valid opaque test key from one hexadecimal character. */
 const key = (character: string): string => character.repeat(64);
+
+/** Builds a nonce-consumption input with concise contract-test defaults. */
 const input = (
   nonceKey: string,
   now = 1_000,
