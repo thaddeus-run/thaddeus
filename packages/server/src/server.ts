@@ -420,15 +420,6 @@ export function createServer(config: ServerConfig): Server {
     }
     trustedReputationHosts.add(attester.did);
   }
-  if (
-    config.minMerges !== undefined &&
-    config.minMerges > 0 &&
-    trustedReputationHosts.size === 0
-  ) {
-    throw new TypeError(
-      'positive minMerges requires a trusted reputation host or attester'
-    );
-  }
   const attestationLimiter = new AttestationRateLimiter(
     config.backend,
     configuredAttestationRateLimit
@@ -2476,8 +2467,8 @@ export function createServer(config: ServerConfig): Server {
       // When configured with a reputation floor, add a durable tier gate: every
       // incoming op's author must clear `minMerges` ATTESTED merges. Self-claimed
       // reputation never counts, so the gate honors only host-vouched history.
-      // Loaded lazily — a server with no host and no floor never touches `rep/`.
-      if (config.minMerges !== undefined) {
+      // Loaded lazily, and only when the floor has an actual trust source.
+      if (config.minMerges !== undefined && trustedReputationHosts.size > 0) {
         gates.push(
           requireReputationTier(
             await reputationLog(),

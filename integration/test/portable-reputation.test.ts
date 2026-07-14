@@ -86,9 +86,11 @@ describe('P10 portable reputation between real server instances', () => {
     expect(archive.contributions).toHaveLength(1);
 
     const destinationBackend = new MemoryBackend();
+    const otherTrustedHost = Identity.create();
     const untrustedServer = createServer({
       backend: destinationBackend,
       minMerges: 1,
+      trustedReputationHosts: [otherTrustedHost.did],
     });
     const untrusted = new Client(
       'http://destination',

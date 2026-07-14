@@ -232,18 +232,6 @@ describe('startServer', () => {
     expect(missingSigner).toEqual([
       '--attestation-rate-limit requires --host or --attestation-aws-kms-key-arn',
     ]);
-
-    const missingTrustSource: string[] = [];
-    expect(
-      await run(['serve', '--min-merges', '1'], {
-        cwd: tmp,
-        home: tmp,
-        out: (line) => missingTrustSource.push(line),
-      })
-    ).toBe(2);
-    expect(missingTrustSource).toEqual([
-      '--min-merges requires --trust-host, --host, or --attestation-aws-kms-key-arn',
-    ]);
   });
 
   test('warns before starting with the development-only local host seed', async () => {
