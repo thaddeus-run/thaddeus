@@ -14,10 +14,12 @@ export class MemoryBackend implements Backend, ReplayNonceBackend {
   readonly #nonces = new Map<string, number>();
   readonly #nonceExpirations: NonceExpiration[] = [];
 
+  /** Stores a defensive byte copy for a generic backend key. */
   async put(key: string, bytes: Uint8Array): Promise<void> {
     this.#map.set(key, new Uint8Array(bytes));
   }
 
+  /** Stores a generic key only when it is not already present. */
   async putIfAbsent(key: string, bytes: Uint8Array): Promise<boolean> {
     if (this.#map.has(key)) {
       return false;
@@ -26,15 +28,18 @@ export class MemoryBackend implements Backend, ReplayNonceBackend {
     return true;
   }
 
+  /** Reads a defensive byte copy for a generic backend key when present. */
   async get(key: string): Promise<Uint8Array | undefined> {
     const v = this.#map.get(key);
     return v === undefined ? undefined : new Uint8Array(v);
   }
 
+  /** Lists generic in-memory keys that begin with the supplied prefix. */
   async list(prefix: string): Promise<readonly string[]> {
     return [...this.#map.keys()].filter((k) => k.startsWith(prefix));
   }
 
+  /** Idempotently deletes a generic in-memory backend key. */
   async delete(key: string): Promise<void> {
     this.#map.delete(key);
   }
