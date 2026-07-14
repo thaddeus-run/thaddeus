@@ -17,6 +17,7 @@ export interface Backend {
 // a race. Implementations define their coordination domain (process-local for
 // MemoryBackend and one FileBackend process for the filesystem implementation).
 export interface ReplayNonceBackend {
+  /** Atomically consumes one opaque nonce key within the backend's domain. */
   consumeNonce(input: ConsumeNonceInput): Promise<ConsumeNonceResult>;
 }
 
