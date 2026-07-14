@@ -115,6 +115,7 @@ export class FileBackend implements Backend, ReplayNonceBackend {
     this.#nonceCoordinator = replayNonceCoordinator(root);
   }
 
+  /** Atomically replaces the bytes stored for a generic backend key. */
   async put(key: string, bytes: Uint8Array): Promise<void> {
     await mkdir(this.#root, { recursive: true });
     const staging = join(this.#root, '.staging');
@@ -124,9 +125,10 @@ export class FileBackend implements Backend, ReplayNonceBackend {
     await renameWithRetry(tmp, this.#path(key));
   }
 
-  // Link a fully written staging file into place. A hard link is an atomic
-  // create-if-absent operation on the same filesystem and never replaces an
-  // existing monotonic record.
+  /**
+   * Atomically creates a generic key without replacing an existing record.
+   * A hard link publishes the fully written staging file in one operation.
+   */
   async putIfAbsent(key: string, bytes: Uint8Array): Promise<boolean> {
     await mkdir(this.#root, { recursive: true });
     const staging = join(this.#root, '.staging');
@@ -146,6 +148,7 @@ export class FileBackend implements Backend, ReplayNonceBackend {
     }
   }
 
+  /** Reads a defensive byte copy for a generic backend key when present. */
   async get(key: string): Promise<Uint8Array | undefined> {
     try {
       return new Uint8Array(await readFile(this.#path(key)));
@@ -157,9 +160,10 @@ export class FileBackend implements Backend, ReplayNonceBackend {
     }
   }
 
-  // Returns only regular files in root, auto-excluding the .staging subdir and
-  // any other directories. No regex filter needed — directories simply don't
-  // pass isFile().
+  /**
+   * Lists generic keys with a prefix while excluding internal directories.
+   * Only regular root files are visible through the generic backend contract.
+   */
   async list(prefix: string): Promise<readonly string[]> {
     let names: string[];
     try {
@@ -188,6 +192,7 @@ export class FileBackend implements Backend, ReplayNonceBackend {
     return keys;
   }
 
+  /** Idempotently deletes a generic backend key. */
   async delete(key: string): Promise<void> {
     try {
       await unlink(this.#path(key));
