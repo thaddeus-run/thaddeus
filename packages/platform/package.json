@@ -1,6 +1,6 @@
 {
   "name": "@thaddeus.run/platform",
-  "version": "0.1.8-alpha",
+  "version": "0.1.9-alpha",
   "description": "The platform: named repos (scopes) with one-call creation and landing-as-policy — re-point a shared view to include a workspace's commits, gated by a pluggable policy. Pillar 06.",
   "keywords": [
     "landing",

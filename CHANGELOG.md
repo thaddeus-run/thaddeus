@@ -12,15 +12,15 @@ All notable changes to Thaddeus. Format follows
 > five-lens analysis (security, product, code-quality/Rust-vs-Go, manifesto
 > conformance) and the ThadHub plan are the companion document:
 > <https://4xibq00df3aj.postplan.dev/>. Statuses below are current as of
-> **0.1.8-alpha**; update the table when a milestone opens or closes.
+> **0.1.9-alpha**; update the table when a milestone opens or closes.
 
-| Phase   | What it is                                                                                                                                                  | Status                             | Milestone / issues                                                                    |
-| ------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------- | ------------------------------------------------------------------------------------- |
-| P4–P10  | Policy, releases, query surface, timed reveal, watch, agent budgets + rate windows, rotate-and-recall, portable reputation (export/import + `--trust-host`) | **Shipped** — through v0.1.8-alpha | —                                                                                     |
-| **P11** | **Hardening & Proof** — benchmarks, outside-reviewer veto, lazythad write actions                                                                           | **In progress**                    | [P11](https://github.com/thaddeus-run/thaddeus/milestone/1) — #58, #59, #60, #73, #74 |
-| P12     | Single-node security hardening                                                                                                                              | **In progress** — #61, #75 shipped | [P12](https://github.com/thaddeus-run/thaddeus/milestone/2) — #61–#63, #75–#79        |
-| P13     | Product & collaboration UX                                                                                                                                  | Queued                             | [P13](https://github.com/thaddeus-run/thaddeus/milestone/3) — #64–#67, #80, #82       |
-| P14     | Backend implementation (behind flags): CAS, S3/SQLite, conformance, migration                                                                               | Queued                             | [P14](https://github.com/thaddeus-run/thaddeus/milestone/4) — #68–#71                 |
+| Phase   | What it is                                                                                                                                                  | Status                                  | Milestone / issues                                                                    |
+| ------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------- | ------------------------------------------------------------------------------------- |
+| P4–P10  | Policy, releases, query surface, timed reveal, watch, agent budgets + rate windows, rotate-and-recall, portable reputation (export/import + `--trust-host`) | **Shipped** — through v0.1.9-alpha      | —                                                                                     |
+| **P11** | **Hardening & Proof** — benchmarks, outside-reviewer veto, lazythad write actions                                                                           | **In progress**                         | [P11](https://github.com/thaddeus-run/thaddeus/milestone/1) — #58, #59, #60, #73, #74 |
+| P12     | Single-node security hardening                                                                                                                              | **In progress** — #61, #75, #79 shipped | [P12](https://github.com/thaddeus-run/thaddeus/milestone/2) — #61–#63, #75–#79        |
+| P13     | Product & collaboration UX                                                                                                                                  | Queued                                  | [P13](https://github.com/thaddeus-run/thaddeus/milestone/3) — #64–#67, #80, #82       |
+| P14     | Backend implementation (behind flags): CAS, S3/SQLite, conformance, migration                                                                               | Queued                                  | [P14](https://github.com/thaddeus-run/thaddeus/milestone/4) — #68–#71                 |
 
 Everything through P14 is **Part 1** — it ships on the current single Fly node
 with `FileBackend`. The production infrastructure change (S3 / multi-node) is
@@ -39,11 +39,10 @@ with `FileBackend`. The production infrastructure change (S3 / multi-node) is
   streamed before authentication or buffering (#75), and backend-neutral atomic
   replay consumption now persists nonce expiries across single-node restarts
   (#61 / THA-8), while reputation now has exact host trust, anti-farming, a
-  durable issuance ceiling, and managed KMS custody (#79 / THA-26; all shipped
-  under Unreleased). Next are per-identity repo/object quotas + rate limits
-  (#76), size/count limits + pagination (#62), per-signer rate + spam control
-  (#63), meter or remove `maxSpend` (#78, still a hard-coded 0). No replicas
-  required.
+  durable issuance ceiling, and managed KMS custody (#79 / THA-26; shipped in
+  0.1.9-alpha). Next are per-identity repo/object quotas + rate limits (#76),
+  size/count limits + pagination (#62), per-signer rate + spam control (#63),
+  meter or remove `maxSpend` (#78, still a hard-coded 0). No replicas required.
 - **P13 — Product & collaboration UX.** `thaddeus init` in-place + offline
   `commit` (#80), the getting-started clone-path fix + version drift + a
   runnable agent-governed demo (#82), plus `track`, workspace base sync, 3-way
@@ -65,6 +64,8 @@ restored successfully in a clean environment (#71).
 > **Correction:** the S3 backend was once cited as "#14," but PR #14 was
 > "Multi-writer collaboration: delegated push over P09," unrelated to storage.
 > The S3 backend is tracked as **#69** under milestone P14.
+
+## [0.1.9-alpha] - 2026-07-14
 
 ### Security
 
@@ -100,6 +101,11 @@ restored successfully in a clean environment (#71).
   heads. CLI clone supports `--owner`; unsigned legacy views migrate with the
   clean-copy, owner-only `pull --bootstrap-head` flow. Delegates may upload
   signed operations but cannot claim publication without an owner-signed land.
+
+  **Breaking:** v0.1.8-alpha clients cannot create or land against a
+  v0.1.9-alpha server. Update the CLI first; owners of unsigned legacy views
+  must migrate from a clean, not-ahead working copy with
+  `thaddeus pull --bootstrap-head`.
 
 - **Request bodies are bounded before authentication or buffering (#75 /
   THA-22).** Recognized POST routes enforce a configurable 16 MiB default with a
