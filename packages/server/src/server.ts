@@ -12,6 +12,7 @@ import {
   type HeadRecord,
   type HeadRecordWire,
   type HeadVerification,
+  MissingReachableOperationError,
   type Op,
   verifyHeadChain,
   verifyHeadSnapshot,
@@ -36,7 +37,9 @@ import {
   type ContributionClaim,
   decodeReputationArchive,
   encodeReputationArchive,
+  REPUTATION_ARCHIVE_FORMAT,
   type ReputationArchive,
+  ReputationArchiveLimitError,
   ReputationLog,
   verifyClaim,
   verifyContribution,
@@ -58,16 +61,32 @@ import {
 import { AttestationRateLimiter } from './attestation-rate';
 import {
   type Bundle,
-  decodeBundle,
-  decodeCapability,
-  decodeClaim,
-  decodeDelegation,
-  decodeRelease,
-  encodeBundle,
+  decodeBundle as decodeBundleWire,
+  decodeCapability as decodeCapabilityWire,
+  decodeClaim as decodeClaimWire,
+  decodeDelegation as decodeDelegationWire,
+  decodeRelease as decodeReleaseWire,
   encodeCapability,
   encodeDelegation,
   encodeRelease,
 } from './dto';
+import {
+  inputLimitBody,
+  InputLimitError,
+  type LimitConfig,
+  resolveLimits,
+  validateLogicalText,
+} from './limits';
+import {
+  arrayPageSource,
+  asyncIteratorPageSource,
+  backendPageSource,
+  CursorRegistry,
+  type PageRequest,
+  PaginationError,
+  paginationErrorBody,
+  parsePagination,
+} from './pagination';
 import {
   DEFAULT_REPO_POLICY,
   normalizeRepoPolicy,
@@ -81,6 +100,8 @@ import {
   verifyRequest as verifySignedEnvelope,
 } from './sign';
 
+export { DEFAULT_MAX_REQUEST_BODY_BYTES } from './limits';
+
 // Parse a JSON request body, returning undefined on malformed input (so a handler
 // can answer 400 rather than throwing a 500). Used by every body-parsing handler.
 function safeParseJson(body: Uint8Array): unknown {
@@ -93,7 +114,7 @@ function safeParseJson(body: Uint8Array): unknown {
 
 // Decode a percent-encoded path segment, returning undefined on a malformed
 // escape sequence (e.g. %E0%A4%A) rather than throwing. Callers respond 400.
-function safeDecode(segment: string): string | undefined {
+function safePercentDecode(segment: string): string | undefined {
   try {
     return decodeURIComponent(segment);
   } catch {
@@ -101,27 +122,40 @@ function safeDecode(segment: string): string | undefined {
   }
 }
 
-export const DEFAULT_MAX_REQUEST_BODY_BYTES: number = 16 * 1024 * 1024;
+function safeDecode(segment: string, maxBytes: number): string | undefined {
+  const decoded = safePercentDecode(segment);
+  if (decoded !== undefined) validateLogicalText(decoded, maxBytes);
+  return decoded;
+}
+
 export const DEFAULT_ATTESTATION_RATE_LIMIT = 20;
 export const MAX_ATTESTATION_RATE_LIMIT = 20;
 const REQUEST_BODY_BUFFER_BLOCK_BYTES = 64 * 1024;
 
-/** Resolves the inclusive application limit and rejects unsafe host values. */
-function requestBodyLimit(value: number | undefined): number {
-  let limit = DEFAULT_MAX_REQUEST_BODY_BYTES;
-  if (value !== undefined) {
-    limit = value;
-  }
-  if (
-    !Number.isSafeInteger(limit) ||
-    limit <= 0 ||
-    limit > Number.MAX_SAFE_INTEGER - 1
-  ) {
-    throw new RangeError(
-      'maxRequestBodyBytes must be a positive safe integer no greater than Number.MAX_SAFE_INTEGER - 1'
-    );
-  }
-  return limit;
+interface RevisionClock {
+  activeMutations: number;
+  sequence: number;
+}
+
+function revisionValue(clock: RevisionClock): number {
+  return clock.sequence * 2 + (clock.activeMutations > 0 ? 1 : 0);
+}
+
+/** Keeps a snapshot revision unstable until every overlapping mutation ends. */
+function beginRevision(clock: RevisionClock): () => void {
+  clock.sequence += 1;
+  clock.activeMutations += 1;
+  let finished = false;
+  return () => {
+    if (finished) return;
+    finished = true;
+    clock.sequence += 1;
+    clock.activeMutations -= 1;
+  };
+}
+
+function bumpRevision(clock: RevisionClock): void {
+  clock.sequence += 1;
 }
 
 /** Resolves the canonical replay capacity and its deprecated alias. */
@@ -176,7 +210,7 @@ function attestationRateLimit(value: number | undefined): number {
   return limit;
 }
 
-export interface ServerConfig {
+export interface ServerConfig extends LimitConfig {
   backend: Backend & ReplayNonceBackend;
   // Largest request body accepted by application routes. Bun hosts use one
   // additional sentinel byte so the streamed guard can observe the boundary.
@@ -221,6 +255,8 @@ export interface Server {
   fetch(req: Request): Promise<Response>;
   /** Promotes every scheduled public capability whose not-before time is due. */
   revealDue(): Promise<number>;
+  /** Releases process-local pagination sessions. Safe to call repeatedly. */
+  close(): Promise<void>;
 }
 
 interface RepoMeta {
@@ -382,12 +418,55 @@ function replacesPendingReveal(
  * the backend or intentionally reset after restart.
  */
 export function createServer(config: ServerConfig): Server {
-  const maxRequestBodyBytes = requestBodyLimit(config.maxRequestBodyBytes);
+  const limits = resolveLimits(config);
+  const { maxRequestBodyBytes } = limits;
+  const validateDecoded = <T>(value: T): T => {
+    validateLogicalText(value, limits.maxFieldBytes);
+    return value;
+  };
+  const decodeBundle = (wire: Bundle) =>
+    validateDecoded(decodeBundleWire(wire));
+  const decodeCapability = (wire: string) =>
+    validateDecoded(decodeCapabilityWire(wire));
+  const decodeClaim = (wire: string) => validateDecoded(decodeClaimWire(wire));
+  const decodeDelegation = (wire: string) =>
+    validateDecoded(decodeDelegationWire(wire));
+  const decodeRelease = (wire: string) =>
+    validateDecoded(decodeReleaseWire(wire));
   const configuredReplayNonceCapacity = replayNonceCapacity(config);
   const configuredRequestSkewMs = requestTimestampSkew(config.requestSkewMs);
   const configuredAttestationRateLimit = attestationRateLimit(
     config.attestationRateLimit
   );
+  const cursorRegistry = new CursorRegistry({
+    defaultPageSize: limits.defaultPageSize,
+    maxPageSize: limits.maxPageSize,
+    maxPageResponseBytes: limits.maxPageResponseBytes,
+    cursorCapacity: limits.paginationCursorCapacity,
+    cursorTtlMs: limits.paginationCursorTtlMs,
+  });
+  const catalogRevision: RevisionClock = {
+    activeMutations: 0,
+    sequence: 0,
+  };
+  const reputationRevision: RevisionClock = {
+    activeMutations: 0,
+    sequence: 0,
+  };
+  const repoRevisions = new Map<string, RevisionClock>();
+  const repoRevisionClock = (name: string): RevisionClock => {
+    let clock = repoRevisions.get(name);
+    if (clock === undefined) {
+      clock = { activeMutations: 0, sequence: 0 };
+      repoRevisions.set(name, clock);
+    }
+    return clock;
+  };
+  const repoRevision = (name: string): number =>
+    revisionValue(repoRevisionClock(name));
+  const bumpRepoRevision = (name: string): void => {
+    bumpRevision(repoRevisionClock(name));
+  };
   if (config.attester !== undefined && config.host !== undefined) {
     throw new TypeError('attester and host cannot both be set');
   }
@@ -712,17 +791,22 @@ export function createServer(config: ServerConfig): Server {
         }
       }
       if (effects.contributions.length > 0) {
-        const reps = await reputationLog();
-        for (const contribution of effects.contributions) {
-          const verification = verifyContribution(contribution);
-          if (
-            contribution.repo !== name ||
-            !verification.authentic ||
-            !verification.attested
-          ) {
-            throw new Error(`stored land contribution is invalid: ${key}`);
+        const finishReputationMutation = beginRevision(reputationRevision);
+        try {
+          const reps = await reputationLog();
+          for (const contribution of effects.contributions) {
+            const verification = verifyContribution(contribution);
+            if (
+              contribution.repo !== name ||
+              !verification.authentic ||
+              !verification.attested
+            ) {
+              throw new Error(`stored land contribution is invalid: ${key}`);
+            }
+            await reps.ingest(contribution);
           }
-          await reps.ingest(contribution);
+        } finally {
+          finishReputationMutation();
         }
       }
       await backend.delete(key);
@@ -916,6 +1000,88 @@ export function createServer(config: ServerConfig): Server {
       headers: { 'content-type': 'application/json' },
     });
 
+  const inputLimitRejections = {
+    archive_too_large: 0,
+    contribution_limit_exceeded: 0,
+    field_too_large: 0,
+  };
+  const paginationOutcomes = {
+    completed: 0,
+    invalid_query: 0,
+    cursor_invalid: 0,
+    capacity: 0,
+    snapshot_changed: 0,
+    item_too_large: 0,
+  };
+
+  function inputLimitResponse(error: InputLimitError): Response {
+    inputLimitRejections[error.code] += 1;
+    return json(413, inputLimitBody(error));
+  }
+
+  function paginationErrorResponse(error: PaginationError): Response {
+    const outcome =
+      error.code === 'invalid_pagination'
+        ? 'invalid_query'
+        : error.code === 'pagination_cursor_invalid'
+          ? 'cursor_invalid'
+          : error.code === 'pagination_capacity_exceeded'
+            ? 'capacity'
+            : error.code === 'pagination_snapshot_changed'
+              ? 'snapshot_changed'
+              : 'item_too_large';
+    paginationOutcomes[outcome] += 1;
+    const response = json(error.status, paginationErrorBody(error));
+    response.headers.set('cache-control', 'no-store');
+    if (error.status === 429) {
+      response.headers.set(
+        'retry-after',
+        String(Math.max(1, Math.ceil(limits.paginationCursorTtlMs / 1_000)))
+      );
+    }
+    return response;
+  }
+
+  async function paged<T>(input: {
+    readonly url?: URL;
+    readonly request?: PageRequest;
+    readonly binding: string;
+    readonly revisionNow: () => number;
+    readonly createSource: () => Promise<import('./pagination').PageSource<T>>;
+    readonly render: (
+      items: readonly T[],
+      nextCursor: string | null
+    ) => unknown;
+    readonly maxBytes?: number;
+    readonly isWithinLimit?: (body: unknown) => boolean;
+  }): Promise<Response> {
+    try {
+      const request =
+        input.request ??
+        parsePagination(input.url as URL, {
+          defaultPageSize: limits.defaultPageSize,
+          maxPageSize: limits.maxPageSize,
+        });
+      const result = await cursorRegistry.page({
+        request,
+        binding: input.binding,
+        revisionNow: input.revisionNow,
+        createSource: input.createSource,
+        render: input.render,
+        maxBytes: input.maxBytes,
+        isWithinLimit: input.isWithinLimit,
+      });
+      if (result.nextCursor === null) paginationOutcomes.completed += 1;
+      const response = json(200, result.body);
+      response.headers.set('cache-control', 'no-store');
+      return response;
+    } catch (error) {
+      if (error instanceof PaginationError)
+        return paginationErrorResponse(error);
+      throw error;
+    }
+  }
+
   const headError = (
     status: number,
     verification: Exclude<HeadVerification, { ok: true }>
@@ -927,8 +1093,9 @@ export function createServer(config: ServerConfig): Server {
 
   function decodeHead(wire: unknown): HeadRecord | Response {
     try {
-      return decodeHeadRecord(wire);
+      return validateDecoded(decodeHeadRecord(wire));
     } catch (error) {
+      if (error instanceof InputLimitError) return inputLimitResponse(error);
       return json(400, {
         error:
           error instanceof Error
@@ -1109,6 +1276,46 @@ export function createServer(config: ServerConfig): Server {
       `thaddeus_http_request_body_rejections_total{reason="declared_too_large"} ${bodyRejections.declared_too_large}`,
       `thaddeus_http_request_body_rejections_total{reason="streamed_too_large"} ${bodyRejections.streamed_too_large}`,
       `thaddeus_http_request_body_rejections_total{reason="invalid_content_length"} ${bodyRejections.invalid_content_length}`,
+      '# HELP thaddeus_reputation_archive_limit_bytes Maximum nested reputation archive bytes.',
+      '# TYPE thaddeus_reputation_archive_limit_bytes gauge',
+      `thaddeus_reputation_archive_limit_bytes ${limits.maxReputationArchiveBytes}`,
+      '# HELP thaddeus_reputation_contribution_limit Maximum raw reputation contributions.',
+      '# TYPE thaddeus_reputation_contribution_limit gauge',
+      `thaddeus_reputation_contribution_limit ${limits.maxReputationContributions}`,
+      '# HELP thaddeus_input_field_limit_bytes Maximum UTF-8 bytes in one logical text field.',
+      '# TYPE thaddeus_input_field_limit_bytes gauge',
+      `thaddeus_input_field_limit_bytes ${limits.maxFieldBytes}`,
+      '# HELP thaddeus_pagination_default_page_size Default collection page item count.',
+      '# TYPE thaddeus_pagination_default_page_size gauge',
+      `thaddeus_pagination_default_page_size ${limits.defaultPageSize}`,
+      '# HELP thaddeus_pagination_max_page_size Maximum accepted collection page item count.',
+      '# TYPE thaddeus_pagination_max_page_size gauge',
+      `thaddeus_pagination_max_page_size ${limits.maxPageSize}`,
+      '# HELP thaddeus_pagination_page_limit_bytes Maximum encoded JSON page bytes.',
+      '# TYPE thaddeus_pagination_page_limit_bytes gauge',
+      `thaddeus_pagination_page_limit_bytes ${limits.maxPageResponseBytes}`,
+      '# HELP thaddeus_pagination_cursor_capacity Maximum active cursor sessions.',
+      '# TYPE thaddeus_pagination_cursor_capacity gauge',
+      `thaddeus_pagination_cursor_capacity ${limits.paginationCursorCapacity}`,
+      '# HELP thaddeus_pagination_cursor_ttl_ms Sliding cursor idle expiry in milliseconds.',
+      '# TYPE thaddeus_pagination_cursor_ttl_ms gauge',
+      `thaddeus_pagination_cursor_ttl_ms ${limits.paginationCursorTtlMs}`,
+      '# HELP thaddeus_pagination_active_cursors Active process-local cursor sessions.',
+      '# TYPE thaddeus_pagination_active_cursors gauge',
+      `thaddeus_pagination_active_cursors ${cursorRegistry.activeCount}`,
+      '# HELP thaddeus_input_limit_rejections_total Input limit rejections by fixed reason.',
+      '# TYPE thaddeus_input_limit_rejections_total counter',
+      `thaddeus_input_limit_rejections_total{reason="archive_too_large"} ${inputLimitRejections.archive_too_large}`,
+      `thaddeus_input_limit_rejections_total{reason="contribution_limit_exceeded"} ${inputLimitRejections.contribution_limit_exceeded}`,
+      `thaddeus_input_limit_rejections_total{reason="field_too_large"} ${inputLimitRejections.field_too_large}`,
+      '# HELP thaddeus_pagination_outcomes_total Pagination outcomes by fixed result.',
+      '# TYPE thaddeus_pagination_outcomes_total counter',
+      `thaddeus_pagination_outcomes_total{outcome="completed"} ${paginationOutcomes.completed}`,
+      `thaddeus_pagination_outcomes_total{outcome="invalid_query"} ${paginationOutcomes.invalid_query}`,
+      `thaddeus_pagination_outcomes_total{outcome="cursor_invalid"} ${paginationOutcomes.cursor_invalid}`,
+      `thaddeus_pagination_outcomes_total{outcome="capacity"} ${paginationOutcomes.capacity}`,
+      `thaddeus_pagination_outcomes_total{outcome="snapshot_changed"} ${paginationOutcomes.snapshot_changed}`,
+      `thaddeus_pagination_outcomes_total{outcome="item_too_large"} ${paginationOutcomes.item_too_large}`,
       '# HELP thaddeus_replay_nonce_capacity Maximum live replay nonces configured for this process.',
       '# TYPE thaddeus_replay_nonce_capacity gauge',
       `thaddeus_replay_nonce_capacity ${configuredReplayNonceCapacity}`,
@@ -1220,25 +1427,41 @@ export function createServer(config: ServerConfig): Server {
       .sort();
   }
 
-  async function listRepos(): Promise<Response> {
-    const names = await repoNames();
-    // Include each repo's owner DID so a client can list "repos I own" without a
-    // second round-trip. Owners are already public on the mirror (they sign
-    // every op), so this leaks nothing new.
-    const owners: Record<string, string> = {};
-    for (const name of names) {
-      const meta = await readMeta(name);
-      if (meta !== undefined) {
-        owners[name] = meta.owner;
-      }
-    }
-    return json(200, { repos: names, owners });
+  async function listRepos(url: URL): Promise<Response> {
+    return paged({
+      url,
+      binding: 'repos',
+      revisionNow: () => revisionValue(catalogRevision),
+      createSource: async () => {
+        const scan = await config.backend.openScan('repo/');
+        return backendPageSource(scan, async (key) => {
+          if (!key.endsWith('/meta/repo')) return undefined;
+          const bytes = await config.backend.get(key);
+          if (bytes === undefined) return undefined;
+          try {
+            const meta = decodeRecord(bytes) as RepoMeta;
+            if (typeof meta.owner !== 'string') return undefined;
+            return {
+              name: key.slice('repo/'.length, -'/meta/repo'.length),
+              owner: meta.owner,
+            };
+          } catch {
+            return undefined;
+          }
+        });
+      },
+      render: (items, nextCursor) => ({
+        repos: items.map((item) => item.name),
+        owners: Object.fromEntries(
+          items.map((item) => [item.name, item.owner] as const)
+        ),
+        nextCursor,
+      }),
+    });
   }
 
   function objectIsReferenced(repo: Repo, plaintextId: string): boolean {
-    return repo.log
-      .ops()
-      .some((op) => op.payload?.plaintext_id === plaintextId);
+    return repo.log.referencesPlaintext(plaintextId);
   }
 
   function currentObjectConflict(
@@ -1278,9 +1501,6 @@ export function createServer(config: ServerConfig): Server {
     if (meta === undefined) {
       return json(404, { error: `no repo ${name}` });
     }
-    if (signer !== meta.owner) {
-      return json(403, { error: 'not the repo owner' });
-    }
     const parsed = safeParseJson(body);
     if (parsed === undefined || parsed === null || typeof parsed !== 'object') {
       return json(400, { error: 'invalid JSON body' });
@@ -1295,7 +1515,8 @@ export function createServer(config: ServerConfig): Server {
     let capability: Capability;
     try {
       capability = decodeCapability(wire);
-    } catch {
+    } catch (error) {
+      if (error instanceof InputLimitError) return inputLimitResponse(error);
       return json(400, { error: 'malformed reveal capability' });
     }
     if (capability.granted_by !== signer) {
@@ -1408,40 +1629,100 @@ export function createServer(config: ServerConfig): Server {
     if (meta === undefined) {
       return json(404, { error: `no repo ${name}` });
     }
-    if (signer !== meta.owner) {
-      return json(403, { error: 'not the repo owner' });
-    }
     const parsed = safeParseJson(body);
     if (parsed === undefined || parsed === null || typeof parsed !== 'object') {
       return json(400, { error: 'invalid JSON body' });
     }
-    const { objects } = parsed as { objects?: unknown };
+    const { objects, cursor, limit } = parsed as {
+      objects?: unknown;
+      cursor?: unknown;
+      limit?: unknown;
+    };
+    const continuation = typeof cursor === 'string' && cursor.length > 0;
+    if (cursor !== undefined && !continuation) {
+      return paginationErrorResponse(new PaginationError('invalid_pagination'));
+    }
     if (
-      !Array.isArray(objects) ||
-      objects.some((id) => typeof id !== 'string')
+      (!continuation &&
+        (!Array.isArray(objects) ||
+          objects.some((id) => typeof id !== 'string'))) ||
+      (continuation && objects !== undefined)
     ) {
-      return json(400, { error: 'objects must be an array of plaintext ids' });
+      return json(400, {
+        error: continuation
+          ? 'continuation must not include objects'
+          : 'objects must be an array of plaintext ids',
+      });
+    }
+    const pageLimit = limit ?? limits.defaultPageSize;
+    if (
+      typeof pageLimit !== 'number' ||
+      !Number.isSafeInteger(pageLimit) ||
+      pageLimit <= 0 ||
+      pageLimit > limits.maxPageSize
+    ) {
+      return paginationErrorResponse(new PaginationError('invalid_pagination'));
+    }
+    if (signer !== meta.owner) {
+      if (!continuation) {
+        return json(403, { error: 'not the repo owner' });
+      }
+      // Let the registry reject the signer-bound token using the stable cursor
+      // contract without exposing which owner or repository minted it.
+      return paged({
+        request: { limit: pageLimit, cursor },
+        binding: `pending-reveals:${name}\n${signer}`,
+        revisionNow: () => repoRevision(name),
+        createSource: async () => arrayPageSource([]),
+        render: (capabilities, nextCursor) => ({
+          capabilities,
+          nextCursor,
+        }),
+      });
     }
     return withRepoLock(name, async () => {
       const repo = await getRepo(name);
       if (repo === undefined) {
         return json(404, { error: `no repo ${name}` });
       }
-      const capabilities = [...new Set(objects as string[])]
-        .filter((id) => objectIsReferenced(repo, id))
-        .flatMap((id) => [
-          ...repo.store.pendingReveals(id),
-          ...repo.store
-            .caps(id)
-            .filter(
-              (capability) =>
-                capability.grantee === publicDid() &&
-                capability.granted_by === meta.owner
-            ),
-        ])
-        .map(encodeCapability);
-      const uniqueCapabilities = [...new Set(capabilities)];
-      return json(200, { capabilities: uniqueCapabilities });
+      return paged({
+        request: {
+          limit: pageLimit,
+          ...(continuation ? { cursor } : {}),
+        },
+        binding: `pending-reveals:${name}\n${signer}`,
+        revisionNow: () => repoRevision(name),
+        createSource: async () => {
+          return asyncIteratorPageSource(
+            (async function* () {
+              const seen = new Set<string>();
+              for (const id of new Set(objects as string[])) {
+                if (!objectIsReferenced(repo, id)) continue;
+                const capabilities = [
+                  ...repo.store.pendingReveals(id),
+                  ...repo.store
+                    .caps(id)
+                    .filter(
+                      (capability) =>
+                        capability.grantee === publicDid() &&
+                        capability.granted_by === meta.owner
+                    ),
+                ];
+                for (const capability of capabilities) {
+                  const encoded = encodeCapability(capability);
+                  if (seen.has(encoded)) continue;
+                  seen.add(encoded);
+                  yield encoded;
+                }
+              }
+            })()
+          );
+        },
+        render: (capabilities, nextCursor) => ({
+          capabilities,
+          nextCursor,
+        }),
+      });
     });
   }
 
@@ -1485,7 +1766,11 @@ export function createServer(config: ServerConfig): Server {
 
   // Public shared-view reads expose only owner-signed authority and its complete
   // chain. A legacy raw pointer fails closed until the owner bootstraps it.
-  async function getView(name: string, view: string): Promise<Response> {
+  async function getView(
+    name: string,
+    view: string,
+    url: URL
+  ): Promise<Response> {
     const repo = await getRepo(name);
     if (repo === undefined) {
       return json(404, { error: `no repo ${name}` });
@@ -1496,55 +1781,86 @@ export function createServer(config: ServerConfig): Server {
         ? json(428, { error: `view ${view} requires owner head bootstrap` })
         : json(404, { error: `no view ${view}` });
     }
-    return json(200, {
-      view,
-      head: encodeHeadRecord(head),
-      chain: repo.headRecords.history(view).map(encodeHeadRecord),
+    return paged({
+      url,
+      binding: `view:${name}\n${view}`,
+      revisionNow: () => repoRevision(name),
+      createSource: async () =>
+        asyncIteratorPageSource(
+          (async function* () {
+            for (const record of repo.headRecords.iterateHistory(view)) {
+              yield encodeHeadRecord(record);
+            }
+          })()
+        ),
+      render: (items, nextCursor) => ({
+        view,
+        head: encodeHeadRecord(head),
+        chain: items,
+        nextCursor,
+      }),
     });
   }
 
   // GET /repos/:name/views — the repo's branches and their heads. A public read,
   // like the rest of the mirror: head ids are already public.
-  async function listViews(name: string): Promise<Response> {
+  async function listViews(name: string, url: URL): Promise<Response> {
     const repo = await getRepo(name);
     if (repo === undefined) {
       return json(404, { error: `no repo ${name}` });
     }
-    const views: Record<string, HeadRecordWire> = {};
-    for (const view of repo.headRecords.views()) {
-      const head = repo.headRecords.current(view);
-      if (head !== undefined) {
-        views[view] = encodeHeadRecord(head);
-      }
-    }
-    return json(200, { views });
+    return paged({
+      url,
+      binding: `views:${name}`,
+      revisionNow: () => repoRevision(name),
+      createSource: async () =>
+        asyncIteratorPageSource(
+          (async function* () {
+            for (const view of repo.headRecords.iterateViews()) {
+              const head = repo.headRecords.current(view);
+              if (head !== undefined) {
+                yield { view, head: encodeHeadRecord(head) };
+              }
+            }
+          })()
+        ),
+      render: (items, nextCursor) => ({
+        views: Object.fromEntries(
+          items.map((item) => [item.view, item.head] as const)
+        ),
+        nextCursor,
+      }),
+    });
   }
 
   // Public immutable release reads. Corrupt records are skipped from the list;
   // a direct lookup reports the stored corruption instead of serving it.
-  async function listReleases(name: string): Promise<Response> {
+  async function listReleases(name: string, url: URL): Promise<Response> {
     if ((await readMeta(name)) === undefined) {
       return json(404, { error: `no repo ${name}` });
     }
-    const releases: Release[] = [];
     const backend = metaBackend(name);
-    for (const key of await backend.list('meta/releases/')) {
-      const bytes = await backend.get(key);
-      if (bytes === undefined) continue;
-      try {
-        const release = decodeRecord(bytes) as Release;
-        if (verifyRelease(release) && release.repo === name) {
-          releases.push(release);
-        }
-      } catch {
-        // Keep a single torn metadata record from sinking the public list.
-      }
-    }
-    releases.sort((a, b) => {
-      const newestFirst = b.at.localeCompare(a.at);
-      return newestFirst !== 0 ? newestFirst : a.tag.localeCompare(b.tag);
+    return paged({
+      url,
+      binding: `releases:${name}`,
+      revisionNow: () => repoRevision(name),
+      createSource: async () => {
+        const scan = await backend.openScan('meta/releases/');
+        return backendPageSource(scan, async (key) => {
+          const bytes = await backend.get(key);
+          if (bytes === undefined) return undefined;
+          try {
+            const release = decodeRecord(bytes) as Release;
+            return verifyRelease(release) && release.repo === name
+              ? encodeRelease(release)
+              : undefined;
+          } catch {
+            return undefined;
+          }
+        });
+      },
+      render: (releases, nextCursor) => ({ releases, nextCursor }),
     });
-    return json(200, { releases: releases.map(encodeRelease) });
   }
 
   async function getRelease(name: string, tag: string): Promise<Response> {
@@ -1603,7 +1919,8 @@ export function createServer(config: ServerConfig): Server {
     let release: Release;
     try {
       release = decodeRelease(wire);
-    } catch {
+    } catch (error) {
+      if (error instanceof InputLimitError) return inputLimitResponse(error);
       return json(400, { error: 'malformed release' });
     }
     if (!verifyRelease(release)) {
@@ -1622,7 +1939,8 @@ export function createServer(config: ServerConfig): Server {
     if (typeof claimWire === 'string') {
       try {
         claim = decodeClaim(claimWire);
-      } catch {
+      } catch (error) {
+        if (error instanceof InputLimitError) return inputLimitResponse(error);
         // A malformed optional claim never invalidates the signed release.
       }
     }
@@ -1713,7 +2031,12 @@ export function createServer(config: ServerConfig): Server {
         try {
           const contribution = prepared.contributions[0];
           if (contribution !== undefined) {
-            await (await reputationLog()).ingest(contribution);
+            const finishReputationMutation = beginRevision(reputationRevision);
+            try {
+              await (await reputationLog()).ingest(contribution);
+            } finally {
+              finishReputationMutation();
+            }
           }
         } catch {
           // The release and its host-vouched contribution are one create from
@@ -1932,55 +2255,125 @@ export function createServer(config: ServerConfig): Server {
   // Returns the reachable bundle for a view: ops in lamport order, plus the
   // CURRENT ciphertext object and its served caps for each plaintext_id an
   // op's payload references. Use this for clone (pull main).
-  async function pull(name: string, view: string): Promise<Response> {
+  async function pull(name: string, view: string, url: URL): Promise<Response> {
     const repo = await getRepo(name);
     if (repo === undefined) {
       return json(404, { error: `no repo ${name}` });
     }
+    const buildRevision = repoRevision(name);
     const head = repo.headRecords.current(view);
     if (head === undefined) {
       return unsignedView(repo, view)
         ? json(428, { error: `view ${view} requires owner head bootstrap` })
         : json(404, { error: `no view ${view}` });
     }
-    const ops = reachableOps(repo.log.ops(), head.heads);
-    const snapshot = verifyHeadSnapshot(head, ops);
-    if (!snapshot.ok) return headError(400, snapshot);
-    // For every plaintext_id an op's payload references, the CURRENT ciphertext
-    // object + its served caps (store.get decrypts the current object, so the
-    // client needs current — not a historical version — to read after rotation).
-    const objects = [];
-    const caps = [];
-    const seen = new Set<string>();
-    for (const op of ops) {
-      const pid = op.payload?.plaintext_id;
-      if (pid === undefined || seen.has(pid)) {
-        continue;
+    if (buildRevision % 2 !== 0 || repoRevision(name) !== buildRevision) {
+      return paginationErrorResponse(
+        new PaginationError('pagination_snapshot_changed')
+      );
+    }
+    const capturedRepo = repo;
+    const capturedHead = head;
+
+    type PullRecord = {
+      readonly kind:
+        | 'chain'
+        | 'ops'
+        | 'objects'
+        | 'caps'
+        | 'prov'
+        | 'veto'
+        | 'symop';
+      readonly value: string;
+    };
+    const wire = (value: unknown): string =>
+      Buffer.from(encodeRecord(value)).toString('base64');
+
+    // Traverse only records already assigned to the current page. The server
+    // revision binds this generator to the captured snapshot; the client sorts
+    // and verifies the complete result after draining every page.
+    async function* records(): AsyncGenerator<PullRecord> {
+      for (const record of capturedRepo.headRecords.iterateHistory(view)) {
+        yield {
+          kind: 'chain',
+          value: JSON.stringify(encodeHeadRecord(record)),
+        };
       }
-      seen.add(pid);
-      const current = repo.store.current(pid);
-      if (current !== undefined) {
-        objects.push(current);
-        caps.push(...repo.store.caps(pid));
+
+      const seenObjects = new Set<string>();
+      let provLog: Awaited<ReturnType<typeof provenanceFor>> | undefined;
+      let vetoLog: Awaited<ReturnType<typeof vetoFor>> | undefined;
+      for (const op of capturedRepo.log.reachable(capturedHead.heads)) {
+        if (!capturedRepo.log.verify(op.id)) {
+          throw new Error('signed snapshot contains an invalid operation');
+        }
+        yield { kind: 'ops', value: wire(op) };
+
+        const plaintextId = op.payload?.plaintext_id;
+        if (plaintextId !== undefined && !seenObjects.has(plaintextId)) {
+          seenObjects.add(plaintextId);
+          const current = capturedRepo.store.current(plaintextId);
+          if (current !== undefined) {
+            yield { kind: 'objects', value: wire(current) };
+            for (const capability of capturedRepo.store.caps(plaintextId)) {
+              yield { kind: 'caps', value: wire(capability) };
+            }
+          }
+        }
+
+        provLog ??= await provenanceFor(name);
+        for (const provenance of provLog.iterateForOp(op.id)) {
+          yield { kind: 'prov', value: wire(provenance) };
+        }
+        vetoLog ??= await vetoFor(name);
+        for (const veto of vetoLog.iterateForOp(op.id)) {
+          yield { kind: 'veto', value: wire(veto) };
+        }
+      }
+
+      const symbolLog = await symopFor(name);
+      for (const operation of symbolLog.iterateAll()) {
+        yield { kind: 'symop', value: wire(operation) };
       }
     }
-    // The signed "why" for every op in the view (P04), so a clone carries the
-    // meaning, not just the code. The standing "no" (P10) travels the same way,
-    // so a clone can see (and re-serve) any veto over the view's ops.
-    const provLog = await provenanceFor(name);
-    const prov = ops.flatMap((op) => [...provLog.forOp(op.id)]);
-    const vetoLog = await vetoFor(name);
-    const veto = ops.flatMap((op) => [...vetoLog.forOp(op.id)]);
-    // The semantic-graph ops (P08) are keyed by symbol, not by a P03 op, so a
-    // clone carries the repo's whole structural history (e.g. rename chains).
-    const symopLog = await symopFor(name);
-    const symop = [...symopLog.all()];
-    return json(200, {
-      view,
-      head: encodeHeadRecord(head),
-      chain: repo.headRecords.history(view).map(encodeHeadRecord),
-      ...encodeBundle(ops, objects, caps, prov, veto, symop),
-    });
+
+    try {
+      return await paged({
+        url,
+        binding: `pull:${name}\n${view}`,
+        revisionNow: () => repoRevision(name),
+        createSource: async () => asyncIteratorPageSource(records()),
+        render: (items, nextCursor) => {
+          const values = (kind: string): string[] =>
+            items
+              .filter((item) => item.kind === kind)
+              .map((item) => item.value);
+          return {
+            view,
+            head: encodeHeadRecord(head),
+            chain: values('chain').map(
+              (wire) => JSON.parse(wire) as HeadRecordWire
+            ),
+            ops: values('ops'),
+            objects: values('objects'),
+            caps: values('caps'),
+            prov: values('prov'),
+            veto: values('veto'),
+            symop: values('symop'),
+            nextCursor,
+          };
+        },
+      });
+    } catch (error) {
+      if (error instanceof MissingReachableOperationError) {
+        return headError(400, {
+          ok: false,
+          code: 'missing_operation',
+          message: 'snapshot omits a signed head or ancestor',
+        });
+      }
+      throw error;
+    }
   }
 
   async function ingestBundle(
@@ -2261,7 +2654,8 @@ export function createServer(config: ServerConfig): Server {
     let bundle: ReturnType<typeof decodeBundle>;
     try {
       bundle = decodeBundle(parsed as Parameters<typeof decodeBundle>[0]);
-    } catch {
+    } catch (error) {
+      if (error instanceof InputLimitError) return inputLimitResponse(error);
       return json(400, { error: 'malformed bundle' });
     }
     return withRepoLock(name, async () => {
@@ -2334,13 +2728,24 @@ export function createServer(config: ServerConfig): Server {
     // Decode any client-pushed reputation claims (P07). A malformed entry is
     // dropped rather than failing the whole land.
     const receivedClaims = Array.isArray(contrib) ? contrib.length : 0;
+    if (receivedClaims > limits.maxReputationContributions) {
+      return inputLimitResponse(
+        new InputLimitError(
+          'contribution_limit_exceeded',
+          limits.maxReputationContributions
+        )
+      );
+    }
     let malformedClaims = 0;
     const claims: ContributionClaim[] = [];
     if (Array.isArray(contrib)) {
       for (const s of contrib) {
         try {
           claims.push(decodeClaim(s));
-        } catch {
+        } catch (error) {
+          if (error instanceof InputLimitError) {
+            return inputLimitResponse(error);
+          }
           malformedClaims += 1;
         }
       }
@@ -2621,7 +3026,8 @@ export function createServer(config: ServerConfig): Server {
     let d: Delegation;
     try {
       d = decodeDelegation(delegation);
-    } catch {
+    } catch (error) {
+      if (error instanceof InputLimitError) return inputLimitResponse(error);
       return json(400, { error: 'malformed delegation' });
     }
     if (d.operator !== meta.owner) {
@@ -2694,7 +3100,8 @@ export function createServer(config: ServerConfig): Server {
     if (recall !== undefined) {
       try {
         recallBundle = decodeBundle(recall);
-      } catch {
+      } catch (error) {
+        if (error instanceof InputLimitError) return inputLimitResponse(error);
         return json(400, { error: 'malformed recall bundle' });
       }
     }
@@ -2715,29 +3122,33 @@ export function createServer(config: ServerConfig): Server {
   }
 
   // Public: the active (non-revoked) grants for a repo, each as a wire delegation.
-  async function listGrants(name: string): Promise<Response> {
+  async function listGrants(name: string, url: URL): Promise<Response> {
     if ((await readMeta(name)) === undefined) {
       return json(404, { error: `no repo ${name}` });
     }
     const reg = await registryFor(name);
     const b = metaBackend(name);
-    const grants: string[] = [];
-    for (const key of await b.list('grant/')) {
-      const bytes = await b.get(key);
-      if (bytes !== undefined) {
-        let d: Delegation;
-        try {
-          d = decodeRecord(bytes) as Delegation;
-        } catch {
-          // skip a corrupt/invalid persisted grant (mirror buildRegistry)
-          continue;
-        }
-        if (!reg.isRevoked(d.agent)) {
-          grants.push(encodeDelegation(d));
-        }
-      }
-    }
-    return json(200, { grants });
+    return paged({
+      url,
+      binding: `grants:${name}`,
+      revisionNow: () => repoRevision(name),
+      createSource: async () => {
+        const scan = await b.openScan('grant/');
+        return backendPageSource(scan, async (key) => {
+          const bytes = await b.get(key);
+          if (bytes === undefined) return undefined;
+          try {
+            const delegation = decodeRecord(bytes) as Delegation;
+            return reg.isRevoked(delegation.agent)
+              ? undefined
+              : encodeDelegation(delegation);
+          } catch {
+            return undefined;
+          }
+        });
+      },
+      render: (grants, nextCursor) => ({ grants, nextCursor }),
+    });
   }
 
   // Public: a subject's server-wide reputation profile — trusted-attested,
@@ -2758,11 +3169,46 @@ export function createServer(config: ServerConfig): Server {
 
   // Public export: portable reputation is cleartext signed metadata. The
   // archive carries all valid host proofs; the destination applies its trust.
-  async function reputationExport(did: string): Promise<Response> {
+  async function reputationExport(did: string, url: URL): Promise<Response> {
     try {
-      const archive = (await reputationLog()).archive(did);
-      return json(200, { archive: encodeReputationArchive(archive) });
-    } catch {
+      const log = await reputationLog();
+      const request = parsePagination(url, {
+        defaultPageSize: limits.defaultPageSize,
+        maxPageSize: limits.maxPageSize,
+      });
+      return paged({
+        request: {
+          ...request,
+          limit: Math.min(request.limit, limits.maxReputationContributions),
+        },
+        binding: `reputation-export:${did}`,
+        revisionNow: () => revisionValue(reputationRevision),
+        createSource: async () =>
+          asyncIteratorPageSource(
+            (async function* () {
+              yield* log.iterateArchiveContributions(did);
+            })()
+          ),
+        render: (contributions, nextCursor) => ({
+          archive: encodeReputationArchive({
+            format: REPUTATION_ARCHIVE_FORMAT,
+            subject: did,
+            contributions,
+          }),
+          nextCursor,
+        }),
+        isWithinLimit: (body) => {
+          const archiveJson = (body as { archive: string }).archive;
+          return (
+            new TextEncoder().encode(archiveJson).length <=
+            limits.maxReputationArchiveBytes
+          );
+        },
+      });
+    } catch (error) {
+      if (error instanceof PaginationError) {
+        return paginationErrorResponse(error);
+      }
       return json(400, { error: 'reputation subject must be a valid did:key' });
     }
   }
@@ -2792,8 +3238,16 @@ export function createServer(config: ServerConfig): Server {
     }
     let archive: ReputationArchive;
     try {
-      archive = decodeReputationArchive(archiveJson);
+      archive = decodeReputationArchive(archiveJson, {
+        maxBytes: limits.maxReputationArchiveBytes,
+        maxContributions: limits.maxReputationContributions,
+        maxFieldBytes: limits.maxFieldBytes,
+      });
     } catch (error) {
+      if (error instanceof ReputationArchiveLimitError) {
+        const mapped = new InputLimitError(error.code, error.limit);
+        return inputLimitResponse(mapped);
+      }
       return json(400, {
         error:
           error instanceof Error ? error.message : 'invalid reputation archive',
@@ -2803,12 +3257,50 @@ export function createServer(config: ServerConfig): Server {
       return json(403, { error: 'only the archive subject may import it' });
     }
     const reps = await reputationLog();
-    const result = await reps.ingestArchive(archive);
+    const finishReputationMutation = beginRevision(reputationRevision);
+    let result: Awaited<ReturnType<ReputationLog['ingestArchive']>>;
+    try {
+      result = await reps.ingestArchive(archive);
+    } finally {
+      finishReputationMutation();
+    }
     return json(200, {
       subject: archive.subject,
       ...result,
       total: reps.archive(archive.subject).contributions.length,
     });
+  }
+
+  /** Marks a mutation in progress until every overlapping writer has exited. */
+  function beginMutation(
+    method: string,
+    path: string
+  ): (() => void) | undefined {
+    if (method === 'POST' && path === '/repos') {
+      return beginRevision(catalogRevision);
+    }
+    const repoMatch =
+      method === 'DELETE'
+        ? path.match(/^\/repos\/(.+)$/)
+        : path.match(
+            /^\/repos\/(.+)\/(?:policy|releases(?:\/[^/]+)?|views(?:\/[^/]+)?|pull|heads\/bootstrap|reveals(?:\/.*)?|push|land|grants|revoke)$/
+          );
+    if (repoMatch === null) return undefined;
+    const name = safePercentDecode(repoMatch[1]);
+    if (name === undefined) return undefined;
+    const isPendingRead = /^\/repos\/.+\/reveals\/pending$/.test(path);
+    if (method === 'POST' && !isPendingRead) {
+      return beginRevision(repoRevisionClock(name));
+    }
+    if (method === 'DELETE') {
+      const finishRepoMutation = beginRevision(repoRevisionClock(name));
+      const finishCatalogMutation = beginRevision(catalogRevision);
+      return () => {
+        finishRepoMutation();
+        finishCatalogMutation();
+      };
+    }
+    return undefined;
   }
 
   return {
@@ -2824,10 +3316,14 @@ export function createServer(config: ServerConfig): Server {
       }
       for (const name of names) {
         try {
-          released += await withRepoLock(name, async () => {
+          const promoted = await withRepoLock(name, async () => {
             const repo = await getRepo(name);
             return repo === undefined ? 0 : repo.store.revealDue(now());
           });
+          released += promoted;
+          if (promoted > 0) {
+            bumpRepoRevision(name);
+          }
         } catch (error) {
           config.onError?.(error, { operation: 'reveal', repo: name });
         }
@@ -2835,17 +3331,40 @@ export function createServer(config: ServerConfig): Server {
       return released;
     },
 
+    async close(): Promise<void> {
+      await cursorRegistry.close();
+    },
+
     /** Handles one HTTP request against the configured server. */
     async fetch(req: Request): Promise<Response> {
       const url = new URL(req.url);
       const path = url.pathname;
+      const finishMutation = beginMutation(req.method, path);
       const emptyBody = new Uint8Array();
       /** Loads a matched POST body before invoking authentication or handlers. */
       const withBody = async (
         handler: (body: Uint8Array) => Promise<Response>
       ): Promise<Response> => {
         const body = await readRequestBody(req);
-        return body instanceof Response ? body : handler(body);
+        if (body instanceof Response) return body;
+        const parsed = safeParseJson(body);
+        if (parsed !== undefined) {
+          try {
+            validateLogicalText(parsed, limits.maxFieldBytes);
+            if (/^\/repos\/.+\/reveals\/pending$/.test(path)) {
+              const pendingObjects = (parsed as { objects?: unknown }).objects;
+              if (Array.isArray(pendingObjects)) {
+                validateLogicalText(pendingObjects, limits.maxFieldBytes);
+              }
+            }
+          } catch (error) {
+            if (error instanceof InputLimitError) {
+              return inputLimitResponse(error);
+            }
+            throw error;
+          }
+        }
+        return handler(body);
       };
       /** Cancels a body before returning the route's stable malformed-path error. */
       const malformedPath = async (): Promise<Response> => {
@@ -2853,207 +3372,248 @@ export function createServer(config: ServerConfig): Server {
         return json(400, { error: 'malformed path' });
       };
 
-      if (req.method !== 'POST') {
-        await cancelBody(req.body);
-      }
+      try {
+        try {
+          for (const segment of path.split('/')) {
+            if (segment.length > 0) {
+              // Decode every segment here so malformed escapes retain their
+              // stable 400 response. Route matchers validate submitted dynamic
+              // values without treating fixed words such as "repos" as input.
+              decodeURIComponent(segment);
+            }
+          }
+          for (const [key, value] of url.searchParams) {
+            validateLogicalText(key, limits.maxFieldBytes);
+            validateLogicalText(value, limits.maxFieldBytes);
+          }
+        } catch (error) {
+          if (error instanceof InputLimitError)
+            return inputLimitResponse(error);
+          if (error instanceof URIError) return malformedPath();
+          throw error;
+        }
 
-      if (path === '/repos' && req.method === 'GET') {
-        return listRepos();
-      }
-      if (path === '/metrics' && req.method === 'GET') {
-        return metrics();
-      }
-      if (path === '/reputation/import' && req.method === 'POST') {
-        return withBody((body) => reputationImport(req, body));
-      }
-      const repExportMatch = path.match(/^\/reputation\/(.+)\/export$/);
-      if (repExportMatch !== null && req.method === 'GET') {
-        const did = safeDecode(repExportMatch[1]);
-        if (did === undefined) return malformedPath();
-        return reputationExport(did);
-      }
-      // GET /reputation/:did — the subject's server-wide profile.
-      const repMatch = path.match(/^\/reputation\/(.+)$/);
-      if (repMatch !== null && req.method === 'GET') {
-        const did = safeDecode(repMatch[1]);
-        if (did === undefined) {
-          return malformedPath();
+        if (req.method !== 'POST') {
+          await cancelBody(req.body);
         }
-        return reputationProfile(did);
-      }
-      if (path === '/repos' && req.method === 'POST') {
-        return withBody((body) => createRepo(req, body));
-      }
-      // DELETE /repos/:name — owner-only. (Suffixed routes below are GET/POST,
-      // so this bare-name match never steals a push/land/grants path.)
-      const deleteMatch = path.match(/^\/repos\/(.+)$/);
-      if (deleteMatch !== null && req.method === 'DELETE') {
-        const repoName = safeDecode(deleteMatch[1]);
-        if (repoName === undefined) {
-          return malformedPath();
+
+        if (path === '/repos' && req.method === 'GET') {
+          return listRepos(url);
         }
-        return deleteRepo(repoName, req, emptyBody);
-      }
-      // /repos/:name/policy — read or owner-select the active land policy.
-      const policyMatch = path.match(/^\/repos\/(.+)\/policy$/);
-      if (policyMatch !== null && req.method === 'GET') {
-        const repoName = safeDecode(policyMatch[1]);
-        if (repoName === undefined) {
-          return malformedPath();
+        if (path === '/metrics' && req.method === 'GET') {
+          return metrics();
         }
-        return getPolicy(repoName);
-      }
-      if (policyMatch !== null && req.method === 'POST') {
-        const repoName = safeDecode(policyMatch[1]);
-        if (repoName === undefined) {
-          return malformedPath();
+        if (path === '/reputation/import' && req.method === 'POST') {
+          return withBody((body) => reputationImport(req, body));
         }
-        return withBody((body) => setPolicy(repoName, req, body));
-      }
-      // /repos/:name/releases and /repos/:name/releases/:tag — immutable
-      // signed release metadata. Match detail first so it is not a collection.
-      const releaseMatch = path.match(/^\/repos\/(.+)\/releases\/([^/]+)$/);
-      if (releaseMatch !== null && req.method === 'GET') {
-        const repoName = safeDecode(releaseMatch[1]);
-        const tag = safeDecode(releaseMatch[2]);
-        if (repoName === undefined || tag === undefined) {
-          return malformedPath();
+        const repExportMatch = path.match(/^\/reputation\/(.+)\/export$/);
+        if (repExportMatch !== null && req.method === 'GET') {
+          const did = safeDecode(repExportMatch[1], limits.maxFieldBytes);
+          if (did === undefined) return malformedPath();
+          return reputationExport(did, url);
         }
-        return getRelease(repoName, tag);
-      }
-      const releasesMatch = path.match(/^\/repos\/(.+)\/releases$/);
-      if (releasesMatch !== null && req.method === 'GET') {
-        const repoName = safeDecode(releasesMatch[1]);
-        if (repoName === undefined) {
-          return malformedPath();
+        // GET /reputation/:did — the subject's server-wide profile.
+        const repMatch = path.match(/^\/reputation\/(.+)$/);
+        if (repMatch !== null && req.method === 'GET') {
+          const did = safeDecode(repMatch[1], limits.maxFieldBytes);
+          if (did === undefined) {
+            return malformedPath();
+          }
+          return reputationProfile(did);
         }
-        return listReleases(repoName);
-      }
-      if (releasesMatch !== null && req.method === 'POST') {
-        const repoName = safeDecode(releasesMatch[1]);
-        if (repoName === undefined) {
-          return malformedPath();
+        if (path === '/repos' && req.method === 'POST') {
+          return withBody((body) => createRepo(req, body));
         }
-        return withBody((body) => createRelease(repoName, req, body));
-      }
-      // /repos/:name/views — list the branches, or create one.
-      const viewsMatch = path.match(/^\/repos\/(.+)\/views$/);
-      if (viewsMatch !== null && req.method === 'GET') {
-        const repoName = safeDecode(viewsMatch[1]);
-        if (repoName === undefined) {
-          return malformedPath();
+        // DELETE /repos/:name — owner-only. (Suffixed routes below are GET/POST,
+        // so this bare-name match never steals a push/land/grants path.)
+        const deleteMatch = path.match(/^\/repos\/(.+)$/);
+        if (deleteMatch !== null && req.method === 'DELETE') {
+          const repoName = safeDecode(deleteMatch[1], limits.maxFieldBytes);
+          if (repoName === undefined) {
+            return malformedPath();
+          }
+          return deleteRepo(repoName, req, emptyBody);
         }
-        return listViews(repoName);
-      }
-      if (viewsMatch !== null && req.method === 'POST') {
-        const repoName = safeDecode(viewsMatch[1]);
-        if (repoName === undefined) {
-          return malformedPath();
+        // /repos/:name/policy — read or owner-select the active land policy.
+        const policyMatch = path.match(/^\/repos\/(.+)\/policy$/);
+        if (policyMatch !== null && req.method === 'GET') {
+          const repoName = safeDecode(policyMatch[1], limits.maxFieldBytes);
+          if (repoName === undefined) {
+            return malformedPath();
+          }
+          return getPolicy(repoName);
         }
-        return withBody((body) => createView(repoName, req, body));
-      }
-      // /repos/:name/views/:view  and  /repos/:name/pull
-      // Names can contain '/' (e.g. "acme/web"); split on the fixed suffixes.
-      const viewMatch = path.match(/^\/repos\/(.+)\/views\/([^/]+)$/);
-      if (viewMatch !== null && req.method === 'GET') {
-        const repoName = safeDecode(viewMatch[1]);
-        const viewName = safeDecode(viewMatch[2]);
-        if (repoName === undefined || viewName === undefined) {
-          return malformedPath();
+        if (policyMatch !== null && req.method === 'POST') {
+          const repoName = safeDecode(policyMatch[1], limits.maxFieldBytes);
+          if (repoName === undefined) {
+            return malformedPath();
+          }
+          return withBody((body) => setPolicy(repoName, req, body));
         }
-        return getView(repoName, viewName);
-      }
-      const pullMatch = path.match(/^\/repos\/(.+)\/pull$/);
-      if (pullMatch !== null && req.method === 'GET') {
-        const repoName = safeDecode(pullMatch[1]);
-        if (repoName === undefined) {
-          return malformedPath();
+        // /repos/:name/releases and /repos/:name/releases/:tag — immutable
+        // signed release metadata. Match detail first so it is not a collection.
+        const releaseMatch = path.match(/^\/repos\/(.+)\/releases\/([^/]+)$/);
+        if (releaseMatch !== null && req.method === 'GET') {
+          const repoName = safeDecode(releaseMatch[1], limits.maxFieldBytes);
+          const tag = safeDecode(releaseMatch[2], limits.maxFieldBytes);
+          if (repoName === undefined || tag === undefined) {
+            return malformedPath();
+          }
+          return getRelease(repoName, tag);
         }
-        return pull(repoName, url.searchParams.get('view') ?? 'main');
-      }
-      const bootstrapHeadMatch = path.match(
-        /^\/repos\/(.+)\/heads\/bootstrap$/
-      );
-      if (bootstrapHeadMatch !== null && req.method === 'POST') {
-        const repoName = safeDecode(bootstrapHeadMatch[1]);
-        if (repoName === undefined) {
-          return malformedPath();
+        const releasesMatch = path.match(/^\/repos\/(.+)\/releases$/);
+        if (releasesMatch !== null && req.method === 'GET') {
+          const repoName = safeDecode(releasesMatch[1], limits.maxFieldBytes);
+          if (repoName === undefined) {
+            return malformedPath();
+          }
+          return listReleases(repoName, url);
         }
-        return withBody((body) => bootstrapHead(repoName, req, body));
-      }
-      // Timed public capabilities: owner schedules one for the current
-      // ciphertext, or manually triggers a due reveal for one plaintext id.
-      const pendingRevealsMatch = path.match(
-        /^\/repos\/(.+)\/reveals\/pending$/
-      );
-      if (pendingRevealsMatch !== null && req.method === 'POST') {
-        const repoName = safeDecode(pendingRevealsMatch[1]);
-        if (repoName === undefined) {
-          return malformedPath();
+        if (releasesMatch !== null && req.method === 'POST') {
+          const repoName = safeDecode(releasesMatch[1], limits.maxFieldBytes);
+          if (repoName === undefined) {
+            return malformedPath();
+          }
+          return withBody((body) => createRelease(repoName, req, body));
         }
-        return withBody((body) => pendingReveals(repoName, req, body));
-      }
-      const revealMatch = path.match(/^\/repos\/(.+)\/reveals\/([^/]+)$/);
-      if (revealMatch !== null && req.method === 'POST') {
-        const repoName = safeDecode(revealMatch[1]);
-        const plaintextId = safeDecode(revealMatch[2]);
-        if (repoName === undefined || plaintextId === undefined) {
-          return malformedPath();
+        // /repos/:name/views — list the branches, or create one.
+        const viewsMatch = path.match(/^\/repos\/(.+)\/views$/);
+        if (viewsMatch !== null && req.method === 'GET') {
+          const repoName = safeDecode(viewsMatch[1], limits.maxFieldBytes);
+          if (repoName === undefined) {
+            return malformedPath();
+          }
+          return listViews(repoName, url);
         }
-        return withBody((body) => reveal(repoName, plaintextId, req, body));
-      }
-      const revealsMatch = path.match(/^\/repos\/(.+)\/reveals$/);
-      if (revealsMatch !== null && req.method === 'POST') {
-        const repoName = safeDecode(revealsMatch[1]);
-        if (repoName === undefined) {
-          return malformedPath();
+        if (viewsMatch !== null && req.method === 'POST') {
+          const repoName = safeDecode(viewsMatch[1], limits.maxFieldBytes);
+          if (repoName === undefined) {
+            return malformedPath();
+          }
+          return withBody((body) => createView(repoName, req, body));
         }
-        return withBody((body) => scheduleReveal(repoName, req, body));
-      }
-      // push / land: POST /repos/:name/push and POST /repos/:name/land
-      // Match before the generic catch-all; names can contain '/'.
-      const pushMatch = path.match(/^\/repos\/(.+)\/push$/);
-      if (pushMatch !== null && req.method === 'POST') {
-        const repoName = safeDecode(pushMatch[1]);
-        if (repoName === undefined) {
-          return malformedPath();
+        // /repos/:name/views/:view  and  /repos/:name/pull
+        // Names can contain '/' (e.g. "acme/web"); split on the fixed suffixes.
+        const viewMatch = path.match(/^\/repos\/(.+)\/views\/([^/]+)$/);
+        if (viewMatch !== null && req.method === 'GET') {
+          const repoName = safeDecode(viewMatch[1], limits.maxFieldBytes);
+          const viewName = safeDecode(viewMatch[2], limits.maxFieldBytes);
+          if (repoName === undefined || viewName === undefined) {
+            return malformedPath();
+          }
+          return getView(repoName, viewName, url);
         }
-        return withBody((body) => push(repoName, req, body));
-      }
-      const landMatch = path.match(/^\/repos\/(.+)\/land$/);
-      if (landMatch !== null && req.method === 'POST') {
-        const repoName = safeDecode(landMatch[1]);
-        if (repoName === undefined) {
-          return malformedPath();
+        const pullMatch = path.match(/^\/repos\/(.+)\/pull$/);
+        if (pullMatch !== null && req.method === 'GET') {
+          const repoName = safeDecode(pullMatch[1], limits.maxFieldBytes);
+          if (repoName === undefined) {
+            return malformedPath();
+          }
+          const views = url.searchParams.getAll('view');
+          if (views.length > 1) {
+            return paginationErrorResponse(
+              new PaginationError('invalid_pagination')
+            );
+          }
+          return pull(repoName, views[0] ?? 'main', url);
         }
-        return withBody((body) => land(repoName, req, body));
-      }
-      // grants / revoke: GET+POST /repos/:name/grants and POST /repos/:name/revoke
-      const grantsMatch = path.match(/^\/repos\/(.+)\/grants$/);
-      if (grantsMatch !== null && req.method === 'POST') {
-        const repoName = safeDecode(grantsMatch[1]);
-        if (repoName === undefined) {
-          return malformedPath();
+        const bootstrapHeadMatch = path.match(
+          /^\/repos\/(.+)\/heads\/bootstrap$/
+        );
+        if (bootstrapHeadMatch !== null && req.method === 'POST') {
+          const repoName = safeDecode(
+            bootstrapHeadMatch[1],
+            limits.maxFieldBytes
+          );
+          if (repoName === undefined) {
+            return malformedPath();
+          }
+          return withBody((body) => bootstrapHead(repoName, req, body));
         }
-        return withBody((body) => grant(repoName, req, body));
-      }
-      if (grantsMatch !== null && req.method === 'GET') {
-        const repoName = safeDecode(grantsMatch[1]);
-        if (repoName === undefined) {
-          return malformedPath();
+        // Timed public capabilities: owner schedules one for the current
+        // ciphertext, or manually triggers a due reveal for one plaintext id.
+        const pendingRevealsMatch = path.match(
+          /^\/repos\/(.+)\/reveals\/pending$/
+        );
+        if (pendingRevealsMatch !== null && req.method === 'POST') {
+          const repoName = safeDecode(
+            pendingRevealsMatch[1],
+            limits.maxFieldBytes
+          );
+          if (repoName === undefined) {
+            return malformedPath();
+          }
+          return withBody((body) => pendingReveals(repoName, req, body));
         }
-        return listGrants(repoName);
-      }
-      const revokeMatch = path.match(/^\/repos\/(.+)\/revoke$/);
-      if (revokeMatch !== null && req.method === 'POST') {
-        const repoName = safeDecode(revokeMatch[1]);
-        if (repoName === undefined) {
-          return malformedPath();
+        const revealMatch = path.match(/^\/repos\/(.+)\/reveals\/([^/]+)$/);
+        if (revealMatch !== null && req.method === 'POST') {
+          const repoName = safeDecode(revealMatch[1], limits.maxFieldBytes);
+          const plaintextId = safeDecode(revealMatch[2], limits.maxFieldBytes);
+          if (repoName === undefined || plaintextId === undefined) {
+            return malformedPath();
+          }
+          return withBody((body) => reveal(repoName, plaintextId, req, body));
         }
-        return withBody((body) => revoke(repoName, req, body));
+        const revealsMatch = path.match(/^\/repos\/(.+)\/reveals$/);
+        if (revealsMatch !== null && req.method === 'POST') {
+          const repoName = safeDecode(revealsMatch[1], limits.maxFieldBytes);
+          if (repoName === undefined) {
+            return malformedPath();
+          }
+          return withBody((body) => scheduleReveal(repoName, req, body));
+        }
+        // push / land: POST /repos/:name/push and POST /repos/:name/land
+        // Match before the generic catch-all; names can contain '/'.
+        const pushMatch = path.match(/^\/repos\/(.+)\/push$/);
+        if (pushMatch !== null && req.method === 'POST') {
+          const repoName = safeDecode(pushMatch[1], limits.maxFieldBytes);
+          if (repoName === undefined) {
+            return malformedPath();
+          }
+          return withBody((body) => push(repoName, req, body));
+        }
+        const landMatch = path.match(/^\/repos\/(.+)\/land$/);
+        if (landMatch !== null && req.method === 'POST') {
+          const repoName = safeDecode(landMatch[1], limits.maxFieldBytes);
+          if (repoName === undefined) {
+            return malformedPath();
+          }
+          return withBody((body) => land(repoName, req, body));
+        }
+        // grants / revoke: GET+POST /repos/:name/grants and POST /repos/:name/revoke
+        const grantsMatch = path.match(/^\/repos\/(.+)\/grants$/);
+        if (grantsMatch !== null && req.method === 'POST') {
+          const repoName = safeDecode(grantsMatch[1], limits.maxFieldBytes);
+          if (repoName === undefined) {
+            return malformedPath();
+          }
+          return withBody((body) => grant(repoName, req, body));
+        }
+        if (grantsMatch !== null && req.method === 'GET') {
+          const repoName = safeDecode(grantsMatch[1], limits.maxFieldBytes);
+          if (repoName === undefined) {
+            return malformedPath();
+          }
+          return listGrants(repoName, url);
+        }
+        const revokeMatch = path.match(/^\/repos\/(.+)\/revoke$/);
+        if (revokeMatch !== null && req.method === 'POST') {
+          const repoName = safeDecode(revokeMatch[1], limits.maxFieldBytes);
+          if (repoName === undefined) {
+            return malformedPath();
+          }
+          return withBody((body) => revoke(repoName, req, body));
+        }
+        await cancelBody(req.body);
+        return json(404, { error: 'not found' });
+      } catch (error) {
+        if (error instanceof InputLimitError) {
+          return inputLimitResponse(error);
+        }
+        throw error;
+      } finally {
+        finishMutation?.();
       }
-      await cancelBody(req.body);
-      return json(404, { error: 'not found' });
     },
   };
 }

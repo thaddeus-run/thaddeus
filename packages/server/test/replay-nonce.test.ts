@@ -64,6 +64,11 @@ class FailingNonceBackend implements Backend, ReplayNonceBackend {
     return this.inner.get(key);
   }
 
+  /** Forwards bounded scans to the in-memory backend. */
+  openScan(prefix: string) {
+    return this.inner.openScan(prefix);
+  }
+
   /** Forwards generic listings to the in-memory backend. */
   list(prefix: string): Promise<readonly string[]> {
     return this.inner.list(prefix);
@@ -176,7 +181,7 @@ describe('durable signed-route replay protection', () => {
     expect(contexts).toEqual(['nonce-consumption']);
     expect(
       await (await server.fetch(new Request('http://t/repos'))).json()
-    ).toEqual({ repos: [], owners: {} });
+    ).toEqual({ repos: [], owners: {}, nextCursor: null });
   });
 
   test('exact expiry stays full and one millisecond later cleanup admits the request', async () => {

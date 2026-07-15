@@ -5,11 +5,12 @@ import {
   MAX_REPLAY_NONCE_CAPACITY,
   type ReplayNonceBackend,
 } from '@thaddeus.run/store';
+import type { BackendScan } from '@thaddeus.run/store';
+import type { Dir } from 'node:fs';
 import {
   link,
   mkdir,
   opendir,
-  readdir,
   readFile,
   rename,
   unlink,
@@ -160,36 +161,80 @@ export class FileBackend implements Backend, ReplayNonceBackend {
     }
   }
 
+  /** Opens a bounded root-directory scan backed directly by `opendir()`. */
+  async openScan(prefix: string): Promise<BackendScan> {
+    let directory: Dir | undefined;
+    try {
+      directory = await opendir(this.#root);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+    }
+    let done = directory === undefined;
+    const close = async (): Promise<void> => {
+      if (done && directory === undefined) return;
+      done = true;
+      const open = directory;
+      directory = undefined;
+      if (open !== undefined) {
+        try {
+          await open.close();
+        } catch {
+          // close is idempotent at the BackendScan boundary
+        }
+      }
+    };
+    return {
+      read: async (maxEntries) => {
+        assertScanBudget(maxEntries);
+        if (done || directory === undefined) return { keys: [], done: true };
+        const keys: string[] = [];
+        try {
+          for (let inspected = 0; inspected < maxEntries; inspected += 1) {
+            const entry = await directory.read();
+            if (entry === null) {
+              await close();
+              break;
+            }
+            if (!entry.isFile()) continue;
+            let key: string;
+            try {
+              key = decodeKey(String(entry.name));
+            } catch {
+              continue;
+            }
+            if (key.startsWith(prefix)) keys.push(key);
+          }
+          return { keys, done };
+        } catch (error) {
+          await close();
+          // Bun may defer the initial directory open until the first read. A
+          // missing backend root is the same empty scan as opendir() ENOENT.
+          if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+            return { keys, done: true };
+          }
+          throw error;
+        }
+      },
+      close,
+    };
+  }
+
   /**
    * Lists generic keys with a prefix while excluding internal directories.
    * Only regular root files are visible through the generic backend contract.
    */
   async list(prefix: string): Promise<readonly string[]> {
-    let names: string[];
-    try {
-      const entries = await readdir(this.#root, { withFileTypes: true });
-      // String(d.name) is the cast-free way to obtain a string regardless of
-      // whether the runtime Dirent carries a Buffer or a string for d.name.
-      names = entries.filter((d) => d.isFile()).map((d) => String(d.name));
-    } catch {
-      return [];
-    }
+    const scan = await this.openScan(prefix);
     const keys: string[] = [];
-    for (const name of names) {
-      let key: string;
-      try {
-        // decodeURIComponent throws URIError on a malformed name (e.g. `%GG`);
-        // a stray/undecodable file is skipped, not fatal — matching the
-        // defensive per-record decode in MemoryStore.open / OpLog.load.
-        key = decodeKey(name);
-      } catch {
-        continue;
+    try {
+      while (true) {
+        const page = await scan.read(1_024);
+        keys.push(...page.keys);
+        if (page.done) return keys;
       }
-      if (key.startsWith(prefix)) {
-        keys.push(key);
-      }
+    } finally {
+      await scan.close();
     }
-    return keys;
   }
 
   /** Idempotently deletes a generic backend key. */
@@ -364,6 +409,12 @@ export class FileBackend implements Backend, ReplayNonceBackend {
 
   #path(key: string): string {
     return join(this.#root, encodeKey(key));
+  }
+}
+
+function assertScanBudget(maxEntries: number): void {
+  if (!Number.isSafeInteger(maxEntries) || maxEntries <= 0) {
+    throw new RangeError('maxEntries must be a positive safe integer');
   }
 }
 

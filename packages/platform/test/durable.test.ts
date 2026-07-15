@@ -1,7 +1,7 @@
 import { Workspace } from '@thaddeus.run/fs';
 import { Identity, ready } from '@thaddeus.run/identity';
 import { signHead } from '@thaddeus.run/log';
-import type { Backend } from '@thaddeus.run/store';
+import { type Backend, scanKeys } from '@thaddeus.run/store';
 import { beforeAll, describe, expect, test } from 'bun:test';
 
 import { Platform } from '../src/platform';
@@ -22,6 +22,7 @@ function memoryBackend(): Backend {
       const v = m.get(k);
       return v === undefined ? undefined : new Uint8Array(v);
     },
+    openScan: async (p) => scanKeys(m.keys(), p),
     list: async (p) => [...m.keys()].filter((k) => k.startsWith(p)),
     delete: async (k) => void m.delete(k),
   };
@@ -162,6 +163,7 @@ describe('Platform — durable repos', () => {
         return inner.put(key, bytes);
       },
       get: (key) => inner.get(key),
+      openScan: (prefix) => inner.openScan(prefix),
       list: (prefix) => inner.list(prefix),
       delete: (key) => inner.delete(key),
     };

@@ -32,6 +32,15 @@ function chunkedBody(
   });
 }
 
+function serverWithBodyLimit(maxRequestBodyBytes: number) {
+  return createServer({
+    backend: new MemoryBackend(),
+    maxRequestBodyBytes,
+    maxReputationArchiveBytes: maxRequestBodyBytes,
+    maxFieldBytes: maxRequestBodyBytes,
+  });
+}
+
 describe('request body limits', () => {
   test('uses a 16 MiB default and rejects unsafe configuration', () => {
     expect(DEFAULT_MAX_REQUEST_BODY_BYTES).toBe(16 * 1024 * 1024);
@@ -43,7 +52,6 @@ describe('request body limits', () => {
       Number.NaN,
       Number.POSITIVE_INFINITY,
       Number.MAX_SAFE_INTEGER,
-      null as unknown as number,
     ]) {
       expect(() =>
         createServer({
@@ -52,13 +60,16 @@ describe('request body limits', () => {
         })
       ).toThrow(RangeError);
     }
+    expect(() =>
+      createServer({
+        backend: new MemoryBackend(),
+        maxRequestBodyBytes: null as unknown as number,
+      })
+    ).toThrow(TypeError);
   });
 
   test('rejects a declared oversize body without pulling it and cancels cleanup', async () => {
-    const server = createServer({
-      backend: new MemoryBackend(),
-      maxRequestBodyBytes: 4,
-    });
+    const server = serverWithBodyLimit(4);
     let pulls = 0;
     let cancellations = 0;
     const body = new ReadableStream<Uint8Array>({
@@ -88,7 +99,7 @@ describe('request body limits', () => {
     expect(cancellations).toBe(1);
     expect(
       await (await server.fetch(new Request('http://t/repos'))).json()
-    ).toEqual({ repos: [], owners: {} });
+    ).toEqual({ repos: [], owners: {}, nextCursor: null });
 
     const metrics = await (
       await server.fetch(new Request('http://t/metrics'))
@@ -99,10 +110,7 @@ describe('request body limits', () => {
   });
 
   test('fails closed on malformed Content-Length without reading bodies', async () => {
-    const server = createServer({
-      backend: new MemoryBackend(),
-      maxRequestBodyBytes: 8,
-    });
+    const server = serverWithBodyLimit(8);
     const invalidValues = [
       '-1',
       '1.5',
@@ -148,10 +156,7 @@ describe('request body limits', () => {
   });
 
   test('streams through the inclusive boundary and rejects overflow or an understated declaration', async () => {
-    const server = createServer({
-      backend: new MemoryBackend(),
-      maxRequestBodyBytes: 4,
-    });
+    const server = serverWithBodyLimit(4);
 
     const boundary = await server.fetch(
       new Request('http://t/repos', {
@@ -194,10 +199,7 @@ describe('request body limits', () => {
 
   test('coalesces many tiny reads without changing the signed body', async () => {
     const maxRequestBodyBytes = 160 * 1_024 + 17;
-    const server = createServer({
-      backend: new MemoryBackend(),
-      maxRequestBodyBytes,
-    });
+    const server = serverWithBodyLimit(maxRequestBodyBytes);
     const signer = Identity.create();
     const base = { ...createRepoBody('boundary', signer), padding: '' };
     const prefix = new TextEncoder().encode(JSON.stringify(base));
@@ -253,10 +255,7 @@ describe('request body limits', () => {
   });
 
   test('cancels bodies on non-POST and malformed-path exits', async () => {
-    const server = createServer({
-      backend: new MemoryBackend(),
-      maxRequestBodyBytes: 8,
-    });
+    const server = serverWithBodyLimit(8);
     let cancellations = 0;
     let pulls = 0;
     const body = () =>
@@ -291,10 +290,7 @@ describe('request body limits', () => {
   });
 
   test('turns a failing body stream into a stable 400 and remains healthy', async () => {
-    const server = createServer({
-      backend: new MemoryBackend(),
-      maxRequestBodyBytes: 8,
-    });
+    const server = serverWithBodyLimit(8);
     const body = new ReadableStream<Uint8Array>({
       pull() {
         throw new Error('adversarial stream failure');
@@ -308,15 +304,12 @@ describe('request body limits', () => {
     expect(await response.json()).toEqual({ error: 'invalid request body' });
     expect(
       await (await server.fetch(new Request('http://t/repos'))).json()
-    ).toEqual({ repos: [], owners: {} });
+    ).toEqual({ repos: [], owners: {}, nextCursor: null });
   });
 
   test('exposes fixed-label Prometheus metrics without request data', async () => {
     const marker = 'private-request-marker';
-    const server = createServer({
-      backend: new MemoryBackend(),
-      maxRequestBodyBytes: 8,
-    });
+    const server = serverWithBodyLimit(8);
     await server.fetch(
       new Request('http://t/repos', {
         method: 'POST',

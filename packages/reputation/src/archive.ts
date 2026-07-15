@@ -21,6 +21,30 @@ export interface ReputationImportResult {
   readonly duplicates: number;
 }
 
+export interface ReputationArchiveDecodeLimits {
+  readonly maxBytes?: number;
+  readonly maxContributions?: number;
+  readonly maxFieldBytes?: number;
+}
+
+export type ReputationArchiveLimitCode =
+  | 'archive_too_large'
+  | 'contribution_limit_exceeded'
+  | 'field_too_large';
+
+/** Structured pre-verification failure for server-enforced archive limits. */
+export class ReputationArchiveLimitError extends RangeError {
+  readonly code: ReputationArchiveLimitCode;
+  readonly limit: number;
+
+  constructor(code: ReputationArchiveLimitCode, limit: number) {
+    super(code);
+    this.name = 'ReputationArchiveLimitError';
+    this.code = code;
+    this.limit = limit;
+  }
+}
+
 interface WireContribution {
   readonly subject: string;
   readonly host: string;
@@ -170,7 +194,19 @@ export function encodeReputationArchive(archive: ReputationArchive): string {
   return `${JSON.stringify(wire, null, 2)}\n`;
 }
 
-export function decodeReputationArchive(json: string): ReputationArchive {
+export function decodeReputationArchive(
+  json: string,
+  limits: ReputationArchiveDecodeLimits = {}
+): ReputationArchive {
+  validateDecodeLimit('maxBytes', limits.maxBytes);
+  validateDecodeLimit('maxContributions', limits.maxContributions);
+  validateDecodeLimit('maxFieldBytes', limits.maxFieldBytes);
+  if (
+    limits.maxBytes !== undefined &&
+    new TextEncoder().encode(json).length > limits.maxBytes
+  ) {
+    throw new ReputationArchiveLimitError('archive_too_large', limits.maxBytes);
+  }
   let parsed: unknown;
   try {
     parsed = JSON.parse(json);
@@ -188,6 +224,27 @@ export function decodeReputationArchive(json: string): ReputationArchive {
   const subject = requiredString(parsed, 'subject');
   if (!Array.isArray(parsed.contributions)) {
     throw new TypeError('reputation archive contributions must be an array');
+  }
+  if (
+    limits.maxContributions !== undefined &&
+    parsed.contributions.length > limits.maxContributions
+  ) {
+    throw new ReputationArchiveLimitError(
+      'contribution_limit_exceeded',
+      limits.maxContributions
+    );
+  }
+  if (limits.maxFieldBytes !== undefined) {
+    assertFieldBytes(subject, limits.maxFieldBytes);
+    for (const value of parsed.contributions) {
+      if (!isRecord(value)) continue;
+      for (const name of ['subject', 'host', 'repo', 'ref', 'kind', 'at']) {
+        const field = value[name];
+        if (typeof field === 'string') {
+          assertFieldBytes(field, limits.maxFieldBytes);
+        }
+      }
+    }
   }
   const contributions = parsed.contributions.map((value) => {
     if (!isRecord(value)) {
@@ -209,4 +266,19 @@ export function decodeReputationArchive(json: string): ReputationArchive {
     subject,
     contributions,
   });
+}
+
+function validateDecodeLimit(name: string, value: number | undefined): void {
+  if (value === undefined) return;
+  if (typeof value !== 'number')
+    throw new TypeError(`${name} must be a number`);
+  if (!Number.isSafeInteger(value) || value <= 0) {
+    throw new RangeError(`${name} must be a positive safe integer`);
+  }
+}
+
+function assertFieldBytes(value: string, maxBytes: number): void {
+  if (new TextEncoder().encode(value).length > maxBytes) {
+    throw new ReputationArchiveLimitError('field_too_large', maxBytes);
+  }
 }

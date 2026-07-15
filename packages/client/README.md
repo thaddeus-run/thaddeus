@@ -31,6 +31,11 @@ archive and `importReputation(archive)` to submit it in a request signed by the
 archive subject. The destination verifies every contribution independently and
 returns imported/duplicate/total counts.
 
+Collection helpers drain bounded pages and retain complete-result behavior.
+`listReposPage`, `listViewsPage`, `listReleasesPage`, `listGrantsPage`, and
+`exportReputationPage` expose individual pages through `PageOptions`. Clone and
+pull reassemble and verify all pages before writing any local state.
+
 Every signed mutation carries a fresh random nonce covered by its signature, so
 the server can reject an otherwise-valid request replayed during the timestamp
 window.

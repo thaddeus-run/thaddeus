@@ -1,15 +1,22 @@
 export {
   Client,
+  ClientResponseError,
   type AttestationSkipReason,
   type AttestationSummary,
   type LandOutcome,
+  type GrantsPage,
+  type PageOptions,
   type PushResult,
   type ReputationImportOutcome,
+  type ReputationExportPage,
   type ReputationProfile,
   type ReleaseCreationOutcome,
+  type ReleasesPage,
+  type ReposPage,
   type RevokeOutcome,
   type RevealOutcome,
   type ScheduleRevealOutcome,
+  type ViewsPage,
 } from './client';
 export type { RepoPolicyRecord } from '@thaddeus.run/server';
 export type {

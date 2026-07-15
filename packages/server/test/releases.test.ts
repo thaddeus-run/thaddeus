@@ -52,6 +52,10 @@ class FailFirstReputationWrite implements Backend, ReplayNonceBackend {
     return this.#inner.get(key);
   }
 
+  openScan(prefix: string) {
+    return this.#inner.openScan(prefix);
+  }
+
   list(prefix: string): Promise<readonly string[]> {
     return this.#inner.list(prefix);
   }
@@ -201,7 +205,7 @@ async function createRelease(
 }
 
 describe('server releases', () => {
-  test('owner creates immutable releases and public reads return newest first', async () => {
+  test('owner creates immutable releases and public reads use cursor order', async () => {
     const owner = Identity.create();
     const srv = createServer({ backend: new MemoryBackend() });
     const snapshot = await createRepoWithHistory(srv, owner);
@@ -221,8 +225,8 @@ describe('server releases', () => {
       await srv.fetch(new Request('http://t/repos/r/releases'))
     ).json()) as { releases: string[] };
     expect(listed.releases.map((wire) => decodeRelease(wire).tag)).toEqual([
-      'v2',
       'v1',
+      'v2',
     ]);
 
     const detail = (await (

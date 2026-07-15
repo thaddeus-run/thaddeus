@@ -31,6 +31,14 @@ export type PublicOp =
       readonly sealed_meta: Ref;
     };
 
+/** Signals a broken stored frontier without exposing the missing identifier. */
+export class MissingReachableOperationError extends Error {
+  constructor() {
+    super('signed snapshot references a missing operation');
+    this.name = 'MissingReachableOperationError';
+  }
+}
+
 // In-memory operation log. The source of truth is the signed-op DAG; file
 // snapshots are derived by materialize(). Durable when constructed with a
 // Backend (write-through + static load). Spike — not concurrency-safe,
@@ -311,6 +319,35 @@ export class OpLog {
       }
       return x.id < y.id ? -1 : x.id > y.id ? 1 : 0;
     });
+  }
+
+  /**
+   * Walks a signed frontier's ancestor closure without copying or sorting the
+   * whole operation map. Cursor consumers restore their preferred order after
+   * collecting the complete stream.
+   */
+  *reachable(heads: readonly string[]): IterableIterator<Op> {
+    const seen = new Set<string>();
+    const stack = [...heads];
+    while (stack.length > 0) {
+      const id = stack.pop();
+      if (id === undefined || seen.has(id)) continue;
+      seen.add(id);
+      const op = this.#ops.get(id);
+      if (op === undefined) {
+        throw new MissingReachableOperationError();
+      }
+      yield op;
+      stack.push(...op.parents);
+    }
+  }
+
+  /** Checks payload references without allocating an all-operations array. */
+  referencesPlaintext(plaintextId: string): boolean {
+    for (const op of this.#ops.values()) {
+      if (op.payload?.plaintext_id === plaintextId) return true;
+    }
+    return false;
   }
 
   // Project the log to a path → { ref, op } tree by LWW over the ancestor-

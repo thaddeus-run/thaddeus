@@ -84,7 +84,11 @@ describe('startServer', () => {
       expect(s.url).toContain('http://localhost:');
       const res = await fetch(`${s.url}/repos`);
       expect(res.status).toBe(200);
-      expect(await res.json()).toEqual({ repos: [], owners: {} });
+      expect(await res.json()).toEqual({
+        repos: [],
+        owners: {},
+        nextCursor: null,
+      });
     } finally {
       await s.stop();
     }
@@ -98,7 +102,6 @@ describe('startServer', () => {
       Number.NaN,
       Number.POSITIVE_INFINITY,
       Number.MAX_SAFE_INTEGER,
-      null as unknown as number,
     ]) {
       expect(() =>
         startServer({
@@ -108,6 +111,39 @@ describe('startServer', () => {
         })
       ).toThrow(RangeError);
     }
+    expect(() =>
+      startServer({
+        dataDir: mkdtempSync(join(tmp, 'invalid-limit-type-')),
+        port: 0,
+        maxRequestBodyBytes: null as unknown as number,
+      })
+    ).toThrow(TypeError);
+  });
+
+  test('rejects invalid pagination and nested limits before opening a listener', () => {
+    expect(() =>
+      startServer({
+        dataDir: mkdtempSync(join(tmp, 'invalid-limit-relation-')),
+        port: 0,
+        maxRequestBodyBytes: 1_024,
+        maxReputationArchiveBytes: 1_025,
+      })
+    ).toThrow(RangeError);
+    expect(() =>
+      startServer({
+        dataDir: mkdtempSync(join(tmp, 'invalid-page-relation-')),
+        port: 0,
+        defaultPageSize: 2,
+        maxPageSize: 1,
+      })
+    ).toThrow(RangeError);
+    expect(() =>
+      startServer({
+        dataDir: mkdtempSync(join(tmp, 'invalid-field-limit-type-')),
+        port: 0,
+        maxFieldBytes: null as unknown as number,
+      })
+    ).toThrow(TypeError);
   });
 
   test('rejects invalid replay controls before opening a listener', () => {
@@ -334,6 +370,8 @@ describe('startServer', () => {
       dataDir: mkdtempSync(join(tmp, 'body-limit-')),
       port: 0,
       maxRequestBodyBytes: limit,
+      maxReputationArchiveBytes: limit,
+      maxFieldBytes: limit,
     });
     const signer = Identity.create();
     const path = '/repos';
@@ -433,6 +471,8 @@ describe('startServer', () => {
       dataDir: mkdtempSync(join(tmp, 'body-concurrency-')),
       port: 0,
       maxRequestBodyBytes: limit,
+      maxReputationArchiveBytes: limit,
+      maxFieldBytes: limit,
     });
     try {
       const responses = await Promise.all(
@@ -467,6 +507,8 @@ describe('startServer', () => {
       dataDir: root,
       port: 0,
       maxRequestBodyBytes: 1_024,
+      maxReputationArchiveBytes: 1_024,
+      maxFieldBytes: 1_024,
     });
     const port = server.port;
     try {
@@ -488,6 +530,8 @@ describe('startServer', () => {
       dataDir: root,
       port,
       maxRequestBodyBytes: 1_024,
+      maxReputationArchiveBytes: 1_024,
+      maxFieldBytes: 1_024,
     });
     try {
       const before = await (await fetch(`${server.url}/metrics`)).text();

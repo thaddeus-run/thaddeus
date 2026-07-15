@@ -31,6 +31,8 @@ import {
   decodeCapability,
   decodeDelegation,
   decodeRelease,
+  DEFAULT_MAX_REPUTATION_ARCHIVE_BYTES,
+  DEFAULT_MAX_REPUTATION_CONTRIBUTIONS,
   encodeBundle,
   encodeCapability,
   encodeClaim,
@@ -108,6 +110,55 @@ export interface LandOutcome {
 export interface ReleaseCreationOutcome {
   readonly release: Release;
   readonly attestations?: AttestationSummary;
+}
+
+export interface PageOptions {
+  readonly limit?: number;
+  readonly cursor?: string;
+}
+
+export interface ReposPage {
+  readonly repos: readonly string[];
+  readonly owners: Readonly<Record<string, string>>;
+  readonly nextCursor: string | null;
+}
+
+export interface ViewsPage {
+  readonly views: Readonly<Record<string, HeadRecordWire>>;
+  readonly nextCursor: string | null;
+}
+
+export interface ReleasesPage {
+  readonly releases: readonly Release[];
+  readonly nextCursor: string | null;
+}
+
+export interface GrantsPage {
+  readonly grants: readonly Delegation[];
+  readonly nextCursor: string | null;
+}
+
+export interface ReputationExportPage {
+  readonly archive: ReputationArchive;
+  readonly nextCursor: string | null;
+}
+
+export class ClientResponseError extends Error {
+  readonly status: number;
+  readonly code?: string;
+  readonly details: Readonly<Record<string, unknown>>;
+
+  constructor(
+    message: string,
+    status: number,
+    details: Readonly<Record<string, unknown>>
+  ) {
+    super(message);
+    this.name = 'ClientResponseError';
+    this.status = status;
+    this.details = details;
+    if (typeof details.code === 'string') this.code = details.code;
+  }
 }
 
 // A subject's server-wide profile: all trusted proofs remain visible in
@@ -250,12 +301,7 @@ export class Client {
     vetoes: VetoLog;
     symbols: SymbolOpLog;
   }> {
-    const enc = encodeURIComponent;
-    const res = await this.#fetch(
-      new Request(`${this.#server}/repos/${enc(name)}/pull?view=${enc(view)}`)
-    );
-    const body = (await this.#ok(res)) as HeadResponse &
-      Parameters<typeof decodeBundle>[0];
+    const body = await this.#pullResponse(name, view);
     const repo = await new Platform().openDurable(name, backend);
     if (
       options?.expectedOwner !== undefined &&
@@ -271,6 +317,11 @@ export class Client {
       prefix: repo.headRecords.history(view),
     });
     const bundle = decodeBundle(body);
+    bundle.ops.sort((left, right) =>
+      left.lamport !== right.lamport
+        ? left.lamport - right.lamport
+        : left.id.localeCompare(right.id)
+    );
     const snapshot = verifyHeadSnapshot(verified.head, bundle.ops);
     if (!snapshot.ok) throw verificationError(snapshot);
     await repo.headRecords.import(
@@ -332,19 +383,17 @@ export class Client {
     symbols: SymbolOpLog;
   }> {
     const targetView = localView ?? remoteView;
-    const enc = encodeURIComponent;
-    const res = await this.#fetch(
-      new Request(
-        `${this.#server}/repos/${enc(name)}/pull?view=${enc(remoteView)}`
-      )
-    );
-    const body = (await this.#ok(res)) as HeadResponse &
-      Parameters<typeof decodeBundle>[0];
+    const body = await this.#pullResponse(name, remoteView);
     const verified = decodeVerifiedChain(body, name, remoteView, {
       owner: repo.headRecords.owner,
       prefix: repo.headRecords.history(remoteView),
     });
     const bundle = decodeBundle(body);
+    bundle.ops.sort((left, right) =>
+      left.lamport !== right.lamport
+        ? left.lamport - right.lamport
+        : left.id.localeCompare(right.id)
+    );
     const snapshot = verifyHeadSnapshot(verified.head, bundle.ops);
     if (!snapshot.ok) throw verificationError(snapshot);
     await repo.headRecords.import(verified.chain, repo.headRecords.owner);
@@ -401,11 +450,15 @@ export class Client {
   // The repo's branches and their heads. Listing does not ingest content or
   // mutate trust, but newer records fetch their complete chain for validation.
   async listViews(name: string, repo: Repo): Promise<Record<string, string[]>> {
-    const res = await this.#fetch(
-      new Request(`${this.#server}/repos/${encodeURIComponent(name)}/views`)
+    const pages = await this.#collectPages((cursor) =>
+      this.listViewsPage(name, cursor === undefined ? {} : { cursor })
     );
-    const body = (await this.#ok(res)) as {
-      views: Record<string, HeadRecordWire>;
+    const body = {
+      views: Object.fromEntries(
+        pages
+          .flatMap((page) => Object.entries(page.views))
+          .sort(([left], [right]) => left.localeCompare(right))
+      ),
     };
     if (
       body.views === null ||
@@ -448,12 +501,32 @@ export class Client {
         throw new Error('fork: listed view conflicts with the local pin');
       }
       if (pinned?.id !== head.id) {
-        const detailResponse = await this.#fetch(
-          new Request(
-            `${this.#server}/repos/${encodeURIComponent(name)}/views/${encodeURIComponent(view)}`
-          )
-        );
-        const detail = (await this.#ok(detailResponse)) as HeadResponse;
+        const detailPages = await this.#collectPages(async (cursor) => {
+          const detailResponse = await this.#fetch(
+            new Request(
+              this.#pageUrl(
+                `/repos/${encodeURIComponent(name)}/views/${encodeURIComponent(view)}`,
+                cursor === undefined ? {} : { cursor }
+              )
+            )
+          );
+          const detail = (await this.#ok(detailResponse)) as HeadResponse & {
+            nextCursor?: unknown;
+          };
+          return {
+            ...detail,
+            nextCursor: this.#nextCursor(detail.nextCursor),
+          };
+        });
+        const firstDetail = detailPages[0];
+        if (firstDetail === undefined) {
+          throw new Error('malformed_record: missing view detail');
+        }
+        const detail: HeadResponse = {
+          view: firstDetail.view,
+          head: firstDetail.head,
+          chain: detailPages.flatMap((page) => [...page.chain]),
+        };
         const verified = decodeVerifiedChain(detail, name, view, {
           owner: listedOwner,
           prefix: repo.headRecords.history(view),
@@ -467,6 +540,32 @@ export class Client {
       views[view] = [...head.heads];
     }
     return views;
+  }
+
+  async listViewsPage(
+    name: string,
+    options: PageOptions = {}
+  ): Promise<ViewsPage> {
+    const res = await this.#fetch(
+      new Request(
+        this.#pageUrl(`/repos/${encodeURIComponent(name)}/views`, options)
+      )
+    );
+    const body = (await this.#ok(res)) as {
+      views?: unknown;
+      nextCursor?: unknown;
+    };
+    if (
+      body.views === null ||
+      typeof body.views !== 'object' ||
+      Array.isArray(body.views)
+    ) {
+      throw new Error('malformed_record: views must be an object');
+    }
+    return {
+      views: body.views as Record<string, HeadRecordWire>,
+      nextCursor: this.#nextCursor(body.nextCursor),
+    };
   }
 
   async getPolicy(name: string): Promise<RepoPolicyRecord> {
@@ -528,19 +627,47 @@ export class Client {
   }
 
   async listReleases(name: string): Promise<Release[]> {
-    const res = await this.#fetch(
-      new Request(`${this.#server}/repos/${encodeURIComponent(name)}/releases`)
+    const pages = await this.#collectPages((cursor) =>
+      this.listReleasesPage(name, cursor === undefined ? {} : { cursor })
     );
-    const body = (await this.#ok(res)) as { releases: string[] };
     const releases: Release[] = [];
-    for (const wire of body.releases) {
-      try {
-        releases.push(verifiedRelease(wire, name));
-      } catch {
-        // A malicious/torn record is never returned as a trusted release.
+    for (const page of pages) releases.push(...page.releases);
+    return releases.sort((left, right) => {
+      const newestFirst = right.at.localeCompare(left.at);
+      return newestFirst !== 0
+        ? newestFirst
+        : left.tag.localeCompare(right.tag);
+    });
+  }
+
+  async listReleasesPage(
+    name: string,
+    options: PageOptions = {}
+  ): Promise<ReleasesPage> {
+    const res = await this.#fetch(
+      new Request(
+        this.#pageUrl(`/repos/${encodeURIComponent(name)}/releases`, options)
+      )
+    );
+    const body = (await this.#ok(res)) as {
+      releases?: unknown;
+      nextCursor?: unknown;
+    };
+    const releases: Release[] = [];
+    if (Array.isArray(body.releases)) {
+      for (const wire of body.releases) {
+        if (typeof wire !== 'string') continue;
+        try {
+          releases.push(verifiedRelease(wire, name));
+        } catch {
+          // A malicious/torn record is never returned as a trusted release.
+        }
       }
     }
-    return releases;
+    return {
+      releases,
+      nextCursor: this.#nextCursor(body.nextCursor),
+    };
   }
 
   async getRelease(name: string, tag: string): Promise<Release> {
@@ -597,11 +724,39 @@ export class Client {
   }
 
   async listRepos(): Promise<readonly string[]> {
-    // Pass a Request object so both the global fetch and an injected server
-    // handler (which calls new URL(req.url)) receive a well-formed input.
-    const res = await this.#fetch(new Request(`${this.#server}/repos`));
-    const body = (await this.#ok(res)) as { repos: string[] };
-    return body.repos;
+    const pages = await this.#collectPages((cursor) =>
+      this.listReposPage(cursor === undefined ? {} : { cursor })
+    );
+    return [...new Set(pages.flatMap((page) => [...page.repos]))].sort();
+  }
+
+  async listReposPage(options: PageOptions = {}): Promise<ReposPage> {
+    const res = await this.#fetch(
+      new Request(this.#pageUrl('/repos', options))
+    );
+    const body = (await this.#ok(res)) as {
+      repos?: unknown;
+      owners?: unknown;
+      nextCursor?: unknown;
+    };
+    const repos = Array.isArray(body.repos)
+      ? body.repos.filter((name): name is string => typeof name === 'string')
+      : [];
+    const owners: Record<string, string> = {};
+    if (
+      body.owners !== null &&
+      typeof body.owners === 'object' &&
+      !Array.isArray(body.owners)
+    ) {
+      for (const [name, owner] of Object.entries(body.owners)) {
+        if (typeof owner === 'string') owners[name] = owner;
+      }
+    }
+    return {
+      repos,
+      owners,
+      nextCursor: this.#nextCursor(body.nextCursor),
+    };
   }
 
   // Repos with their owner DID (the mirror's GET /repos carries owners). Lets a
@@ -609,15 +764,17 @@ export class Client {
   async listReposWithOwners(): Promise<
     readonly { name: string; owner: string | null }[]
   > {
-    const res = await this.#fetch(new Request(`${this.#server}/repos`));
-    const body = (await this.#ok(res)) as {
-      repos: string[];
-      owners?: Record<string, string>;
-    };
-    return body.repos.map((name) => ({
-      name,
-      owner: body.owners?.[name] ?? null,
-    }));
+    const pages = await this.#collectPages((cursor) =>
+      this.listReposPage(cursor === undefined ? {} : { cursor })
+    );
+    return pages
+      .flatMap((page) =>
+        page.repos.map((name) => ({
+          name,
+          owner: page.owners[name] ?? null,
+        }))
+      )
+      .sort((left, right) => left.name.localeCompare(right.name));
   }
 
   // Delete a repo (owner-only, enforced server-side). Irreversible.
@@ -694,19 +851,32 @@ export class Client {
     plaintextIds: readonly string[]
   ): Promise<number> {
     const requested = new Set(plaintextIds);
-    const res = await this.#signed(
-      'POST',
-      `/repos/${encodeURIComponent(name)}/reveals/pending`,
-      { objects: [...requested] }
-    );
-    // Pre-P7 servers do not expose this owner-only route and cannot hold
-    // pending reveals, so absence is equivalent to an empty schedule set.
-    if (res.status === 404) {
-      return 0;
-    }
-    const body = (await this.#ok(res)) as { capabilities: string[] };
+    const pages = await this.#collectPages(async (cursor) => {
+      const res = await this.#signed(
+        'POST',
+        `/repos/${encodeURIComponent(name)}/reveals/pending`,
+        cursor === undefined ? { objects: [...requested] } : { cursor }
+      );
+      // Pre-P7 servers do not expose this owner-only route and cannot hold
+      // pending reveals, so absence is equivalent to an empty schedule set.
+      if (res.status === 404) {
+        return { capabilities: [] as string[], nextCursor: null };
+      }
+      const body = (await this.#ok(res)) as {
+        capabilities?: unknown;
+        nextCursor?: unknown;
+      };
+      return {
+        capabilities: Array.isArray(body.capabilities)
+          ? body.capabilities.filter(
+              (wire): wire is string => typeof wire === 'string'
+            )
+          : [],
+        nextCursor: this.#nextCursor(body.nextCursor),
+      };
+    });
     let ingested = 0;
-    const wires = Array.isArray(body.capabilities) ? body.capabilities : [];
+    const wires = [...new Set(pages.flatMap((page) => page.capabilities))];
     for (const wire of wires) {
       if (typeof wire !== 'string') {
         continue;
@@ -887,13 +1057,38 @@ export class Client {
 
   // Public export of a subject's complete dual-signed contribution set.
   async exportReputation(did: string): Promise<ReputationArchive> {
+    const pages = await this.#collectPages((cursor) =>
+      this.exportReputationPage(did, cursor === undefined ? {} : { cursor })
+    );
+    return decodeReputationArchive(
+      encodeReputationArchive({
+        format: pages[0]?.archive.format ?? 'thaddeus.reputation.v1',
+        subject: did,
+        contributions: pages.flatMap((page) => [...page.archive.contributions]),
+      })
+    );
+  }
+
+  async exportReputationPage(
+    did: string,
+    options: PageOptions = {}
+  ): Promise<ReputationExportPage> {
     const res = await this.#fetch(
       new Request(
-        `${this.#server}/reputation/${encodeURIComponent(did)}/export`
+        this.#pageUrl(`/reputation/${encodeURIComponent(did)}/export`, options)
       )
     );
-    const body = (await this.#ok(res)) as { archive: string };
-    return decodeReputationArchive(body.archive);
+    const body = (await this.#ok(res)) as {
+      archive?: unknown;
+      nextCursor?: unknown;
+    };
+    if (typeof body.archive !== 'string') {
+      throw new Error('malformed reputation archive page');
+    }
+    return {
+      archive: decodeReputationArchive(body.archive),
+      nextCursor: this.#nextCursor(body.nextCursor),
+    };
   }
 
   // Signed, subject-authorized import. The destination independently verifies
@@ -901,10 +1096,66 @@ export class Client {
   async importReputation(
     archive: ReputationArchive
   ): Promise<ReputationImportOutcome> {
-    const res = await this.#signed('POST', '/reputation/import', {
-      archive: encodeReputationArchive(archive),
-    });
-    return (await this.#ok(res)) as ReputationImportOutcome;
+    const normalized = decodeReputationArchive(
+      encodeReputationArchive(archive)
+    );
+    let maxBytes = DEFAULT_MAX_REPUTATION_ARCHIVE_BYTES;
+    let maxContributions = DEFAULT_MAX_REPUTATION_CONTRIBUTIONS;
+    let offset = 0;
+    let imported = 0;
+    let duplicates = 0;
+    let total = 0;
+    let sentEmpty = false;
+    while (offset < normalized.contributions.length || !sentEmpty) {
+      const remaining = normalized.contributions.slice(offset);
+      const chunk = this.#reputationImportChunk(
+        normalized.subject,
+        remaining,
+        maxBytes,
+        maxContributions
+      );
+      try {
+        const res = await this.#signed('POST', '/reputation/import', {
+          archive: encodeReputationArchive(chunk),
+        });
+        const outcome = (await this.#ok(res)) as ReputationImportOutcome;
+        imported += outcome.imported;
+        duplicates += outcome.duplicates;
+        total = outcome.total;
+        offset += chunk.contributions.length;
+        sentEmpty = true;
+      } catch (error) {
+        if (!(error instanceof ClientResponseError)) throw error;
+        if (error.code === 'field_too_large') throw error;
+        const key =
+          error.code === 'archive_too_large'
+            ? 'maxBytes'
+            : error.code === 'contribution_limit_exceeded'
+              ? 'maxContributions'
+              : undefined;
+        if (key === undefined) throw error;
+        const proposed = error.details[key];
+        if (
+          typeof proposed !== 'number' ||
+          !Number.isSafeInteger(proposed) ||
+          proposed <= 0 ||
+          (key === 'maxBytes'
+            ? proposed >= maxBytes
+            : proposed >= maxContributions)
+        ) {
+          throw error;
+        }
+        if (key === 'maxBytes') maxBytes = proposed;
+        else maxContributions = proposed;
+      }
+      if (normalized.contributions.length === 0) break;
+    }
+    return {
+      subject: normalized.subject,
+      imported,
+      duplicates,
+      total,
+    };
   }
 
   // Owner: register an owner-signed delegation granting `delegation.agent` push.
@@ -967,21 +1218,169 @@ export class Client {
 
   // The repo's active (non-revoked) delegations — a public, verifiable list.
   async listGrants(name: string): Promise<Delegation[]> {
-    const res = await this.#fetch(
-      new Request(`${this.#server}/repos/${encodeURIComponent(name)}/grants`)
+    const pages = await this.#collectPages((cursor) =>
+      this.listGrantsPage(name, cursor === undefined ? {} : { cursor })
     );
-    const body = (await this.#ok(res)) as { grants: string[] };
+    return pages
+      .flatMap((page) => [...page.grants])
+      .sort((left, right) => left.agent.localeCompare(right.agent));
+  }
+
+  async listGrantsPage(
+    name: string,
+    options: PageOptions = {}
+  ): Promise<GrantsPage> {
+    const res = await this.#fetch(
+      new Request(
+        this.#pageUrl(`/repos/${encodeURIComponent(name)}/grants`, options)
+      )
+    );
+    const body = (await this.#ok(res)) as {
+      grants?: unknown;
+      nextCursor?: unknown;
+    };
     // Decode each entry defensively: a single malformed grant must not crash the
     // caller, so failures are skipped rather than thrown.
     const out: Delegation[] = [];
-    for (const g of body.grants) {
+    for (const g of Array.isArray(body.grants) ? body.grants : []) {
+      if (typeof g !== 'string') continue;
       try {
         out.push(decodeDelegation(g));
       } catch {
         // skip a malformed wire delegation
       }
     }
-    return out;
+    return {
+      grants: out,
+      nextCursor: this.#nextCursor(body.nextCursor),
+    };
+  }
+
+  /** Collects and deduplicates an untrusted pull before any local mutation. */
+  async #pullResponse(
+    name: string,
+    view: string
+  ): Promise<HeadResponse & Parameters<typeof decodeBundle>[0]> {
+    type PullPage = HeadResponse &
+      Parameters<typeof decodeBundle>[0] & { nextCursor: string | null };
+    const pages = await this.#collectPages<PullPage>(async (cursor) => {
+      const path = `/repos/${encodeURIComponent(name)}/pull`;
+      const url = new URL(`${this.#server}${path}`);
+      url.searchParams.set('view', view);
+      if (cursor !== undefined) url.searchParams.set('cursor', cursor);
+      const response = await this.#fetch(new Request(url.toString()));
+      const body = (await this.#ok(response)) as HeadResponse &
+        Parameters<typeof decodeBundle>[0] & { nextCursor?: unknown };
+      return { ...body, nextCursor: this.#nextCursor(body.nextCursor) };
+    });
+    const first = pages[0];
+    if (first === undefined)
+      throw new Error('malformed_record: missing pull page');
+    const unique = (
+      field: keyof Parameters<typeof decodeBundle>[0]
+    ): string[] => [...new Set(pages.flatMap((page) => page[field] ?? []))];
+    return {
+      view: first.view,
+      head: first.head,
+      chain: [
+        ...new Map(
+          pages
+            .flatMap((page) => [...page.chain])
+            .map((record) => [record.id, record] as const)
+        ).values(),
+      ],
+      ops: unique('ops'),
+      objects: unique('objects'),
+      caps: unique('caps'),
+      prov: unique('prov'),
+      veto: unique('veto'),
+      symop: unique('symop'),
+    };
+  }
+
+  /** Chooses the largest portable import chunk that fits both public caps. */
+  #reputationImportChunk(
+    subject: string,
+    remaining: ReadonlyArray<ReputationArchive['contributions'][number]>,
+    maxBytes: number,
+    maxContributions: number
+  ): ReputationArchive {
+    const archive = (count: number): ReputationArchive => ({
+      format: 'thaddeus.reputation.v1',
+      subject,
+      contributions: remaining.slice(0, count),
+    });
+    if (remaining.length === 0) return archive(0);
+    let low = 1;
+    let high = Math.min(remaining.length, maxContributions);
+    let best = 0;
+    while (low <= high) {
+      const middle = Math.floor((low + high) / 2);
+      const bytes = new TextEncoder().encode(
+        encodeReputationArchive(archive(middle))
+      ).length;
+      if (bytes <= maxBytes) {
+        best = middle;
+        low = middle + 1;
+      } else {
+        high = middle - 1;
+      }
+    }
+    // Sending the irreducible record lets the destination return its stable
+    // field/archive limit error; the client never loops without progress.
+    return archive(Math.max(1, best));
+  }
+
+  /** Traverses rotating cursors with bounded retries and loop defenses. */
+  async #collectPages<T extends { readonly nextCursor: string | null }>(
+    load: (cursor: string | undefined) => Promise<T>
+  ): Promise<T[]> {
+    for (let attempt = 0; ; attempt += 1) {
+      const pages: T[] = [];
+      const seen = new Set<string>();
+      let cursor: string | undefined;
+      try {
+        while (true) {
+          const page = await load(cursor);
+          pages.push(page);
+          const next = page.nextCursor;
+          if (next === null) return pages;
+          if (seen.has(next)) {
+            throw new Error('pagination cursor repeated');
+          }
+          seen.add(next);
+          if (pages.length >= 10_000) {
+            throw new Error('pagination page limit exceeded');
+          }
+          cursor = next;
+        }
+      } catch (error) {
+        const retryable =
+          error instanceof ClientResponseError &&
+          (error.code === 'pagination_snapshot_changed' ||
+            error.code === 'pagination_cursor_invalid');
+        if (!retryable || attempt >= 2) throw error;
+      }
+    }
+  }
+
+  #pageUrl(path: string, options: PageOptions): string {
+    const url = new URL(`${this.#server}${path}`);
+    if (options.limit !== undefined) {
+      url.searchParams.set('limit', String(options.limit));
+    }
+    if (options.cursor !== undefined) {
+      url.searchParams.set('cursor', options.cursor);
+    }
+    return url.toString();
+  }
+
+  #nextCursor(value: unknown): string | null {
+    if (value === undefined || value === null) return null;
+    if (typeof value !== 'string' || value.length === 0) {
+      throw new Error('malformed pagination cursor');
+    }
+    return value;
   }
 
   // POST a JSON body with the signed-request envelope.
@@ -1027,6 +1426,10 @@ export class Client {
       parsed = undefined;
     }
     if (!res.ok) {
+      const details =
+        parsed !== null && typeof parsed === 'object' && !Array.isArray(parsed)
+          ? (parsed as Record<string, unknown>)
+          : {};
       const msg =
         parsed !== null &&
         parsed !== undefined &&
@@ -1036,7 +1439,7 @@ export class Client {
           : text.length > 0
             ? text.slice(0, 200)
             : `request failed: ${res.status}`;
-      throw new Error(msg);
+      throw new ClientResponseError(msg, res.status, details);
     }
     return parsed ?? {};
   }

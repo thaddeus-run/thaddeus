@@ -1,7 +1,7 @@
 import { Identity, ready } from '@thaddeus.run/identity';
 import { beforeAll, describe, expect, test } from 'bun:test';
 
-import type { Backend } from '../src/backend';
+import { type Backend, scanKeys } from '../src/backend';
 import { issueCapability } from '../src/capability';
 import { publicIdentity } from '../src/membrane';
 import { encrypt, newContentKey } from '../src/object';
@@ -24,6 +24,7 @@ function memoryBackend(): Backend {
       const v = m.get(k);
       return v === undefined ? undefined : new Uint8Array(v);
     },
+    openScan: async (p) => scanKeys(m.keys(), p),
     list: async (p) => [...m.keys()].filter((k) => k.startsWith(p)),
     delete: async (k) => void m.delete(k),
   };
@@ -136,6 +137,7 @@ describe('MemoryStore — durable mode', () => {
           await inner.put(key, bytes);
         },
         get: (key) => inner.get(key),
+        openScan: (prefix) => inner.openScan(prefix),
         list: (prefix) => inner.list(prefix),
         delete: (key) => inner.delete(key),
       };
@@ -187,6 +189,7 @@ describe('MemoryStore — durable mode', () => {
     const backend: Backend = {
       put: (key, bytes) => inner.put(key, bytes),
       get: (key) => inner.get(key),
+      openScan: (prefix) => inner.openScan(prefix),
       list: (prefix) => inner.list(prefix),
       delete: async (key) => {
         if (failDelete && key.startsWith('recall/')) {
@@ -229,6 +232,7 @@ describe('MemoryStore — durable mode', () => {
           await inner.put(key, bytes);
         },
         get: (key) => inner.get(key),
+        openScan: (prefix) => inner.openScan(prefix),
         list: (prefix) => inner.list(prefix),
         delete: (key) => inner.delete(key),
       };

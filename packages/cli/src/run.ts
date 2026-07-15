@@ -32,11 +32,20 @@ import {
 import { signVeto, VetoLog } from '@thaddeus.run/review';
 import {
   DEFAULT_ATTESTATION_RATE_LIMIT,
+  DEFAULT_MAX_FIELD_BYTES,
+  DEFAULT_MAX_PAGE_RESPONSE_BYTES,
+  DEFAULT_MAX_REPUTATION_ARCHIVE_BYTES,
+  DEFAULT_MAX_REPUTATION_CONTRIBUTIONS,
   DEFAULT_MAX_REQUEST_BODY_BYTES,
+  DEFAULT_PAGE_SIZE,
+  DEFAULT_PAGINATION_CURSOR_CAPACITY,
+  DEFAULT_PAGINATION_CURSOR_TTL_MS,
   DEFAULT_REPLAY_NONCE_CAPACITY,
   MAX_ATTESTATION_RATE_LIMIT,
+  MAX_PAGE_SIZE,
   MAX_REPLAY_NONCE_CAPACITY,
   REQUEST_SKEW_MS,
+  resolveLimits,
 } from '@thaddeus.run/server';
 import { type Backend, scoped } from '@thaddeus.run/store';
 import type { EventKind } from '@thaddeus.run/watch';
@@ -3055,6 +3064,14 @@ export async function run(
             'attestation-rate-limit': { type: 'string' },
             'min-merges': { type: 'string' },
             'max-request-body-bytes': { type: 'string' },
+            'max-reputation-archive-bytes': { type: 'string' },
+            'max-reputation-contributions': { type: 'string' },
+            'max-field-bytes': { type: 'string' },
+            'default-page-size': { type: 'string' },
+            'max-page-size': { type: 'string' },
+            'max-page-response-bytes': { type: 'string' },
+            'pagination-cursor-capacity': { type: 'string' },
+            'pagination-cursor-ttl-ms': { type: 'string' },
             'replay-nonce-capacity': { type: 'string' },
             'request-skew-ms': { type: 'string' },
             'trust-host': { type: 'string', multiple: true },
@@ -3080,6 +3097,46 @@ export async function run(
           maxRequestBodyBytes > Number.MAX_SAFE_INTEGER - 1
         ) {
           out(`invalid --max-request-body-bytes: ${rawMaxRequestBodyBytes}`);
+          return 2;
+        }
+        const configuredLimits = {
+          maxReputationArchiveBytes: DEFAULT_MAX_REPUTATION_ARCHIVE_BYTES,
+          maxReputationContributions: DEFAULT_MAX_REPUTATION_CONTRIBUTIONS,
+          maxFieldBytes: DEFAULT_MAX_FIELD_BYTES,
+          defaultPageSize: DEFAULT_PAGE_SIZE,
+          maxPageSize: MAX_PAGE_SIZE,
+          maxPageResponseBytes: DEFAULT_MAX_PAGE_RESPONSE_BYTES,
+          paginationCursorCapacity: DEFAULT_PAGINATION_CURSOR_CAPACITY,
+          paginationCursorTtlMs: DEFAULT_PAGINATION_CURSOR_TTL_MS,
+        };
+        const limitFlags = [
+          ['max-reputation-archive-bytes', 'maxReputationArchiveBytes'],
+          ['max-reputation-contributions', 'maxReputationContributions'],
+          ['max-field-bytes', 'maxFieldBytes'],
+          ['default-page-size', 'defaultPageSize'],
+          ['max-page-size', 'maxPageSize'],
+          ['max-page-response-bytes', 'maxPageResponseBytes'],
+          ['pagination-cursor-capacity', 'paginationCursorCapacity'],
+          ['pagination-cursor-ttl-ms', 'paginationCursorTtlMs'],
+        ] as const;
+        for (const [flag, property] of limitFlags) {
+          const raw = values[flag];
+          if (raw === undefined) continue;
+          const parsed = Number(raw);
+          if (
+            !/^\d+$/.test(raw) ||
+            !Number.isSafeInteger(parsed) ||
+            parsed <= 0
+          ) {
+            out(`invalid --${flag}: ${raw}`);
+            return 2;
+          }
+          configuredLimits[property] = parsed;
+        }
+        try {
+          resolveLimits({ maxRequestBodyBytes, ...configuredLimits });
+        } catch {
+          out('invalid server limit configuration');
           return 2;
         }
         const rawReplayNonceCapacity = values['replay-nonce-capacity'];
@@ -3185,12 +3242,13 @@ export async function run(
           attestationRateLimit: configuredAttestationRateLimit,
           minMerges,
           maxRequestBodyBytes,
+          ...configuredLimits,
           replayNonceCapacity,
           requestSkewMs,
           trustedReputationHosts,
         });
         out(
-          `thaddeus serving on ${server.url} (data: ${dataDir}, max body: ${maxRequestBodyBytes} bytes, replay nonces: ${replayNonceCapacity}, request skew: ${requestSkewMs} ms${
+          `thaddeus serving on ${server.url} (data: ${dataDir}, max body: ${maxRequestBodyBytes} bytes, archive: ${configuredLimits.maxReputationArchiveBytes} bytes/${configuredLimits.maxReputationContributions} contributions, field: ${configuredLimits.maxFieldBytes} bytes, pages: ${configuredLimits.defaultPageSize}/${configuredLimits.maxPageSize} items and ${configuredLimits.maxPageResponseBytes} bytes, cursors: ${configuredLimits.paginationCursorCapacity}/${configuredLimits.paginationCursorTtlMs} ms, replay nonces: ${replayNonceCapacity}, request skew: ${requestSkewMs} ms${
             attester !== undefined
               ? `, attesting as ${attester.did} via AWS KMS`
               : host !== undefined

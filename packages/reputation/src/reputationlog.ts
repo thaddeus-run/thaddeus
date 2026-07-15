@@ -124,6 +124,19 @@ export class ReputationLog {
     });
   }
 
+  /** Streams genuine dual-signed proofs without building a subject-wide array. */
+  *iterateArchiveContributions(
+    subject: string
+  ): IterableIterator<Contribution> {
+    for (const contribution of this.#records.values()) {
+      if (contribution.subject !== subject) continue;
+      const verification = verifyContribution(contribution);
+      if (verification.authentic && verification.attested) {
+        yield contribution;
+      }
+    }
+  }
+
   // Strictly validate first, then persist only the missing delta in one backend
   // write. Memory changes happen last, so a failed write exposes no partial set.
   async ingestArchive(

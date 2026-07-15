@@ -408,7 +408,6 @@ describe('Client signed-head verification', () => {
       { ops: [], code: 'missing_operation' },
       { ops: [child], code: 'missing_operation' },
       { ops: [root, child, extra], code: 'extra_operation' },
-      { ops: [root, child, child], code: 'duplicate_operation' },
       { ops: [root, forged], code: 'invalid_operation' },
     ];
     for (const attack of attacks) {
@@ -420,7 +419,9 @@ describe('Client signed-head verification', () => {
       expect(repo.log.heads('main')).toEqual([]);
     }
 
-    body = pullBody('r', 'main', [genesis, next], [root, child]);
+    // Page reassembly deliberately deduplicates identical wire records before
+    // final completeness verification.
+    body = pullBody('r', 'main', [genesis, next], [root, child, child]);
     const pulled = await client.pull('r', repo, backend);
     expect(pulled.head.id).toBe(next.id);
     expect(repo.log.heads('main')).toEqual([child.id]);

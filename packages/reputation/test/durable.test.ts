@@ -109,6 +109,7 @@ describe('ReputationLog — durability', () => {
     const memory = new MemoryBackend();
     const backend: Backend = {
       get: (key) => memory.get(key),
+      openScan: (prefix) => memory.openScan(prefix),
       list: (prefix) => memory.list(prefix),
       delete: (key) => memory.delete(key),
       put: () => Promise.reject(new Error('write failed')),
