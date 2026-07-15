@@ -60,6 +60,14 @@ integers no greater than `Number.MAX_SAFE_INTEGER - 1`. Invalid values stop
 startup before the listening socket opens. The container entrypoint exposes the
 same setting as `THADDEUS_MAX_REQUEST_BODY_BYTES`.
 
+Archive, contribution, logical-field, page item/byte, and cursor session limits
+are configurable with `--max-reputation-archive-bytes`,
+`--max-reputation-contributions`, `--max-field-bytes`, `--default-page-size`,
+`--max-page-size`, `--max-page-response-bytes`, `--pagination-cursor-capacity`,
+and `--pagination-cursor-ttl-ms`. Matching `THADDEUS_*` variables are available
+in the container. Repo, view, release, grant, pull, reveal, and reputation
+commands continue to show complete results by draining server pages.
+
 Durable replay protection retains up to 100,000 live signed-request nonces by
 default. `--replay-nonce-capacity N` accepts positive decimal integers through
 1,000,000. `--request-skew-ms N` narrows timestamp acceptance from the

@@ -14,6 +14,19 @@ export function scoped(backend: Backend, prefix: string): Backend {
         }),
     get: (key) => backend.get(prefix + key),
     delete: (key) => backend.delete(prefix + key),
+    openScan: async (p) => {
+      const scan = await backend.openScan(prefix + p);
+      return {
+        read: async (maxEntries: number) => {
+          const page = await scan.read(maxEntries);
+          return {
+            keys: page.keys.map((key) => key.slice(prefix.length)),
+            done: page.done,
+          };
+        },
+        close: () => scan.close(),
+      };
+    },
     list: async (p) =>
       (await backend.list(prefix + p)).map((k) => k.slice(prefix.length)),
   };

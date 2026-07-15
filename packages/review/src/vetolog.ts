@@ -135,6 +135,11 @@ export class VetoLog {
     });
   }
 
+  /** Iterates the stored cursor order without allocating a sorted copy. */
+  *iterateForOp(opId: string): IterableIterator<Veto> {
+    yield* this.#byOp.get(opId) ?? [];
+  }
+
   // Signature integrity over the bound op id. Whether that op actually exists is
   // the log's concern, not this check.
   verify(v: Veto): boolean {

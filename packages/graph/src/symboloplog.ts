@@ -113,6 +113,13 @@ export class SymbolOpLog {
       .flatMap(([, list]) => list);
   }
 
+  /** Iterates stored symbol operations without building a response-wide array. */
+  *iterateAll(): IterableIterator<SymbolOp> {
+    for (const records of this.#bySymbol.values()) {
+      yield* records;
+    }
+  }
+
   // Signature + id integrity over the record. Whether the symbol/op it targets
   // actually exists is the graph's concern, not this check.
   verify(op: SymbolOp): boolean {

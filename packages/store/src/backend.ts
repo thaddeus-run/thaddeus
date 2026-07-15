@@ -2,14 +2,58 @@
 // in @thaddeus.run/persist (MemoryBackend, FileBackend). Keys are strings like
 // `obj/<id>`, `op/<id>`, `view/<name>`. Async — used only behind already-async
 // store/log mutations and the static loaders; synchronous reads never touch it.
+export interface BackendScan {
+  /**
+   * Inspects at most `maxEntries` underlying entries. Filtering may therefore
+   * produce an empty, non-terminal result.
+   */
+  read(maxEntries: number): Promise<{
+    keys: readonly string[];
+    done: boolean;
+  }>;
+  /** Releases any iterator or operating-system resource held by the scan. */
+  close(): Promise<void>;
+}
+
 export interface Backend {
   put(key: string, bytes: Uint8Array): Promise<void>;
   // Atomically creates a key and returns false when it already exists. Durable
   // monotonic records use this to prevent concurrent writers from overwriting.
   putIfAbsent?(key: string, bytes: Uint8Array): Promise<boolean>;
   get(key: string): Promise<Uint8Array | undefined>;
+  openScan(prefix: string): Promise<BackendScan>;
   list(prefix: string): Promise<readonly string[]>;
   delete(key: string): Promise<void>;
+}
+
+/** Builds a bounded scanner over an existing lazy key iterator. */
+export function scanKeys(
+  iterator: Iterator<string>,
+  prefix: string
+): BackendScan {
+  let done = false;
+  return {
+    read: async (maxEntries) => {
+      if (!Number.isSafeInteger(maxEntries) || maxEntries <= 0) {
+        throw new RangeError('maxEntries must be a positive safe integer');
+      }
+      if (done) return { keys: [], done: true };
+      const keys: string[] = [];
+      for (let inspected = 0; inspected < maxEntries; inspected += 1) {
+        const entry = iterator.next();
+        if (entry.done === true) {
+          done = true;
+          break;
+        }
+        if (entry.value.startsWith(prefix)) keys.push(entry.value);
+      }
+      return { keys, done };
+    },
+    close: async () => {
+      done = true;
+      iterator.return?.();
+    },
+  };
 }
 
 // Atomic replay protection is a separate backend capability because generic

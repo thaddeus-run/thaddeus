@@ -128,14 +128,29 @@ describe('timed reveal', () => {
     const pending = await srv.fetch(
       signedPost(
         pendingPath,
-        { objects: [local.ref.plaintext_id] },
+        { objects: [local.ref.plaintext_id], limit: 1 },
         owner,
         clock
       )
     );
+    const pendingBody = (await pending.json()) as {
+      capabilities: string[];
+      nextCursor: string | null;
+    };
+    expect(pendingBody.capabilities).toHaveLength(1);
+    expect(typeof pendingBody.nextCursor).toBe('string');
     expect(
-      ((await pending.json()) as { capabilities: string[] }).capabilities
-    ).toHaveLength(1);
+      (
+        await srv.fetch(
+          signedPost(
+            pendingPath,
+            { cursor: pendingBody.nextCursor, limit: 1 },
+            Identity.create(),
+            clock
+          )
+        )
+      ).status
+    ).toBe(410);
     expect(
       (
         await srv.fetch(
@@ -593,6 +608,7 @@ describe('timed reveal', () => {
         await inner.put(key, bytes);
       },
       get: (key) => inner.get(key),
+      openScan: (prefix) => inner.openScan(prefix),
       list: (prefix) => inner.list(prefix),
       delete: (key) => inner.delete(key),
       consumeNonce: (input) => inner.consumeNonce(input),

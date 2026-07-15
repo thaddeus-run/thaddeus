@@ -25,17 +25,25 @@ so the selected host is trusted as embargo custodian until release.
 
 ## Container configuration
 
-| Variable                               | Default    | Meaning                                                |
-| -------------------------------------- | ---------- | ------------------------------------------------------ |
-| `PORT`                                 | `4000`     | listen port                                            |
-| `THADDEUS_DATA`                        | `/data`    | durable substrate directory                            |
-| `THADDEUS_ATTESTATION_AWS_KMS_KEY_ARN` | —          | exact production KMS key ARN                           |
-| `THADDEUS_ATTESTATION_RATE_LIMIT`      | `20`       | per-subject rolling-hour issuance cap (`0..20`)        |
-| `THADDEUS_MIN_MERGES`                  | —          | gate land on unique trusted merge events per author    |
-| `THADDEUS_TRUST_HOSTS`                 | —          | comma-separated exact foreign attester DID allowlist   |
-| `THADDEUS_MAX_REQUEST_BODY_BYTES`      | `16777216` | inclusive request-body limit                           |
-| `THADDEUS_REPLAY_NONCE_CAPACITY`       | `100000`   | maximum live durable replay nonces (maximum `1000000`) |
-| `THADDEUS_REQUEST_SKEW_MS`             | `300000`   | accepted signed timestamp skew (maximum `300000`)      |
+| Variable                                | Default    | Meaning                                                |
+| --------------------------------------- | ---------- | ------------------------------------------------------ |
+| `PORT`                                  | `4000`     | listen port                                            |
+| `THADDEUS_DATA`                         | `/data`    | durable substrate directory                            |
+| `THADDEUS_ATTESTATION_AWS_KMS_KEY_ARN`  | —          | exact production KMS key ARN                           |
+| `THADDEUS_ATTESTATION_RATE_LIMIT`       | `20`       | per-subject rolling-hour issuance cap (`0..20`)        |
+| `THADDEUS_MIN_MERGES`                   | —          | gate land on unique trusted merge events per author    |
+| `THADDEUS_TRUST_HOSTS`                  | —          | comma-separated exact foreign attester DID allowlist   |
+| `THADDEUS_MAX_REQUEST_BODY_BYTES`       | `16777216` | inclusive request-body limit                           |
+| `THADDEUS_MAX_REPUTATION_ARCHIVE_BYTES` | `4194304`  | nested reputation archive byte limit                   |
+| `THADDEUS_MAX_REPUTATION_CONTRIBUTIONS` | `4096`     | raw contribution count limit                           |
+| `THADDEUS_MAX_FIELD_BYTES`              | `16384`    | logical UTF-8 text-field byte limit                    |
+| `THADDEUS_DEFAULT_PAGE_SIZE`            | `100`      | default collection page item count                     |
+| `THADDEUS_MAX_PAGE_SIZE`                | `1000`     | largest accepted collection page item count            |
+| `THADDEUS_MAX_PAGE_RESPONSE_BYTES`      | `16777216` | encoded JSON page byte limit                           |
+| `THADDEUS_PAGINATION_CURSOR_CAPACITY`   | `1000`     | maximum live process-local cursor sessions             |
+| `THADDEUS_PAGINATION_CURSOR_TTL_MS`     | `300000`   | sliding cursor idle expiry                             |
+| `THADDEUS_REPLAY_NONCE_CAPACITY`        | `100000`   | maximum live durable replay nonces (maximum `1000000`) |
+| `THADDEUS_REQUEST_SKEW_MS`              | `300000`   | accepted signed timestamp skew (maximum `300000`)      |
 
 The entrypoint does not run `thaddeus init`, interpret `THADDEUS_HOST` or
 `THADDEUS_HOME`, or create an identity beneath `/data`. The active KMS DID is
@@ -62,6 +70,27 @@ thaddeus serve --host --data ./thaddeus-data --attestation-rate-limit 20
 ```
 
 Never use `--host` as an automatic fallback when KMS is unavailable.
+
+## Input and pagination limits
+
+Logical repository, view, release, policy, delegation, operation, capability,
+provenance, veto, symbol-operation, head, and contribution text is limited by
+UTF-8 bytes after decoding. Ciphertext, signatures, nonces, wrapped keys, and
+byte arrays are excluded. Reputation archives are checked before inner JSON
+parsing, and raw contribution counts before proof verification.
+
+Every HTTP collection returns `nextCursor`. Cursors are opaque, rotating,
+one-use, route/selector/signer bound where applicable, process-local, and
+invalid after restart. Stable limit codes are `archive_too_large`,
+`contribution_limit_exceeded`, and `field_too_large`. Pagination uses
+`invalid_pagination`, `pagination_cursor_invalid`,
+`pagination_snapshot_changed`, `pagination_capacity_exceeded`, and
+`page_item_too_large`.
+
+All numeric settings must be positive safe integers. Archive bytes may not
+exceed request-body or page-response bytes; field bytes may not exceed archive
+bytes; and the default page size may not exceed the maximum page size. Invalid
+configuration prevents the listener from opening.
 
 ## Fly.io and AWS KMS
 

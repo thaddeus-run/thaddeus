@@ -53,6 +53,38 @@ for (const [name, make] of [
       expect(await b.putIfAbsent('head/0', enc('second'))).toBe(false);
       expect(dec((await b.get('head/0'))!)).toBe('first');
     });
+
+    test('openScan advances within its inspection budget and closes cleanly', async () => {
+      const b = make();
+      await b.put('other/0', enc('x'));
+      await b.put('wanted/0', enc('a'));
+      await b.put('wanted/1', enc('b'));
+
+      const scan = await b.openScan('wanted/');
+      const found: string[] = [];
+      let sawEmptyNonterminal = false;
+      while (true) {
+        const page = await scan.read(1);
+        expect(page.keys.length).toBeLessThanOrEqual(1);
+        if (page.keys.length === 0 && !page.done) sawEmptyNonterminal = true;
+        found.push(...page.keys);
+        if (page.done) break;
+      }
+      expect(found.sort()).toEqual(['wanted/0', 'wanted/1']);
+      expect(sawEmptyNonterminal).toBe(true);
+      expect(await scan.read(1)).toEqual({ keys: [], done: true });
+      await scan.close();
+      await scan.close();
+    });
+
+    test('openScan rejects invalid inspection budgets', async () => {
+      const scan = await make().openScan('');
+      expect(scan.read(0)).rejects.toBeInstanceOf(RangeError);
+      expect(scan.read(Number.MAX_SAFE_INTEGER + 1)).rejects.toBeInstanceOf(
+        RangeError
+      );
+      await scan.close();
+    });
   });
 }
 
@@ -78,5 +110,13 @@ describe('scoped', () => {
     expect(dec((await a.get('view/main'))!)).toBe('A');
     expect(dec((await b.get('view/main'))!)).toBe('B');
     expect([...(await a.list('view/'))]).toEqual(['view/main']);
+
+    const scan = await a.openScan('view/');
+    expect(await scan.read(1)).toEqual({ keys: ['view/main'], done: false });
+    while (!(await scan.read(1)).done) {
+      // The underlying namespace may contain unrelated entries, so a scoped
+      // scan is allowed to return empty non-terminal pages while advancing.
+    }
+    await scan.close();
   });
 });

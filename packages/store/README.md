@@ -4,6 +4,11 @@ Encrypted, content-addressed objects with per-object capabilities. A value is
 ciphertext at rest; access is a key sealed to an identity; offboarding is a
 single key rotation.
 
+Durable backends expose `openScan(prefix)` for bounded enumeration. Each
+`read(maxEntries)` inspects no more than its work budget and may return an empty
+nonterminal page. Scans are explicitly closable, and `scoped()` translates the
+same streaming contract through its namespace.
+
 ```bash
 bun add @thaddeus.run/store @thaddeus.run/identity
 ```

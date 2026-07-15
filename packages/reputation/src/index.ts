@@ -19,7 +19,13 @@ export {
   decodeReputationArchive,
   encodeReputationArchive,
   REPUTATION_ARCHIVE_FORMAT,
+  ReputationArchiveLimitError,
 } from './archive';
-export type { ReputationArchive, ReputationImportResult } from './archive';
+export type {
+  ReputationArchive,
+  ReputationArchiveDecodeLimits,
+  ReputationArchiveLimitCode,
+  ReputationImportResult,
+} from './archive';
 export { ReputationLog } from './reputationlog';
 export type { Profile } from './reputationlog';

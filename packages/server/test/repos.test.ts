@@ -65,6 +65,7 @@ describe('repos', () => {
     expect(await list.json()).toEqual({
       repos: ['acme/web'],
       owners: { 'acme/web': a.did },
+      nextCursor: null,
     });
   });
 
@@ -92,7 +93,11 @@ describe('repos', () => {
       (await srv.fetch(signedDelete('/repos/del%2Fme', owner))).status
     ).toBe(200);
     const list = await srv.fetch(new Request('http://t/repos'));
-    expect(await list.json()).toEqual({ repos: [], owners: {} });
+    expect(await list.json()).toEqual({
+      repos: [],
+      owners: {},
+      nextCursor: null,
+    });
 
     // Deleting a now-missing repo → 404.
     expect(

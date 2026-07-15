@@ -50,6 +50,10 @@ class FailFirstMeterDeltaWrite implements Backend, ReplayNonceBackend {
     return this.#inner.get(key);
   }
 
+  openScan(prefix: string) {
+    return this.#inner.openScan(prefix);
+  }
+
   async list(prefix: string): Promise<readonly string[]> {
     return this.#inner.list(prefix);
   }

@@ -1,5 +1,6 @@
 export type {
   Backend,
+  BackendScan,
   ConsumeNonceInput,
   ConsumeNonceResult,
   ReplayNonceBackend,
@@ -9,6 +10,7 @@ export {
   DEFAULT_REPLAY_NONCE_CAPACITY,
   encodeRecord,
   MAX_REPLAY_NONCE_CAPACITY,
+  scanKeys,
 } from './backend';
 export { ALG, address, decrypt, encrypt, newContentKey } from './object';
 export type { EncryptedObject } from './object';

@@ -1,5 +1,5 @@
 import { Identity, ready } from '@thaddeus.run/identity';
-import { type Backend, encodeRecord } from '@thaddeus.run/store';
+import { type Backend, encodeRecord, scanKeys } from '@thaddeus.run/store';
 import { beforeAll, describe, expect, test } from 'bun:test';
 
 import { signHead, verifyHead } from '../src/head';
@@ -41,6 +41,10 @@ class MemoryBackend implements Backend {
     return Promise.resolve(
       [...this.records.keys()].filter((key) => key.startsWith(prefix))
     );
+  }
+
+  openScan(prefix: string) {
+    return Promise.resolve(scanKeys(this.records.keys(), prefix));
   }
 
   delete(key: string): Promise<void> {

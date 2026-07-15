@@ -41,6 +41,30 @@ describe('Client — createRepo / listRepos', () => {
     expect(msg).toContain('already exists');
   });
 
+  test('full-result helpers drain page-size-one responses deterministically', async () => {
+    const a = Identity.create();
+    const srv = createServer({
+      backend: new MemoryBackend(),
+      defaultPageSize: 1,
+      maxPageSize: 1,
+    });
+    const c = new Client('http://t', a, srv.fetch.bind(srv));
+    await c.createRepo('zeta');
+    await c.createRepo('alpha');
+    await c.createRepo('middle');
+
+    const first = await c.listReposPage();
+    expect(first.repos.length).toBeLessThanOrEqual(1);
+    expect(first.nextCursor).not.toBeNull();
+    expect(await c.listRepos()).toEqual(['alpha', 'middle', 'zeta']);
+    expect(await c.listReposWithOwners()).toEqual([
+      { name: 'alpha', owner: a.did },
+      { name: 'middle', owner: a.did },
+      { name: 'zeta', owner: a.did },
+    ]);
+    await srv.close();
+  });
+
   test('getPolicy / setPolicy round-trip a repo policy', async () => {
     const a = Identity.create();
     const c = new Client('http://t', a, server());

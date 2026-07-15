@@ -10,6 +10,10 @@ A `Backend` is a tiny async key→bytes store (`@thaddeus.run/store`).
 Give one to a `Store`/`OpLog` (or `Platform.createDurable`/`openDurable`) and a
 repo survives a restart.
 
+`MemoryBackend` scans advance a map iterator without copying the remaining
+keyspace. `FileBackend` scans use `opendir()` and close directory handles on
+completion or explicit cleanup. Compatibility `list()` calls drain the scan.
+
 Both backends also implement the atomic `ReplayNonceBackend` contract.
 `MemoryBackend` uses a bounded map/min-heap. `FileBackend` stores versioned
 expiry records below the dedicated `.replay-nonces-v1/` directory, which normal

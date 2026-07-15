@@ -15,11 +15,12 @@ policy-approved merged heads; the server persists it before updating its
 projection. Delegates may upload signed operations, but cannot create shared
 branches or land them. A policy denial stores no candidate head.
 
-View and pull responses include the current record and complete chain. Before
-serving a pull, the server verifies that it holds exactly the signed heads'
-reachable operation closure. Legacy raw views return 428 until their owner uses
-the bootstrap endpoint to select a complete version-0 head; raw pointers are
-never used as bootstrap trust input.
+View and pull responses include the current record and bounded chain/bundle
+fragments. The same-version client drains the snapshot-bound pages and verifies
+that their reassembled operations are exactly the signed heads' reachable
+closure before changing local state. Legacy raw views return 428 until their
+owner uses the bootstrap endpoint to select a complete version-0 head; raw
+pointers are never used as bootstrap trust input.
 
 Timed reveals arrive as signed capabilities wrapped to the well-known public
 identity. They are persisted separately from served capabilities, never appear
@@ -107,6 +108,30 @@ stable JSON responses:
 
 Bun-native transport rejections happen before the handler and return 413 with an
 empty body. Unmatched request bodies are cancelled without buffering.
+
+THA-9 adds flat `ServerConfig` limits for nested reputation archives, raw
+contribution counts, decoded logical text, page item/byte bounds, and cursor
+capacity/idle lifetime. Collection responses carry `nextCursor` and
+`Cache-Control: no-store`; cursors are opaque, rotating, one-use, route-bound,
+capacity-bounded, and revision-bound. `Server.close()` releases outstanding
+scanners during shutdown.
+
+Stable bounded-input and pagination errors are:
+
+| Status | Code                           | Meaning                                            |
+| -----: | ------------------------------ | -------------------------------------------------- |
+|    413 | body response has no code      | Request body exceeded `maxRequestBodyBytes`        |
+|    413 | `archive_too_large`            | Nested reputation archive exceeded its byte cap    |
+|    413 | `contribution_limit_exceeded`  | Raw contribution count exceeded its cap            |
+|    413 | `field_too_large`              | Decoded logical UTF-8 text exceeded its byte cap   |
+|    400 | `invalid_pagination`           | Pagination parameters were invalid or duplicated   |
+|    410 | `pagination_cursor_invalid`    | Cursor was unknown, expired, replayed, or misbound |
+|    409 | `pagination_snapshot_changed`  | Relevant data changed during traversal             |
+|    429 | `pagination_capacity_exceeded` | Active cursor capacity was full                    |
+|    422 | `page_item_too_large`          | One stored item could not fit in a page            |
+
+Limit errors report only stable labels and configured caps. They never echo
+submitted values, cursors, paths, repository names, DIDs, or record content.
 
 `GET /metrics` exposes Prometheus gauges for the application/transport body
 limits, replay controls, and attestation enabled/rate-limit state. Fixed-label

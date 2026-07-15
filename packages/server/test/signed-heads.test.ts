@@ -47,6 +47,10 @@ class FailFirstReputationWrite implements Backend, ReplayNonceBackend {
     return this.inner.get(key);
   }
 
+  openScan(prefix: string) {
+    return this.inner.openScan(prefix);
+  }
+
   list(prefix: string): Promise<readonly string[]> {
     return this.inner.list(prefix);
   }
@@ -142,7 +146,7 @@ describe('server signed shared heads', () => {
       new Request('http://t/repos/legacy/views')
     );
     expect(unsignedList.status).toBe(200);
-    expect(await unsignedList.json()).toEqual({ views: {} });
+    expect(await unsignedList.json()).toEqual({ views: {}, nextCursor: null });
 
     const strangerHead = signHead(
       {

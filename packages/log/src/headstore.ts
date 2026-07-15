@@ -141,8 +141,20 @@ export class HeadStore {
     return [...this.#histories.keys()].sort();
   }
 
+  /** Iterates view names in cursor order without copying the complete key set. */
+  *iterateViews(): IterableIterator<string> {
+    yield* this.#histories.keys();
+  }
+
   history(view: string): readonly HeadRecord[] {
     return (this.#histories.get(view) ?? []).map(copyRecord);
+  }
+
+  /** Iterates defensive history records without first copying the full chain. */
+  *iterateHistory(view: string): IterableIterator<HeadRecord> {
+    for (const record of this.#histories.get(view) ?? []) {
+      yield copyRecord(record);
+    }
   }
 
   current(view: string): HeadRecord | undefined {

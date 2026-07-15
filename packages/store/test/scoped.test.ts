@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 
-import type { Backend } from '../src/backend';
+import { type Backend, scanKeys } from '../src/backend';
 import { scoped } from '../src/scoped';
 
 // A minimal in-test backend backed by a Map.
@@ -12,6 +12,7 @@ function mapBackend(): Backend {
       const v = m.get(k);
       return v === undefined ? undefined : new Uint8Array(v);
     },
+    openScan: async (p) => scanKeys(m.keys(), p),
     list: async (p) => [...m.keys()].filter((k) => k.startsWith(p)),
     delete: async (k) => void m.delete(k),
   };

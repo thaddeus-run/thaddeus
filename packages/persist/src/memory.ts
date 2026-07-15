@@ -1,5 +1,6 @@
 import type {
   Backend,
+  BackendScan,
   ConsumeNonceInput,
   ConsumeNonceResult,
   ReplayNonceBackend,
@@ -34,9 +35,45 @@ export class MemoryBackend implements Backend, ReplayNonceBackend {
     return v === undefined ? undefined : new Uint8Array(v);
   }
 
+  /** Opens a lazy scan over the map without copying the remaining keyspace. */
+  async openScan(prefix: string): Promise<BackendScan> {
+    const iterator = this.#map.keys();
+    let done = false;
+    return {
+      read: async (maxEntries) => {
+        assertScanBudget(maxEntries);
+        if (done) return { keys: [], done: true };
+        const keys: string[] = [];
+        for (let inspected = 0; inspected < maxEntries; inspected += 1) {
+          const entry = iterator.next();
+          if (entry.done === true) {
+            done = true;
+            break;
+          }
+          if (entry.value.startsWith(prefix)) keys.push(entry.value);
+        }
+        return { keys, done };
+      },
+      close: async () => {
+        done = true;
+        iterator.return?.();
+      },
+    };
+  }
+
   /** Lists generic in-memory keys that begin with the supplied prefix. */
   async list(prefix: string): Promise<readonly string[]> {
-    return [...this.#map.keys()].filter((k) => k.startsWith(prefix));
+    const scan = await this.openScan(prefix);
+    const keys: string[] = [];
+    try {
+      while (true) {
+        const page = await scan.read(1_024);
+        keys.push(...page.keys);
+        if (page.done) return keys;
+      }
+    } finally {
+      await scan.close();
+    }
   }
 
   /** Idempotently deletes a generic in-memory backend key. */
@@ -50,5 +87,11 @@ export class MemoryBackend implements Backend, ReplayNonceBackend {
       { byKey: this.#nonces, expirations: this.#nonceExpirations },
       input
     ).result;
+  }
+}
+
+function assertScanBudget(maxEntries: number): void {
+  if (!Number.isSafeInteger(maxEntries) || maxEntries <= 0) {
+    throw new RangeError('maxEntries must be a positive safe integer');
   }
 }

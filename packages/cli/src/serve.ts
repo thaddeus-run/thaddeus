@@ -4,9 +4,9 @@ import type { LandPolicy } from '@thaddeus.run/platform';
 import type { AttestationSigner } from '@thaddeus.run/reputation';
 import {
   createServer,
-  DEFAULT_MAX_REQUEST_BODY_BYTES,
   DEFAULT_REPLAY_NONCE_CAPACITY,
   REQUEST_SKEW_MS,
+  resolveLimits,
 } from '@thaddeus.run/server';
 
 // Pin Bun's documented default so slow-body protection cannot drift across
@@ -27,6 +27,14 @@ export interface ServeOptions {
   // Default 16 MiB; accepts positive integers through
   // Number.MAX_SAFE_INTEGER - 1.
   maxRequestBodyBytes?: number;
+  maxReputationArchiveBytes?: number;
+  maxReputationContributions?: number;
+  maxFieldBytes?: number;
+  defaultPageSize?: number;
+  maxPageSize?: number;
+  maxPageResponseBytes?: number;
+  paginationCursorCapacity?: number;
+  paginationCursorTtlMs?: number;
   // Bounded durable signed-envelope replay protection (default 100,000).
   replayNonceCapacity?: number;
   // Accepted request timestamp skew in milliseconds (default/max 300,000).
@@ -48,13 +56,11 @@ export interface RunningServer {
  * The CLI awaits the returned handle indefinitely; tests use its live URL.
  */
 export function startServer(opts: ServeOptions): RunningServer {
-  let maxRequestBodyBytes = DEFAULT_MAX_REQUEST_BODY_BYTES;
-  if (opts.maxRequestBodyBytes !== undefined) {
-    maxRequestBodyBytes = opts.maxRequestBodyBytes;
-  }
+  const limits = resolveLimits(opts);
+  const { maxRequestBodyBytes } = limits;
   const srv = createServer({
     backend: new FileBackend(opts.dataDir),
-    maxRequestBodyBytes,
+    ...limits,
     policy: opts.policy,
     attester: opts.attester,
     host: opts.host,
@@ -125,6 +131,7 @@ export function startServer(opts: ServeOptions): RunningServer {
       clearInterval(revealTimer);
       await revealTick;
       await http.stop(true);
+      await srv.close();
     },
   };
 }
