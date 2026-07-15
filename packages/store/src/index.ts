@@ -6,6 +6,7 @@ export type {
   ReplayNonceBackend,
 } from './backend';
 export {
+  assertScanBudget,
   decodeRecord,
   DEFAULT_REPLAY_NONCE_CAPACITY,
   encodeRecord,

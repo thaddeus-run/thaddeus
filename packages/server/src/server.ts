@@ -462,10 +462,24 @@ export function createServer(config: ServerConfig): Server {
     }
     return clock;
   };
-  const repoRevision = (name: string): number =>
-    revisionValue(repoRevisionClock(name));
+  const repoRevisionNow = (name: string): (() => number) => {
+    const clock = repoRevisionClock(name);
+    return () => revisionValue(clock);
+  };
   const bumpRepoRevision = (name: string): void => {
     bumpRevision(repoRevisionClock(name));
+  };
+  /** Keeps one authenticated repository commit unstable until it finishes. */
+  const withRepoRevision = async <T>(
+    name: string,
+    mutation: () => Promise<T>
+  ): Promise<T> => {
+    const finish = beginRevision(repoRevisionClock(name));
+    try {
+      return await mutation();
+    } finally {
+      finish();
+    }
   };
   if (config.attester !== undefined && config.host !== undefined) {
     throw new TypeError('attester and host cannot both be set');
@@ -1042,6 +1056,7 @@ export function createServer(config: ServerConfig): Server {
     return response;
   }
 
+  /** Builds one revision-bound page and maps stable pagination failures. */
   async function paged<T>(input: {
     readonly url?: URL;
     readonly request?: PageRequest;
@@ -1403,18 +1418,28 @@ export function createServer(config: ServerConfig): Server {
       if ((await readMeta(name)) !== undefined) {
         return json(409, { error: `repo ${name} already exists` });
       }
-      const repo = await platform.createDurable(name, config.backend);
-      await repo.headRecords.bootstrap(decoded);
-      repo.log.view('main', decoded.heads);
-      // Metadata is written last: it remains the repository visibility marker,
-      // so a failed signed-head write cannot expose an unsigned repository.
-      await metaBackend(name).put('meta/repo', encodeRecord({ owner: signer }));
-      repoCache.set(name, repo);
-      return json(201, {
-        name,
-        owner: signer,
-        head: encodeHeadRecord(decoded),
-      });
+      const finishCatalogMutation = beginRevision(catalogRevision);
+      try {
+        return await withRepoRevision(name, async () => {
+          const repo = await platform.createDurable(name, config.backend);
+          await repo.headRecords.bootstrap(decoded);
+          repo.log.view('main', decoded.heads);
+          // Metadata is written last: it remains the repository visibility marker,
+          // so a failed signed-head write cannot expose an unsigned repository.
+          await metaBackend(name).put(
+            'meta/repo',
+            encodeRecord({ owner: signer })
+          );
+          repoCache.set(name, repo);
+          return json(201, {
+            name,
+            owner: signer,
+            head: encodeHeadRecord(decoded),
+          });
+        });
+      } finally {
+        finishCatalogMutation();
+      }
     });
   }
 
@@ -1427,6 +1452,7 @@ export function createServer(config: ServerConfig): Server {
       .sort();
   }
 
+  /** Returns one bounded page of repositories and their public owners. */
   async function listRepos(url: URL): Promise<Response> {
     return paged({
       url,
@@ -1501,6 +1527,9 @@ export function createServer(config: ServerConfig): Server {
     if (meta === undefined) {
       return json(404, { error: `no repo ${name}` });
     }
+    if (signer !== meta.owner) {
+      return json(403, { error: 'not the repo owner' });
+    }
     const parsed = safeParseJson(body);
     if (parsed === undefined || parsed === null || typeof parsed !== 'object') {
       return json(400, { error: 'invalid JSON body' });
@@ -1522,6 +1551,23 @@ export function createServer(config: ServerConfig): Server {
     if (capability.granted_by !== signer) {
       return json(403, { error: 'reveal was not granted by the repo owner' });
     }
+    let validSignature = false;
+    try {
+      validSignature = verifyCapability(capability);
+    } catch {
+      validSignature = false;
+    }
+    if (!validSignature) {
+      return json(400, { error: 'invalid reveal capability signature' });
+    }
+    if (capability.grantee !== publicDid()) {
+      return json(400, {
+        error: 'reveal capability is not granted to the public',
+      });
+    }
+    if (Number.isNaN(Date.parse(capability.not_before))) {
+      return json(400, { error: 'invalid reveal timestamp' });
+    }
     return withRepoLock(name, async () => {
       const repo = await getRepo(name);
       if (repo === undefined) {
@@ -1534,24 +1580,26 @@ export function createServer(config: ServerConfig): Server {
       if (conflict !== undefined) {
         return conflict;
       }
-      let scheduled: boolean;
-      try {
-        scheduled = await repo.store.ingestReveal(capability);
-      } catch (err) {
-        const message = err instanceof Error ? err.message : String(err);
-        return json(400, { error: message });
-      }
-      const ref = { id: String(object), plaintext_id: capability.object };
-      const released = await repo.store.reveal(ref, now());
-      const isPublic = repo.store
-        .caps(capability.object)
-        .some((cap) => cap.grantee === publicDid());
-      return json(scheduled ? 201 : 200, {
-        object: capability.object,
-        at: capability.not_before,
-        scheduled,
-        released,
-        public: isPublic,
+      return withRepoRevision(name, async () => {
+        let scheduled: boolean;
+        try {
+          scheduled = await repo.store.ingestReveal(capability);
+        } catch (err) {
+          const message = err instanceof Error ? err.message : String(err);
+          return json(400, { error: message });
+        }
+        const ref = { id: String(object), plaintext_id: capability.object };
+        const released = await repo.store.reveal(ref, now());
+        const isPublic = repo.store
+          .caps(capability.object)
+          .some((cap) => cap.grantee === publicDid());
+        return json(scheduled ? 201 : 200, {
+          object: capability.object,
+          at: capability.not_before,
+          scheduled,
+          released,
+          public: isPublic,
+        });
       });
     });
   }
@@ -1597,14 +1645,16 @@ export function createServer(config: ServerConfig): Server {
       if (conflict !== undefined) {
         return conflict;
       }
-      const released = await repo.store.reveal(
-        { id: String(object), plaintext_id: plaintextId },
-        now()
-      );
-      const isPublic = repo.store
-        .caps(plaintextId)
-        .some((cap) => cap.grantee === publicDid());
-      return json(200, { object: plaintextId, released, public: isPublic });
+      return withRepoRevision(name, async () => {
+        const released = await repo.store.reveal(
+          { id: String(object), plaintext_id: plaintextId },
+          now()
+        );
+        const isPublic = repo.store
+          .caps(plaintextId)
+          .some((cap) => cap.grantee === publicDid());
+        return json(200, { object: plaintextId, released, public: isPublic });
+      });
     });
   }
 
@@ -1672,7 +1722,7 @@ export function createServer(config: ServerConfig): Server {
       return paged({
         request: { limit: pageLimit, cursor },
         binding: `pending-reveals:${name}\n${signer}`,
-        revisionNow: () => repoRevision(name),
+        revisionNow: repoRevisionNow(name),
         createSource: async () => arrayPageSource([]),
         render: (capabilities, nextCursor) => ({
           capabilities,
@@ -1691,7 +1741,7 @@ export function createServer(config: ServerConfig): Server {
           ...(continuation ? { cursor } : {}),
         },
         binding: `pending-reveals:${name}\n${signer}`,
-        revisionNow: () => repoRevision(name),
+        revisionNow: repoRevisionNow(name),
         createSource: async () => {
           return asyncIteratorPageSource(
             (async function* () {
@@ -1751,21 +1801,34 @@ export function createServer(config: ServerConfig): Server {
       if (signer !== meta.owner) {
         return json(403, { error: 'not the repo owner' });
       }
-      const b = metaBackend(name);
-      for (const key of await b.list('')) {
-        await b.delete(key);
+      const clock = repoRevisionClock(name);
+      const finishRepoMutation = beginRevision(clock);
+      const finishCatalogMutation = beginRevision(catalogRevision);
+      let deleted = false;
+      try {
+        const b = metaBackend(name);
+        for (const key of await b.list('')) {
+          await b.delete(key);
+        }
+        repoCache.delete(name);
+        registries.delete(name);
+        provenances.delete(name);
+        vetoes.delete(name);
+        symops.delete(name);
+        deleted = true;
+        return json(200, { deleted: name });
+      } finally {
+        finishRepoMutation();
+        finishCatalogMutation();
+        if (deleted) repoRevisions.delete(name);
       }
-      repoCache.delete(name);
-      registries.delete(name);
-      provenances.delete(name);
-      vetoes.delete(name);
-      symops.delete(name);
-      return json(200, { deleted: name });
     });
   }
 
-  // Public shared-view reads expose only owner-signed authority and its complete
-  // chain. A legacy raw pointer fails closed until the owner bootstraps it.
+  /**
+   * Returns one signed-history page for a shared view; unsigned legacy views
+   * fail closed until their owner bootstraps authority.
+   */
   async function getView(
     name: string,
     view: string,
@@ -1784,7 +1847,7 @@ export function createServer(config: ServerConfig): Server {
     return paged({
       url,
       binding: `view:${name}\n${view}`,
-      revisionNow: () => repoRevision(name),
+      revisionNow: repoRevisionNow(name),
       createSource: async () =>
         asyncIteratorPageSource(
           (async function* () {
@@ -1802,8 +1865,7 @@ export function createServer(config: ServerConfig): Server {
     });
   }
 
-  // GET /repos/:name/views — the repo's branches and their heads. A public read,
-  // like the rest of the mirror: head ids are already public.
+  /** Returns one bounded page of a repository's public signed view heads. */
   async function listViews(name: string, url: URL): Promise<Response> {
     const repo = await getRepo(name);
     if (repo === undefined) {
@@ -1812,7 +1874,7 @@ export function createServer(config: ServerConfig): Server {
     return paged({
       url,
       binding: `views:${name}`,
-      revisionNow: () => repoRevision(name),
+      revisionNow: repoRevisionNow(name),
       createSource: async () =>
         asyncIteratorPageSource(
           (async function* () {
@@ -1833,8 +1895,10 @@ export function createServer(config: ServerConfig): Server {
     });
   }
 
-  // Public immutable release reads. Corrupt records are skipped from the list;
-  // a direct lookup reports the stored corruption instead of serving it.
+  /**
+   * Returns one bounded page of immutable releases, defensively skipping
+   * corrupt list records while direct lookups report stored corruption.
+   */
   async function listReleases(name: string, url: URL): Promise<Response> {
     if ((await readMeta(name)) === undefined) {
       return json(404, { error: `no repo ${name}` });
@@ -1843,7 +1907,7 @@ export function createServer(config: ServerConfig): Server {
     return paged({
       url,
       binding: `releases:${name}`,
-      revisionNow: () => repoRevision(name),
+      revisionNow: repoRevisionNow(name),
       createSource: async () => {
         const scan = await backend.openScan('meta/releases/');
         return backendPageSource(scan, async (key) => {
@@ -2021,47 +2085,50 @@ export function createServer(config: ServerConfig): Server {
         attestationSummary.skipped.ineligible = 1;
       }
 
-      try {
-        await backend.put(key, encodeRecord(release));
-      } catch (error) {
-        await releaseAttestationReservations(prepared.reservations);
-        throw error;
-      }
-      if (prepared.contributions.length > 0) {
+      return withRepoRevision(name, async () => {
         try {
-          const contribution = prepared.contributions[0];
-          if (contribution !== undefined) {
-            const finishReputationMutation = beginRevision(reputationRevision);
-            try {
-              await (await reputationLog()).ingest(contribution);
-            } finally {
-              finishReputationMutation();
-            }
-          }
-        } catch {
-          // The release and its host-vouched contribution are one create from
-          // the caller's perspective. If the second durable write fails, remove
-          // the tag while still holding the repo lock so a clean retry can
-          // create and attest it instead of getting a permanent duplicate 409.
+          await backend.put(key, encodeRecord(release));
+        } catch (error) {
+          await releaseAttestationReservations(prepared.reservations);
+          throw error;
+        }
+        if (prepared.contributions.length > 0) {
           try {
-            await backend.delete(key);
+            const contribution = prepared.contributions[0];
+            if (contribution !== undefined) {
+              const finishReputationMutation =
+                beginRevision(reputationRevision);
+              try {
+                await (await reputationLog()).ingest(contribution);
+              } finally {
+                finishReputationMutation();
+              }
+            }
           } catch {
+            // The release and its host-vouched contribution are one create from
+            // the caller's perspective. If the second durable write fails, remove
+            // the tag while still holding the repo lock so a clean retry can
+            // create and attest it instead of getting a permanent duplicate 409.
+            try {
+              await backend.delete(key);
+            } catch {
+              return json(500, {
+                error:
+                  'release attestation failed and release rollback failed; inspect the stored tag before retrying',
+              });
+            }
+            await releaseAttestationReservations(prepared.reservations);
             return json(500, {
-              error:
-                'release attestation failed and release rollback failed; inspect the stored tag before retrying',
+              error: 'release attestation failed; release was rolled back',
             });
           }
-          await releaseAttestationReservations(prepared.reservations);
-          return json(500, {
-            error: 'release attestation failed; release was rolled back',
-          });
         }
-      }
-      attestationSummary.issued = prepared.contributions.length;
-      recordAttestationSummary(attestationSummary);
-      return json(201, {
-        release: encodeRelease(release),
-        attestations: attestationSummary,
+        attestationSummary.issued = prepared.contributions.length;
+        recordAttestationSummary(attestationSummary);
+        return json(201, {
+          release: encodeRelease(release),
+          attestations: attestationSummary,
+        });
       });
     });
   }
@@ -2121,8 +2188,10 @@ export function createServer(config: ServerConfig): Server {
       if (lockedMeta.owner !== meta.owner) {
         return json(409, { error: 'repo changed; retry policy set' });
       }
-      await metaBackend(name).put('meta/policy', encodeRecord(next));
-      return json(200, { policy: next });
+      return withRepoRevision(name, async () => {
+        await metaBackend(name).put('meta/policy', encodeRecord(next));
+        return json(200, { policy: next });
+      });
     });
   }
 
@@ -2186,12 +2255,14 @@ export function createServer(config: ServerConfig): Server {
         reachableOps(repo.log.ops(), decoded.heads)
       );
       if (!snapshot.ok) return headError(400, snapshot);
-      await repo.headRecords.bootstrap(decoded);
-      repo.log.view(view, decoded.heads);
-      return json(201, {
-        view,
-        head: encodeHeadRecord(decoded),
-        heads: [...decoded.heads],
+      return withRepoRevision(name, async () => {
+        await repo.headRecords.bootstrap(decoded);
+        repo.log.view(view, decoded.heads);
+        return json(201, {
+          view,
+          head: encodeHeadRecord(decoded),
+          heads: [...decoded.heads],
+        });
       });
     });
   }
@@ -2246,28 +2317,32 @@ export function createServer(config: ServerConfig): Server {
         reachableOps(repo.log.ops(), decoded.heads)
       );
       if (!snapshot.ok) return headError(400, snapshot);
-      await repo.headRecords.bootstrap(decoded);
-      repo.log.view(decoded.view, decoded.heads);
-      return json(200, { head: encodeHeadRecord(decoded) });
+      return withRepoRevision(name, async () => {
+        await repo.headRecords.bootstrap(decoded);
+        repo.log.view(decoded.view, decoded.heads);
+        return json(200, { head: encodeHeadRecord(decoded) });
+      });
     });
   }
 
-  // Returns the reachable bundle for a view: ops in lamport order, plus the
-  // CURRENT ciphertext object and its served caps for each plaintext_id an
-  // op's payload references. Use this for clone (pull main).
+  /**
+   * Returns one lazy page of a view's reachable chain and bundle records while
+   * retaining the captured signed head for complete client verification.
+   */
   async function pull(name: string, view: string, url: URL): Promise<Response> {
     const repo = await getRepo(name);
     if (repo === undefined) {
       return json(404, { error: `no repo ${name}` });
     }
-    const buildRevision = repoRevision(name);
+    const revisionNow = repoRevisionNow(name);
+    const buildRevision = revisionNow();
     const head = repo.headRecords.current(view);
     if (head === undefined) {
       return unsignedView(repo, view)
         ? json(428, { error: `view ${view} requires owner head bootstrap` })
         : json(404, { error: `no view ${view}` });
     }
-    if (buildRevision % 2 !== 0 || repoRevision(name) !== buildRevision) {
+    if (buildRevision % 2 !== 0 || revisionNow() !== buildRevision) {
       return paginationErrorResponse(
         new PaginationError('pagination_snapshot_changed')
       );
@@ -2341,7 +2416,7 @@ export function createServer(config: ServerConfig): Server {
       return await paged({
         url,
         binding: `pull:${name}\n${view}`,
-        revisionNow: () => repoRevision(name),
+        revisionNow,
         createSource: async () => asyncIteratorPageSource(records()),
         render: (items, nextCursor) => {
           const values = (kind: string): string[] =>
@@ -2674,7 +2749,9 @@ export function createServer(config: ServerConfig): Server {
       if (repo === undefined) {
         return json(404, { error: `no repo ${name}` });
       }
-      return json(200, await ingestBundle(name, repo, bundle));
+      return withRepoRevision(name, async () =>
+        json(200, await ingestBundle(name, repo, bundle))
+      );
     });
   }
 
@@ -2952,41 +3029,43 @@ export function createServer(config: ServerConfig): Server {
       };
       const effectsBackend = metaBackend(name);
       const effectsKey = `meta/land-effects/${decoded.id}`;
-      try {
-        await effectsBackend.put(effectsKey, encodeRecord(effects));
-      } catch (error) {
-        await releaseAttestationReservations(prepared.reservations);
-        throw error;
-      }
+      return withRepoRevision(name, async () => {
+        try {
+          await effectsBackend.put(effectsKey, encodeRecord(effects));
+        } catch (error) {
+          await releaseAttestationReservations(prepared.reservations);
+          throw error;
+        }
 
-      let result: LandResult;
-      try {
-        result = await repo.land({
-          from: src,
-          into: target,
-          author: PublicIdentity.fromDid(signer),
-          policy: all(...gates),
-          headRecord: decoded,
+        let result: LandResult;
+        try {
+          result = await repo.land({
+            from: src,
+            into: target,
+            author: PublicIdentity.fromDid(signer),
+            policy: all(...gates),
+            headRecord: decoded,
+          });
+        } catch (error) {
+          await effectsBackend.delete(effectsKey).catch(() => {});
+          await releaseAttestationReservations(prepared.reservations);
+          throw error;
+        }
+        if (!result.landed) {
+          await effectsBackend.delete(effectsKey).catch(() => {});
+          await releaseAttestationReservations(prepared.reservations);
+        } else {
+          // Authority is already committed. A secondary write failure must not
+          // turn success into a retryable error; the durable outbox remains.
+          await recoverLandEffects(name, repo, reg).catch(() => {});
+          attestationSummary.issued = prepared.contributions.length;
+          recordAttestationSummary(attestationSummary);
+        }
+        return json(200, {
+          ...result,
+          ...(result.landed ? { head: encodeHeadRecord(decoded) } : {}),
+          ...(result.landed ? { attestations: attestationSummary } : {}),
         });
-      } catch (error) {
-        await effectsBackend.delete(effectsKey).catch(() => {});
-        await releaseAttestationReservations(prepared.reservations);
-        throw error;
-      }
-      if (!result.landed) {
-        await effectsBackend.delete(effectsKey).catch(() => {});
-        await releaseAttestationReservations(prepared.reservations);
-      } else {
-        // Authority is already committed. A secondary write failure must not
-        // turn success into a retryable error; the durable outbox remains.
-        await recoverLandEffects(name, repo, reg).catch(() => {});
-        attestationSummary.issued = prepared.contributions.length;
-        recordAttestationSummary(attestationSummary);
-      }
-      return json(200, {
-        ...result,
-        ...(result.landed ? { head: encodeHeadRecord(decoded) } : {}),
-        ...(result.landed ? { attestations: attestationSummary } : {}),
       });
     });
   }
@@ -3050,17 +3129,19 @@ export function createServer(config: ServerConfig): Server {
       }
       // register() can throw on a malformed delegation; map it to a 400 rather
       // than letting it escape as a 500 (defense-in-depth after verifyDelegation).
-      try {
-        reg.register(d);
-      } catch {
-        return json(400, { error: 'invalid delegation' });
-      }
-      await metaBackend(name).put(`grant/${d.agent}`, encodeRecord(d));
-      return json(200, {
-        agent: d.agent,
-        paths: [...d.paths],
-        maxChanges: d.maxChanges,
-        maxSpend: d.maxSpend,
+      return withRepoRevision(name, async () => {
+        try {
+          reg.register(d);
+        } catch {
+          return json(400, { error: 'invalid delegation' });
+        }
+        await metaBackend(name).put(`grant/${d.agent}`, encodeRecord(d));
+        return json(200, {
+          agent: d.agent,
+          paths: [...d.paths],
+          maxChanges: d.maxChanges,
+          maxSpend: d.maxSpend,
+        });
       });
     });
   }
@@ -3110,18 +3191,20 @@ export function createServer(config: ServerConfig): Server {
       if (repo === undefined) {
         return json(404, { error: `no repo ${name}` });
       }
-      const recalled =
-        recallBundle === undefined
-          ? undefined
-          : await ingestBundle(name, repo, recallBundle, true);
-      const reg = await registryFor(name);
-      reg.revoke(agent);
-      await metaBackend(name).put(`revoked/${agent}`, encodeRecord(true));
-      return json(200, { agent, revoked: true, recalled });
+      return withRepoRevision(name, async () => {
+        const recalled =
+          recallBundle === undefined
+            ? undefined
+            : await ingestBundle(name, repo, recallBundle, true);
+        const reg = await registryFor(name);
+        reg.revoke(agent);
+        await metaBackend(name).put(`revoked/${agent}`, encodeRecord(true));
+        return json(200, { agent, revoked: true, recalled });
+      });
     });
   }
 
-  // Public: the active (non-revoked) grants for a repo, each as a wire delegation.
+  /** Returns one bounded page of active delegation records for a repository. */
   async function listGrants(name: string, url: URL): Promise<Response> {
     if ((await readMeta(name)) === undefined) {
       return json(404, { error: `no repo ${name}` });
@@ -3131,7 +3214,7 @@ export function createServer(config: ServerConfig): Server {
     return paged({
       url,
       binding: `grants:${name}`,
-      revisionNow: () => repoRevision(name),
+      revisionNow: repoRevisionNow(name),
       createSource: async () => {
         const scan = await b.openScan('grant/');
         return backendPageSource(scan, async (key) => {
@@ -3167,11 +3250,18 @@ export function createServer(config: ServerConfig): Server {
     });
   }
 
-  // Public export: portable reputation is cleartext signed metadata. The
-  // archive carries all valid host proofs; the destination applies its trust.
+  /**
+   * Returns one bounded portable reputation archive page; the destination
+   * remains responsible for applying host trust.
+   */
   async function reputationExport(did: string, url: URL): Promise<Response> {
     try {
-      const log = await reputationLog();
+      PublicIdentity.fromDid(did);
+    } catch {
+      return json(400, { error: 'reputation subject must be a valid did:key' });
+    }
+    const log = await reputationLog();
+    try {
       const request = parsePagination(url, {
         defaultPageSize: limits.defaultPageSize,
         maxPageSize: limits.maxPageSize,
@@ -3209,7 +3299,7 @@ export function createServer(config: ServerConfig): Server {
       if (error instanceof PaginationError) {
         return paginationErrorResponse(error);
       }
-      return json(400, { error: 'reputation subject must be a valid did:key' });
+      throw error;
     }
   }
 
@@ -3267,40 +3357,7 @@ export function createServer(config: ServerConfig): Server {
     return json(200, {
       subject: archive.subject,
       ...result,
-      total: reps.archive(archive.subject).contributions.length,
     });
-  }
-
-  /** Marks a mutation in progress until every overlapping writer has exited. */
-  function beginMutation(
-    method: string,
-    path: string
-  ): (() => void) | undefined {
-    if (method === 'POST' && path === '/repos') {
-      return beginRevision(catalogRevision);
-    }
-    const repoMatch =
-      method === 'DELETE'
-        ? path.match(/^\/repos\/(.+)$/)
-        : path.match(
-            /^\/repos\/(.+)\/(?:policy|releases(?:\/[^/]+)?|views(?:\/[^/]+)?|pull|heads\/bootstrap|reveals(?:\/.*)?|push|land|grants|revoke)$/
-          );
-    if (repoMatch === null) return undefined;
-    const name = safePercentDecode(repoMatch[1]);
-    if (name === undefined) return undefined;
-    const isPendingRead = /^\/repos\/.+\/reveals\/pending$/.test(path);
-    if (method === 'POST' && !isPendingRead) {
-      return beginRevision(repoRevisionClock(name));
-    }
-    if (method === 'DELETE') {
-      const finishRepoMutation = beginRevision(repoRevisionClock(name));
-      const finishCatalogMutation = beginRevision(catalogRevision);
-      return () => {
-        finishRepoMutation();
-        finishCatalogMutation();
-      };
-    }
-    return undefined;
   }
 
   return {
@@ -3339,7 +3396,6 @@ export function createServer(config: ServerConfig): Server {
     async fetch(req: Request): Promise<Response> {
       const url = new URL(req.url);
       const path = url.pathname;
-      const finishMutation = beginMutation(req.method, path);
       const emptyBody = new Uint8Array();
       /** Loads a matched POST body before invoking authentication or handlers. */
       const withBody = async (
@@ -3384,7 +3440,7 @@ export function createServer(config: ServerConfig): Server {
           }
           for (const [key, value] of url.searchParams) {
             validateLogicalText(key, limits.maxFieldBytes);
-            validateLogicalText(value, limits.maxFieldBytes);
+            validateLogicalText(value, limits.maxFieldBytes, key);
           }
         } catch (error) {
           if (error instanceof InputLimitError)
@@ -3611,8 +3667,6 @@ export function createServer(config: ServerConfig): Server {
           return inputLimitResponse(error);
         }
         throw error;
-      } finally {
-        finishMutation?.();
       }
     },
   };

@@ -1,4 +1,5 @@
 import {
+  assertScanBudget,
   type Backend,
   type ConsumeNonceInput,
   type ConsumeNonceResult,
@@ -409,12 +410,6 @@ export class FileBackend implements Backend, ReplayNonceBackend {
 
   #path(key: string): string {
     return join(this.#root, encodeKey(key));
-  }
-}
-
-function assertScanBudget(maxEntries: number): void {
-  if (!Number.isSafeInteger(maxEntries) || maxEntries <= 0) {
-    throw new RangeError('maxEntries must be a positive safe integer');
   }
 }
 

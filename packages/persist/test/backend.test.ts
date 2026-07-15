@@ -79,10 +79,21 @@ for (const [name, make] of [
 
     test('openScan rejects invalid inspection budgets', async () => {
       const scan = await make().openScan('');
-      expect(scan.read(0)).rejects.toBeInstanceOf(RangeError);
-      expect(scan.read(Number.MAX_SAFE_INTEGER + 1)).rejects.toBeInstanceOf(
-        RangeError
-      );
+      let firstError: unknown;
+      try {
+        await scan.read(0);
+      } catch (error) {
+        firstError = error;
+      }
+      expect(firstError).toBeInstanceOf(RangeError);
+
+      let secondError: unknown;
+      try {
+        await scan.read(Number.MAX_SAFE_INTEGER + 1);
+      } catch (error) {
+        secondError = error;
+      }
+      expect(secondError).toBeInstanceOf(RangeError);
       await scan.close();
     });
   });

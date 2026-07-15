@@ -1,10 +1,12 @@
 import { Identity, ready } from '@thaddeus.run/identity';
 import { FileBackend, MemoryBackend } from '@thaddeus.run/persist';
+import type { Backend, ReplayNonceBackend } from '@thaddeus.run/store';
 import { beforeAll, describe, expect, test } from 'bun:test';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
+import { encodeBundle } from '../src/dto';
 import {
   DEFAULT_MAX_FIELD_BYTES,
   DEFAULT_MAX_PAGE_RESPONSE_BYTES,
@@ -17,6 +19,7 @@ import {
   DEFAULT_PAGINATION_CURSOR_TTL_MS,
   resolveLimits,
 } from '../src/limits';
+import { CursorRegistry, type PageSource } from '../src/pagination';
 import { createServer } from '../src/server';
 import { signRequest } from '../src/sign';
 import { createRepoBody } from './heads';
@@ -49,6 +52,27 @@ function createRequest(name: string, owner: Identity): Request {
   });
 }
 
+function signedPost(path: string, value: unknown, signer: Identity): Request {
+  const body = new TextEncoder().encode(JSON.stringify(value));
+  const signed = signRequest(
+    'POST',
+    path,
+    body,
+    signer,
+    new Date().toISOString()
+  );
+  return new Request(`http://t${path}`, {
+    method: 'POST',
+    body,
+    headers: {
+      'x-thaddeus-did': signed.did,
+      'x-thaddeus-timestamp': signed.timestamp,
+      'x-thaddeus-nonce': signed.nonce,
+      'x-thaddeus-signature': signed.signature,
+    },
+  });
+}
+
 describe('THA-9 limits and pagination', () => {
   test('exports balanced defaults and rejects types, ranges, and relationships', () => {
     expect(resolveLimits({})).toEqual({
@@ -67,6 +91,9 @@ describe('THA-9 limits and pagination', () => {
     >;
     for (const property of properties) {
       expect(() => resolveLimits({ [property]: '1' } as never)).toThrow(
+        TypeError
+      );
+      expect(() => resolveLimits({ [property]: null } as never)).toThrow(
         TypeError
       );
       for (const value of [0, -1, 1.5, Number.NaN, Number.POSITIVE_INFINITY]) {
@@ -132,6 +159,60 @@ describe('THA-9 limits and pagination', () => {
     expect(await replay.json()).toMatchObject({
       code: 'pagination_cursor_invalid',
     });
+    await server.close();
+  });
+
+  test('opaque cursors are not constrained by the logical-field byte limit', async () => {
+    const backend = new MemoryBackend();
+    const owner = Identity.create();
+    const seed = createServer({ backend });
+    await seed.fetch(createRequest('a', owner));
+    await seed.fetch(createRequest('b', owner));
+    await seed.close();
+
+    const server = createServer({
+      backend,
+      defaultPageSize: 1,
+      maxPageSize: 1,
+      maxFieldBytes: 42,
+    });
+    const first = (await (
+      await server.fetch(new Request('http://t/repos'))
+    ).json()) as { nextCursor: string };
+    expect(first.nextCursor.length).toBeGreaterThan(42);
+    expect(
+      (
+        await server.fetch(
+          new Request(`http://t/repos?cursor=${first.nextCursor}`)
+        )
+      ).status
+    ).toBe(200);
+    await server.close();
+  });
+
+  test('rejected writes do not invalidate an authorized repository snapshot', async () => {
+    const server = createServer({
+      backend: new MemoryBackend(),
+      defaultPageSize: 1,
+      maxPageSize: 1,
+    });
+    const owner = Identity.create();
+    const attacker = Identity.create();
+    await server.fetch(createRequest('guarded', owner));
+    const first = (await (
+      await server.fetch(new Request('http://t/repos/guarded/views'))
+    ).json()) as { nextCursor: string };
+    const rejected = await server.fetch(
+      signedPost('/repos/guarded/push', encodeBundle([], [], []), attacker)
+    );
+    expect(rejected.status).toBe(403);
+    expect(
+      (
+        await server.fetch(
+          new Request(`http://t/repos/guarded/views?cursor=${first.nextCursor}`)
+        )
+      ).status
+    ).toBe(200);
     await server.close();
   });
 
@@ -346,5 +427,74 @@ describe('THA-9 limits and pagination', () => {
     } finally {
       rmSync(root, { recursive: true, force: true });
     }
+  });
+
+  test('server shutdown wins a race with cursor registration', async () => {
+    const registry = new CursorRegistry({
+      defaultPageSize: 1,
+      maxPageSize: 1,
+      maxPageResponseBytes: 1_024,
+      cursorCapacity: 1,
+      cursorTtlMs: 1_000,
+    });
+    let releaseRead: (() => void) | undefined;
+    let closeCalls = 0;
+    const source: PageSource<string> = {
+      read: () =>
+        new Promise((resolve) => {
+          releaseRead = () => resolve({ items: ['item'], done: false });
+        }),
+      close: () => {
+        closeCalls += 1;
+        return Promise.resolve();
+      },
+    };
+    const page = registry.page({
+      request: { limit: 1 },
+      binding: 'shutdown-race',
+      revisionNow: () => 0,
+      createSource: () => Promise.resolve(source),
+      render: (items, nextCursor) => ({ items, nextCursor }),
+    });
+    while (releaseRead === undefined) await Promise.resolve();
+    await registry.close();
+    releaseRead();
+    let error: unknown;
+    try {
+      await page;
+    } catch (caught) {
+      error = caught;
+    }
+    expect(error).toMatchObject({ code: 'pagination_cursor_invalid' });
+    expect(registry.activeCount).toBe(0);
+    expect(closeCalls).toBe(1);
+  });
+
+  test('reputation storage failures are not mislabeled as invalid DIDs', async () => {
+    const memory = new MemoryBackend();
+    const backend: Backend & ReplayNonceBackend = {
+      put: (key, bytes) => memory.put(key, bytes),
+      get: (key) => memory.get(key),
+      openScan: (prefix) => memory.openScan(prefix),
+      list: (prefix) =>
+        prefix === 'rep/'
+          ? Promise.reject(new Error('reputation storage unavailable'))
+          : memory.list(prefix),
+      delete: (key) => memory.delete(key),
+      consumeNonce: (input) => memory.consumeNonce(input),
+    };
+    const server = createServer({ backend });
+    const subject = Identity.create();
+    let error: unknown;
+    try {
+      await server.fetch(
+        new Request(`http://t/reputation/${subject.did}/export`)
+      );
+    } catch (caught) {
+      error = caught;
+    }
+    expect(error).toBeInstanceOf(Error);
+    expect(String(error)).toContain('reputation storage unavailable');
+    await server.close();
   });
 });

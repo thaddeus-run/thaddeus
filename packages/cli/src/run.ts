@@ -574,7 +574,7 @@ async function reshareToMembers(
 ): Promise<number> {
   let dids: string[];
   try {
-    dids = await client.members(repoName);
+    dids = await client.members(repoName, local);
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     throw new Error(
@@ -3135,8 +3135,10 @@ export async function run(
         }
         try {
           resolveLimits({ maxRequestBodyBytes, ...configuredLimits });
-        } catch {
-          out('invalid server limit configuration');
+        } catch (error) {
+          const message =
+            error instanceof Error ? error.message : String(error);
+          out(`invalid server limit configuration: ${message}`);
           return 2;
         }
         const rawReplayNonceCapacity = values['replay-nonce-capacity'];

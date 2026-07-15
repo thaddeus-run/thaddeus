@@ -28,6 +28,7 @@ export type PaginationErrorCode =
   | 'pagination_capacity_exceeded'
   | 'page_item_too_large';
 
+/** Carries one stable pagination failure code without request-derived data. */
 export class PaginationError extends Error {
   readonly code: PaginationErrorCode;
   readonly status: number;
@@ -180,7 +181,7 @@ export class CursorRegistry {
       }
       if (done) {
         await source.close();
-        return { body: input.render(items, null), nextCursor: null };
+        return { body, nextCursor: null };
       }
       const nextCursor = await this.#store({
         binding: input.binding,
@@ -220,7 +221,7 @@ export class CursorRegistry {
     this.#sessions.delete(token);
     if (session.timer !== undefined) clearTimeout(session.timer);
     if (session.expiresAt <= Date.now()) {
-      void session.source.close();
+      void session.source.close().catch(() => {});
       return undefined;
     }
     return session;
@@ -228,6 +229,10 @@ export class CursorRegistry {
 
   async #store(session: CursorSession): Promise<string> {
     await this.#cleanupExpired();
+    if (this.#closed) {
+      await session.source.close();
+      throw new PaginationError('pagination_cursor_invalid');
+    }
     if (this.#sessions.size >= this.#config.cursorCapacity) {
       await session.source.close();
       throw new PaginationError('pagination_capacity_exceeded');
@@ -243,7 +248,7 @@ export class CursorRegistry {
       () => {
         if (this.#sessions.get(token) !== session) return;
         this.#sessions.delete(token);
-        void session.source.close();
+        void session.source.close().catch(() => {});
       },
       this.#config.cursorTtlMs
     );
@@ -297,6 +302,7 @@ class BufferedPageSource<T> implements PageSource<T> {
   }
 }
 
+/** Adapts an in-memory array to the same bounded page-source contract. */
 export function arrayPageSource<T>(items: readonly T[]): PageSource<T> {
   let offset = 0;
   return {
@@ -356,6 +362,7 @@ export function backendPageSource<T>(
   };
 }
 
+/** Maps a pagination failure to its stable, privacy-safe response body. */
 export function paginationErrorBody(error: PaginationError): {
   error: string;
   code: PaginationErrorCode;

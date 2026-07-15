@@ -55,6 +55,17 @@ async function failureOf(promise: Promise<unknown>): Promise<Error> {
 }
 
 describe('Client signed-head verification', () => {
+  test('listViewsPage rejects malformed head entries', async () => {
+    const client = new Client(
+      'http://t',
+      Identity.create(),
+      responseFetch(() => ({ views: { main: {} }, nextCursor: null }))
+    );
+    expect((await failureOf(client.listViewsPage('r'))).message).toContain(
+      'malformed_record'
+    );
+  });
+
   test('expected owner accepts the match and rejects owner, scope, and record substitution', async () => {
     const owner = Identity.create();
     const stranger = Identity.create();
@@ -243,11 +254,69 @@ describe('Client signed-head verification', () => {
     listed = higher;
     chain = [genesis, next];
     expect((await failureOf(client.listViews('r', repo))).message).toContain(
-      'fork'
+      'pagination_snapshot_changed'
     );
     chain = [genesis, next, higher];
     expect(await client.listViews('r', repo)).toEqual({ main: [] });
     expect(repo.headRecords.current('main')?.id).toBe(next.id);
+  });
+
+  test('restarts the complete view read when list and detail cross snapshots', async () => {
+    const owner = Identity.create();
+    const genesis = signHead(
+      {
+        repo: 'r',
+        view: 'main',
+        version: 0,
+        previous: null,
+        heads: [],
+      },
+      owner
+    );
+    const next = signHead(
+      {
+        repo: 'r',
+        view: 'main',
+        version: 1,
+        previous: genesis.id,
+        heads: [],
+      },
+      owner
+    );
+    const higher = signHead(
+      {
+        repo: 'r',
+        view: 'main',
+        version: 2,
+        previous: next.id,
+        heads: [],
+      },
+      owner
+    );
+    const repo = await new Platform().openDurable('r', new MemoryBackend());
+    await repo.headRecords.bootstrap(genesis);
+    let listCalls = 0;
+    const client = new Client('http://t', Identity.create(), (request) => {
+      const list = new URL(request.url).pathname.endsWith('/views');
+      if (list) listCalls += 1;
+      const response = list
+        ? {
+            views: {
+              main: encodeHeadRecord(listCalls === 1 ? next : higher),
+            },
+            nextCursor: null,
+          }
+        : {
+            view: 'main',
+            head: encodeHeadRecord(higher),
+            chain: [genesis, next, higher].map(encodeHeadRecord),
+            nextCursor: null,
+          };
+      return Promise.resolve(Response.json(response));
+    });
+
+    expect(await client.listViews('r', repo)).toEqual({ main: [] });
+    expect(listCalls).toBe(2);
   });
 
   test('rejects rollback, a pinned-version fork, and broken or gapped chains', async () => {

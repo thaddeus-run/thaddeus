@@ -1,9 +1,10 @@
-import type {
-  Backend,
-  BackendScan,
-  ConsumeNonceInput,
-  ConsumeNonceResult,
-  ReplayNonceBackend,
+import {
+  type Backend,
+  type BackendScan,
+  type ConsumeNonceInput,
+  type ConsumeNonceResult,
+  type ReplayNonceBackend,
+  scanKeys,
 } from '@thaddeus.run/store';
 
 import { consumeNonceState, type NonceExpiration } from './replay';
@@ -37,28 +38,7 @@ export class MemoryBackend implements Backend, ReplayNonceBackend {
 
   /** Opens a lazy scan over the map without copying the remaining keyspace. */
   async openScan(prefix: string): Promise<BackendScan> {
-    const iterator = this.#map.keys();
-    let done = false;
-    return {
-      read: async (maxEntries) => {
-        assertScanBudget(maxEntries);
-        if (done) return { keys: [], done: true };
-        const keys: string[] = [];
-        for (let inspected = 0; inspected < maxEntries; inspected += 1) {
-          const entry = iterator.next();
-          if (entry.done === true) {
-            done = true;
-            break;
-          }
-          if (entry.value.startsWith(prefix)) keys.push(entry.value);
-        }
-        return { keys, done };
-      },
-      close: async () => {
-        done = true;
-        iterator.return?.();
-      },
-    };
+    return scanKeys(this.#map.keys(), prefix);
   }
 
   /** Lists generic in-memory keys that begin with the supplied prefix. */
@@ -87,11 +67,5 @@ export class MemoryBackend implements Backend, ReplayNonceBackend {
       { byKey: this.#nonces, expirations: this.#nonceExpirations },
       input
     ).result;
-  }
-}
-
-function assertScanBudget(maxEntries: number): void {
-  if (!Number.isSafeInteger(maxEntries) || maxEntries <= 0) {
-    throw new RangeError('maxEntries must be a positive safe integer');
   }
 }
