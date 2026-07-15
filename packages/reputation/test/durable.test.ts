@@ -94,10 +94,12 @@ describe('ReputationLog — durability', () => {
     expect(await reps.ingestArchive(archive)).toEqual({
       imported: 1,
       duplicates: 0,
+      total: 2,
     });
     expect(await reps.ingestArchive(archive)).toEqual({
       imported: 0,
       duplicates: 1,
+      total: 2,
     });
     expect(await backend.list('rep-import/')).toHaveLength(1);
     expect(

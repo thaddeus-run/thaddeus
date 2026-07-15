@@ -212,6 +212,29 @@ describe('startServer', () => {
     }
   });
 
+  test('explains invalid cross-limit CLI configurations', async () => {
+    const output: string[] = [];
+    expect(
+      await run(
+        [
+          'serve',
+          '--max-reputation-archive-bytes',
+          '10',
+          '--max-field-bytes',
+          '11',
+        ],
+        {
+          cwd: tmp,
+          home: tmp,
+          out: (line) => output.push(line),
+        }
+      )
+    ).toBe(2);
+    expect(output).toEqual([
+      'invalid server limit configuration: maxFieldBytes must not exceed maxReputationArchiveBytes',
+    ]);
+  });
+
   test('validates attestation signer and rate-limit options before startup', async () => {
     const keyArn =
       'arn:aws:kms:eu-west-1:123456789012:key/12345678-1234-1234-1234-123456789012';

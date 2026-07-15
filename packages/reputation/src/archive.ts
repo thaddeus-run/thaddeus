@@ -19,6 +19,7 @@ export interface ReputationArchive {
 export interface ReputationImportResult {
   readonly imported: number;
   readonly duplicates: number;
+  readonly total: number;
 }
 
 export interface ReputationArchiveDecodeLimits {
@@ -90,7 +91,7 @@ function decodeCanonicalBase64(value: unknown, name: string): Uint8Array {
   return bytes;
 }
 
-// Stable full-content identity shared by archive normalization and the log.
+/** Returns the stable full-content identity used by archives and logs. */
 export function contributionContentKey(c: Contribution): string {
   return JSON.stringify([
     c.subject,
@@ -104,7 +105,7 @@ export function contributionContentKey(c: Contribution): string {
   ]);
 }
 
-// Deterministic order: (at, ref, kind), then all content as a tiebreak.
+/** Orders contributions by event fields and full content as a tiebreak. */
 export function compareContributions(a: Contribution, b: Contribution): number {
   const ka = `${a.at}|${a.ref}|${a.kind}`;
   const kb = `${b.at}|${b.ref}|${b.kind}`;
@@ -127,8 +128,10 @@ function assertSubject(subject: string): void {
   }
 }
 
-// Validate the entire archive before normalizing duplicates/order. This is the
-// strict import boundary: only genuine two-party contribution proofs travel.
+/**
+ * Validates an entire archive before normalization so only genuine two-party
+ * contribution proofs cross the portable import boundary.
+ */
 export function normalizeReputationArchive(
   archive: ReputationArchive
 ): ReputationArchive {
@@ -184,6 +187,7 @@ function wireContribution(c: Contribution): WireContribution {
   };
 }
 
+/** Encodes a normalized portable reputation archive as stable JSON text. */
 export function encodeReputationArchive(archive: ReputationArchive): string {
   const normalized = normalizeReputationArchive(archive);
   const wire: WireArchive = {
@@ -194,6 +198,10 @@ export function encodeReputationArchive(archive: ReputationArchive): string {
   return `${JSON.stringify(wire, null, 2)}\n`;
 }
 
+/**
+ * Decodes a portable archive, optionally enforcing raw byte, count, and field
+ * limits before normalization and signature-verification work.
+ */
 export function decodeReputationArchive(
   json: string,
   limits: ReputationArchiveDecodeLimits = {}

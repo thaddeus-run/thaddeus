@@ -235,6 +235,57 @@ describe('timed reveal', () => {
     ).toBe(409);
   });
 
+  test('an invalid reveal does not invalidate an active view snapshot', async () => {
+    const owner = Identity.create();
+    const local = await committed(owner);
+    const srv = createServer({
+      backend: new MemoryBackend(),
+      defaultPageSize: 1,
+      maxPageSize: 1,
+      now: () => before,
+    });
+    await srv.fetch(
+      signedPost('/repos', createRepoBody('r', owner), owner, before)
+    );
+    await srv.fetch(signedPost('/repos/r/push', local.bundle, owner, before));
+    await srv.fetch(
+      signedPost(
+        '/repos/r/land',
+        await landBody(srv.fetch, 'r', local.heads, owner),
+        owner,
+        before
+      )
+    );
+
+    const first = (await (
+      await srv.fetch(new Request('http://t/repos/r/views/main'))
+    ).json()) as { nextCursor: string };
+    const capability = await local.store.scheduleReveal(local.ref, at, owner);
+    const rejected = await srv.fetch(
+      signedPost(
+        '/repos/r/reveals',
+        {
+          capability: encodeCapability({
+            ...capability,
+            sig: new Uint8Array(capability.sig.length),
+          }),
+          object: local.store.current(local.ref.plaintext_id)!.id,
+        },
+        owner,
+        before
+      )
+    );
+    expect(rejected.status).toBe(400);
+    expect(
+      (
+        await srv.fetch(
+          new Request(`http://t/repos/r/views/main?cursor=${first.nextCursor}`)
+        )
+      ).status
+    ).toBe(200);
+    await srv.close();
+  });
+
   test('owner recall rejects a pending schedule granted by another identity', async () => {
     const owner = Identity.create();
     const attacker = Identity.create();

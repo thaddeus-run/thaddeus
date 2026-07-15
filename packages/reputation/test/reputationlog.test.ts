@@ -23,6 +23,22 @@ const fields = (
 });
 
 describe('ReputationLog — aggregate, verify, profile', () => {
+  test('an absent subject does not inspect unrelated global records', () => {
+    const subject = Identity.create();
+    const other = Identity.create();
+    const host = Identity.create();
+    const contribution = signContribution(fields(), subject, host);
+    const log = new ReputationLog();
+    log.append(contribution);
+    Object.defineProperty(contribution, 'subject', {
+      get: () => {
+        throw new Error('unrelated contribution was inspected');
+      },
+    });
+
+    expect([...log.iterateArchiveContributions(other.did)]).toEqual([]);
+  });
+
   test('cross-instance honoring: a contribution verifies on a fresh log', () => {
     const alice = Identity.create();
     const instanceA = Identity.create();

@@ -3,7 +3,7 @@ import { Workspace } from '@thaddeus.run/fs';
 import { Identity, PublicIdentity, ready } from '@thaddeus.run/identity';
 import { MemoryBackend } from '@thaddeus.run/persist';
 import type { Repo } from '@thaddeus.run/platform';
-import { createServer } from '@thaddeus.run/server';
+import { createServer, encodeDelegation } from '@thaddeus.run/server';
 import { beforeAll, describe, expect, test } from 'bun:test';
 
 import { Client } from '../src/client';
@@ -59,8 +59,9 @@ describe('Client.members', () => {
     const srv = createServer({ backend: new MemoryBackend() });
     const c = new Client('http://t', a, srv.fetch.bind(srv));
     await c.createRepo('r');
+    const { repo } = await c.clone('r', new MemoryBackend());
 
-    expect(await c.members('r')).toEqual([a.did]);
+    expect(await c.members('r', repo)).toEqual([a.did]);
 
     await c.grant(
       'r',
@@ -69,10 +70,48 @@ describe('Client.members', () => {
         a
       )
     );
-    expect((await c.members('r')).sort()).toEqual([a.did, b.did].sort());
+    expect((await c.members('r', repo)).sort()).toEqual([a.did, b.did].sort());
 
     await c.revoke('r', b.did);
-    expect(await c.members('r')).toEqual([a.did]); // revoked member drops out
+    expect(await c.members('r', repo)).toEqual([a.did]); // revoked member drops out
+  });
+
+  test('trusts only grants signed by the locally pinned owner', async () => {
+    const owner = Identity.create();
+    const delegate = Identity.create();
+    const attacker = Identity.create();
+    const substituted = Identity.create();
+    const srv = createServer({ backend: new MemoryBackend() });
+    const trusted = new Client('http://t', owner, srv.fetch.bind(srv));
+    await trusted.createRepo('r');
+    const { repo } = await trusted.clone('r', new MemoryBackend());
+    const fields = {
+      paths: ['**'],
+      maxChanges: 10,
+      maxSpend: 10,
+    } as const;
+    const valid = signDelegation({ ...fields, agent: delegate.did }, owner);
+    const forged = signDelegation(
+      { ...fields, agent: substituted.did },
+      attacker
+    );
+    const malformed = signDelegation({ ...fields, agent: 'not-a-did' }, owner);
+    const hostile = new Client('http://t', owner, () =>
+      Promise.resolve(
+        Response.json({
+          grants: [
+            encodeDelegation(forged),
+            encodeDelegation(malformed),
+            encodeDelegation(valid),
+          ],
+          nextCursor: null,
+        })
+      )
+    );
+
+    expect(await hostile.members('r', repo)).toEqual(
+      [owner.did, delegate.did].sort()
+    );
   });
 });
 

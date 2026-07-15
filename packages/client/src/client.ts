@@ -1,6 +1,6 @@
-import type { Delegation } from '@thaddeus.run/agent';
+import { type Delegation, verifyDelegation } from '@thaddeus.run/agent';
 import { type SymbolOp, SymbolOpLog } from '@thaddeus.run/graph';
-import type { Identity } from '@thaddeus.run/identity';
+import { type Identity, PublicIdentity } from '@thaddeus.run/identity';
 import {
   type Conflict,
   decodeHeadRecord,
@@ -124,7 +124,7 @@ export interface ReposPage {
 }
 
 export interface ViewsPage {
-  readonly views: Readonly<Record<string, HeadRecordWire>>;
+  readonly views: Readonly<Record<string, HeadRecord>>;
   readonly nextCursor: string | null;
 }
 
@@ -143,6 +143,7 @@ export interface ReputationExportPage {
   readonly nextCursor: string | null;
 }
 
+/** Preserves stable server error metadata for client retry decisions. */
 export class ClientResponseError extends Error {
   readonly status: number;
   readonly code?: string;
@@ -158,6 +159,14 @@ export class ClientResponseError extends Error {
     this.status = status;
     this.details = details;
     if (typeof details.code === 'string') this.code = details.code;
+  }
+}
+
+/** Signals that independently paged view phases observed different heads. */
+class ViewSnapshotChangedError extends Error {
+  constructor() {
+    super('pagination_snapshot_changed: view list changed during read');
+    this.name = 'ViewSnapshotChangedError';
   }
 }
 
@@ -247,9 +256,10 @@ function verifiedRelease(
   return release;
 }
 
-// A small client over the Thaddeus HTTP remote. Holds one Identity, signs every
-// write request, and does all crypto client-side. `fetchImpl` is injectable so
-// tests pass createServer(...).fetch directly (no port).
+/**
+ * A small client over the Thaddeus HTTP remote. It signs every write and keeps
+ * cryptographic verification client-side; fetch is injectable for local tests.
+ */
 export class Client {
   readonly #server: string;
   readonly #identity: Identity;
@@ -285,9 +295,9 @@ export class Client {
     return { name: body.name, owner: body.owner };
   }
 
-  // Pull a view's reachable bundle in a single atomic request. The /pull
-  // response now includes view+heads alongside ops/objects/caps, so we no
-  // longer need a separate /views call (closes the PR #12 clone TOCTOU).
+  // Pull a view's reachable bundle by draining revision-bound pages from one
+  // atomic snapshot. The response includes view+heads with ops/objects/caps, so
+  // no separate /views call can introduce a clone TOCTOU.
   async clone(
     name: string,
     backend: Backend,
@@ -429,27 +439,49 @@ export class Client {
     };
   }
 
-  // The repo's collaborators: its owner plus every non-revoked delegate (the
-  // server filters revoked agents out of /grants). Every member is a did:key, so
-  // a caller derives each member's public key with `PublicIdentity.fromDid` —
-  // no key exchange is needed to share a decryption capability with them.
-  async members(name: string): Promise<string[]> {
-    // The two reads are independent, so issue them concurrently — `push` calls
-    // this on every publish and a serial pair doubles the round-trip latency.
-    const [repos, grants] = await Promise.all([
-      this.listReposWithOwners(),
-      this.listGrants(name),
-    ]);
-    const owner = repos.find((r) => r.name === name)?.owner;
-    const delegates = grants.map((g) => g.agent);
-    const dids =
-      owner === null || owner === undefined ? delegates : [owner, ...delegates];
-    return [...new Set(dids)].sort();
+  /**
+   * Returns recipients authenticated by the locally pinned owner and its
+   * verified active delegations; remote collection fields are never authority.
+   */
+  async members(name: string, repo: Repo): Promise<string[]> {
+    const owner = repo.headRecords.owner;
+    if (owner === undefined) {
+      throw new Error('wrong_owner: repository owner is not locally pinned');
+    }
+    const delegates: string[] = [];
+    for (const delegation of await this.listGrants(name)) {
+      if (delegation.operator !== owner || !verifyDelegation(delegation)) {
+        continue;
+      }
+      try {
+        PublicIdentity.fromDid(delegation.agent);
+      } catch {
+        continue;
+      }
+      delegates.push(delegation.agent);
+    }
+    return [...new Set([owner, ...delegates])].sort();
   }
 
   // The repo's branches and their heads. Listing does not ingest content or
   // mutate trust, but newer records fetch their complete chain for validation.
   async listViews(name: string, repo: Repo): Promise<Record<string, string[]>> {
+    for (let attempt = 0; ; attempt += 1) {
+      try {
+        return await this.#listViewsSnapshot(name, repo);
+      } catch (error) {
+        if (!(error instanceof ViewSnapshotChangedError) || attempt >= 2) {
+          throw error;
+        }
+      }
+    }
+  }
+
+  /** Reads the view list and detail chains once, without retaining partials. */
+  async #listViewsSnapshot(
+    name: string,
+    repo: Repo
+  ): Promise<Record<string, string[]>> {
     const pages = await this.#collectPages((cursor) =>
       this.listViewsPage(name, cursor === undefined ? {} : { cursor })
     );
@@ -470,15 +502,7 @@ export class Client {
     const expectedOwner = repo.headRecords.owner;
     let listedOwner = expectedOwner;
     const views: Record<string, string[]> = {};
-    for (const [view, wire] of Object.entries(body.views)) {
-      let head: HeadRecord;
-      try {
-        head = decodeHeadRecord(wire);
-      } catch (error) {
-        throw new Error(
-          `malformed_record: ${error instanceof Error ? error.message : 'invalid head record'}`
-        );
-      }
+    for (const [view, head] of Object.entries(body.views)) {
       const verification = verifyHead(head);
       if (!verification.ok) throw verificationError(verification);
       if (head.repo !== name)
@@ -532,9 +556,7 @@ export class Client {
           prefix: repo.headRecords.history(view),
         });
         if (verified.head.id !== head.id) {
-          throw new Error(
-            'fork: listed view does not match its signed head chain'
-          );
+          throw new ViewSnapshotChangedError();
         }
       }
       views[view] = [...head.heads];
@@ -542,6 +564,7 @@ export class Client {
     return views;
   }
 
+  /** Returns one independently consumable page of decoded signed view heads. */
   async listViewsPage(
     name: string,
     options: PageOptions = {}
@@ -562,8 +585,18 @@ export class Client {
     ) {
       throw new Error('malformed_record: views must be an object');
     }
+    const views: Record<string, HeadRecord> = {};
+    for (const [view, wire] of Object.entries(body.views)) {
+      try {
+        views[view] = decodeHeadRecord(wire as HeadRecordWire);
+      } catch (error) {
+        throw new Error(
+          `malformed_record: ${error instanceof Error ? error.message : 'invalid head record'}`
+        );
+      }
+    }
     return {
-      views: body.views as Record<string, HeadRecordWire>,
+      views,
       nextCursor: this.#nextCursor(body.nextCursor),
     };
   }
@@ -640,6 +673,7 @@ export class Client {
     });
   }
 
+  /** Returns one independently consumable page of repository releases. */
   async listReleasesPage(
     name: string,
     options: PageOptions = {}
@@ -730,6 +764,7 @@ export class Client {
     return [...new Set(pages.flatMap((page) => [...page.repos]))].sort();
   }
 
+  /** Returns one independently consumable page of repository metadata. */
   async listReposPage(options: PageOptions = {}): Promise<ReposPage> {
     const res = await this.#fetch(
       new Request(this.#pageUrl('/repos', options))
@@ -1069,6 +1104,7 @@ export class Client {
     );
   }
 
+  /** Returns one independently consumable reputation archive page. */
   async exportReputationPage(
     did: string,
     options: PageOptions = {}
@@ -1226,6 +1262,7 @@ export class Client {
       .sort((left, right) => left.agent.localeCompare(right.agent));
   }
 
+  /** Returns one independently consumable page of active delegations. */
   async listGrantsPage(
     name: string,
     options: PageOptions = {}

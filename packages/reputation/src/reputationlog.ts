@@ -30,16 +30,15 @@ export interface Profile {
   readonly byKind: Readonly<Record<ContributionKind, number>>;
 }
 
-// The untrusted aggregator: an indexer over signed records gathered from
-// anywhere. Keep-and-label — every record is kept regardless of validity, and
-// the verifier checks signatures itself. Durable when constructed with a
-// `Backend` (write-through + static `load`); in-memory otherwise. Held once
-// server-wide (reputation spans repos), so its records live under a top-level
-// `rep/` prefix, not a per-repo scope. Spike — single process, not
-// concurrency-safe.
+/**
+ * An untrusted, keep-and-label contribution aggregator. Its server-wide hot
+ * indexes support bounded subject-specific traversal over durable records.
+ */
 export class ReputationLog {
   readonly #backend: Backend | undefined;
   readonly #records: Map<string, Contribution> = new Map();
+  readonly #recordsBySubject = new Map<string, Map<string, Contribution>>();
+  readonly #portableBySubject = new Map<string, Set<string>>();
 
   constructor(backend?: Backend) {
     this.#backend = backend;
@@ -57,7 +56,7 @@ export class ReputationLog {
       }
       try {
         const c = decodeRecord(bytes) as Contribution;
-        log.#records.set(contributionContentKey(c), c);
+        log.#index(c);
       } catch {
         continue; // torn/old-version/corrupt record — skip, never surface
       }
@@ -70,7 +69,7 @@ export class ReputationLog {
           decodeRecord(bytes) as ReputationArchive
         );
         for (const c of archive.contributions) {
-          log.#records.set(contributionContentKey(c), c);
+          log.#index(c);
         }
       } catch {
         continue; // corrupt or old import archive — skip the whole batch
@@ -81,7 +80,7 @@ export class ReputationLog {
 
   // Ingest a record, keep it regardless of validity, idempotent on full content.
   append(c: Contribution): void {
-    this.#records.set(contributionContentKey(c), c);
+    this.#index(c);
   }
 
   // Durably ingest a record (keep-and-label). Write-through first so a failed
@@ -89,7 +88,7 @@ export class ReputationLog {
   // Idempotent (content-addressed key).
   async ingest(c: Contribution): Promise<void> {
     await this.#persist(c);
-    this.#records.set(contributionContentKey(c), c);
+    this.#index(c);
   }
 
   // Write-through for a record (no-op without a backend). Content-addressed key
@@ -106,9 +105,9 @@ export class ReputationLog {
 
   // Every known record bearing `subject` (any validity), deterministic order.
   forSubject(subject: string): readonly Contribution[] {
-    return [...this.#records.values()]
-      .filter((c) => c.subject === subject)
-      .sort(compareContributions);
+    return [...(this.#recordsBySubject.get(subject)?.values() ?? [])].sort(
+      compareContributions
+    );
   }
 
   // Export every genuine dual-signed proof for the subject. Host trust is a
@@ -128,8 +127,8 @@ export class ReputationLog {
   *iterateArchiveContributions(
     subject: string
   ): IterableIterator<Contribution> {
-    for (const contribution of this.#records.values()) {
-      if (contribution.subject !== subject) continue;
+    for (const contribution of this.#recordsBySubject.get(subject)?.values() ??
+      []) {
       const verification = verifyContribution(contribution);
       if (verification.authentic && verification.attested) {
         yield contribution;
@@ -147,7 +146,13 @@ export class ReputationLog {
       (c) => !this.#records.has(contributionContentKey(c))
     );
     const duplicates = normalized.contributions.length - missing.length;
-    if (missing.length === 0) return { imported: 0, duplicates };
+    if (missing.length === 0) {
+      return {
+        imported: 0,
+        duplicates,
+        total: this.#portableBySubject.get(normalized.subject)?.size ?? 0,
+      };
+    }
 
     const delta: ReputationArchive = { ...normalized, contributions: missing };
     if (this.#backend !== undefined) {
@@ -158,9 +163,32 @@ export class ReputationLog {
       await this.#backend.put(key, encodeRecord(delta));
     }
     for (const c of missing) {
-      this.#records.set(contributionContentKey(c), c);
+      this.#index(c);
     }
-    return { imported: missing.length, duplicates };
+    return {
+      imported: missing.length,
+      duplicates,
+      total: this.#portableBySubject.get(normalized.subject)?.size ?? 0,
+    };
+  }
+
+  /** Indexes one immutable content record for bounded subject-wide traversal. */
+  #index(contribution: Contribution): void {
+    const key = contributionContentKey(contribution);
+    if (this.#records.has(key)) return;
+    this.#records.set(key, contribution);
+    const subjectRecords =
+      this.#recordsBySubject.get(contribution.subject) ??
+      new Map<string, Contribution>();
+    subjectRecords.set(key, contribution);
+    this.#recordsBySubject.set(contribution.subject, subjectRecords);
+    const verification = verifyContribution(contribution);
+    if (verification.authentic && verification.attested) {
+      const portable =
+        this.#portableBySubject.get(contribution.subject) ?? new Set<string>();
+      portable.add(key);
+      this.#portableBySubject.set(contribution.subject, portable);
+    }
   }
 
   // Check a record's two signatures against the dids it carries. This is

@@ -59,41 +59,59 @@ export function resolveLimits(config: LimitConfig): ResolvedLimits {
   const limits: ResolvedLimits = {
     maxRequestBodyBytes: positiveInteger(
       'maxRequestBodyBytes',
-      config.maxRequestBodyBytes ?? DEFAULT_MAX_REQUEST_BODY_BYTES,
+      configuredOrDefault(
+        config.maxRequestBodyBytes,
+        DEFAULT_MAX_REQUEST_BODY_BYTES
+      ),
       // Bun needs one sentinel byte above the application cap.
       Number.MAX_SAFE_INTEGER - 1
     ),
     maxReputationArchiveBytes: positiveInteger(
       'maxReputationArchiveBytes',
-      config.maxReputationArchiveBytes ?? DEFAULT_MAX_REPUTATION_ARCHIVE_BYTES
+      configuredOrDefault(
+        config.maxReputationArchiveBytes,
+        DEFAULT_MAX_REPUTATION_ARCHIVE_BYTES
+      )
     ),
     maxReputationContributions: positiveInteger(
       'maxReputationContributions',
-      config.maxReputationContributions ?? DEFAULT_MAX_REPUTATION_CONTRIBUTIONS
+      configuredOrDefault(
+        config.maxReputationContributions,
+        DEFAULT_MAX_REPUTATION_CONTRIBUTIONS
+      )
     ),
     maxFieldBytes: positiveInteger(
       'maxFieldBytes',
-      config.maxFieldBytes ?? DEFAULT_MAX_FIELD_BYTES
+      configuredOrDefault(config.maxFieldBytes, DEFAULT_MAX_FIELD_BYTES)
     ),
     defaultPageSize: positiveInteger(
       'defaultPageSize',
-      config.defaultPageSize ?? DEFAULT_PAGE_SIZE
+      configuredOrDefault(config.defaultPageSize, DEFAULT_PAGE_SIZE)
     ),
     maxPageSize: positiveInteger(
       'maxPageSize',
-      config.maxPageSize ?? MAX_PAGE_SIZE
+      configuredOrDefault(config.maxPageSize, MAX_PAGE_SIZE)
     ),
     maxPageResponseBytes: positiveInteger(
       'maxPageResponseBytes',
-      config.maxPageResponseBytes ?? DEFAULT_MAX_PAGE_RESPONSE_BYTES
+      configuredOrDefault(
+        config.maxPageResponseBytes,
+        DEFAULT_MAX_PAGE_RESPONSE_BYTES
+      )
     ),
     paginationCursorCapacity: positiveInteger(
       'paginationCursorCapacity',
-      config.paginationCursorCapacity ?? DEFAULT_PAGINATION_CURSOR_CAPACITY
+      configuredOrDefault(
+        config.paginationCursorCapacity,
+        DEFAULT_PAGINATION_CURSOR_CAPACITY
+      )
     ),
     paginationCursorTtlMs: positiveInteger(
       'paginationCursorTtlMs',
-      config.paginationCursorTtlMs ?? DEFAULT_PAGINATION_CURSOR_TTL_MS
+      configuredOrDefault(
+        config.paginationCursorTtlMs,
+        DEFAULT_PAGINATION_CURSOR_TTL_MS
+      )
     ),
   };
   relationship(
@@ -115,9 +133,18 @@ export function resolveLimits(config: LimitConfig): ResolvedLimits {
   return limits;
 }
 
+/** Defaults only omitted options so runtime null values still fail closed. */
+function configuredOrDefault(
+  value: number | undefined,
+  defaultValue: number
+): unknown {
+  if (value === undefined) return defaultValue;
+  return value;
+}
+
 function positiveInteger(
   name: string,
-  value: number,
+  value: unknown,
   maximum?: number
 ): number {
   if (typeof value !== 'number') {
@@ -143,6 +170,7 @@ const EXCLUDED_TEXT_KEYS = new Set([
   'caps',
   'capability',
   'claim',
+  'cursor',
   'delegation',
   'host_sig',
   'nonce',
@@ -188,6 +216,7 @@ export function validateLogicalText(
   }
 }
 
+/** Maps an input-limit failure to its stable, privacy-safe response body. */
 export function inputLimitBody(error: InputLimitError): {
   error: string;
   code: InputLimitCode;

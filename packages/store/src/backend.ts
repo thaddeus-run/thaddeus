@@ -26,6 +26,13 @@ export interface Backend {
   delete(key: string): Promise<void>;
 }
 
+/** Rejects scanner work budgets that cannot be enforced safely. */
+export function assertScanBudget(maxEntries: number): void {
+  if (!Number.isSafeInteger(maxEntries) || maxEntries <= 0) {
+    throw new RangeError('maxEntries must be a positive safe integer');
+  }
+}
+
 /** Builds a bounded scanner over an existing lazy key iterator. */
 export function scanKeys(
   iterator: Iterator<string>,
@@ -34,9 +41,7 @@ export function scanKeys(
   let done = false;
   return {
     read: async (maxEntries) => {
-      if (!Number.isSafeInteger(maxEntries) || maxEntries <= 0) {
-        throw new RangeError('maxEntries must be a positive safe integer');
-      }
+      assertScanBudget(maxEntries);
       if (done) return { keys: [], done: true };
       const keys: string[] = [];
       for (let inspected = 0; inspected < maxEntries; inspected += 1) {
