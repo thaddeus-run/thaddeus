@@ -1810,7 +1810,7 @@ putIfMatch(key, bytes, expectedVersion): boolean  // compare-and-swap</code></pr
         >
         now returns bounded pages of reachable records, which the client
         reconstructs into a complete verified bundle. Ciphertext objects are
-        content-addressed by <code>StoredObject</code> in
+        content-addressed by <code>address()</code> in
         <code>packages/store/src/object.ts</code>. G1 separates signed
         manifests, immutable hash-addressed ciphertext objects, and private
         capability responses so the immutable data plane can use a global cache
