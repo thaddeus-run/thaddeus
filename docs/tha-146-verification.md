@@ -30,17 +30,17 @@ moon run cli:test -- test/quota-compile.test.ts
 
 The compiled scenarios are also included in the complete CLI suite below:
 
-| Scenario                       | Observed assertions                                                                                                                                                                                                  |
-| ------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Repository concurrency         | Six concurrent creates with a two-repository limit yield exactly two 201 responses and four 403 responses.                                                                                                           |
-| Independent identity           | A second independently minted identity creates and uploads successfully while the first is exhausted.                                                                                                                |
-| Object boundary                | Two concurrent object uploads across two repositories succeed at a two-object aggregate limit; the next returns 403 `object_quota_exceeded`.                                                                         |
-| Duplicate and rejected uploads | A duplicate upload returns 200; a rejected upload adds no repository keys. Replay nonce consumption is accounted separately.                                                                                         |
-| Byte boundary                  | An object at the exact encoded byte limit returns 200; the same object with the limit reduced by one byte returns 403 `object_bytes_quota_exceeded` and leaves no object record.                                     |
-| Restart                        | Fresh server processes retain repository/object usage and both creation-window states.                                                                                                                               |
-| Deletion and rate              | Deletion frees storage; the next upload can still return 429 `object_creation_rate_limited` because deletion does not refund creation. Repository churn similarly reaches 429 with `Retry-After`.                    |
-| Filesystem failure             | A directory deliberately occupying an object destination forces 503; after removing the fault and restarting, journal recovery refunds the failed attempt and an upload at a one-object/one-creation limit succeeds. |
-| Shipped pagination             | Compiled `repos` traverses multiple pages with page size 1. Compiled `clone`, first `push`, fresh `clone`, second `push`, and `pull` preserve the exact file contents.                                               |
+| Scenario                       | Observed assertions                                                                                                                                                                                                       |
+| ------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Repository concurrency         | Six concurrent creates with a two-repository limit yield exactly two 201 responses and four 403 responses.                                                                                                                |
+| Independent identity           | A second independently minted identity creates and uploads successfully while the first is exhausted.                                                                                                                     |
+| Object boundary                | Two concurrent object uploads across two repositories succeed at a two-object aggregate limit; the next returns 403 `object_quota_exceeded`.                                                                              |
+| Duplicate and rejected uploads | A duplicate upload returns 200; a rejected upload adds no repository keys. Replay nonce consumption is accounted separately.                                                                                              |
+| Byte boundary                  | An object at the exact encoded byte limit returns 200; the same object with the limit reduced by one byte returns 403 `object_bytes_quota_exceeded` and leaves no object record.                                          |
+| Restart                        | Fresh server processes retain repository/object usage and both creation-window states.                                                                                                                                    |
+| Deletion and rate              | Deletion frees storage; the next upload can still return 429 `object_creation_rate_limited` because deletion does not refund creation. Repository churn similarly reaches 429 with `Retry-After`.                         |
+| Filesystem failure             | A directory deliberately occupying an object destination forces 503; after removing the fault and restarting, the same upload succeeds at a one-object/one-creation limit; this original fixture failed during preflight. |
+| Shipped pagination             | Compiled `repos` traverses multiple pages with page size 1. Compiled `clone`, first `push`, fresh `clone`, second `push`, and `pull` preserve the exact file contents.                                                    |
 
 The second-upload test found that `Client.land` fetched only one page of signed
 head history. It now uses the existing THA-9 cursor collector before chain
@@ -103,6 +103,14 @@ The affected suites completed with **424 passing tests and zero failures**:
 
 All six affected typechecks passed. Formatting and lint are part of the required
 final verification; existing `require-await` warnings are not test failures.
+
+## Post-merge verification
+
+[THA-147 verification](tha-147-verification.md) records a fresh run after PR
+#211 merged, adds compiled object-concurrency and flat-data adoption scenarios,
+and corrects the scope of the original filesystem-failure evidence. The current
+compiled fixture fails the journal write before commit; injected-backend route
+tests provide the separate post-publication rollback and replay evidence.
 
 ## Scope and completion tracking
 
