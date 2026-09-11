@@ -26,10 +26,11 @@ veto may be `active`, `revoked`, `withdrawn`, `unauthorized`, `legacy`, or
 Offline status reflects the signed evidence fetched so far; it is not a promise
 about the next server land decision.
 
-`blockOnVeto(vetoes, reviewers, authorized?)` in `@thaddeus.run/platform`
-requires an explicit reviewer allowlist. Empty means nobody is trusted. The
-server also checks the exact grant, repository, target path, revocation, and
-withdrawal for each veto at landing.
+`blockOnVeto(vetoes, reviewers, authorized)` in `@thaddeus.run/platform`
+requires an explicit reviewer allowlist and lifecycle authorization predicate.
+Empty means nobody is trusted; omitting either argument throws. The server also
+checks the exact grant, repository, target path, revocation, and withdrawal for
+each veto at landing.
 
 ## Upgrade behavior
 

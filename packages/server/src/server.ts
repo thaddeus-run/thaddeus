@@ -2735,9 +2735,9 @@ export function createServer(config: ServerConfig): Server {
     const field =
       action === 'reviewers'
         ? 'capability'
-        : action === 'reviewers/revoke'
+        : action === 'reviewer-revocations'
           ? 'revocation'
-          : action === 'vetoes/withdraw'
+          : action === 'veto-withdrawals'
             ? 'withdrawal'
             : 'veto';
     if (Object.keys(data).some((key) => key !== field))
@@ -2785,7 +2785,10 @@ export function createServer(config: ServerConfig): Server {
       const meta = await readMeta(name);
       if (meta === undefined)
         return json(404, { error: 'repository_not_found' });
-      if (action.startsWith('reviewers') && signer !== meta.owner)
+      if (
+        (action === 'reviewers' || action === 'reviewer-revocations') &&
+        signer !== meta.owner
+      )
         return json(403, { error: 'not the repo owner' });
       if (
         record !== undefined &&
@@ -2802,11 +2805,11 @@ export function createServer(config: ServerConfig): Server {
                 grant: reviewerCapabilityId(record as ReviewerCapability),
               });
             }
-            if (action === 'reviewers/revoke') {
+            if (action === 'reviewer-revocations') {
               await log.revoke(record as ReviewRevocation);
               return json(200, { revoked: true });
             }
-            if (action === 'vetoes/withdraw') {
+            if (action === 'veto-withdrawals') {
               await log.withdraw(record as VetoWithdrawal);
               return json(200, { withdrawn: true });
             }
@@ -4070,8 +4073,9 @@ export function createServer(config: ServerConfig): Server {
           }
           return withBody((body) => scheduleReveal(repoName, req, body));
         }
+        // Single-segment actions preserve existing routes for names containing '/'.
         const reviewMatch = path.match(
-          /^\/repos\/(.+)\/(reviewers(?:\/revoke)?|vetoes(?:\/withdraw)?)$/
+          /^\/repos\/(.+)\/(reviewers|reviewer-revocations|vetoes|veto-withdrawals)$/
         );
         if (reviewMatch !== null) {
           const repoName = safeDecode(reviewMatch[1], limits.maxFieldBytes);

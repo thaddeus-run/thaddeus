@@ -245,7 +245,7 @@ test('review revoke disables durable vetoes; a fresh grant does not resurrect th
     (
       await srv.fetch(
         signed(
-          '/repos/r/reviewers/revoke',
+          '/repos/r/reviewer-revocations',
           { revocation: encodeReviewRecord(revocation) },
           owner
         )
@@ -281,7 +281,7 @@ test('withdrawal is durable, cannot be undone by duplicate upload, and preserves
     (
       await srv.fetch(
         signed(
-          '/repos/r/vetoes/withdraw',
+          '/repos/r/veto-withdrawals',
           { withdrawal: encodeReviewRecord(withdrawal) },
           reviewer
         )
@@ -401,7 +401,7 @@ test('rate limits survive restart and retries consume no additional budget', asy
     (
       await restarted.fetch(
         signed(
-          '/repos/r/vetoes/withdraw',
+          '/repos/r/veto-withdrawals',
           { withdrawal: encodeReviewRecord(withdrawal) },
           f.owner
         )
@@ -435,7 +435,7 @@ test('upgrades preserve owner v1 vetoes and ignore outsider v1 even after granti
     (
       await loaded.fetch(
         signed(
-          '/repos/r/vetoes/withdraw',
+          '/repos/r/veto-withdrawals',
           { withdrawal: encodeReviewRecord(withdrawal) },
           other.owner
         )
@@ -484,7 +484,7 @@ test('batch limits, forged management, and unaffiliated withdrawals fail without
     (
       await srv.fetch(
         signed(
-          '/repos/r/vetoes/withdraw',
+          '/repos/r/veto-withdrawals',
           { withdrawal: encodeReviewRecord(withdrawal) },
           stranger
         )
@@ -510,7 +510,7 @@ test('concurrent revoke and submit cannot leave a veto active after revocation',
     submit(srv, veto, reviewer),
     srv.fetch(
       signed(
-        '/repos/r/reviewers/revoke',
+        '/repos/r/reviewer-revocations',
         { revocation: encodeReviewRecord(revocation) },
         owner
       )
@@ -617,3 +617,51 @@ for (const failRollback of [false, true]) {
     ).toHaveLength(1);
   });
 }
+
+test('review routes preserve write revocation for slash-containing repository names', async () => {
+  const owner = Identity.create();
+  const delegate = Identity.create();
+  const srv = createServer({ backend: new MemoryBackend(), now: () => at });
+  for (const name of ['a', 'a/reviewers', 'a/vetoes']) {
+    expect(
+      (await srv.fetch(signed('/repos', createRepoBody(name, owner), owner)))
+        .status
+    ).toBe(201);
+    const delegation = signDelegation(
+      { agent: delegate.did, paths: ['**'], maxChanges: 10, maxSpend: 10 },
+      owner
+    );
+    expect(
+      (
+        await srv.fetch(
+          signed(
+            `/repos/${name}/grants`,
+            { delegation: encodeDelegation(delegation) },
+            owner
+          )
+        )
+      ).status
+    ).toBe(200);
+  }
+  for (const name of ['a/reviewers', 'a/vetoes']) {
+    const response = await srv.fetch(
+      signed(`/repos/${name}/revoke`, { agent: delegate.did }, owner)
+    );
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({
+      agent: delegate.did,
+      revoked: true,
+    });
+    const denied = await srv.fetch(
+      signed(`/repos/${name}/push`, encodeBundle([], [], []), delegate)
+    );
+    expect(denied.status).toBe(403);
+  }
+  expect(
+    (
+      await srv.fetch(
+        signed('/repos/a/push', encodeBundle([], [], []), delegate)
+      )
+    ).status
+  ).toBe(200);
+});

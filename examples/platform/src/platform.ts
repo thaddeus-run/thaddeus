@@ -254,7 +254,9 @@ console.log(
 const core = platform.createRepo('acme/core');
 const vetoes = new VetoLog();
 const reviewer = Identity.create();
-const veto = blockOnVeto(vetoes, [reviewer.did]);
+// This legacy in-memory demo has static authority and no revocation records.
+// Persistent hosts must use ReviewLog.status(veto, op) === 'active'.
+const veto = blockOnVeto(vetoes, [reviewer.did], () => true);
 
 // A clean op lands under the veto policy.
 await branch(core, 'alice/clean', 'src/ok.rs', 'fn ok() {}', alice);

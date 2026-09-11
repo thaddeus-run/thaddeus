@@ -409,6 +409,13 @@ describe('policy — requirePassingChecks', () => {
 const VETO_AT = '2026-07-01T00:00:00Z';
 
 describe('policy — blockOnVeto', () => {
+  test('omitting lifecycle authorization fails closed for runtime callers', () => {
+    // @ts-expect-error Runtime callers must also supply lifecycle authorization.
+    expect(() => blockOnVeto(new VetoLog(), [Identity.create().did])).toThrow(
+      TypeError
+    );
+  });
+
   test('allows when no incoming op is vetoed', async () => {
     const store = new MemoryStore();
     const log = new OpLog(store);
@@ -416,9 +423,11 @@ describe('policy — blockOnVeto', () => {
     const vetoes = new VetoLog();
     const op = await log.write('main', 'a.rs', enc('fn a() {}'), author);
 
-    const d = await blockOnVeto(vetoes, [author.did])(
-      proposal({ incomingOps: [op] })
-    );
+    const d = await blockOnVeto(
+      vetoes,
+      [author.did],
+      () => true
+    )(proposal({ incomingOps: [op] }));
     expect(d.allow).toBe(true);
   });
 
@@ -435,9 +444,11 @@ describe('policy — blockOnVeto', () => {
       reviewer
     );
 
-    const d = await blockOnVeto(vetoes, [reviewer.did])(
-      proposal({ incomingOps: [op] })
-    );
+    const d = await blockOnVeto(
+      vetoes,
+      [reviewer.did],
+      () => true
+    )(proposal({ incomingOps: [op] }));
     expect(d.allow).toBe(false);
     expect(d.reason).toContain('1 op(s)');
     expect(d.reason).toContain('veto');
@@ -458,9 +469,11 @@ describe('policy — blockOnVeto', () => {
     );
 
     // Only `authorized` may veto; the outsider's verified veto is ignored.
-    const d = await blockOnVeto(vetoes, [authorized.did])(
-      proposal({ incomingOps: [op] })
-    );
+    const d = await blockOnVeto(
+      vetoes,
+      [authorized.did],
+      () => true
+    )(proposal({ incomingOps: [op] }));
     expect(d.allow).toBe(true);
   });
 
@@ -475,9 +488,11 @@ describe('policy — blockOnVeto', () => {
     // Tampered body: names a real reviewer but the signature no longer verifies.
     vetoes.append({ ...signed, reason: 'forged veto' });
 
-    const d = await blockOnVeto(vetoes, [reviewer.did])(
-      proposal({ incomingOps: [op] })
-    );
+    const d = await blockOnVeto(
+      vetoes,
+      [reviewer.did],
+      () => true
+    )(proposal({ incomingOps: [op] }));
     expect(d.allow).toBe(true);
   });
 
@@ -491,9 +506,11 @@ describe('policy — blockOnVeto', () => {
     const vetoed = await log.write('main', 'f.rs', enc('fn f() {}'), author);
     await vetoes.record(vetoed, { reason: 'unsafe', at: VETO_AT }, reviewer);
 
-    const d = await blockOnVeto(vetoes, [reviewer.did])(
-      proposal({ incomingOps: [clean, vetoed] })
-    );
+    const d = await blockOnVeto(
+      vetoes,
+      [reviewer.did],
+      () => true
+    )(proposal({ incomingOps: [clean, vetoed] }));
     expect(d.allow).toBe(false);
     expect(d.reason).toContain('1 op(s)');
   });
@@ -505,7 +522,13 @@ describe('policy — blockOnVeto', () => {
     const vetoes = new VetoLog();
     await vetoes.record(op, { reason: 'no', at: VETO_AT }, reviewer);
     expect(
-      (await blockOnVeto(vetoes, [])(proposal({ incomingOps: [op] }))).allow
+      (
+        await blockOnVeto(
+          vetoes,
+          [],
+          () => true
+        )(proposal({ incomingOps: [op] }))
+      ).allow
     ).toBe(true);
     // @ts-expect-error Runtime callers must also provide the allowlist.
     expect(() => blockOnVeto(vetoes)).toThrow(TypeError);

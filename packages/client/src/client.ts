@@ -993,7 +993,7 @@ export class Client {
     return (await this.#ok(
       await this.#signed(
         'POST',
-        `/repos/${encodeURIComponent(name)}/reviewers/revoke`,
+        `/repos/${encodeURIComponent(name)}/reviewer-revocations`,
         {
           revocation: encodeReviewRecord(revocation),
         }
@@ -1008,7 +1008,7 @@ export class Client {
     return (await this.#ok(
       await this.#signed(
         'POST',
-        `/repos/${encodeURIComponent(name)}/vetoes/withdraw`,
+        `/repos/${encodeURIComponent(name)}/veto-withdrawals`,
         {
           withdrawal: encodeReviewRecord(withdrawal),
         }

@@ -25,9 +25,8 @@ must not retire a person's authority to say no.
 > discoverability-as-query, typed releases, and mirror/peer transport are
 > deferred (see the design spec).
 
-`blockOnVeto(vetoes, reviewers, authorized?)` requires an explicit DID
-allowlist. An empty list trusts nobody; omitting the list throws. Hosts with
-scoped grants must provide the third argument to check current authority for
-each veto and operation. The server does this using `ReviewLog.status`, so
-withdrawn or revoked vetoes cannot block even though their signatures remain
-valid.
+`blockOnVeto(vetoes, reviewers, authorized)` requires an explicit DID allowlist
+and a lifecycle authorization predicate. An empty list trusts nobody; omitting
+either argument throws. The predicate checks current authority for each veto and
+operation. The server does this using `ReviewLog.status`, so withdrawn or
+revoked vetoes cannot block even though their signatures remain valid.
