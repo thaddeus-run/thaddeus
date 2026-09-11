@@ -905,27 +905,33 @@ export function createServer(config: ServerConfig): Server {
     if (meta === undefined) {
       return undefined; // unknown repo
     }
-    const repo = await platform.openDurable(name, config.backend);
-    if (
-      repo.headRecords.owner !== undefined &&
-      repo.headRecords.owner !== meta.owner
-    ) {
-      throw new Error(
-        `signed-head owner disagrees with repo metadata: ${name}`
-      );
-    }
-    // Signed history is authoritative for shared views. Raw view/* values may
-    // still hold local or legacy projections, but they are never trust input.
-    for (const view of repo.headRecords.views()) {
-      const current = repo.headRecords.current(view);
-      if (current !== undefined) {
-        repo.log.view(view, current.heads);
+    // Opening durable stores may finish pre-quota recall journals. Reserve and
+    // commit those object writes with the owner's usage before serving reads.
+    return quotaMutation(name, meta.owner, false, async () => {
+      const loaded = repoCache.get(name);
+      if (loaded !== undefined) return loaded;
+      const repo = await platform.openDurable(name, config.backend);
+      if (
+        repo.headRecords.owner !== undefined &&
+        repo.headRecords.owner !== meta.owner
+      ) {
+        throw new Error(
+          `signed-head owner disagrees with repo metadata: ${name}`
+        );
       }
-    }
-    await recoverLandEffects(name, repo, await registryFor(name));
-    repoCache.set(name, repo);
-    trimRepoCache(name);
-    return repo;
+      // Signed history is authoritative for shared views. Raw view/* values may
+      // still hold local or legacy projections, but they are never trust input.
+      for (const view of repo.headRecords.views()) {
+        const current = repo.headRecords.current(view);
+        if (current !== undefined) {
+          repo.log.view(view, current.heads);
+        }
+      }
+      await recoverLandEffects(name, repo, await registryFor(name));
+      repoCache.set(name, repo);
+      trimRepoCache(name);
+      return repo;
+    });
   }
 
   /** Drops all caches together so failed staged writes cannot remain visible. */

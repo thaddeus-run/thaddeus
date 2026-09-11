@@ -58,6 +58,14 @@ bounded legacy-adoption scan, and early rejection before a cold object scan.
 A route test also cycles unauthorized uploads across 130 repositories and
 verifies that an evicted delegation registry reloads from storage.
 
+Cold-read regressions seed prepared recall journals from before quota adoption,
+both before and after the object record was written. Reads recover successfully
+on both backends, repeated restarts do not double-charge, and subsequent uploads
+still enforce the owner's quota. The client browser test bundles the SDK with
+tsdown's browser target and verifies that no Node builtin import survives;
+shared protocol exports do not load the server's quota transaction
+implementation.
+
 The deletion test preserves a second owner's nested repository and its quota
 when deleting a parent name prefix. Whole-bundle quota rejection discards
 earlier staged objects and their hot cache. The metrics test verifies fixed
@@ -78,13 +86,13 @@ moon run server:test persist:test client:test cli:test store:test platform:test 
   store:typecheck platform:typecheck
 ```
 
-The affected suites completed with **415 passing tests and zero failures**:
+The affected suites completed with **420 passing tests and zero failures**:
 
 | Project                                      | Passing tests |
 | -------------------------------------------- | ------------: |
-| server                                       |           151 |
+| server                                       |           156 |
 | persist                                      |            36 |
-| client                                       |            29 |
+| client                                       |            30 |
 | cli, including four compiled quota scenarios |            99 |
 | store                                        |            50 |
 | platform                                     |            49 |

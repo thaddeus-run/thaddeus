@@ -40,7 +40,7 @@ import {
   encodeRelease,
   type RepoPolicyRecord,
   signRequest,
-} from '@thaddeus.run/server';
+} from '@thaddeus.run/server/protocol';
 import {
   type Backend,
   type Capability,

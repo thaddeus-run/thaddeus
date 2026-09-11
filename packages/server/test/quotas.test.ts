@@ -101,6 +101,71 @@ for (const kind of ['memory', 'file'] as const) {
       kind === 'memory'
         ? new MemoryBackend()
         : new FileBackend(mkdtempSync(join(tmp, 'data-')));
+    for (const alreadyWritten of [false, true]) {
+      test(`cold reads recover legacy recalls with durable accounting (object written: ${alreadyWritten})`, async () => {
+        const owner = Identity.create();
+        const b = backend();
+        const config = {
+          backend: b,
+          now: () => new Date(initial).toISOString(),
+          quotas: { maxObjects: 1, objectCreationLimit: 1 },
+        };
+        expect(
+          (await create(createServer(config), owner, 'recall')).status
+        ).toBe(201);
+        const store = new MemoryStore();
+        const ref = await store.put(
+          new TextEncoder().encode('recovered'),
+          owner
+        );
+        const encrypted = store.current(ref.plaintext_id)!;
+        const caps = [...store.caps(ref.plaintext_id)];
+        if (alreadyWritten)
+          await b.put(
+            `repo/recall/obj/${encrypted.id}`,
+            encodeRecord(encrypted)
+          );
+        await b.put(
+          `repo/recall/recall/${ref.plaintext_id}`,
+          encodeRecord({
+            phase: 'prepared',
+            recall: { object: encrypted, caps, pending: [] },
+          })
+        );
+        for (const key of await b.list('quota/v1/')) await b.delete(key);
+        for (let restart = 0; restart < 2; restart++) {
+          const server = createServer(config);
+          const response = await server.fetch(
+            new Request('http://quota.test/repos/recall/views/main')
+          );
+          expect(response.status).toBe(200);
+          expect(await b.get(`repo/recall/obj/${encrypted.id}`)).toBeDefined();
+          expect(
+            await b.get(`repo/recall/recall/${ref.plaintext_id}`)
+          ).toBeUndefined();
+          expect(
+            (
+              await push(
+                server,
+                owner,
+                'recall',
+                encodeBundle([], [encrypted], caps)
+              )
+            ).status
+          ).toBe(200);
+          const denied = await push(
+            server,
+            owner,
+            'recall',
+            (await object(owner, 'extra')).bundle
+          );
+          expect(denied.status).toBe(403);
+          expect(await denied.json()).toMatchObject({
+            code: 'object_quota_exceeded',
+          });
+        }
+      });
+    }
     test('repository boundary, concurrency, independent identity, restart and deletion', async () => {
       const owner = Identity.create();
       const other = Identity.create();

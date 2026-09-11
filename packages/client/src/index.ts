@@ -18,7 +18,7 @@ export {
   type ScheduleRevealOutcome,
   type ViewsPage,
 } from './client';
-export type { RepoPolicyRecord } from '@thaddeus.run/server';
+export type { RepoPolicyRecord } from '@thaddeus.run/server/protocol';
 export type {
   Release,
   ReleaseArtifact,
