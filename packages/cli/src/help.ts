@@ -343,7 +343,9 @@ thaddeus policy clear [--json]
   Per-owner storage quotas: --max-repositories (100), --max-objects (100000),
   --max-object-bytes (1073741824 encoded object bytes). Creation windows use
   --repository-creation-limit (20), --object-creation-limit (10000), and
-  --creation-window-ms (3600000). All must be positive safe integers.
+  --creation-window-ms (3600000). All six must be positive safe integers at
+  most 2251799813685247 (floor(Number.MAX_SAFE_INTEGER / 4)); larger values
+  fail startup with "invalid quota configuration" and exit code 2.
   Delegated uploads consume the repository owner's budget. Quotas and windows
   persist across restart; deleting data frees storage, but not creation rate.
   --max-request-body-bytes sets the inclusive request-body limit (default

@@ -522,6 +522,11 @@ test('interrupted commit is replayed on restart and retains its owner quota', as
   b.interrupted = true;
   expect((await push(first, owner, 'a', item.bundle)).status).toBe(503);
   expect(await b.get('quota/v1/journal')).toBeDefined();
+  const metrics = await first.fetch(new Request('http://quota.test/metrics'));
+  expect(metrics.status).toBe(200);
+  expect(await metrics.text()).toContain(
+    'thaddeus_quota_outcomes_total{outcome="quota_storage_unavailable"} 1'
+  );
   b.interrupted = false;
   const restarted = createServer(config);
   expect(
@@ -536,6 +541,119 @@ test('interrupted commit is replayed on restart and retains its owner quota', as
   ).toBe(200);
   await create(restarted, owner, 'b');
   expect((await push(restarted, owner, 'b', another.bundle)).status).toBe(200);
+});
+
+test('cache eviction invalidates cursors even when a cold clock starts at zero', async () => {
+  const owner = Identity.create();
+  const backend = new MemoryBackend();
+  const config = {
+    backend,
+    now: () => new Date(initial).toISOString(),
+    quotas: { maxRepositories: 200, repositoryCreationLimit: 200 },
+    defaultPageSize: 1,
+    maxPageSize: 1,
+  };
+  const writer = createServer(config);
+  for (let i = 0; i < 130; i++) await create(writer, owner, `cursor-${i}`);
+  const reader = createServer(config);
+  const first = await reader.fetch(
+    new Request('http://quota.test/repos/cursor-0/views')
+  );
+  const { nextCursor } = (await first.json()) as { nextCursor: string };
+  expect(nextCursor).toBeString();
+  for (let i = 1; i < 130; i++) {
+    expect(
+      (
+        await reader.fetch(
+          new Request(`http://quota.test/repos/cursor-${i}/views/main`)
+        )
+      ).status
+    ).toBe(200);
+  }
+  const stale = await reader.fetch(
+    new Request(`http://quota.test/repos/cursor-0/views?cursor=${nextCursor}`)
+  );
+  expect(stale.status).toBe(409);
+  expect(await stale.json()).toMatchObject({
+    code: 'pagination_snapshot_changed',
+  });
+  await reader.close();
+  await writer.close();
+});
+
+for (const mutation of ['push', 'revoke'] as const) {
+  test(`${mutation} racing deletion returns 404 without a retry hint`, async () => {
+    class PausedBackend extends MemoryBackend {
+      pause?: () => Promise<void>;
+      override async get(key: string): Promise<Uint8Array | undefined> {
+        const bytes = await super.get(key);
+        if (key === 'repo/race/meta/repo' && this.pause !== undefined) {
+          const pause = this.pause;
+          this.pause = undefined;
+          await pause();
+        }
+        return bytes;
+      }
+    }
+    const backend = new PausedBackend();
+    const owner = Identity.create();
+    const server = createServer({
+      backend,
+      now: () => new Date(initial).toISOString(),
+    });
+    await create(server, owner, 'race');
+    const entered = Promise.withResolvers<void>();
+    const resume = Promise.withResolvers<void>();
+    backend.pause = async () => {
+      entered.resolve();
+      await resume.promise;
+    };
+    const pending = server.fetch(
+      request(
+        'POST',
+        `/repos/race/${mutation}`,
+        owner,
+        mutation === 'push'
+          ? encodeBundle([], [], [])
+          : { agent: Identity.create().did }
+      )
+    );
+    await entered.promise;
+    expect(
+      (await server.fetch(request('DELETE', '/repos/race', owner))).status
+    ).toBe(200);
+    resume.resolve();
+    const response = await pending;
+    expect(response.status).toBe(404);
+    expect(response.headers.get('retry-after')).toBeNull();
+    expect(await backend.list('repo/race/')).toEqual([]);
+  });
+}
+
+test('deletion checks repeated nested prefixes with bounded metadata reads', async () => {
+  class ObservedBackend extends MemoryBackend {
+    nestedReads = 0;
+    override async get(key: string): Promise<Uint8Array | undefined> {
+      if (key === 'repo/parent/child/meta/repo') this.nestedReads++;
+      return super.get(key);
+    }
+  }
+  const backend = new ObservedBackend();
+  const owner = Identity.create();
+  const server = createServer({
+    backend,
+    now: () => new Date(initial).toISOString(),
+  });
+  await create(server, owner, 'parent');
+  await create(server, owner, 'parent/child');
+  for (let i = 0; i < 100; i++)
+    await backend.put(`repo/parent/child/meta/example/${i}`, encodeRecord(i));
+  backend.nestedReads = 0;
+  expect(
+    (await server.fetch(request('DELETE', '/repos/parent', owner))).status
+  ).toBe(200);
+  expect(backend.nestedReads).toBeLessThanOrEqual(2);
+  expect(await backend.get('repo/parent/child/meta/example/99')).toBeDefined();
 });
 
 test('failed genesis reclaims the repository reservation and creation window', async () => {

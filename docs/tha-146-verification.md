@@ -55,6 +55,10 @@ owner/delegate accounting, independent identities, deletion, restart, corrupt
 records, an interrupted commit, a failed genesis, failed object writes, a
 bounded legacy-adoption scan, and early rejection before a cold object scan.
 
+Additional route regressions cover stale cursors after cache eviction, push and
+revoke racing repository deletion, metrics during a recovery fault, and bounded
+nested-prefix metadata lookups during deletion.
+
 A route test also cycles unauthorized uploads across 130 repositories and
 verifies that an evicted delegation registry reloads from storage.
 
@@ -86,11 +90,11 @@ moon run server:test persist:test client:test cli:test store:test platform:test 
   store:typecheck platform:typecheck
 ```
 
-The affected suites completed with **420 passing tests and zero failures**:
+The affected suites completed with **424 passing tests and zero failures**:
 
 | Project                                      | Passing tests |
 | -------------------------------------------- | ------------: |
-| server                                       |           156 |
+| server                                       |           160 |
 | persist                                      |            36 |
 | client                                       |            30 |
 | cli, including four compiled quota scenarios |            99 |

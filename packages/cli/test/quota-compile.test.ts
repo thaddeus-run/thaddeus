@@ -26,7 +26,7 @@ beforeAll(async () => {
     stdout: 'pipe',
     stderr: 'pipe',
   });
-  expect(build.exitCode).toBe(0);
+  expect(build.exitCode, new TextDecoder().decode(build.stderr)).toBe(0);
 });
 afterAll(async () => {
   for (const process of processes) {

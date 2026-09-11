@@ -52,6 +52,7 @@ export type QuotaCode =
   | 'object_creation_rate_limited'
   | 'quota_batch_too_large'
   | 'quota_storage_unavailable'
+  | 'repository_not_found'
   | 'repository_exists';
 export class QuotaError extends Error {
   constructor(
@@ -128,6 +129,7 @@ export class QuotaAccounting {
     object_creation_rate_limited: 0,
     quota_batch_too_large: 0,
     quota_storage_unavailable: 0,
+    repository_not_found: 0,
     repository_exists: 0,
     committed: 0,
     recovered: 0,
@@ -216,10 +218,9 @@ export class QuotaAccounting {
           throw new QuotaError('repository_exists');
         if (!create) {
           const metaBytes = await this.#raw.get(`repo/${name}/meta/repo`);
-          if (
-            metaBytes === undefined ||
-            (decodeRecord(metaBytes) as { owner?: string }).owner !== owner
-          )
+          if (metaBytes === undefined)
+            throw new QuotaError('repository_not_found');
+          if ((decodeRecord(metaBytes) as { owner?: string }).owner !== owner)
             throw new QuotaError('quota_storage_unavailable', 1);
         }
         if (create) {

@@ -1894,6 +1894,7 @@ export function createServer(config: ServerConfig): Server {
           const b = metaBackend(name);
           const scan = await b.openScan('');
           let inspected = 0;
+          const nestedPrefixes = new Map<string, boolean>();
           try {
             while (true) {
               if (inspected >= 1_000_000)
@@ -1911,10 +1912,18 @@ export function createServer(config: ServerConfig): Server {
                   boundary = key.indexOf('/', boundary + 1)
                 ) {
                   if (!key.slice(boundary + 1).includes('/')) break;
-                  if (
-                    (await readMeta(`${name}/${key.slice(0, boundary)}`)) !==
-                    undefined
-                  ) {
+                  const prefix = key.slice(0, boundary);
+                  let known = nestedPrefixes.get(prefix);
+                  if (known === undefined) {
+                    known = (await readMeta(`${name}/${prefix}`)) !== undefined;
+                    // Bound memoization even for adversarial nested names.
+                    if (nestedPrefixes.size >= 256)
+                      nestedPrefixes.delete(
+                        nestedPrefixes.keys().next().value!
+                      );
+                    nestedPrefixes.set(prefix, known);
+                  }
+                  if (known) {
                     nested = true;
                     break;
                   }
@@ -3579,14 +3588,13 @@ export function createServer(config: ServerConfig): Server {
 
         if (req.method !== 'POST') {
           await cancelBody(req.body);
+          // Process-local observability remains available during recovery faults.
+          if (path === '/metrics' && req.method === 'GET') return metrics();
           await quotas.ready();
         }
 
         if (path === '/repos' && req.method === 'GET') {
           return listRepos(url);
-        }
-        if (path === '/metrics' && req.method === 'GET') {
-          return metrics();
         }
         if (path === '/reputation/import' && req.method === 'POST') {
           return withBody((body) => reputationImport(req, body));
@@ -3810,13 +3818,15 @@ export function createServer(config: ServerConfig): Server {
         const status =
           error.code === 'repository_exists'
             ? 409
-            : error.code === 'quota_storage_unavailable'
-              ? 503
-              : error.code.endsWith('rate_limited')
-                ? 429
-                : error.code === 'quota_batch_too_large'
-                  ? 413
-                  : 403;
+            : error.code === 'repository_not_found'
+              ? 404
+              : error.code === 'quota_storage_unavailable'
+                ? 503
+                : error.code.endsWith('rate_limited')
+                  ? 429
+                  : error.code === 'quota_batch_too_large'
+                    ? 413
+                    : 403;
         return new Response(
           JSON.stringify({ error: error.code, code: error.code }),
           {
