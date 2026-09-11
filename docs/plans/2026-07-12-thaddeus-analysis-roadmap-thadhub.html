@@ -3,7 +3,7 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Thaddeus — Five-Lens Analysis, Roadmap & ThadHub Plan</title>
+    <title>Thaddeus — Five-Lens Analysis, Roadmap &amp; ThadHub Plan</title>
     <style>
       :root {
         --bg: #fbfbfa;
@@ -266,7 +266,9 @@
   <body>
     <div class="wrap">
       <header class="doc">
-        <h1>Thaddeus — Five-Lens Analysis, Active Roadmap & ThadHub Plan</h1>
+        <h1>
+          Thaddeus — Five-Lens Analysis, Active Roadmap &amp; ThadHub Plan
+        </h1>
         <p class="meta">
           <strong>Date:</strong> 2026-07-12 · <strong>Subject:</strong> the
           Thaddeus source-control substrate (18 TS packages +
@@ -282,8 +284,12 @@
           <strong>Companion changes (already applied):</strong> the deferred
           ledger was rewritten and the active pipeline consolidated into
           <code>CHANGELOG.md</code> (the standalone roadmap file was retired),
-          and 25 issues across 4 milestones (P11–P14) were opened on
-          <code>thaddeus-run/thaddeus</code>. See <a href="#implemented">§6</a>.
+          and the original 25 public-core issues across 4 milestones (P11–P14)
+          were opened on <code>thaddeus-run/thaddeus</code>. The complete
+          public/private portfolio now lives in Linear, including dedicated Key
+          Recovery, Global Repository Delivery, and ThadHub Actions projects;
+          public GitHub mirrors only portable core work. See
+          <a href="#implemented">§6</a>.
         </p>
       </header>
 
@@ -324,10 +330,10 @@
             architectural verdict is unchanged.
           </li>
         </ul>
-        Section text below is preserved as-written against <code>9613e66</code>;
-        where a finding is now closed it is flagged inline. The CHANGELOG
-        <code>[Unreleased]</code> pipeline and the GitHub issues carry the
-        corrected, current status.
+        Original audit text below is retained where it remains current and
+        corrected inline where newer releases or verified tracking changed the
+        conclusion. Linear carries the complete current portfolio; public GitHub
+        issues carry only reusable Thaddeus-core work.
       </div>
 
       <p class="lead">
@@ -371,6 +377,20 @@
               >Detailed next-steps outline (the re-prioritized pipeline)</a
             >
           </li>
+          <li>
+            <a href="#pillar-gap-tracking"
+              >P05, P08 &amp; P09 completion tracking</a
+            >
+          </li>
+          <li>
+            <a href="#key-recovery">Identity Continuity &amp; Key Recovery</a>
+          </li>
+          <li>
+            <a href="#global-delivery"
+              >Global Repository Delivery &amp; Reliability</a
+            >
+          </li>
+          <li><a href="#thadhub-actions">ThadHub Actions</a></li>
           <li><a href="#thadhub">ThadHub — detailed plan</a></li>
         </ol>
       </nav>
@@ -792,7 +812,7 @@
           <td>No</td>
         </tr>
         <tr>
-          <td>Diff (working & branch)</td>
+          <td>Diff (working &amp; branch)</td>
           <td>
             <span class="tag t-ok">Built</span> (<code>diff --from/--to</code>)
           </td>
@@ -1115,7 +1135,7 @@ putIfMatch(key, bytes, expectedVersion): boolean  // compare-and-swap</code></pr
           <td class="grade">95%</td>
           <td>
             Everything claimed is real and tested,
-            <em>including the hard part</em>: revoke rotates the key &
+            <em>including the hard part</em>: revoke rotates the key &amp;
             re-encrypts.
           </td>
         </tr>
@@ -1149,8 +1169,10 @@ putIfMatch(key, bytes, expectedVersion): boolean  // compare-and-swap</code></pr
           <td>P05 Virtual FS</td>
           <td class="grade">65%</td>
           <td>
-            COW-by-structural-sharing genuinely delivered; the named API surface
-            doesn't exist and FUSE is absent.
+            COW-by-structural-sharing is real. THA-41 selects the public
+            VFS/FUSE contract; THA-114 is the blocked implementation issue that
+            must ship the named view/snapshot/workcopy API and conformance
+            tests.
           </td>
         </tr>
         <tr>
@@ -1166,27 +1188,32 @@ putIfMatch(key, bytes, expectedVersion): boolean  // compare-and-swap</code></pr
           <td>P07 Identity / federated reputation</td>
           <td class="grade">70%</td>
           <td>
-            The record protocol (dual-sig, verify-from-DID, portability) is
-            excellent; "federated" is only proven same-process — no wire moves a
-            contribution between hosts.
+            The dual-signed record protocol is real, and 0.1.7 added a
+            trust-host allowlist plus signed export/import archives, so
+            reputation now has a manual wire between hosts. Automatic
+            host-to-host federation and continuous exchange remain.
           </td>
         </tr>
         <tr>
           <td>P08 Semantic graph ("boldest break")</td>
           <td class="grade">35%</td>
           <td>
-            Weakest. Graph is <em>derived from text</em> (inverting the claim),
-            backed by two regexes, 1 of 4 structural ops, no structural
-            conflicts.
+            Still the weakest: the graph is <em>derived from text</em>, backed
+            by two regexes, with one structural operation and no structural
+            conflicts. THA-113 settles canonical graph versus derived index;
+            strengthened THA-36 then delivers the parser-backed semantic model,
+            while split issue THA-145 owns the four structural operations and
+            deterministic conflict semantics.
           </td>
         </tr>
         <tr>
           <td>P09 Agents as principals</td>
           <td class="grade">55%</td>
           <td>
-            Identity/attribution + terminal revocation real; budgets are
-            path-only/lifetime/self-reported; the "economy" (paid attestation)
-            is entirely absent.
+            Identity, attribution, terminal revocation, and per-hour rate
+            windows are real. Authority remains path-only; symbol scopes,
+            durable multi-node atomic budget/rate accounting, delegation expiry,
+            and paid execution remain unbuilt but are now separately tracked.
           </td>
         </tr>
         <tr>
@@ -1231,17 +1258,22 @@ putIfMatch(key, bytes, expectedVersion): boolean  // compare-and-swap</code></pr
           concrete migration promise doesn't exist.
         </li>
         <li>
-          <strong>"Federated reputation" isn't networked</strong> — the endpoint
-          returns counts and sync bundles omit contributions; "federated" is a
-          same-process property today.
+          <strong
+            >Federated reputation has a manual wire, but not automatic
+            federation</strong
+          >
+          — 0.1.7 ships signed export/import archives and a trust-host
+          allowlist. Host-to-host mirror/subscribe, continuous exchange, and
+          automated trust policy remain tracked work.
         </li>
         <li>
           <strong
             >The richest promised artifacts are absent or redefined-down</strong
           >
-          — P09 paid attestation (zero code), P10 semantic/behavioral diff
-          (doesn't exist), "formal proof" (reduced to an allowlisted CI
-          signature), P11 "query like Postgres in ms" (a full re-derive facade).
+          — P09 paid execution/attestation remains unbuilt but is now tracked
+          under ThadHub Actions; P10 semantic/behavioral diff doesn't exist,
+          "formal proof" is reduced to an allowlisted CI signature, and P11
+          "query like Postgres in ms" is a full re-derive facade.
         </li>
         <li>
           <strong
@@ -1290,8 +1322,9 @@ putIfMatch(key, bytes, expectedVersion): boolean  // compare-and-swap</code></pr
         6. What was already implemented (Part 1 §1 — tracking cleanup)
       </h2>
       <p>
-        These changes are <strong>done and verified</strong> in the repo (docs
-        formatted clean; milestones/issues live on GitHub):
+        These original cleanup changes are <strong>done and verified</strong> in
+        the repo (docs formatted clean; the public P11–P14 issues live on
+        GitHub, while the complete current portfolio lives in Linear):
       </p>
       <ul class="checklist">
         <li>
@@ -1348,8 +1381,8 @@ putIfMatch(key, bytes, expectedVersion): boolean  // compare-and-swap</code></pr
           <input type="checkbox" checked disabled /><span
             ><span class="done-flag">DONE</span> —
             <strong>4 milestones + 25 issues created</strong> (#58–#82): P11
-            Hardening & Proof, P12 Single-node security, P13 Product/collab UX,
-            P14 Backend-behind-flags — including the 8 security findings
+            Hardening &amp; Proof, P12 Single-node security, P13 Product/collab
+            UX, P14 Backend-behind-flags — including the 8 security findings
             (#72–#79) and 3 PM/DX items (#80–#82) surfaced by this
             analysis.</span
           >
@@ -1364,11 +1397,12 @@ putIfMatch(key, bytes, expectedVersion): boolean  // compare-and-swap</code></pr
         <em>within</em> it: put the <strong>security bindings</strong> and the
         <strong>on-ramp</strong> ahead of the substrate-polish they were mixed
         with, and grow the <strong>Backend contract</strong> before any
-        infrastructure change. The GitHub milestones now encode exactly this.
+        infrastructure change. Linear now encodes the complete public/private
+        portfolio; GitHub exposes only reusable public-core work.
       </p>
 
       <h3>
-        P11 — Hardening & Proof <span class="pill">current</span> ·
+        P11 — Hardening &amp; Proof <span class="pill">current</span> ·
         <a href="https://github.com/thaddeus-run/thaddeus/milestone/1"
           >milestone</a
         >
@@ -1484,7 +1518,7 @@ putIfMatch(key, bytes, expectedVersion): boolean  // compare-and-swap</code></pr
       </ul>
 
       <h3>
-        P13 — Product & collaboration UX ·
+        P13 — Product &amp; collaboration UX ·
         <a href="https://github.com/thaddeus-run/thaddeus/milestone/3"
           >milestone</a
         >
@@ -1581,7 +1615,467 @@ putIfMatch(key, bytes, expectedVersion): boolean  // compare-and-swap</code></pr
         >
       </div>
 
+      <h3 id="pillar-gap-tracking">P05, P08 &amp; P09 completion tracking</h3>
+      <p>
+        The audit gaps now have explicit implementation ownership. Creating a
+        tracking issue alone does not improve a pillar score: each row below has
+        a concrete shipped-and-tested exit condition.
+      </p>
+      <table>
+        <tr>
+          <th>Pillar</th>
+          <th>Tracking</th>
+          <th>Required outcome</th>
+        </tr>
+        <tr>
+          <td><strong>P05 — Virtual FS</strong></td>
+          <td>
+            THA-114 ·
+            <a href="https://github.com/thaddeus-run/thaddeus/issues/170"
+              >public core #170</a
+            >
+            · blocked by THA-41
+          </td>
+          <td>
+            Ship the selected view/snapshot/workcopy API, compatibility and
+            conformance tests, documentation, and the explicit FUSE outcome.
+          </td>
+        </tr>
+        <tr>
+          <td><strong>P08 — Semantic graph architecture</strong></td>
+          <td>
+            THA-113 ·
+            <a href="https://github.com/thaddeus-run/thaddeus/issues/169"
+              >public decision #169</a
+            >
+            → strengthened THA-36 → THA-145 ·
+            <a href="https://github.com/thaddeus-run/thaddeus/issues/201"
+              >public structural operations #201</a
+            >
+          </td>
+          <td>
+            Decide canonical graph versus derived index, then ship a
+            parser-backed semantic model, all four promised structural
+            operations, and deterministic structural-conflict semantics.
+          </td>
+        </tr>
+        <tr>
+          <td><strong>P09 — Symbol authority</strong></td>
+          <td>
+            THA-115 ·
+            <a href="https://github.com/thaddeus-run/thaddeus/issues/171"
+              >public core #171</a
+            >
+          </td>
+          <td>
+            Delegate authority to stable symbols and definitions without
+            widening access to an entire path; prove rename/move and stale-scope
+            behavior.
+          </td>
+        </tr>
+        <tr>
+          <td><strong>P09 — Durable budgets &amp; expiry</strong></td>
+          <td>
+            THA-116 ·
+            <a href="https://github.com/thaddeus-run/thaddeus/issues/172"
+              >public core #172</a
+            >
+            · extends THA-25/#78
+          </td>
+          <td>
+            Atomically enforce rate and spend windows across restarts and nodes,
+            enforce delegation expiry, and pass race, retry, failover, and clock
+            boundary tests.
+          </td>
+        </tr>
+      </table>
+
+      <h3 id="key-recovery">Identity Continuity &amp; Key Recovery</h3>
+      <p>
+        Key recovery is a separate, security-critical project rather than a
+        hidden part of browser authentication. Its outcome is that a user who
+        loses a device can regain control through a recovery method they
+        enrolled beforehand, without giving ThadHub a plaintext key or a
+        unilateral account-reset power. There is deliberately no magical
+        server-side reset: without a previously enrolled recovery factor, a lost
+        sole key remains unrecoverable.
+      </p>
+      <div class="card verdict">
+        <strong>Project boundary.</strong> Recovery records, cryptographic
+        formats, verification, rotation, and continuity rules are portable
+        <strong>open-source Thaddeus core</strong>. Enrollment screens, customer
+        support flows, hosted recovery orchestration, telemetry, and operational
+        drills are <strong>closed-source ThadHub product</strong>. The public
+        core must remain usable by another compatible host without depending on
+        ThadHub.
+      </div>
+      <table>
+        <tr>
+          <th>Milestone</th>
+          <th>Tracked issue</th>
+          <th>Exit gate</th>
+        </tr>
+        <tr>
+          <td>
+            <strong>R0 — Recovery threat model &amp; identity decision</strong>
+          </td>
+          <td>
+            THA-102 ·
+            <a href="https://github.com/thaddeus-run/thaddeus/issues/158"
+              >public core #158</a
+            >
+          </td>
+          <td>
+            Choose the recoverable-identity model; document attacker, coercion,
+            device-loss, and support-impersonation cases; specify what can and
+            cannot be recovered.
+          </td>
+        </tr>
+        <tr>
+          <td>
+            <strong
+              >R1 — User-controlled backup &amp; clean-device restore</strong
+            >
+          </td>
+          <td>
+            THA-103 ·
+            <a href="https://github.com/thaddeus-run/thaddeus/issues/159"
+              >public core #159</a
+            >
+          </td>
+          <td>
+            Produce an encrypted, user-held recovery kit and prove a restore on
+            a clean device without exposing recovery material to the host.
+          </td>
+        </tr>
+        <tr>
+          <td><strong>R2 — Multi-device &amp; threshold recovery</strong></td>
+          <td>
+            THA-104 ·
+            <a href="https://github.com/thaddeus-run/thaddeus/issues/160"
+              >public core #160</a
+            >
+          </td>
+          <td>
+            Support an enrolled second device and/or threshold guardians so no
+            single host, support agent, or lost device can take over identity.
+          </td>
+        </tr>
+        <tr>
+          <td><strong>R3 — Rotation, revocation &amp; continuity</strong></td>
+          <td>
+            THA-105 ·
+            <a href="https://github.com/thaddeus-run/thaddeus/issues/161"
+              >public core #161</a
+            >
+          </td>
+          <td>
+            Revoke a compromised device, rotate and re-wrap keys, and preserve
+            verifiable repository and reputation continuity without allowing old
+            recovery material to regain access.
+          </td>
+        </tr>
+        <tr>
+          <td>
+            <strong>R4 — Private product recovery UX &amp; drills</strong>
+          </td>
+          <td>THA-106 · Linear/private repository only</td>
+          <td>
+            Ship enrollment, warnings, restore UX, support-safe runbooks, and
+            recurring recovery drills against the public protocol. No public
+            GitHub issue contains proprietary ThadHub implementation detail.
+          </td>
+        </tr>
+      </table>
+      <p>
+        R0 blocks R1–R4. R1–R3 establish the portable mechanism before R4
+        productizes it. The project is complete only after clean-device,
+        lost-device, compromised-device, stale-recovery-factor, and host-loss
+        drills pass; a happy-path sign-in test is not sufficient evidence.
+      </p>
+
+      <h3 id="global-delivery">
+        Global Repository Delivery &amp; Reliability ·
+        <a
+          href="https://linear.app/thaddeus-run/project/global-repository-delivery-and-reliability-f4cc2c5d4008"
+          >Linear project</a
+        >
+      </h3>
+      <p>
+        This late-stage project turns “could host all of GitHub” into an
+        explicit workload model and measured reliability envelope. Today
+        <code>packages/server/src/server.ts:1135</code> dynamically builds a
+        complete pull bundle, while ciphertext objects are already
+        content-addressed at <code>packages/store/src/object.ts:15</code>. G1
+        separates signed manifests, immutable hash-addressed ciphertext objects,
+        and private capability responses so the immutable data plane can use a
+        global cache without weakening authorization.
+      </p>
+      <div class="card verdict" style="border-left-color: var(--crit)">
+        <strong>Sequence gate.</strong> G0 measurement may begin now, but no CDN
+        or global-routing production rollout proceeds until the P14/H4 CAS
+        contract, S3 backend conformance, migration, rollback, and multi-node
+        correctness gates pass. The current <code>Backend</code> has no CAS
+        operation (<code>packages/store/src/backend.ts:5</code>), and
+        FileBackend uses one flat directory
+        (<code>packages/persist/src/file.ts:52</code>).
+      </div>
+      <div class="card">
+        <strong>Source boundary.</strong> Signed manifests, hash-addressed
+        object delivery, verification, and interoperable routing records are
+        public Thaddeus core. AWS topology, CDN configuration, cell placement,
+        capacity and cost data, operational automation, and hosted control-plane
+        implementation remain closed-source ThadHub work.
+      </div>
+      <div class="card verdict" style="border-left-color: var(--med)">
+        <strong>Observed local baseline — not a hyperscale claim.</strong> On
+        2026-07-12, the packaged <code>0.1.5-alpha</code> server with a single
+        FileBackend accepted 15,000/15,000 uniquely named, signed
+        <code>POST /repos</code> requests with HTTP 201 in 59.085 seconds
+        (253.87 completions/second). Latency was 49.16&nbsp;ms p50,
+        133.61&nbsp;ms p95, 163.40&nbsp;ms p99, and 194.46&nbsp;ms maximum; RSS
+        was approximately 129&nbsp;MiB. Listing 15,001 repositories took
+        581.28&nbsp;ms, and the backend occupied 59&nbsp;MB. This proves only a
+        one-minute local empty-repository metadata-create path. It does not
+        prove sustained or populated workloads, clone/pull, push/land,
+        current-source performance, AWS behavior, multi-node correctness,
+        failover, or CDN performance. The current-source harness was not used
+        because generated package exports were stale. G0 replaces this spot test
+        with a reproducible workload matrix.
+      </div>
+      <table>
+        <tr>
+          <th>Milestone</th>
+          <th>Tracked work</th>
+          <th>Exit gate</th>
+        </tr>
+        <tr>
+          <td><strong>G0 — Capacity model, SLOs &amp; load harness</strong></td>
+          <td>
+            THA-117 · Linear/private capacity model; THA-118 ·
+            <a href="https://github.com/thaddeus-run/thaddeus/issues/174"
+              >public load harness #174</a
+            >
+          </td>
+          <td>
+            Define repository count, storage, clone/pull and write profiles,
+            p50/p95/p99 latency, availability, RTO/RPO, and cost targets. Empty,
+            populated, hot, cold, read, write, and failure scenarios must be
+            reproducible before “GitHub scale” is treated as a requirement.
+          </td>
+        </tr>
+        <tr>
+          <td><strong>G1 — CDN-ready repository protocol</strong></td>
+          <td>
+            THA-119 ·
+            <a href="https://github.com/thaddeus-run/thaddeus/issues/175"
+              >public core #175</a
+            >; THA-120 ·
+            <a href="https://github.com/thaddeus-run/thaddeus/issues/176"
+              >public core #176</a
+            >; THA-121 · Linear/private integration
+          </td>
+          <td>
+            Ship a versioned signed manifest and immutable object responses with
+            compatibility tests. Mutable heads, authorization decisions, and
+            wrapped capabilities must never receive ordinary public caching.
+          </td>
+        </tr>
+        <tr>
+          <td><strong>G2 — Global immutable-object delivery</strong></td>
+          <td>THA-122–123 · Linear/private infrastructure</td>
+          <td>
+            Deploy CloudFront +
+            <a
+              href="https://docs.aws.amazon.com/AmazonCloudFront/latest/DeveloperGuide/origin-shield.html"
+              >Origin Shield</a
+            >
+            over S3-backed origins, then add
+            <a
+              href="https://docs.aws.amazon.com/AmazonS3/latest/userguide/MultiRegionAccessPoints.html"
+              >Multi-Region Access Points</a
+            >, replication, explicit cache policy, private-data leakage tests,
+            and origin-failure drills.
+          </td>
+        </tr>
+        <tr>
+          <td><strong>G3 — Regional cells &amp; sharding</strong></td>
+          <td>
+            THA-124 ·
+            <a href="https://github.com/thaddeus-run/thaddeus/issues/180"
+              >public routing primitive #180</a
+            >; THA-125–126 · Linear/private cell implementation
+          </td>
+          <td>
+            Give every repository a home cell/region for writes, backed by
+            multi-AZ services, CAS metadata, queues, load shedding, controlled
+            home migration, and independent blast radii. The write model follows
+            explicit single-primary/per-item-home guidance rather than accepting
+            conflicting writes everywhere; see
+            <a
+              href="https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/bp-global-table-design.prescriptive-guidance.writemodes.html"
+              >DynamoDB global-table write modes</a
+            >.
+          </td>
+        </tr>
+        <tr>
+          <td><strong>G4 — Multi-region recovery</strong></td>
+          <td>THA-127–129 · Linear/private recovery plane</td>
+          <td>
+            Operate a replicated read plane, rehearse repository-home and region
+            evacuation, automate restore and failover, and meet measured RTO/RPO
+            during AZ and regional loss using
+            <a
+              href="https://docs.aws.amazon.com/r53recovery/latest/dg/what-is-route53-recovery.html"
+              >AWS Application Recovery Controller</a
+            >.
+          </td>
+        </tr>
+        <tr>
+          <td><strong>G5 — Hyperscale qualification</strong></td>
+          <td>
+            THA-130 ·
+            <a href="https://github.com/thaddeus-run/thaddeus/issues/186"
+              >public workload suite #186</a
+            >; THA-131 · Linear/private qualification
+          </td>
+          <td>
+            Sustain clone/pull/push/land traffic, hot repositories, cache-miss
+            storms, runner bursts, backup restoration, zero-downtime deployment,
+            and AZ/region-loss chaos. Promotion requires every defined SLO and
+            cost ceiling under failure, not merely provisioned infrastructure.
+          </td>
+        </tr>
+      </table>
+
+      <h3 id="thadhub-actions">
+        ThadHub Actions ·
+        <a
+          href="https://linear.app/thaddeus-run/project/thadhub-actions-and-cicd-b077c931dc3f"
+          >Linear project</a
+        >
+      </h3>
+      <div class="card verdict">
+        <strong>Customer feature, not ThadHub deployment automation.</strong>
+        THA-47 deploys ThadHub itself, and THA-107 deploys it onto AWS. This
+        separate closed-source project lets customers execute workflows for
+        their repositories. The compatibility model is <strong>hybrid</strong>:
+        a Thaddeus-native signed workflow/run/check model plus an importer for
+        the commonly used
+        <a
+          href="https://docs.github.com/en/actions/reference/workflows-and-actions"
+          >GitHub Actions</a
+        >
+        subset, with an explicit compatibility matrix. Only portable signed
+        record formats and verifiers needed for interoperability belong in
+        public core; scheduler, runners, hosted logs, secrets, billing, and UI
+        remain private ThadHub implementation.
+      </div>
+      <table>
+        <tr>
+          <th>Milestone</th>
+          <th>Tracked work</th>
+          <th>Exit gate</th>
+        </tr>
+        <tr>
+          <td>
+            <strong
+              >A0 — Workflow model, permissions &amp; compatibility</strong
+            >
+          </td>
+          <td>
+            THA-132 ·
+            <a href="https://github.com/thaddeus-run/thaddeus/issues/188"
+              >public signed schema #188</a
+            >; THA-133 · Linear/private product boundary
+          </td>
+          <td>
+            Version the native workflow/run/check schema, least-privilege
+            permissions, and threat model; publish the supported GitHub subset
+            and explicit unsupported cases before building the scheduler.
+          </td>
+        </tr>
+        <tr>
+          <td><strong>A1 — Triggers &amp; orchestration</strong></td>
+          <td>THA-134–135 · Linear/private orchestration</td>
+          <td>
+            Push, review, tag, schedule, and manual triggers feed a durable DAG
+            scheduler with deduplication, concurrency controls, and a tested job
+            state machine.
+          </td>
+        </tr>
+        <tr>
+          <td><strong>A2 — Isolated runners</strong></td>
+          <td>THA-136–138 · Linear/private runner plane</td>
+          <td>
+            Ephemeral isolated runners support cancellation, retry, and
+            matrices; enforce CPU, memory, time, filesystem, and egress limits;
+            and prove cleanup after success, failure, timeout, and compromise
+            attempts.
+          </td>
+        </tr>
+        <tr>
+          <td>
+            <strong
+              >A3 — Logs, artifacts, caches &amp; signed provenance</strong
+            >
+          </td>
+          <td>THA-66 + THA-139 · Linear/private product work</td>
+          <td>
+            Stream logs, retain artifacts, isolate dependency caches against
+            poisoning, and emit signed check provenance that review/land policy
+            can verify independently.
+          </td>
+        </tr>
+        <tr>
+          <td><strong>A4 — Secrets, environments &amp; deployments</strong></td>
+          <td>THA-140–141 · Linear/private security and deployment work</td>
+          <td>
+            Scope and rotate secrets, protect environments with approvals, keep
+            a complete audit trail, gate continuous deployments, and pass leak
+            response and privilege-escalation exercises.
+          </td>
+        </tr>
+        <tr>
+          <td>
+            <strong
+              >A5 — Autoscaling, billing &amp; compatibility/import</strong
+            >
+          </td>
+          <td>
+            THA-142, THA-143 &amp; THA-144 · Linear/private scale and migration
+            work
+          </td>
+          <td>
+            Autoscale hosted runner pools, enforce quotas and billing, support
+            isolated self-hosted runners, import the common GitHub
+            workflow/action subset with diagnostics, and pass burst/cost
+            qualification.
+          </td>
+        </tr>
+      </table>
+      <p>
+        A0 can start before H4. Hosted execution must not reach general
+        availability until H1 authentication/authorization, runner isolation,
+        secret handling, quota enforcement, and the H4 multi-node-safety gates
+        pass. G5 includes real ThadHub Actions runner bursts only after A2 and
+        A5 provide a production-shaped workload.
+      </p>
+
       <h2 id="thadhub">8. ThadHub — detailed plan</h2>
+      <div class="card verdict" style="border-left-color: var(--crit)">
+        <strong>Source boundary.</strong>
+        <strong>Thaddeus core is open source:</strong> the protocol, CLI, server
+        libraries, portable records and formats, cryptographic verification,
+        migration, and interoperability live in
+        <code>thaddeus-run/thaddeus</code>.
+        <strong>ThadHub is closed source:</strong> its web product, hosted
+        control plane, search operations, billing, deployment, private-access
+        UX, and business implementation live in private repositories and are
+        tracked in Linear. Public GitHub issues may describe only reusable core
+        primitives; proprietary implementation work must not be mirrored into
+        the public repository.
+      </div>
       <blockquote>
         <strong>What it is:</strong> a hosted, multi-tenant home for Thaddeus
         repos — it runs <code>@thaddeus.run/server</code> at scale, gives every
@@ -1696,7 +2190,9 @@ putIfMatch(key, bytes, expectedVersion): boolean  // compare-and-swap</code></pr
         <li>
           <strong>Storage path</strong> — FileBackend (today, fine for Lite) →
           S3/R2 with conditional writes (the CAS unlock, #68/#69) → multi-node
-          with node-local rebuildable caches + etag invalidation.
+          with node-local rebuildable caches + etag invalidation. G1–G5 then add
+          immutable-object CDN delivery, regional cells, recovery, and measured
+          hyperscale qualification.
         </li>
         <li>
           <strong>Federation</strong> — already latent: a clone is a complete
@@ -1738,13 +2234,17 @@ putIfMatch(key, bytes, expectedVersion): boolean  // compare-and-swap</code></pr
         </li>
       </ol>
 
-      <h3>Monetization without betraying "your code & reputation are yours"</h3>
+      <h3>
+        Monetization without betraying "your code &amp; reputation are yours"
+      </h3>
       <p>
         Never charge rent on the things the manifesto says are yours (leaving,
         verifying, taking your reputation). Charge for compute, hosting,
         availability, and the value of your attestation: (1)
         hosting/availability (free public, paid private storage/bandwidth/CDN);
-        (2) CI/verification-as-a-service (sell the CPU-seconds that produce the
+        (2)
+        <a href="#thadhub-actions">ThadHub Actions</a>
+        CI/verification-as-a-service (sell the CPU-seconds that produce the
         signed check-provenance the land gate consumes — not merge permission);
         (3) paid higher-assurance attestations (your reputation to spend, not
         theirs to lose); (4) private-repo compute; (5) enterprise self-hosted
@@ -1753,6 +2253,28 @@ putIfMatch(key, bytes, expectedVersion): boolean  // compare-and-swap</code></pr
       </p>
 
       <h3>Phased build plan</h3>
+      <div class="card">
+        <strong>Two different meanings of CI/CD.</strong>
+        <ul class="tight" style="margin-top: 0.5rem">
+          <li>
+            <code>.github/workflows/ci.yml</code> and
+            <code>.github/workflows/release.yml</code> build, test, and release
+            the open-source Thaddeus core.
+          </li>
+          <li>
+            THA-47 is ThadHub's <em>internal</em> build/deploy pipeline on
+            temporary Fly.io; THA-107 moves the same immutable application
+            artifact to AWS.
+          </li>
+          <li>
+            A0–A5 is the separate
+            <a href="#thadhub-actions"
+              >customer-facing ThadHub Actions product</a
+            >
+            for running workflows on hosted repositories.
+          </li>
+        </ul>
+      </div>
       <table>
         <tr>
           <th>Phase</th>
@@ -1761,14 +2283,18 @@ putIfMatch(key, bytes, expectedVersion): boolean  // compare-and-swap</code></pr
         </tr>
         <tr>
           <td>
-            <strong>H0 — ThadHub Lite</strong>
+            <strong>H0 — ThadHub Lite + internal delivery pipeline</strong>
             <span class="pill">this quarter</span>
           </td>
           <td>
-            Deploy on today's live Fly server; handle→DID registry; namespace
-            routing; <strong>public-repo web browse</strong> (server-side render
-            via world capability); provenance "why" view; reputation profiles;
-            releases; read-only.
+            Deploy <strong>temporarily</strong> on today's live Fly server from
+            the private ThadHub repository; add private GitHub Actions for
+            build, test, preview/staging/production deploy, smoke test, canary,
+            and rollback; handle→DID registry; namespace routing;
+            <strong>public-repo web browse</strong> (server-side render via
+            world capability); provenance "why" view; reputation profiles;
+            releases; read-only. Tracked privately as THA-47, “internal ThadHub
+            delivery pipeline and temporary Fly.io hosting.”
           </td>
           <td>
             <strong>None</strong> — uses existing scoping + <code>/</code> names
@@ -1785,7 +2311,7 @@ putIfMatch(key, bytes, expectedVersion): boolean  // compare-and-swap</code></pr
           <td>Ship the replay-nonce cache (#61) before public launch.</td>
         </tr>
         <tr>
-          <td><strong>H2 — Discovery & search</strong></td>
+          <td><strong>H2 — Discovery &amp; search</strong></td>
           <td>
             Metadata index (all repos); content + symbol search for public
             repos; topics; trending by attested reputation.
@@ -1795,15 +2321,18 @@ putIfMatch(key, bytes, expectedVersion): boolean  // compare-and-swap</code></pr
         <tr>
           <td><strong>H3 — Attesting hub</strong></td>
           <td>
-            Host-vouched merges/releases; reputation-tier gates; paid CI
-            producing signed check-provenance.
+            Host-vouched merges/releases and reputation-tier gates; introduce
+            the first paid verification jobs supplied by ThadHub Actions A3,
+            producing signed check-provenance. H3 is not the complete Actions
+            product.
           </td>
           <td>
-            Portable reputation export/import (P10) + host allowlist (#79).
+            Portable reputation export/import (P10) + host allowlist (#79) + the
+            A0 signed workflow/run/check model.
           </td>
         </tr>
         <tr>
-          <td><strong>H4 — Multi-node scale</strong></td>
+          <td><strong>H4 — First multi-node-safe substrate</strong></td>
           <td>
             S3/R2 backend; replace the per-process lock with CAS-retry on
             head-repoint; node-local rebuildable caches; autoscaling.
@@ -1811,6 +2340,26 @@ putIfMatch(key, bytes, expectedVersion): boolean  // compare-and-swap</code></pr
           <td>
             <strong>BLOCKING:</strong> the CAS contract + S3 backend (#68, #69)
             and multi-node coordination.
+          </td>
+        </tr>
+        <tr>
+          <td><strong>H4b — AWS foundation &amp; Fly.io cutover</strong></td>
+          <td>
+            Build an AWS staging environment and private deployment pipeline
+            (THA-107); deploy the same immutable artifact used on Fly; exercise
+            data migration, observability, backups, and rollback; then migrate
+            production traffic from Fly to AWS with a measured soak period and
+            decommission Fly only after rollback is no longer required
+            (THA-108).
+          </td>
+          <td>
+            <strong>BLOCKING:</strong> backend conformance and migration drills
+            (#71), CAS + S3 support (#68, #69), multi-node safety, a successful
+            AWS staging restore, and a rehearsed production rollback. THA-107
+            blocks THA-108; both remain Linear/private-repository work. H4/H4b
+            establish the first correct AWS home, not global scale; G0–G5 own
+            CDN delivery, regional cells, multi-region recovery, and hyperscale
+            qualification.
           </td>
         </tr>
         <tr>
@@ -1828,7 +2377,10 @@ putIfMatch(key, bytes, expectedVersion): boolean  // compare-and-swap</code></pr
             encrypted/client-side private search; hardware/extension key
             custody.
           </td>
-          <td>Key-custody UX (the hardest open problem).</td>
+          <td>
+            Identity Continuity &amp; Key Recovery R0–R4, including safe browser
+            key custody and a verified clean-device restore.
+          </td>
         </tr>
       </table>
       <p>
@@ -1838,7 +2390,11 @@ putIfMatch(key, bytes, expectedVersion): boolean  // compare-and-swap</code></pr
         world capability" and every metadata surface it renders is already
         cleartext in the <code>pull</code> bundle. The full federated,
         multi-node, private-browsing vision (H4–H6) is honestly gated on the
-        S3/CAS + federation work the Thaddeus roadmap already sequences.
+        S3/CAS + federation work the Thaddeus roadmap already sequences. Fly is
+        an explicit temporary host: production moves only in H4b, after AWS
+        staging, data migration, rollback, and multi-node safety are observed.
+        Global CDN reach and “all of GitHub” reliability are later G0–G5
+        qualification outcomes, not claims made by the first AWS cutover.
       </p>
 
       <h3>Hard open problems (state them plainly)</h3>
@@ -1850,7 +2406,9 @@ putIfMatch(key, bytes, expectedVersion): boolean  // compare-and-swap</code></pr
           <code>sign</code>/<code>unseal</code> to an allow-listed origin. Until
           then, private browse stays CLI/desktop-first and the web shows only
           the metadata skeleton. The single biggest UX gap vs. GitHub; scope it
-          as its own project.
+          is now tracked by the Identity Continuity &amp; Key Recovery project
+          (THA-102–THA-106), with only the reusable protocol and cryptographic
+          mechanisms public.
         </li>
         <li>
           <strong>Discovery of encrypted content</strong> — you can't index what
@@ -1887,7 +2445,7 @@ putIfMatch(key, bytes, expectedVersion): boolean  // compare-and-swap</code></pr
 
       <footer>
         <p>
-          <strong>Method & honesty note.</strong> Findings come from five
+          <strong>Method &amp; honesty note.</strong> Findings come from five
           independent expert subagents that read the source directly (two
           security auditors, a PM reviewer, a principal-engineer code review,
           and a manifesto-conformance auditor), plus a de-novo ThadHub design.
@@ -1896,12 +2454,15 @@ putIfMatch(key, bytes, expectedVersion): boolean  // compare-and-swap</code></pr
           <strong
             >no exploit was run and no code in <code>packages/</code> was
             changed</strong
-          >. The only changes applied to the repo are the documentation/tracking
-          cleanup in §6 (roadmap, CHANGELOG deferred ledger) and the 25 GitHub
-          issues across milestones P11–P14. The two most severe security items
-          (#72 capability-key binding, #73 unsigned heads) each warrant a
-          definitive exploit-or-refute test before the severity is treated as
-          final.
+          >. This planning update changed the roadmap and Linear/GitHub
+          tracking, not product code. The runtime exception is the explicitly
+          scoped local 15,000-repository benchmark above, run against the
+          packaged <code>0.1.5-alpha</code> binary; its limitations are part of
+          the result. Linear is the complete public/private portfolio, while
+          GitHub carries reusable public-core issues only. The two most severe
+          security items (#72 capability-key binding, #73 unsigned heads) each
+          warrant a definitive exploit-or-refute test before the severity is
+          treated as final.
         </p>
         <p class="small">Generated 2026-07-12 for the Thaddeus project.</p>
       </footer>
