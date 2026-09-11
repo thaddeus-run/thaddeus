@@ -159,14 +159,14 @@ submit vetoes without uploading code or advancing a shared head. Veto scope
 comes from the review grant, even if that identity also has a write delegation
 with different paths.
 
-| Route                                | Request                  | Authority                                          |
-| ------------------------------------ | ------------------------ | -------------------------------------------------- |
-| `POST /repos/:name/reviewers`        | `{ capability }`         | Owner request and owner-signed grant               |
-| `GET /repos/:name/reviewers`         | Pagination parameters    | Public active grant evidence                       |
-| `POST /repos/:name/reviewers/revoke` | `{ revocation }`         | Owner request and signed grant revocation          |
-| `POST /repos/:name/vetoes`           | `{ veto: [wireRecord] }` | Reviewer request matching each veto signer         |
-| `GET /repos/:name/vetoes`            | Pagination parameters    | Public signed history and current lifecycle labels |
-| `POST /repos/:name/vetoes/withdraw`  | `{ withdrawal }`         | Veto author or repository owner                    |
+| Route                                    | Request                  | Authority                                          |
+| ---------------------------------------- | ------------------------ | -------------------------------------------------- |
+| `POST /repos/:name/reviewers`            | `{ capability }`         | Owner request and owner-signed grant               |
+| `GET /repos/:name/reviewers`             | Pagination parameters    | Public active grant evidence                       |
+| `POST /repos/:name/reviewer-revocations` | `{ revocation }`         | Owner request and signed grant revocation          |
+| `POST /repos/:name/vetoes`               | `{ veto: [wireRecord] }` | Reviewer request matching each veto signer         |
+| `GET /repos/:name/vetoes`                | Pagination parameters    | Public signed history and current lifecycle labels |
+| `POST /repos/:name/veto-withdrawals`     | `{ withdrawal }`         | Veto author or repository owner                    |
 
 Management records use `encodeReviewRecord` from the protocol export. Vetoes use
 the existing bundle record encoding. The submission response has the same

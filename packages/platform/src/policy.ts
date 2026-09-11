@@ -138,16 +138,20 @@ export function requirePassingChecks(
   };
 }
 
-// Only explicitly trusted reviewers can block a land. The optional predicate
-// lets a host re-check repository scope, grant revocation, and withdrawals for
+// Only explicitly trusted reviewers can block a land. The required predicate
+// makes the host re-check repository scope, grant revocation, and withdrawals for
 // each target operation; signature validity alone never supplies authority.
 export function blockOnVeto(
   vetoes: Pick<VetoLog, 'forOp' | 'status'>,
   reviewers: readonly string[],
-  authorized: (veto: Veto, op: Op) => boolean = () => true
+  authorized: (veto: Veto, op: Op) => boolean
 ): LandPolicy {
   if (!Array.isArray(reviewers))
     throw new TypeError('blockOnVeto requires an explicit reviewer allowlist');
+  if (typeof authorized !== 'function')
+    throw new TypeError(
+      'blockOnVeto requires a lifecycle authorization predicate'
+    );
   const allowed = new Set(reviewers);
   return (p) => {
     const vetoed = p.incomingOps.filter((op) =>
