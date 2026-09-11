@@ -12,7 +12,7 @@ All notable changes to Thaddeus. Format follows
 > five-lens analysis (security, product, code-quality/Rust-vs-Go, manifesto
 > conformance) and the ThadHub plan are the companion document:
 > <https://4xibq00df3aj.postplan.dev/>. Statuses below are current as of
-> **0.1.9-alpha**; update the table when a milestone opens or closes.
+> **0.1.10-alpha**; update the table when a milestone opens or closes.
 
 | Phase   | What it is                                                                                                                                                  | Status                                       | Milestone / issues                                                                    |
 | ------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------- | ------------------------------------------------------------------------------------- |
@@ -65,6 +65,29 @@ restored successfully in a clean environment (#71).
 > **Correction:** the S3 backend was once cited as "#14," but PR #14 was
 > "Multi-writer collaboration: delegated push over P09," unrelated to storage.
 > The S3 backend is tracked as **#69** under milestone P14.
+
+## [0.1.10-alpha] - 2026-09-11
+
+### Added
+
+- **Defensive limits and bounded pagination (#62 / THA-9).** Collection routes
+  now use opaque rotating cursors, bounded snapshots and scanners, configurable
+  request/archive/field/page limits, and stable errors. SDK and CLI consumers
+  drain pages, retry invalidated snapshots, reconstruct pulls, and chunk
+  reputation imports while preserving complete results.
+- **Deployment controls for limits and pagination.** Server options, CLI flags,
+  container variables, Fly configuration, metrics, and documentation expose the
+  new bounds and cursor lifetimes.
+
+### Fixed
+
+- **Pagination review findings.** Correct result reassembly, deterministic
+  ordering, cursor invalidation, validation, cleanup, and shutdown behavior.
+
+### Documentation
+
+- Preserve the expanded Linear-backed portfolio roadmap and the July 23 Safe
+  Agent Mode design. Safe Agent Mode remains a design, not a released command.
 
 ## [0.1.9-alpha] - 2026-07-14
 
