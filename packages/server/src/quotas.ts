@@ -182,6 +182,14 @@ export class QuotaAccounting {
     create: boolean,
     action: () => Promise<T>
   ): Promise<T> {
+    // Cold repository loading can replay store journals during a mutation.
+    // Join that repository's reservation instead of waiting on our own queue.
+    const active = this.#context.getStore();
+    if (active !== undefined) {
+      if (create || active.prefix !== `repo/${name}/`)
+        throw new QuotaError('quota_storage_unavailable', 1);
+      return action();
+    }
     return exclusive(this.#raw, async () => {
       try {
         await this.#recover();

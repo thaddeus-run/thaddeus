@@ -112,15 +112,19 @@ count traversed directory entries against the existing scanner budget. Deletion
 removes both copies. Old binaries cannot read the new sharded layout; take a
 backup before upgrading rather than attempting an in-place binary downgrade.
 
-Before the first quota-controlled mutation, a backend without the quota marker
-adopts existing repository/object usage once. Adoption streams at most 100,000
-underlying entries and records owner totals with a journal; it does not reset
-usage to zero on upgrade. Over-limit legacy usage is retained and charged.
-Malformed ownership, orphaned objects, corrupt accounting, or an adoption scan
-that exceeds the hard budget fail closed with 503. Stores exceeding that bound
-require an offline migration reviewed against their actual data before serving
-writes; repeated HTTP requests cannot bypass the bound. Creation history from
-before the upgrade is unavailable, so new creation windows begin at adoption.
+Before the first quota-controlled mutation or cold repository open, a backend
+without the quota marker adopts existing repository/object usage once. Adoption
+streams at most 100,000 underlying entries and records owner totals with a
+journal; it does not reset usage to zero on upgrade. Over-limit legacy usage is
+retained and charged. Malformed ownership, orphaned objects, corrupt accounting,
+or an adoption scan that exceeds the hard budget fail closed with 503. Stores
+exceeding that bound require an offline migration reviewed against their actual
+data before serving writes or opening a cold repository for reads; repeated HTTP
+requests cannot bypass the bound. Cold opening uses the same owner transaction
+because store loading can replay an interrupted recall and create an object.
+Recovery charges new records once and preserves existing object usage. Creation
+history from before the upgrade is unavailable, so new creation windows begin at
+adoption.
 
 ## Metrics and residual abuse risk
 
