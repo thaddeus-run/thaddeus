@@ -463,6 +463,11 @@ test('batch limits, forged management, and unaffiliated withdrawals fail without
     )
   );
   expect(batch.status).toBe(413);
+  expect(await batch.json()).toEqual({
+    error: 'veto submission limit exceeded',
+    code: 'veto_limit_exceeded',
+    maxVetoes: 1,
+  });
   const invalidCap = { ...cap, paths: ['**'] };
   expect(
     (

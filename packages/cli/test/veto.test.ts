@@ -1,6 +1,6 @@
 import { ready } from '@thaddeus.run/identity';
 import { FileBackend, MemoryBackend } from '@thaddeus.run/persist';
-import { signVeto, VetoLog } from '@thaddeus.run/review';
+import { ReviewLog, signVeto, VetoLog } from '@thaddeus.run/review';
 import { createServer } from '@thaddeus.run/server';
 import { scoped } from '@thaddeus.run/store';
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
@@ -171,4 +171,136 @@ test('outside reviewer grant, scoped veto, withdrawal, and revocation persist of
   output.length = 0;
   expect(await run(['reviewer', 'list', '--json'], env())).toBe(0);
   expect(JSON.parse(output[0])).toEqual([]);
+});
+
+test.each(['grant', 'veto', 'withdraw', 'revoke'] as const)(
+  'successful %s retains its local record when history refresh fails',
+  async (action) => {
+    const backend = new MemoryBackend();
+    const srv = createServer({ backend });
+    const ownerHome = await clientHome(srv.fetch, 'sync-owner');
+    const reviewerHome = await clientHome(srv.fetch, 'sync-reviewer');
+    const wc = mkdtempSync(join(tmp, 'sync-wc-'));
+    const reviewerWc = mkdtempSync(join(tmp, 'sync-review-wc-'));
+    const output: string[] = [];
+    let failHistory = false;
+    const env = (reviewer = false) => ({
+      cwd: reviewer ? reviewerWc : wc,
+      home: reviewer ? reviewerHome : ownerHome,
+      out: (line: string) => output.push(line),
+      fetchImpl: (req: Request) => {
+        if (
+          failHistory &&
+          req.method === 'GET' &&
+          new URL(req.url).pathname.endsWith('/vetoes')
+        )
+          return Promise.reject(new Error('history connection lost'));
+        return srv.fetch(req);
+      },
+    });
+    expect(await run(['create', 'http://t', 'sync'], env())).toBe(0);
+    expect(await run(['clone', 'http://t', 'sync', wc], env())).toBe(0);
+    writeFileSync(join(wc, 'auth.rs'), 'fn refresh() {}');
+    expect(await run(['push'], env())).toBe(0);
+    expect(
+      await run(['clone', 'http://t', 'sync', reviewerWc], env(true))
+    ).toBe(0);
+    output.length = 0;
+    expect(await run(['log', '--json'], env())).toBe(0);
+    const op = JSON.parse(output[0])[0].id as string;
+    const grantArgs = [
+      'reviewer',
+      'grant',
+      loadIdentity(reviewerHome).did,
+      '--paths',
+      'auth.rs',
+    ];
+    const serverReviews = () =>
+      ReviewLog.load(
+        scoped(backend, 'repo/sync/'),
+        'sync',
+        loadIdentity(ownerHome).did
+      );
+    let grant = '';
+    let veto = '';
+    if (action !== 'grant') {
+      expect(await run(grantArgs, env())).toBe(0);
+      output.length = 0;
+      expect(await run(['reviewer', 'list', '--json'], env())).toBe(0);
+      grant = JSON.parse(output[0])[0].id;
+    }
+    if (action === 'withdraw') {
+      expect(await run(['veto', op], env(true))).toBe(0);
+      output.length = 0;
+      expect(await run(['vetoes', op, '--json'], env(true))).toBe(0);
+      veto = JSON.parse(output[0]).vetoes[0].id;
+    }
+    const args =
+      action === 'grant'
+        ? grantArgs
+        : action === 'veto'
+          ? ['veto', op]
+          : action === 'withdraw'
+            ? ['veto', 'withdraw', veto]
+            : ['reviewer', 'revoke', grant];
+    failHistory = true;
+    output.length = 0;
+    const reviewer = action === 'veto' || action === 'withdraw';
+    const exit = await run(args, env(reviewer));
+    const remote = await serverReviews();
+    // The mutation reached the real server even though its following read failed.
+    if (action === 'grant') expect(remote.grants()).toHaveLength(1);
+    if (action === 'veto') expect(remote.vetoes()).toHaveLength(1);
+    if (action === 'withdraw')
+      expect(
+        remote.status(remote.vetoes()[0], { id: op, path: 'auth.rs' })
+      ).toBe('withdrawn');
+    if (action === 'revoke') expect(remote.grants()).toHaveLength(0);
+    expect(exit).toBe(0);
+    expect(output.join('\n')).toContain('warning:');
+    expect(output.join('\n')).toContain('pull');
+    const root = reviewer ? reviewerWc : wc;
+    const cfg = loadConfig(root);
+    const local = await ReviewLog.load(
+      scoped(new FileBackend(storePath(root, cfg)), 'repo/sync/'),
+      'sync',
+      loadIdentity(ownerHome).did
+    );
+    if (action === 'grant') expect(local.grants()).toHaveLength(1);
+    if (action === 'revoke') expect(local.grants()).toHaveLength(0);
+    if (reviewer) {
+      output.length = 0;
+      expect(await run(['vetoes', op, '--json'], env(true))).toBe(0);
+      expect(JSON.parse(output[0]).vetoes[0].lifecycle).toBe(
+        action === 'withdraw' ? 'withdrawn' : 'active'
+      );
+    }
+  }
+);
+
+test('invalid reviewer grant options exit with usage status without granting authority', async () => {
+  const backend = new MemoryBackend();
+  const srv = createServer({ backend });
+  const home = await clientHome(srv.fetch, 'invalid-grant');
+  const wc = mkdtempSync(join(tmp, 'invalid-grant-wc-'));
+  const env = { cwd: wc, home, fetchImpl: srv.fetch, out: () => {} };
+  expect(await run(['create', 'http://t', 'invalid'], env)).toBe(0);
+  expect(await run(['clone', 'http://t', 'invalid', wc], env)).toBe(0);
+  for (const options of [
+    [],
+    ['--paths', ''],
+    ['--paths', 'a/../b'],
+    ['--paths', '**', '--max-vetoes-per-hour', 'NaN'],
+    ['--paths', '**', '--max-active-vetoes', '0'],
+  ]) {
+    expect(
+      await run(['reviewer', 'grant', loadIdentity(home).did, ...options], env)
+    ).toBe(2);
+  }
+  const reviews = await ReviewLog.load(
+    scoped(backend, 'repo/invalid/'),
+    'invalid',
+    loadIdentity(home).did
+  );
+  expect(reviews.grants()).toHaveLength(0);
 });

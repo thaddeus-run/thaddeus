@@ -223,7 +223,15 @@ export function inputLimitBody(error: InputLimitError): {
   code: InputLimitCode;
   maxBytes?: number;
   maxContributions?: number;
+  maxVetoes?: number;
 } {
+  if (error.code === 'veto_limit_exceeded') {
+    return {
+      error: 'veto submission limit exceeded',
+      code: error.code,
+      maxVetoes: error.limit,
+    };
+  }
   if (error.code === 'contribution_limit_exceeded') {
     return {
       error: 'reputation contribution limit exceeded',

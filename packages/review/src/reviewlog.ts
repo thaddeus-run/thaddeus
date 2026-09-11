@@ -82,11 +82,17 @@ export class ReviewLog {
       let event: ReviewEvent;
       try {
         event = decodeRecord(data) as ReviewEvent;
-        if (key !== `review/${eventId(event)}`)
-          fail('corrupt', 'review content address mismatch');
       } catch {
         fail('corrupt', 'cannot decode review event');
       }
+      let id: string;
+      try {
+        id = eventId(event);
+      } catch {
+        fail('corrupt', 'cannot encode review event');
+      }
+      if (key !== `review/${id}`)
+        fail('corrupt', 'review content address mismatch');
       events.push(event);
     }
     const rank = { grant: 0, veto: 1, revoke: 2, withdraw: 3 };
