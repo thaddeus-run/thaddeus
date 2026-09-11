@@ -53,3 +53,5 @@ export {
   encodeDelegation,
   encodeRelease,
 } from './dto';
+export { DEFAULT_QUOTAS, resolveQuotas, QuotaError } from './quotas';
+export type { QuotaConfig, ResolvedQuotas, QuotaCode } from './quotas';

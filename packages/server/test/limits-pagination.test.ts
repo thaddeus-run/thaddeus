@@ -279,12 +279,24 @@ describe('THA-9 limits and pagination', () => {
       maxPageSize: 1,
     });
     await roomy.fetch(createRequest('x'.repeat(64), owner));
-    const empty = (await (
-      await roomy.fetch(new Request('http://t/repos'))
-    ).json()) as { nextCursor: string };
-    const itemResponse = await roomy.fetch(
-      new Request(`http://t/repos?cursor=${empty.nextCursor}`)
-    );
+    // Backend internals and shard entries may yield any number of empty pages.
+    const nextItem = async (
+      server: ReturnType<typeof createServer>
+    ): Promise<Response> => {
+      let url = 'http://t/repos';
+      for (let pages = 0; pages < 100; pages++) {
+        const response = await server.fetch(new Request(url));
+        if (response.status !== 200) return response;
+        const body = (await response.clone().json()) as {
+          repos: string[];
+          nextCursor: string | null;
+        };
+        if (body.repos.length > 0 || body.nextCursor === null) return response;
+        url = `http://t/repos?cursor=${body.nextCursor}`;
+      }
+      throw new Error('repository scan did not finish');
+    };
+    const itemResponse = await nextItem(roomy);
     const itemText = await itemResponse.text();
     const exactBytes = new TextEncoder().encode(itemText).length;
     await roomy.close();
@@ -297,12 +309,7 @@ describe('THA-9 limits and pagination', () => {
       maxFieldBytes: 43,
       maxPageResponseBytes: exactBytes,
     });
-    const exactEmpty = (await (
-      await exact.fetch(new Request('http://t/repos'))
-    ).json()) as { nextCursor: string };
-    const exactItem = await exact.fetch(
-      new Request(`http://t/repos?cursor=${exactEmpty.nextCursor}`)
-    );
+    const exactItem = await nextItem(exact);
     expect(exactItem.status).toBe(200);
     expect(new TextEncoder().encode(await exactItem.text())).toHaveLength(
       exactBytes
@@ -317,12 +324,7 @@ describe('THA-9 limits and pagination', () => {
       maxFieldBytes: 43,
       maxPageResponseBytes: exactBytes - 1,
     });
-    const smallEmpty = (await (
-      await tooSmall.fetch(new Request('http://t/repos'))
-    ).json()) as { nextCursor: string };
-    const rejected = await tooSmall.fetch(
-      new Request(`http://t/repos?cursor=${smallEmpty.nextCursor}`)
-    );
+    const rejected = await nextItem(tooSmall);
     expect(rejected.status).toBe(422);
     expect(await rejected.json()).toMatchObject({
       code: 'page_item_too_large',

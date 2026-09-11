@@ -340,6 +340,12 @@ thaddeus policy clear [--json]
   --replay-nonce-capacity bounds live durable signed-request nonces (default
   100000, maximum 1000000). --request-skew-ms narrows accepted timestamp skew
   from the protocol maximum/default of 300000 ms.
+  Per-owner storage quotas: --max-repositories (100), --max-objects (100000),
+  --max-object-bytes (1073741824 encoded object bytes). Creation windows use
+  --repository-creation-limit (20), --object-creation-limit (10000), and
+  --creation-window-ms (3600000). All must be positive safe integers.
+  Delegated uploads consume the repository owner's budget. Quotas and windows
+  persist across restart; deleting data frees storage, but not creation rate.
   --max-request-body-bytes sets the inclusive request-body limit (default
   16777216, or 16 MiB) and must be a positive integer no greater than
   Number.MAX_SAFE_INTEGER - 1.`,

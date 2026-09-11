@@ -980,12 +980,28 @@ export class Client {
     into = 'main',
     contrib: readonly ContributionClaim[] = []
   ): Promise<LandOutcome> {
-    const currentResponse = await this.#fetch(
-      new Request(
-        `${this.#server}/repos/${encodeURIComponent(name)}/views/${encodeURIComponent(into)}`
-      )
-    );
-    const currentBody = (await this.#ok(currentResponse)) as HeadResponse;
+    // Landing must verify the complete history even when it spans pages.
+    const pages = await this.#collectPages(async (cursor) => {
+      const response = await this.#fetch(
+        new Request(
+          this.#pageUrl(
+            `/repos/${encodeURIComponent(name)}/views/${encodeURIComponent(into)}`,
+            cursor === undefined ? {} : { cursor }
+          )
+        )
+      );
+      const page = (await this.#ok(response)) as HeadResponse & {
+        nextCursor?: unknown;
+      };
+      return { ...page, nextCursor: this.#nextCursor(page.nextCursor) };
+    });
+    const first = pages[0];
+    if (first === undefined)
+      throw new Error('malformed_record: missing view detail');
+    const currentBody: HeadResponse = {
+      ...first,
+      chain: pages.flatMap((page) => [...page.chain]),
+    };
     const current = decodeVerifiedChain(currentBody, name, into, {
       owner: repo.headRecords.owner,
       prefix: repo.headRecords.history(into),

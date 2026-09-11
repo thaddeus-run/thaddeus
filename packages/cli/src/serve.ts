@@ -5,6 +5,7 @@ import type { AttestationSigner } from '@thaddeus.run/reputation';
 import {
   createServer,
   DEFAULT_REPLAY_NONCE_CAPACITY,
+  type QuotaConfig,
   REQUEST_SKEW_MS,
   resolveLimits,
 } from '@thaddeus.run/server';
@@ -15,6 +16,7 @@ const REQUEST_IDLE_TIMEOUT_SECONDS = 10;
 
 // Options for a local Thaddeus server.
 export interface ServeOptions {
+  quotas?: QuotaConfig;
   dataDir: string; // FileBackend root (the durable cold tier)
   port?: number; // default 4000; pass 0 for an OS-assigned port (tests)
   policy?: LandPolicy; // default blockOnConflict (createServer's default)
@@ -61,6 +63,7 @@ export function startServer(opts: ServeOptions): RunningServer {
   const srv = createServer({
     backend: new FileBackend(opts.dataDir),
     ...limits,
+    quotas: opts.quotas,
     policy: opts.policy,
     attester: opts.attester,
     host: opts.host,

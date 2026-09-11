@@ -7,8 +7,10 @@ import {
   type ReplayNonceBackend,
 } from '@thaddeus.run/store';
 import type { BackendScan } from '@thaddeus.run/store';
+import { createHash } from 'node:crypto';
 import type { Dir } from 'node:fs';
 import {
+  access,
   link,
   mkdir,
   opendir,
@@ -17,7 +19,7 @@ import {
   unlink,
   writeFile,
 } from 'node:fs/promises';
-import { join, resolve } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 
 import {
   consumeNonceState,
@@ -102,15 +104,15 @@ async function renameWithRetry(from: string, to: string): Promise<void> {
   }
 }
 
-// Filesystem backend: each key → one percent-encoded file under `root`. Writes
-// go through a `.staging/` subdir (same filesystem → atomic rename), so a
-// crash never yields a half-written file and staging files never appear in
-// `list`. Zero dependencies beyond node:fs. Flat directory (dir sharding is a
-// later optimization); keys never contain a literal '%' collision because
-// encodeKey is a bijection.
+// Generic records use 256 hash shards. Legacy flat records remain readable;
+// overwrites migrate them lazily. Staging and nonce internals stay invisible.
 export class FileBackend implements Backend, ReplayNonceBackend {
   readonly #root: string;
   readonly #nonceCoordinator: ReplayNonceCoordinator;
+
+  get coordinationDomain(): object {
+    return this.#nonceCoordinator;
+  }
 
   constructor(root: string) {
     this.#root = root;
@@ -123,8 +125,14 @@ export class FileBackend implements Backend, ReplayNonceBackend {
     const staging = join(this.#root, '.staging');
     await mkdir(staging, { recursive: true });
     const tmp = join(staging, `${process.pid}-${tmpSeq++}`);
-    await writeFile(tmp, bytes);
-    await renameWithRetry(tmp, this.#path(key));
+    try {
+      await mkdir(dirname(this.#path(key)), { recursive: true });
+      await writeFile(tmp, bytes);
+      await renameWithRetry(tmp, this.#path(key));
+      await this.#unlink(this.#legacyPath(key));
+    } finally {
+      await unlink(tmp).catch(() => {});
+    }
   }
 
   /**
@@ -136,8 +144,10 @@ export class FileBackend implements Backend, ReplayNonceBackend {
     const staging = join(this.#root, '.staging');
     await mkdir(staging, { recursive: true });
     const tmp = join(staging, `${process.pid}-${tmpSeq++}`);
-    await writeFile(tmp, bytes);
     try {
+      if (await this.#exists(this.#legacyPath(key))) return false;
+      await mkdir(dirname(this.#path(key)), { recursive: true });
+      await writeFile(tmp, bytes);
       await link(tmp, this.#path(key));
       return true;
     } catch (error) {
@@ -156,63 +166,90 @@ export class FileBackend implements Backend, ReplayNonceBackend {
       return new Uint8Array(await readFile(this.#path(key)));
     } catch (err) {
       if ((err as NodeJS.ErrnoException).code === 'ENOENT') {
-        return undefined; // absent
+        try {
+          return new Uint8Array(await readFile(this.#legacyPath(key)));
+        } catch (legacyError) {
+          if ((legacyError as NodeJS.ErrnoException).code === 'ENOENT')
+            return undefined;
+          throw legacyError;
+        }
       }
       throw err; // a real read error must surface, not look like "absent"
     }
   }
 
-  /** Opens a bounded root-directory scan backed directly by `opendir()`. */
+  /** Traverses shards lazily, counting directory entries against the scan budget. */
   async openScan(prefix: string): Promise<BackendScan> {
-    let directory: Dir | undefined;
-    try {
-      directory = await opendir(this.#root);
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
-    }
-    let done = directory === undefined;
-    const close = async (): Promise<void> => {
-      if (done && directory === undefined) return;
-      done = true;
-      const open = directory;
-      directory = undefined;
-      if (open !== undefined) {
-        try {
-          await open.close();
-        } catch {
-          // close is idempotent at the BackendScan boundary
-        }
+    const stack: { directory: Dir; path: string; depth: number }[] = [];
+    let done = false;
+    const open = async (path: string, depth: number): Promise<void> => {
+      try {
+        stack.push({ directory: await opendir(path), path, depth });
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
       }
+    };
+    await open(this.#root, 0);
+    const closeDirectory = async (directory: Dir): Promise<void> => {
+      try {
+        await directory.close();
+      } catch {
+        /* BackendScan.close is idempotent. */
+      }
+    };
+    const close = async (): Promise<void> => {
+      done = true;
+      while (stack.length > 0) await closeDirectory(stack.pop()!.directory);
     };
     return {
       read: async (maxEntries) => {
         assertScanBudget(maxEntries);
-        if (done || directory === undefined) return { keys: [], done: true };
         const keys: string[] = [];
+        if (done) return { keys, done };
         try {
-          for (let inspected = 0; inspected < maxEntries; inspected += 1) {
-            const entry = await directory.read();
-            if (entry === null) {
-              await close();
+          for (let inspected = 0; inspected < maxEntries; inspected++) {
+            const current = stack.at(-1);
+            if (current === undefined) {
+              done = true;
               break;
             }
-            if (!entry.isFile()) continue;
+            let entry;
+            try {
+              entry = await current.directory.read();
+            } catch (error) {
+              if ((error as NodeJS.ErrnoException).code !== 'ENOENT')
+                throw error;
+              entry = null;
+            }
+            if (entry === null) {
+              stack.pop();
+              await closeDirectory(current.directory);
+              continue;
+            }
+            const name = String(entry.name);
+            if (entry.isDirectory()) {
+              if (
+                (current.depth === 0 && name === '.records-v1') ||
+                (current.depth === 1 && /^[0-9a-f]{2}$/.test(name))
+              )
+                await open(join(current.path, name), current.depth + 1);
+              continue;
+            }
+            if (!entry.isFile() || current.depth === 1) continue;
             let key: string;
             try {
-              key = decodeKey(String(entry.name));
+              key = decodeKey(name);
             } catch {
               continue;
             }
-            if (key.startsWith(prefix)) keys.push(key);
+            if (!key.startsWith(prefix)) continue;
+            if (current.depth === 0 && (await this.#exists(this.#path(key))))
+              continue;
+            keys.push(key);
           }
           return { keys, done };
         } catch (error) {
           await close();
-          // Bun may defer the initial directory open until the first read. A
-          // missing backend root is the same empty scan as opendir() ENOENT.
-          if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
-            return { keys, done: true };
-          }
           throw error;
         }
       },
@@ -240,13 +277,26 @@ export class FileBackend implements Backend, ReplayNonceBackend {
 
   /** Idempotently deletes a generic backend key. */
   async delete(key: string): Promise<void> {
+    // Remove legacy first so a interrupted delete cannot resurrect stale bytes.
+    await this.#unlink(this.#legacyPath(key));
+    await this.#unlink(this.#path(key));
+  }
+
+  async #unlink(path: string): Promise<void> {
     try {
-      await unlink(this.#path(key));
-    } catch (err) {
-      if ((err as NodeJS.ErrnoException).code === 'ENOENT') {
-        return; // already absent — idempotent
-      }
-      throw err; // a real error must surface, not look like success
+      await unlink(path);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+    }
+  }
+
+  async #exists(path: string): Promise<boolean> {
+    try {
+      await access(path);
+      return true;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return false;
+      throw error;
     }
   }
 
@@ -408,8 +458,13 @@ export class FileBackend implements Backend, ReplayNonceBackend {
     return join(this.#root, REPLAY_NONCE_DIRECTORY);
   }
 
-  #path(key: string): string {
+  #legacyPath(key: string): string {
     return join(this.#root, encodeKey(key));
+  }
+
+  #path(key: string): string {
+    const shard = createHash('sha256').update(key).digest('hex').slice(0, 2);
+    return join(this.#root, '.records-v1', shard, encodeKey(key));
   }
 }
 

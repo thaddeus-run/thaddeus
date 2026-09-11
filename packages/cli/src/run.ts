@@ -40,12 +40,14 @@ import {
   DEFAULT_PAGE_SIZE,
   DEFAULT_PAGINATION_CURSOR_CAPACITY,
   DEFAULT_PAGINATION_CURSOR_TTL_MS,
+  DEFAULT_QUOTAS,
   DEFAULT_REPLAY_NONCE_CAPACITY,
   MAX_ATTESTATION_RATE_LIMIT,
   MAX_PAGE_SIZE,
   MAX_REPLAY_NONCE_CAPACITY,
   REQUEST_SKEW_MS,
   resolveLimits,
+  resolveQuotas,
 } from '@thaddeus.run/server';
 import { type Backend, scoped } from '@thaddeus.run/store';
 import type { EventKind } from '@thaddeus.run/watch';
@@ -3072,6 +3074,12 @@ export async function run(
             'max-page-response-bytes': { type: 'string' },
             'pagination-cursor-capacity': { type: 'string' },
             'pagination-cursor-ttl-ms': { type: 'string' },
+            'max-repositories': { type: 'string' },
+            'max-objects': { type: 'string' },
+            'max-object-bytes': { type: 'string' },
+            'repository-creation-limit': { type: 'string' },
+            'object-creation-limit': { type: 'string' },
+            'creation-window-ms': { type: 'string' },
             'replay-nonce-capacity': { type: 'string' },
             'request-skew-ms': { type: 'string' },
             'trust-host': { type: 'string', multiple: true },
@@ -3139,6 +3147,33 @@ export async function run(
           const message =
             error instanceof Error ? error.message : String(error);
           out(`invalid server limit configuration: ${message}`);
+          return 2;
+        }
+        const quotas = { ...DEFAULT_QUOTAS } as Record<
+          keyof typeof DEFAULT_QUOTAS,
+          number
+        >;
+        const quotaFlags = [
+          ['max-repositories', 'maxRepositories'],
+          ['max-objects', 'maxObjects'],
+          ['max-object-bytes', 'maxObjectBytes'],
+          ['repository-creation-limit', 'repositoryCreationLimit'],
+          ['object-creation-limit', 'objectCreationLimit'],
+          ['creation-window-ms', 'creationWindowMs'],
+        ] as const;
+        for (const [flag, property] of quotaFlags) {
+          const raw = values[flag];
+          if (raw === undefined) continue;
+          if (!/^\d+$/.test(raw)) {
+            out(`invalid --${flag}`);
+            return 2;
+          }
+          quotas[property] = Number(raw);
+        }
+        try {
+          resolveQuotas(quotas);
+        } catch {
+          out('invalid quota configuration');
           return 2;
         }
         const rawReplayNonceCapacity = values['replay-nonce-capacity'];
@@ -3237,6 +3272,7 @@ export async function run(
           }
         }
         const server = startServer({
+          quotas,
           dataDir,
           port,
           attester,

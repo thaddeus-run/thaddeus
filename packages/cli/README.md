@@ -186,3 +186,8 @@ thaddeus revoke did:key:z6Mk…
 ```
 
 > **Status: spike.** Online, full-set sync (see the CLI design spec).
+
+`thaddeus serve` also accepts `--max-repositories`, `--max-objects`,
+`--max-object-bytes`, `--repository-creation-limit`, `--object-creation-limit`,
+and `--creation-window-ms`. These per-owner budgets persist across restart. See
+[durable quota defaults and operational details](../../docs/repository-quotas.md).
