@@ -29,7 +29,18 @@ import {
   type ReputationArchive,
   signClaim,
 } from '@thaddeus.run/reputation';
-import { signVeto, VetoLog } from '@thaddeus.run/review';
+import {
+  reviewerCapabilityId,
+  ReviewLog,
+  reviewScopeMatches,
+  signReviewerCapability,
+  signReviewRevocation,
+  signScopedVeto,
+  signVetoWithdrawal,
+  verifyVeto,
+  vetoId,
+  VetoLog,
+} from '@thaddeus.run/review';
 import {
   DEFAULT_ATTESTATION_RATE_LIMIT,
   DEFAULT_MAX_FIELD_BYTES,
@@ -131,6 +142,29 @@ async function openLocal(root: string, cfg: Config): Promise<Repo> {
 // openDurable uses — so a ProvenanceLog reads/writes the "why" alongside the code.
 function repoScope(root: string, cfg: Config): Backend {
   return scoped(new FileBackend(storePath(root, cfg)), `repo/${cfg.repo}/`);
+}
+
+// Replay signed review events against the working copy's pinned owner for offline use.
+async function localReviews(
+  root: string,
+  cfg: Config,
+  repo: Repo
+): Promise<ReviewLog> {
+  const owner = repo.headRecords.owner;
+  if (owner === undefined)
+    throw new Error('repository owner is not pinned; pull first');
+  return ReviewLog.load(repoScope(root, cfg), cfg.repo, owner);
+}
+
+// History signatures and the pinned owner determine authority; server labels do not.
+async function syncReviews(
+  client: Client,
+  cfg: Config,
+  reviews: ReviewLog
+): Promise<void> {
+  for (const entry of await client.reviewHistory(cfg.repo)) {
+    if ('kind' in entry.record) await reviews.import(entry.record);
+  }
 }
 
 async function readableSnapshot(
@@ -2062,6 +2096,7 @@ export async function run(
           repoScope(root, cfg)
         );
         const vetoLog = await VetoLog.load(repoScope(root, cfg));
+        const reviews = await localReviews(root, cfg, local);
         // --since/--until filter by the op's signed wall-clock timestamp
         // (op.at), both bounds inclusive. Parse the bounds AND op.at to instants
         // (epoch ms) and compare those — a lexical string compare would misorder
@@ -2086,7 +2121,9 @@ export async function run(
           );
         });
         const isVetoed = (op: Op): boolean =>
-          vetoLog.forOp(op.id).some((v) => vetoLog.status(v) === 'verified');
+          [...vetoLog.forOp(op.id), ...reviews.vetoes()].some(
+            (v) => reviews.status(v, op) === 'active'
+          );
         if (values.json === true) {
           out(
             JSON.stringify(
@@ -2096,6 +2133,7 @@ export async function run(
                 path: op.path,
                 author: op.author,
                 vetoed: isVetoed(op),
+                reviewState: 'last-synced',
                 why: provLog.forOp(op.id).map((p) => ({
                   status: provLog.status(p),
                   actor_kind: p.actor_kind,
@@ -2110,10 +2148,10 @@ export async function run(
           out('no history');
           return 0;
         }
+        out('review state: last-synced; pull to refresh');
         for (const op of ops) {
           const why = provLog.forOp(op.id);
-          // A ⛔ marker flags an op under a verified standing veto — the reader
-          // sees at a glance which changes a reviewer has blocked.
+          // A blocking marker reflects authority in the last-synced review history.
           out(
             `${op.id.slice(0, 10)}  ${op.at}  ${op.path}${isVetoed(op) ? '  ⛔ vetoed' : ''}`
           );
@@ -2225,12 +2263,17 @@ export async function run(
       case 'veto': {
         const { values, positionals } = parseArgs({
           args: [...rest],
-          options: { message: { type: 'string', short: 'm' } },
+          options: {
+            message: { type: 'string', short: 'm' },
+            grant: { type: 'string' },
+          },
           allowPositionals: true,
         });
         const prefix = positionals[0];
         if (prefix === undefined) {
-          out('usage: thaddeus veto <op> [-m "<reason>"]');
+          out(
+            'usage: thaddeus veto <op> [-m "<reason>"] [--grant id] | veto withdraw <veto-id> [-m reason]'
+          );
           return 2;
         }
         const root = findRoot(env.cwd);
@@ -2242,6 +2285,32 @@ export async function run(
         const view = viewOf(cfg);
         const identity = loadIdentity(env.home);
         const local = await openLocal(root, cfg);
+        const client = new Client(cfg.server, identity, env.fetchImpl);
+        const reviews = await localReviews(root, cfg, local);
+        if (prefix === 'withdraw') {
+          const id = positionals[1];
+          if (id === undefined) {
+            out('usage: thaddeus veto withdraw <veto-id> [-m reason]');
+            return 2;
+          }
+          const withdrawal = signVetoWithdrawal(
+            {
+              repo: cfg.repo,
+              veto: id,
+              reason: values.message ?? 'withdrawn',
+              at: new Date().toISOString(),
+            },
+            identity
+          );
+          const result = await client.withdrawVeto(cfg.repo, withdrawal);
+          if (!result.withdrawn) {
+            out('veto withdrawal not accepted');
+            return 1;
+          }
+          await syncReviews(client, cfg, reviews);
+          out(`withdrew veto ${id}`);
+          return 0;
+        }
         // Resolve a short op-id prefix (as printed by `log`) to a full op.
         const matches = opsOnView(local, view).filter((o) =>
           o.id.startsWith(prefix)
@@ -2256,15 +2325,41 @@ export async function run(
         }
         const op = matches[0];
         const reason = values.message ?? 'vetoed';
-        const veto = signVeto(
-          { op: op.id, reason, at: new Date().toISOString() },
+        let grant = 'owner';
+        if (
+          identity.did !== local.headRecords.owner ||
+          (values.grant !== undefined && values.grant !== 'owner')
+        ) {
+          const grants = (
+            await client.listReviewers(cfg.repo, local.headRecords.owner!)
+          )
+            .filter(
+              (cap) =>
+                cap.reviewer === identity.did &&
+                cap.paths.some((path) => reviewScopeMatches(path, op.path))
+            )
+            .map((cap) => reviewerCapabilityId(cap))
+            .sort();
+          const selected =
+            values.grant === undefined
+              ? grants[0]
+              : grants.find((id) => id === values.grant);
+          if (selected === undefined) {
+            out('no active reviewer grant covers this operation');
+            return 1;
+          }
+          grant = selected;
+        }
+        const veto = signScopedVeto(
+          {
+            repo: cfg.repo,
+            grant,
+            op: op.id,
+            reason,
+            at: new Date().toISOString(),
+          },
           identity
         );
-        // Persist locally (so `log`/`vetoes` show it offline) then push a
-        // veto-only bundle. A verified veto blocks any subsequent land of the op.
-        const vetoLog = new VetoLog(repoScope(root, cfg));
-        await vetoLog.ingest(veto);
-        const client = new Client(cfg.server, identity, env.fetchImpl);
         const pushed = await client.pushVetoes(cfg.repo, [veto]);
         if (pushed.accepted.veto === 0) {
           out(
@@ -2276,7 +2371,8 @@ export async function run(
           );
           return 1;
         }
-        out(`vetoed ${op.id.slice(0, 10)}: ${reason}`);
+        await syncReviews(client, cfg, reviews);
+        out(`vetoed ${op.id.slice(0, 10)}: ${reason} [${vetoId(veto)}]`);
         return 0;
       }
       case 'vetoes': {
@@ -2294,6 +2390,7 @@ export async function run(
         const view = viewOf(cfg);
         const local = await openLocal(root, cfg);
         const vetoLog = await VetoLog.load(repoScope(root, cfg));
+        const reviews = await localReviews(root, cfg, local);
         const matches = opsOnView(local, view).filter((o) =>
           o.id.startsWith(prefix)
         );
@@ -2306,13 +2403,23 @@ export async function run(
           return 2;
         }
         const op = matches[0];
-        const records = vetoLog.forOp(op.id);
+        const records = [
+          ...new Map(
+            [
+              ...vetoLog.forOp(op.id),
+              ...reviews.vetoes().filter((v) => v.op === op.id),
+            ].map((v) => [vetoId(v), v])
+          ).values(),
+        ];
         if (wantsJson(rest)) {
           out(
             JSON.stringify({
               op: { id: op.id, path: op.path },
+              reviewState: 'last-synced',
               vetoes: records.map((v) => ({
-                status: vetoLog.status(v),
+                id: vetoId(v),
+                status: verifyVeto(v) ? 'verified' : 'unverified',
+                lifecycle: reviews.status(v, op),
                 reviewer: v.reviewer,
                 reason: v.reason,
                 at: v.at,
@@ -2325,9 +2432,12 @@ export async function run(
           out('no vetoes');
           return 0;
         }
+        out('review state: last-synced; pull to refresh');
         out(`op ${op.id.slice(0, 10)}  ${op.path}`);
         for (const v of records) {
-          out(`  [${vetoLog.status(v)}] ${v.reviewer}: ${v.reason}`);
+          out(
+            `  [${verifyVeto(v) ? 'verified' : 'unverified'}] [${reviews.status(v, op)}] ${vetoId(v)} ${v.reviewer}: ${v.reason}`
+          );
         }
         return 0;
       }
@@ -2693,6 +2803,102 @@ export async function run(
         } else {
           for (const line of replacementWarning) out(line);
           for (const line of describePolicy(saved)) out(line);
+        }
+        return 0;
+      }
+      case 'reviewer': {
+        const { values, positionals } = parseArgs({
+          args: [...rest],
+          options: {
+            paths: { type: 'string' },
+            'max-vetoes-per-hour': { type: 'string' },
+            'max-active-vetoes': { type: 'string' },
+            message: { type: 'string', short: 'm' },
+            json: { type: 'boolean' },
+          },
+          allowPositionals: true,
+        });
+        const [action, target] = positionals;
+        if (
+          !['grant', 'list', 'revoke'].includes(action ?? '') ||
+          (action !== 'list' && target === undefined)
+        ) {
+          out(
+            'usage: thaddeus reviewer grant <did> --paths a,b | list [--json] | revoke <grant-id> [-m reason]'
+          );
+          return 2;
+        }
+        const root = findRoot(env.cwd);
+        if (root === undefined) {
+          out('not a thaddeus working copy');
+          return 2;
+        }
+        const cfg = loadConfig(root);
+        const local = await openLocal(root, cfg);
+        const identity = loadIdentity(env.home);
+        const reviews = await localReviews(root, cfg, local);
+        const client = new Client(cfg.server, identity, env.fetchImpl);
+        if (action === 'list') {
+          const caps = await client.listReviewers(
+            cfg.repo,
+            local.headRecords.owner!
+          );
+          await syncReviews(client, cfg, reviews);
+          const rows = caps.map((cap) => ({
+            id: reviewerCapabilityId(cap),
+            reviewer: cap.reviewer,
+            paths: cap.paths,
+            maxVetoesPerHour: cap.maxVetoesPerHour,
+            maxActiveVetoes: cap.maxActiveVetoes,
+          }));
+          if (values.json === true) out(JSON.stringify(rows));
+          else if (rows.length === 0) out('no reviewer grants');
+          else
+            for (const cap of rows)
+              out(
+                `${cap.id} ${cap.reviewer} ${cap.paths.join(', ')} (max ${cap.maxVetoesPerHour}/hour, ${cap.maxActiveVetoes} active)`
+              );
+          return 0;
+        }
+        if (identity.did !== local.headRecords.owner) {
+          out('only the repository owner can manage reviewers');
+          return 1;
+        }
+        if (action === 'grant') {
+          const cap = signReviewerCapability(
+            {
+              repo: cfg.repo,
+              reviewer: target,
+              paths: values.paths?.split(',').map((path) => path.trim()) ?? [],
+              maxVetoesPerHour: Number(values['max-vetoes-per-hour'] ?? 60),
+              maxActiveVetoes: Number(values['max-active-vetoes'] ?? 256),
+              at: new Date().toISOString(),
+              nonce: crypto.randomUUID(),
+            },
+            identity
+          );
+          const result = await client.grantReviewer(cfg.repo, cap);
+          if (result.grant !== reviewerCapabilityId(cap))
+            throw new Error('reviewer grant not accepted');
+          await syncReviews(client, cfg, reviews);
+          out(`granted review ${result.grant} to ${target}`);
+        } else {
+          const revocation = signReviewRevocation(
+            {
+              repo: cfg.repo,
+              grant: target,
+              reason: values.message ?? 'revoked',
+              at: new Date().toISOString(),
+            },
+            identity
+          );
+          const result = await client.revokeReviewer(cfg.repo, revocation);
+          if (!result.revoked) {
+            out('reviewer revocation not accepted');
+            return 1;
+          }
+          await syncReviews(client, cfg, reviews);
+          out(`revoked review ${target}`);
         }
         return 0;
       }

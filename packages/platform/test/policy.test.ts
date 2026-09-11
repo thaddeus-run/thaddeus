@@ -416,7 +416,9 @@ describe('policy — blockOnVeto', () => {
     const vetoes = new VetoLog();
     const op = await log.write('main', 'a.rs', enc('fn a() {}'), author);
 
-    const d = await blockOnVeto(vetoes)(proposal({ incomingOps: [op] }));
+    const d = await blockOnVeto(vetoes, [author.did])(
+      proposal({ incomingOps: [op] })
+    );
     expect(d.allow).toBe(true);
   });
 
@@ -433,7 +435,9 @@ describe('policy — blockOnVeto', () => {
       reviewer
     );
 
-    const d = await blockOnVeto(vetoes)(proposal({ incomingOps: [op] }));
+    const d = await blockOnVeto(vetoes, [reviewer.did])(
+      proposal({ incomingOps: [op] })
+    );
     expect(d.allow).toBe(false);
     expect(d.reason).toContain('1 op(s)');
     expect(d.reason).toContain('veto');
@@ -471,7 +475,9 @@ describe('policy — blockOnVeto', () => {
     // Tampered body: names a real reviewer but the signature no longer verifies.
     vetoes.append({ ...signed, reason: 'forged veto' });
 
-    const d = await blockOnVeto(vetoes)(proposal({ incomingOps: [op] }));
+    const d = await blockOnVeto(vetoes, [reviewer.did])(
+      proposal({ incomingOps: [op] })
+    );
     expect(d.allow).toBe(true);
   });
 
@@ -485,16 +491,24 @@ describe('policy — blockOnVeto', () => {
     const vetoed = await log.write('main', 'f.rs', enc('fn f() {}'), author);
     await vetoes.record(vetoed, { reason: 'unsafe', at: VETO_AT }, reviewer);
 
-    const d = await blockOnVeto(vetoes)(
+    const d = await blockOnVeto(vetoes, [reviewer.did])(
       proposal({ incomingOps: [clean, vetoed] })
     );
     expect(d.allow).toBe(false);
     expect(d.reason).toContain('1 op(s)');
   });
 
-  test('an empty reviewers allowlist is rejected at construction', () => {
+  test('an empty allowlist trusts nobody and omission is rejected', async () => {
+    const reviewer = Identity.create();
+    const log = new OpLog(new MemoryStore());
+    const op = await log.write('main', 'a.ts', enc('a'), reviewer);
     const vetoes = new VetoLog();
-    expect(() => blockOnVeto(vetoes, [])).toThrow(RangeError);
+    await vetoes.record(op, { reason: 'no', at: VETO_AT }, reviewer);
+    expect(
+      (await blockOnVeto(vetoes, [])(proposal({ incomingOps: [op] }))).allow
+    ).toBe(true);
+    // @ts-expect-error Runtime callers must also provide the allowlist.
+    expect(() => blockOnVeto(vetoes)).toThrow(TypeError);
   });
 });
 

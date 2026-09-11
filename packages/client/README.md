@@ -42,3 +42,22 @@ window.
 
 > **Status: spike.** Online, full-set sync. Delegates can upload operations;
 > shared-head authority is owner-only.
+
+## Reviewers and vetoes
+
+`grantReviewer`, `listReviewers`, and `revokeReviewer` manage review grants.
+`listReviewers(name, expectedOwner)` verifies signatures against the caller's
+pinned owner DID. These methods never create write delegations or distribute
+content decryption keys.
+
+`pushVetoes` submits to the review-only endpoint. Use `signScopedVeto` from
+`@thaddeus.run/review` with the repository name and exact reviewer grant ID, or
+`owner` for the repository owner. Inspect `accepted.veto` and `rejected` before
+reporting a successful submission. `withdrawVeto` sends a signed withdrawal.
+
+`reviewHistory` collects signed history and current server labels;
+`reviewHistoryPage` returns an individual bounded page. Clone and pull return a
+`reviews: ReviewLog` alongside `vetoes: VetoLog` and persist the signed
+lifecycle evidence locally. Use `reviews.status(veto, op)` to distinguish active
+authority from signature validity. Offline state may be stale until the next
+sync.

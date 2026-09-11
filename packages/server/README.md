@@ -151,3 +151,45 @@ Repository creation and encrypted-object uploads enforce durable per-owner
 storage quotas and creation windows by default. Configure `ServerConfig.quotas`;
 see
 [quota semantics, HTTP errors, recovery and metrics](../../docs/repository-quotas.md).
+
+## Reviewer authorization
+
+Review grants are independent of write delegations. An outside reviewer can
+submit vetoes without uploading code or advancing a shared head. Veto scope
+comes from the review grant, even if that identity also has a write delegation
+with different paths.
+
+| Route                                | Request                  | Authority                                          |
+| ------------------------------------ | ------------------------ | -------------------------------------------------- |
+| `POST /repos/:name/reviewers`        | `{ capability }`         | Owner request and owner-signed grant               |
+| `GET /repos/:name/reviewers`         | Pagination parameters    | Public active grant evidence                       |
+| `POST /repos/:name/reviewers/revoke` | `{ revocation }`         | Owner request and signed grant revocation          |
+| `POST /repos/:name/vetoes`           | `{ veto: [wireRecord] }` | Reviewer request matching each veto signer         |
+| `GET /repos/:name/vetoes`            | Pagination parameters    | Public signed history and current lifecycle labels |
+| `POST /repos/:name/vetoes/withdraw`  | `{ withdrawal }`         | Veto author or repository owner                    |
+
+Management records use `encodeReviewRecord` from the protocol export. Vetoes use
+the existing bundle record encoding. The submission response has the same
+`accepted` and `rejected` fields as push. Per-item authorization and rate
+failures appear in `rejected`; malformed envelopes fail the request. Review-only
+routes reject extra bundle fields. Ordinary push and owner recall still check
+every veto through the same validator. Unknown or invalid target operations are
+rejected.
+
+`ServerConfig.reviewLimits` accepts `maxVetoesPerHour`, `maxActiveVetoes`, and
+`maxVetoesPerRequest`, defaulting to 60, 256, and 256. Existing request-body and
+decoded-field byte limits also apply. A batch over the veto count limit returns
+`veto_limit_exceeded`. Limits include owner submissions and do not reset when a
+reviewer receives another grant. This bounds submission rate and active count,
+not lifetime audit storage.
+
+The land policy always uses an explicit owner-plus-reviewer allowlist and
+rechecks scope and revocation under the repository lock. Revoking a review grant
+removes the effect of its existing vetoes without deleting history. Revoking a
+write delegation does not revoke a separately granted review capability.
+
+On upgrade, legacy non-owner vetoes are audit-only. Legacy owner vetoes still
+block. New grants never activate old non-owner vetoes. Pull/clone pages carry
+signed review events alongside legacy vetoes so clients can display lifecycle
+state offline. Server lifecycle labels describe the current server state;
+clients verify the signed evidence against their pinned repository owner.

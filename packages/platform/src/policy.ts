@@ -1,7 +1,7 @@
 import type { Conflict, Op } from '@thaddeus.run/log';
 import type { ProvenanceLog } from '@thaddeus.run/provenance';
 import type { ReputationLog } from '@thaddeus.run/reputation';
-import type { VetoLog } from '@thaddeus.run/review';
+import type { Veto, VetoLog } from '@thaddeus.run/review';
 
 // A proposed landing, computed on a dry-run view before any policy decision.
 export interface LandProposal {
@@ -138,28 +138,17 @@ export function requirePassingChecks(
   };
 }
 
-// The standing human veto (Pillar 10): a reviewer keeps the right to say no to
-// any change, even one a green policy would merge. Reject iff ANY incoming op
-// carries a verified standing veto — from an allowed reviewer, when `reviewers`
-// is given; from anyone, when it is omitted. Composed in the floor via all(...),
-// which is an AND, a veto overrides every green gate: automation sets the floor,
-// the veto is the ceiling a person can always lower. An unverified veto never
-// blocks, so a forged veto cannot deny service.
+// Only explicitly trusted reviewers can block a land. The optional predicate
+// lets a host re-check repository scope, grant revocation, and withdrawals for
+// each target operation; signature validity alone never supplies authority.
 export function blockOnVeto(
-  vetoes: VetoLog,
-  reviewers?: readonly string[]
+  vetoes: Pick<VetoLog, 'forOp' | 'status'>,
+  reviewers: readonly string[],
+  authorized: (veto: Veto, op: Op) => boolean = () => true
 ): LandPolicy {
-  // Fail fast on a misconfigured allowlist: an empty `reviewers` array means no
-  // reviewer can ever match, so every veto is ignored and the gate becomes a
-  // silent always-pass — the opposite of a veto's intent. To accept any
-  // reviewer's veto, OMIT `reviewers` (undefined); passing `[]` is a mistake, so
-  // reject it at construction, mirroring requireReputationTier's guard.
-  if (reviewers !== undefined && reviewers.length === 0) {
-    throw new RangeError(
-      'blockOnVeto: reviewers must be a non-empty allowlist, or omitted to accept any reviewer'
-    );
-  }
-  const allowed = reviewers === undefined ? undefined : new Set(reviewers);
+  if (!Array.isArray(reviewers))
+    throw new TypeError('blockOnVeto requires an explicit reviewer allowlist');
+  const allowed = new Set(reviewers);
   return (p) => {
     const vetoed = p.incomingOps.filter((op) =>
       vetoes
@@ -167,7 +156,8 @@ export function blockOnVeto(
         .some(
           (v) =>
             vetoes.status(v) === 'verified' &&
-            (allowed === undefined || allowed.has(v.reviewer))
+            allowed.has(v.reviewer) &&
+            authorized(v, op)
         )
     );
     return vetoed.length === 0

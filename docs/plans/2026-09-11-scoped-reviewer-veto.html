@@ -1,0 +1,1037 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="color-scheme" content="dark" />
+    <title>THA-6 + THA-24: scoped reviewer veto</title>
+    <style>
+      :root {
+        /* Near-black editorial palette. Dark-only by design — do not add a light theme. */
+        --bg: #000000;
+        --surface: #0c0c0c; /* cards */
+        --rule: #232323; /* hairlines, card borders */
+        --fg: #ededed; /* body text */
+        --fg-strong: #ffffff; /* headings */
+        --muted: #8b8b8b; /* secondary text, table heads */
+        --code-bg: #242424; /* inline code chip */
+        --block-bg: #0e0e0e; /* pre blocks */
+        --accent: #6fdc8c; /* links, skill names, checked state */
+        --s: #5ee08a;
+        --a: #a8e05f;
+        --b: #e0c95e;
+        --c: #e0a35e;
+        --d: #e06f6f;
+        --x: #7a7a7a;
+      }
+      * {
+        box-sizing: border-box;
+      }
+      html {
+        -webkit-text-size-adjust: 100%;
+      }
+      body {
+        margin: 0;
+        background: var(--bg);
+        color: var(--fg);
+        font:
+          17px/1.7 system-ui,
+          -apple-system,
+          'Helvetica Neue',
+          'Segoe UI',
+          Arial,
+          sans-serif;
+        font-synthesis-weight: none;
+        -webkit-font-smoothing: antialiased;
+      }
+      .wrap {
+        max-width: 900px;
+        margin: 0 auto;
+        padding: 4rem 1.5rem 8rem;
+      }
+
+      /* ---------- Type ---------- */
+      h1,
+      h2,
+      h3 {
+        color: var(--fg-strong);
+        font-weight: 700;
+        letter-spacing: -0.021em;
+      }
+      h1 {
+        font-size: 2.25rem;
+        line-height: 1.15;
+        margin: 0 0 1rem;
+      }
+      h2 {
+        font-size: 1.4rem;
+        line-height: 1.25;
+        margin: 0 0 1.25rem;
+      }
+      h3 {
+        font-size: 1.05rem;
+        line-height: 1.4;
+        margin: 2rem 0 0.5rem;
+      }
+      p {
+        margin: 0 0 1.1rem;
+      }
+      a {
+        color: var(--accent);
+        text-decoration: none;
+      }
+      a:hover {
+        text-decoration: underline;
+      }
+      .lede {
+        color: var(--muted);
+        font-size: 1.05rem;
+        margin: 0;
+      }
+      .muted {
+        color: var(--muted);
+      }
+
+      /* Sections are separated by a hairline and a lot of air — no boxes around prose. */
+      section.block {
+        border-top: 1px solid var(--rule);
+        padding-top: 2.5rem;
+        margin-top: 2.5rem;
+      }
+      header {
+        padding-bottom: 1.75rem;
+      }
+
+      /* ---------- Code ---------- */
+      code {
+        font-family: ui-monospace, SFMono-Regular, 'SF Mono', Menlo, monospace;
+        font-size: 0.855em;
+        background: var(--code-bg);
+        color: #e8e8e8;
+        padding: 0.12em 0.42em;
+        border-radius: 4px;
+        white-space: nowrap;
+      }
+      pre {
+        background: var(--block-bg);
+        border: 1px solid var(--rule);
+        border-radius: 8px;
+        padding: 1rem 1.1rem;
+        overflow-x: auto;
+        font-size: 0.875rem;
+        line-height: 1.6;
+        margin: 0.9rem 0;
+      }
+      pre code {
+        background: none;
+        padding: 0;
+        font-size: inherit;
+        white-space: pre;
+        color: var(--fg);
+      }
+
+      /* ---------- Stat cards ---------- */
+      .stats {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
+        gap: 0.9rem;
+        margin: 1.75rem 0;
+      }
+      .stat {
+        background: var(--surface);
+        border: 1px solid var(--rule);
+        border-radius: 10px;
+        padding: 1.2rem 1.3rem 1.35rem;
+      }
+      .stat b {
+        display: block;
+        color: var(--fg-strong);
+        font-size: 2rem;
+        font-weight: 500;
+        letter-spacing: -0.02em;
+        line-height: 1.1;
+        margin-bottom: 0.5rem;
+      }
+      .stat span {
+        color: var(--muted);
+        font-size: 0.95rem;
+        line-height: 1.45;
+      }
+
+      /* ---------- Tables: uppercase muted heads, hairline rows, no vertical rules ---------- */
+      .table-scroll {
+        overflow-x: auto;
+        margin: 1.5rem 0;
+      }
+      table {
+        border-collapse: collapse;
+        width: 100%;
+      }
+      th {
+        text-align: left;
+        vertical-align: bottom;
+        color: var(--muted);
+        font-size: 0.74rem;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.1em;
+        padding: 0 1.5rem 0.8rem 0;
+        border-bottom: 1px solid var(--rule);
+        white-space: nowrap;
+      }
+      td {
+        text-align: left;
+        vertical-align: top;
+        padding: 0.95rem 1.5rem 0.95rem 0;
+        border-bottom: 1px solid var(--rule);
+      }
+      th:last-child,
+      td:last-child {
+        padding-right: 0;
+      }
+      tbody tr:last-child td {
+        border-bottom: 0;
+      }
+      td.num {
+        color: var(--muted);
+        font-variant-numeric: tabular-nums;
+      }
+
+      /* ---------- Tier / status legend ---------- */
+      .legend {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 1.25rem;
+        color: var(--muted);
+        font-size: 0.95rem;
+        margin: 0 0 0.75rem;
+      }
+      .tier {
+        font-weight: 700;
+      }
+      .tier-s {
+        color: var(--s);
+      }
+      .tier-a {
+        color: var(--a);
+      }
+      .tier-b {
+        color: var(--b);
+      }
+      .tier-c {
+        color: var(--c);
+      }
+      .tier-d {
+        color: var(--d);
+      }
+      .tier-x {
+        color: var(--x);
+      }
+      .name {
+        color: var(--accent);
+        font-weight: 600;
+      }
+
+      /* ---------- Callout ---------- */
+      .callout {
+        background: var(--surface);
+        border: 1px solid var(--rule);
+        border-radius: 10px;
+        padding: 1.15rem 1.35rem;
+        margin: 1.5rem 0;
+      }
+      .callout > :last-child {
+        margin-bottom: 0;
+      }
+      .callout strong {
+        color: var(--fg-strong);
+      }
+      .callout ul {
+        margin: 0.6rem 0 0;
+        padding-left: 1.15rem;
+      }
+      .callout li {
+        margin: 0.3rem 0;
+      }
+
+      /* ---------- Tasks ---------- */
+      section.task {
+        background: var(--surface);
+        border: 1px solid var(--rule);
+        border-radius: 10px;
+        padding: 1.4rem 1.6rem;
+        margin: 1.25rem 0;
+      }
+      .files {
+        font-size: 0.92rem;
+        color: var(--muted);
+        margin: 0 0 1rem;
+      }
+      .files code {
+        color: var(--fg);
+        white-space: normal;
+      }
+      .io {
+        margin: 0 0 1.25rem;
+        font-size: 0.95rem;
+      }
+      .io dt {
+        color: var(--muted);
+        font-size: 0.74rem;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.1em;
+      }
+      .io dd {
+        margin: 0.2rem 0 0.75rem;
+      }
+      ol.steps {
+        list-style: none;
+        padding: 0;
+        margin: 0;
+      }
+      ol.steps > li {
+        display: flex;
+        gap: 0.7rem;
+        align-items: flex-start;
+        padding: 0.7rem 0;
+        border-top: 1px solid var(--rule);
+      }
+      ol.steps > li:first-child {
+        border-top: 0;
+        padding-top: 0;
+      }
+      ol.steps input {
+        margin: 0.42rem 0 0;
+        flex: none;
+        width: 1rem;
+        height: 1rem;
+        accent-color: var(--accent);
+      }
+      ol.steps input:checked + .label {
+        color: var(--muted);
+      }
+      ol.steps input:checked + .label strong {
+        color: var(--muted);
+        text-decoration: line-through;
+      }
+      .label {
+        flex: 1;
+        min-width: 0;
+      }
+      .label strong {
+        color: var(--fg-strong);
+        font-weight: 600;
+      }
+
+      .progress {
+        color: var(--muted);
+        font-size: 0.95rem;
+        margin-top: 3rem;
+        border-top: 1px solid var(--rule);
+        padding-top: 1.5rem;
+      }
+      .progress b {
+        color: var(--accent);
+      }
+
+      @media (max-width: 620px) {
+        body {
+          font-size: 16px;
+        }
+        h1 {
+          font-size: 1.8rem;
+        }
+        .wrap {
+          padding: 2.5rem 1.1rem 5rem;
+        }
+        section.task {
+          padding: 1.1rem 1.15rem;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="wrap">
+      <header>
+        <h1>Scoped reviewer veto implementation plan</h1>
+        <p class="lede">
+          THA-6 and THA-24, one PR against <code>fdbf022</code>. Review grants
+          permit scoped vetoes without write authority.
+        </p>
+      </header>
+      <section class="block">
+        <h2>Execution</h2>
+        <p>
+          TypeScript, Bun, moon, existing signed records and Backend
+          persistence. The domain owns signed authority and lifecycle records;
+          the server enforces them under repository locks. Client and CLI
+          commands use the same submission checks.
+        </p>
+        <p>
+          For agentic workers, use the subagent-driven-development or
+          executing-plans skill task by task. Do not commit or push without the
+          user's instruction.
+        </p>
+      </section>
+      <section class="block">
+        <p>
+          Prepared 2026-09-11 against main at <code>fdbf022</code> after
+          <code>git pull --ff-only</code>. Both GitHub mirrors (#59 and #77)
+          remain open and match the supplied issue descriptions. Linear could
+          not be refreshed because its connection requires reauthentication. The
+          repository's <code>.agents/skills/</code> directory is empty.
+        </p>
+      </section>
+      <section class="block">
+        <h2>Delivery</h2>
+        <p>
+          Implement both issues in one PR. THA-6 supplies the authority model
+          that THA-24 needs, and shipping them together avoids an intermediate
+          state with two sources of veto authorization. The current roadmap
+          already groups #59 and #77.
+        </p>
+        <ul>
+          <li>
+            Proposed branch:
+            <code>feature/tha-6-tha-24-scoped-reviewer-veto</code>.
+          </li>
+          <li>
+            Proposed PR title:
+            <code
+              >feat(review): authorize scoped reviewer vetoes independently of
+              writes</code
+            >.
+          </li>
+          <li>
+            Link THA-6 and THA-24; include <code>Closes #59</code> and
+            <code>Closes #77</code> in the eventual PR.
+          </li>
+          <li>
+            Leave approval-required policy to THA-97 and the review queue to
+            THA-98. This PR supplies their authority and audit primitives. THA-7
+            and THA-55 remain separate client/UI integrations.
+          </li>
+          <li>
+            Implementation is authorized on
+            <code>feature/tha-6-tha-24-scoped-reviewer-veto</code>. No commits,
+            pushes, or PR publication are authorized.
+          </li>
+        </ul>
+      </section>
+      <section class="block">
+        <h2>Evidence from current code</h2>
+        <table>
+          <thead>
+            <tr>
+              <th>Area</th>
+              <th>Current behavior</th>
+              <th>Required change</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><code>packages/review/src/veto.ts</code></td>
+              <td>v1 signature covers op, reviewer, reason, timestamp</td>
+              <td>
+                Bind new external-reviewer vetoes to a repository and a specific
+                reviewer grant
+              </td>
+            </tr>
+            <tr>
+              <td><code>packages/review/src/vetolog.ts</code></td>
+              <td>
+                Durable, content-deduplicated, keep-and-label log; only
+                verified/unverified labels
+              </td>
+              <td>
+                Preserve signature labels and add separate
+                authorization/lifecycle evaluation and audit records
+              </td>
+            </tr>
+            <tr>
+              <td><code>packages/server/src/server.ts:2859</code></td>
+              <td>General push authorizes owner or active write delegate</td>
+              <td>
+                Give reviewer-only identities a dedicated submission route;
+                never authorize writes from review grants
+              </td>
+            </tr>
+            <tr>
+              <td><code>packages/server/src/server.ts:2789</code></td>
+              <td>
+                Bundle ingestion persists vetoes without signer, target, or
+                scope authorization
+              </td>
+              <td>One shared veto validator for every ingestion route</td>
+            </tr>
+            <tr>
+              <td><code>packages/server/src/server.ts:3079</code></td>
+              <td>
+                Calls <code>blockOnVeto(vetoLog)</code> without an allowlist
+              </td>
+              <td>
+                Pass owner plus active reviewers explicitly and evaluate each
+                veto's grant and target scope
+              </td>
+            </tr>
+            <tr>
+              <td><code>packages/server/src/server.ts:3333</code></td>
+              <td>
+                Owner's revoke/recall bundle also reaches
+                <code>ingestBundle</code>
+              </td>
+              <td>Apply the same veto checks to this alternate path</td>
+            </tr>
+            <tr>
+              <td><code>packages/client/src/client.ts:938</code></td>
+              <td><code>pushVetoes</code> sends a veto-only general push</td>
+              <td>
+                Preserve the public method while routing through the reviewer
+                endpoint
+              </td>
+            </tr>
+            <tr>
+              <td><code>packages/agent/src/registry.ts</code></td>
+              <td>Write delegations and terminal write revocation</td>
+              <td>
+                Keep independent from reviewer grants and reviewer revocation
+              </td>
+            </tr>
+            <tr>
+              <td><code>packages/server/src/attestation-rate.ts</code></td>
+              <td>Durable rate-window pattern already exists</td>
+              <td>
+                Reuse its persistence principles, with veto-specific metering
+                and deduplication
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </section>
+      <section class="block">
+        <h2>Authorization decisions</h2>
+        <ol>
+          <li>
+            Add an owner-signed <code>ReviewerCapability</code> in
+            <code>@thaddeus.run/review</code>, with its own signing domain.
+            Fields: repository, reviewer DID, issuer DID, nonempty path scopes,
+            issuance time, unique grant nonce, and finite veto limits. Derive
+            the grant ID from canonical signed content. Validate at registration
+            and replay; freeze verified authority data. A write Delegation
+            cannot decode or verify as a reviewer capability. Review authority
+            grants no code upload, land, grant-management, or decryption
+            authority.
+          </li>
+          <li>
+            The repository owner remains an explicit full-scope reviewer. Other
+            identities require a reviewer grant even when they also hold a write
+            delegation. Review scopes govern vetoes; write scopes govern writes.
+            Do not intersect the two: a deliberately granted
+            <code>src/**</code> reviewer with a <code>docs/**</code> write
+            delegation must be able to review <code>src/**</code> without
+            gaining authority to write there. This replaces THA-24's interim
+            wording about checking the write delegation with the separate
+            reviewer capability requested by both issues.
+          </li>
+          <li>
+            New scoped veto records use a versioned signing domain covering
+            repository, grant ID, target op ID, reviewer, reason, and timestamp.
+            Owner records use an explicit owner authority marker. Retain v1
+            decoding and signature validation. Bind each external review to its
+            exact grant so revocation followed by a new grant never resurrects
+            old vetoes or accepts a veto made for another repo.
+          </li>
+          <li>
+            Require the request signer to equal the veto reviewer; do not permit
+            relaying another person's veto in this slice. Verify the record,
+            current grant, repo, and an existing signature-valid target op in
+            that repo before persistence. Check the target's stored path against
+            the review grant, never a caller's claimed path. Use the existing
+            exact-path / <code>prefix/**</code> / <code>**</code> semantics and
+            reject traversal or ambiguous path spellings. Reject unknown
+            targets; callers can submit again once the op exists. Same-bundle
+            targets must have been successfully ingested before a writer's veto
+            is evaluated.
+          </li>
+          <li>
+            At land time, re-evaluate authorization, exact grant revocation,
+            target scope, and withdrawal under the same repository lock as head
+            advancement. An explicit DID allowlist alone is insufficient: it
+            cannot express per-op scope or distinguish a revoked grant from a
+            later grant to the same DID.
+          </li>
+          <li>
+            Keep write and review revocation independent. An owner-signed
+            revocation terminally disables one reviewer grant and all vetoes
+            made under it, while retaining history. A fresh grant has a fresh
+            ID. Allow reviewer-signed withdrawal of their exact veto, and
+            owner-signed dismissal, both append-only and bound to the veto's
+            stable content ID. Replaying the same veto cannot undo withdrawal. A
+            new veto after withdrawal is a new, rate-limited record.
+          </li>
+        </ol>
+      </section>
+      <section class="block">
+        <h2>Implementation sequence within the PR</h2>
+        <h3>1. Review records, registry, and durable lifecycle</h3>
+        <ul>
+          <li>
+            Add capability, grant revocation, scoped veto, withdrawal/dismissal
+            records, canonical signing helpers, and a review registry without
+            importing the agent package. Export through
+            <code>packages/review/src/index.ts</code>.
+          </li>
+          <li>
+            Extend the review log to retain immutable audit history and compute
+            whether a veto is active, revoked, withdrawn, unauthorized, or
+            legacy. Keep cryptographic validity distinct: a valid signature does
+            not imply current authorization.
+          </li>
+          <li>
+            Persist signed records and server receipt time before changing
+            in-memory projections. Use one durable acceptance envelope for the
+            veto and receipt timestamp, so a crash cannot persist a veto without
+            its rate accounting.
+          </li>
+          <li>
+            Reload grants, revocations, vetoes, and withdrawals
+            deterministically. Invalid authority records confer no rights;
+            unreadable revocation state must fail closed rather than silently
+            re-enable a grant. Invalidate review caches on repository deletion
+            and failed mutations, following existing server patterns.
+          </li>
+        </ul>
+        <h3>2. Owner management and reviewer submission endpoints</h3>
+        <ul>
+          <li>
+            Add owner-authenticated grant/revoke endpoints under
+            <code>/repos/:name/reviewers</code>, plus a bounded, paginated grant
+            listing. Verify both request and record signer against repository
+            ownership, and bind records to the requested repository.
+          </li>
+          <li>
+            Add signed <code>POST /repos/:name/vetoes</code> and a signed
+            withdrawal endpoint. Accept only their review payloads; a reviewer
+            cannot smuggle objects, ops, store capabilities, provenance,
+            semantic ops, pending reveals, or head updates.
+          </li>
+          <li>
+            Add a paginated veto-history read endpoint. Follow the repository's
+            current read-access model and make actor, authority ID, target,
+            reason, receipt time, signature validity, and lifecycle status
+            inspectable. This is history, not a pending-review queue or an
+            approval concept.
+          </li>
+          <li>
+            Thread authenticated submission context into
+            <code>ingestBundle</code>; route general push and owner
+            revoke/recall veto entries through the same validator. General push
+            remains owner/write-delegate only. A writer without review authority
+            can still upload code, but its veto entries are rejected with no
+            veto side effects.
+          </li>
+          <li>
+            Preserve existing per-item accepted/rejected semantics for bundle
+            ingestion. Use stable rejection codes for missing authority, signer
+            mismatch, wrong repo, unknown target, invalid signature, scope,
+            revoked grant, and rate exhaustion.
+          </li>
+        </ul>
+        <h3>3. Land policy and upgrade behavior</h3>
+        <ul>
+          <li>
+            Make <code>blockOnVeto</code> require an explicit reviewer
+            allowlist, and add a predicate or policy context for per-veto
+            authorization/lifecycle checks. Update every internal caller, tests,
+            examples, and documentation. Remove implicit trust of every DID;
+            define an empty allowlist as trusting nobody. The server normally
+            passes at least the owner.
+          </li>
+          <li>
+            Compose owner plus active reviewer grants with the existing policy
+            floor; a veto from an authorized reviewer still overrides otherwise
+            green gates.
+          </li>
+          <li>
+            Existing owner v1 vetoes remain effective if their target is valid
+            in the repo. Existing non-owner v1 vetoes remain visible as legacy
+            audit entries but stop blocking, because they lack an
+            authorization-bound grant ID. Require a new grant and fresh scoped
+            submission to make them active. Never auto-promote write delegates
+            to reviewers or reinterpret old vetoes when granting review rights.
+          </li>
+          <li>
+            Document this security-related behavior change and the
+            explicit-allowlist API change in package docs and CHANGELOG.
+            Preserve original signed bytes.
+          </li>
+        </ul>
+        <h3>4. Abuse limits and concurrency</h3>
+        <ul>
+          <li>
+            Proposed configurable server ceilings: 60 newly accepted vetoes per
+            reviewer per repo per trailing hour, 256 active vetoes per reviewer
+            per repo, and 256 veto entries per request. Capability limits may
+            tighten these ceilings. Apply server ceilings to owner submissions
+            too. Validate finite safe integer limits; retain existing
+            request-body and decoded-field byte limits.
+          </li>
+          <li>
+            Charge only distinct accepted records, using trusted server receipt
+            time. Identical retries do not duplicate history or consume budget;
+            check current authority before reporting success. New grant IDs do
+            not reset DID-level rate/active limits. Active limits aggregate
+            across that reviewer's grants.
+          </li>
+          <li>
+            Rebuild recent usage from durable acceptance records after restart;
+            prune expired in-memory window entries without deleting audit
+            history. Keep a bounded index for active vetoes and current rate
+            usage.
+          </li>
+          <li>
+            Serialize check, persistence, and projection with
+            <code>withRepoLock</code>, and update repository revisions for
+            cursor consistency. Test both orderings of submit/revoke and
+            submit/land. A veto accepted after a land does not undo it.
+          </li>
+          <li>
+            Revocation and withdrawal must remain possible when submission
+            budgets are exhausted. Existing repository/object quotas do not
+            bound all review metadata; do not claim they do. This slice bounds
+            submission rate and active veto count, not lifetime audit storage;
+            broader retention policy remains separate.
+          </li>
+        </ul>
+        <h3>5. Client and CLI integration</h3>
+        <ul>
+          <li>
+            Add review grant/list/revoke and veto-history/withdraw methods to
+            the client; update DTO/protocol exports, pagination handling, and
+            browser-safe imports.
+          </li>
+          <li>
+            Route <code>pushVetoes</code> to the dedicated endpoint while
+            preserving its result contract. Update CLI <code>veto</code> to
+            select the active grant and sign the scoped record; owner usage
+            remains straightforward. If multiple grants cover an op, select
+            deterministically and permit explicit grant selection.
+          </li>
+          <li>
+            Add minimal CLI reviewer grant/list/revoke and veto withdrawal
+            commands using the existing local identity and signed-request
+            plumbing. Update <code>vetoes</code> and <code>log</code> so a
+            signature-valid but inactive veto is not displayed as blocking.
+          </li>
+          <li>
+            Pull/clone must retain the signed authority and lifecycle records
+            needed to interpret veto history offline. Use the bounded
+            DTO/pagination conventions; imported records do not bypass server
+            submission checks or automatically acquire authority on another
+            server/repo. A local history view may be stale until refreshed and
+            must not be presented as an authoritative land decision.
+          </li>
+        </ul>
+      </section>
+      <section class="block">
+        <h2>Acceptance tests</h2>
+        <ul>
+          <li>
+            Reproduce THA-24: a <code>docs/**</code> write delegate uploads a
+            valid veto for the owner's unlanded <code>src/**</code> op. Reject
+            it; owner land succeeds before and after delegate revocation and
+            server restart.
+          </li>
+          <li>
+            An outside reviewer with only a <code>src/**</code> review grant can
+            veto matching code; cannot upload code, land, issue grants, or veto
+            <code>docs/**</code>. Verify negative cases with signed valid
+            payloads so failures demonstrate authorization, not parsing.
+          </li>
+          <li>
+            A holder of both roles uses each capability independently, including
+            review scope wider than write scope. Revoking either role leaves the
+            other intact.
+          </li>
+          <li>
+            Forged/foreign-owner grants, wrong repo, wrong grant ID, signer
+            substitution, invalid or unknown targets, traversal paths, and
+            mixed-payload smuggling fail.
+          </li>
+          <li>
+            General push and owner recall cannot bypass reviewer checks; owner
+            cannot launder another DID's veto. Successful code items preserve
+            bundle semantics.
+          </li>
+          <li>
+            Authorized veto blocks a green land without advancing the head.
+            Revocation, withdrawal, and dismissal remove its effect without
+            deleting audit evidence. Exact replays and fresh grants do not
+            resurrect disabled records.
+          </li>
+          <li>
+            Seed pre-upgrade data directly: owner v1 veto remains effective,
+            outsider v1 veto cannot block, and granting review rights never
+            activates old data.
+          </li>
+          <li>
+            Rate boundary, batch limit, active limit, duplicate retries, fake
+            signed timestamps, restart, new-grant attempts to reset limits,
+            concurrent submissions, and storage failures preserve budgets and
+            durable state.
+          </li>
+          <li>
+            Race tests establish serialized outcomes for revoke/submit and
+            submit/land; unreadable revocation storage cannot silently authorize
+            old grants.
+          </li>
+          <li>
+            Client/CLI outside-reviewer flow, paginated audit history,
+            clone/pull lifecycle synchronization, and browser import smoke tests
+            cover the public surfaces.
+          </li>
+        </ul>
+      </section>
+      <section class="block">
+        <h2>Verification and completion</h2>
+        <p>
+          Run focused regressions during implementation, then the affected
+          package tasks:
+        </p>
+        <pre><code class="language-bash">export AGENT=1
+moon run review:typecheck review:test platform:typecheck platform:test
+moon run server:typecheck server:test client:typecheck client:test
+moon run cli:typecheck cli:test
+moon run root:format root:lint
+git diff --check
+</code></pre>
+        <p>
+          Use moon's dependency builds and pinned proto tools; add affected
+          integration or example checks if their call sites change.
+          Implementation and verification results are recorded at the end of
+          this document.
+        </p>
+        <p>
+          The PR is ready when the exploit regression, role separation, live
+          revocation, audit durability, and abuse-limit tests pass together;
+          user-facing authorization changes are documented; and both issue
+          checklists are mapped to implementation evidence, with the P13
+          policy/queue items explicitly deferred.
+        </p>
+      </section>
+      <section class="block">
+        <h2>Task 1: Review records</h2>
+        <section class="task">
+          <p class="files">
+            packages/review/src/authority.ts; packages/review/src/reviewlog.ts;
+            packages/review/test/reviewlog.test.ts
+          </p>
+          <ol class="steps">
+            <li>
+              <input type="checkbox" checked id="t1s1" /><span class="label"
+                >Write a regression with this assertion and the valid signed
+                fixtures required by the acceptance cases.
+                <pre><code>expect(verifyReviewerCapability({ ...grant, repo: 'other' })).toBe(false);</code></pre>
+              </span>
+            </li>
+            <li>
+              <input type="checkbox" checked id="t1s2" /><span class="label"
+                >Run <code>moon run review:test review:typecheck</code> before
+                implementation and record the failure.</span
+              >
+            </li>
+            <li>
+              <input type="checkbox" checked id="t1s3" /><span class="label"
+                >Define ReviewerCapability, ReviewRevocation, VetoWithdrawal,
+                ReviewEvent and ReviewLog. Bind v2 veto signatures to repo and
+                exact grant; retain owner v1 compatibility.</span
+              >
+            </li>
+            <li>
+              <input type="checkbox" checked id="t1s4" /><span class="label"
+                >Run <code>moon run review:test review:typecheck</code> after
+                implementation; inspect every failure. Review the diff against
+                the acceptance cases before marking this task complete.</span
+              >
+            </li>
+          </ol>
+        </section>
+      </section>
+      <section class="block">
+        <h2>Task 2: Server authorization</h2>
+        <section class="task">
+          <p class="files">
+            packages/server/src/server.ts; packages/server/src/dto.ts;
+            packages/platform/src/policy.ts; packages/server/test/review.test.ts
+          </p>
+          <ol class="steps">
+            <li>
+              <input type="checkbox" checked id="t2s1" /><span class="label"
+                >Write a regression with this assertion and the valid signed
+                fixtures required by the acceptance cases.
+                <pre><code>expect(result.accepted.veto).toBe(0);
+expect(landed.landed).toBe(true);</code></pre>
+              </span>
+            </li>
+            <li>
+              <input type="checkbox" checked id="t2s2" /><span class="label"
+                >Run
+                <code
+                  >moon run server:test platform:test server:typecheck
+                  platform:typecheck</code
+                >
+                before implementation and record the failure.</span
+              >
+            </li>
+            <li>
+              <input type="checkbox" checked id="t2s3" /><span class="label"
+                >Route signed reviewer submissions separately from writes. Feed
+                all bundle vetoes through the same validator. Pass owner and
+                active reviewers to blockOnVeto and check target scope at
+                land.</span
+              >
+            </li>
+            <li>
+              <input type="checkbox" checked id="t2s4" /><span class="label"
+                >Run
+                <code
+                  >moon run server:test platform:test server:typecheck
+                  platform:typecheck</code
+                >
+                after implementation; inspect every failure. Review the diff
+                against the acceptance cases before marking this task
+                complete.</span
+              >
+            </li>
+          </ol>
+        </section>
+      </section>
+      <section class="block">
+        <h2>Task 3: Client and CLI</h2>
+        <section class="task">
+          <p class="files">
+            packages/client/src/client.ts; packages/cli/src/run.ts;
+            packages/cli/src/help.ts
+          </p>
+          <ol class="steps">
+            <li>
+              <input type="checkbox" checked id="t3s1" /><span class="label"
+                >Write a regression with this assertion and the valid signed
+                fixtures required by the acceptance cases.
+                <pre><code>expect((await reviewer.pushVetoes('r', [veto])).accepted.veto).toBe(1);</code></pre>
+              </span>
+            </li>
+            <li>
+              <input type="checkbox" checked id="t3s2" /><span class="label"
+                >Run
+                <code
+                  >moon run client:test cli:test client:typecheck
+                  cli:typecheck</code
+                >
+                before implementation and record the failure.</span
+              >
+            </li>
+            <li>
+              <input type="checkbox" checked id="t3s3" /><span class="label"
+                >Add reviewer grant/list/revoke, scoped veto submission, history
+                and withdrawal. Synchronize signed review events on pull and
+                clone, without accepting imported authority through write
+                routes.</span
+              >
+            </li>
+            <li>
+              <input type="checkbox" checked id="t3s4" /><span class="label"
+                >Run
+                <code
+                  >moon run client:test cli:test client:typecheck
+                  cli:typecheck</code
+                >
+                after implementation; inspect every failure. Review the diff
+                against the acceptance cases before marking this task
+                complete.</span
+              >
+            </li>
+          </ol>
+        </section>
+      </section>
+      <section class="block">
+        <h2>Task 4: Regression and live verification</h2>
+        <section class="task">
+          <p class="files">
+            packages/server/test/review.test.ts;
+            packages/client/test/review.test.ts; packages/cli/test/veto.test.ts
+          </p>
+          <ol class="steps">
+            <li>
+              <input type="checkbox" checked id="t4s1" /><span class="label"
+                >Write a regression with this assertion and the valid signed
+                fixtures required by the acceptance cases.
+                <pre><code>expect(afterRestart.landed).toBe(true);</code></pre>
+              </span>
+            </li>
+            <li>
+              <input type="checkbox" checked id="t4s2" /><span class="label"
+                >Run <code>moon run root:format root:lint</code> before
+                implementation and record the failure.</span
+              >
+            </li>
+            <li>
+              <input type="checkbox" checked id="t4s3" /><span class="label"
+                >Run signed HTTP requests against a live server and invoke the
+                CLI. Exercise outside review, writer denial, revocation,
+                withdrawal, a second repository, restart and the existing owner
+                write/land path. Record actual command output.</span
+              >
+            </li>
+            <li>
+              <input type="checkbox" checked id="t4s4" /><span class="label"
+                >Run <code>moon run root:format root:lint</code> after
+                implementation; inspect every failure. Review the diff against
+                the acceptance cases before marking this task complete.</span
+              >
+            </li>
+          </ol>
+        </section>
+      </section>
+      <section class="block">
+        <h2>Implementation record</h2>
+        <p>
+          Final checks passed: 384 tests across review, platform, server,
+          client, and CLI. All five affected package typechecks passed, as did
+          the platform example typecheck and demo.
+          <code>moon run root:format root:lint</code> passed with 45 existing
+          warnings and zero errors. <code>git diff --check</code> passed.
+        </p>
+        <p>
+          The feature is implemented on
+          <code>feature/tha-6-tha-24-scoped-reviewer-veto</code>. No commit,
+          push, or PR has been created.
+        </p>
+        <p>
+          Review grants and signed vetoes are repository-bound. Every server
+          veto ingestion path uses the same validator. Revocation and withdrawal
+          retain signed history. Recent receipt indexes are pruned after durable
+          acceptance; backward server clocks fail closed for new submissions.
+        </p>
+        <p>
+          Observed live run: the compiled server retained a veto across restart
+          over FileBackend. The CLI dispatcher sent real HTTP requests using
+          isolated identities. Land returned exit 1 before and after restart;
+          withdrawal returned exit 0; land and a second owner upload then
+          returned exit 0. The revoked reviewer could no longer submit. The
+          compiled binary also printed reviewer command help.
+        </p>
+        <p>
+          The domain and whole-change reviews found replay, accounting, and
+          error-mapping defects. Each was corrected and covered by a regression.
+          Automated checks cover both successful quota rollback and recovery
+          when publishing rollback also fails. Approval-required policy and the
+          review queue remain in THA-97 and THA-98. Offline status can lag the
+          server, and lifetime audit retention is not bounded by the submission
+          limits.
+        </p>
+      </section>
+    </div>
+  </body>
+</html>

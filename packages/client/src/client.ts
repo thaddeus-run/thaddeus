@@ -25,12 +25,23 @@ import {
   encodeReputationArchive,
   type ReputationArchive,
 } from '@thaddeus.run/reputation';
-import { type Veto, VetoLog } from '@thaddeus.run/review';
+import {
+  type ReviewerCapability,
+  type ReviewEvent,
+  ReviewLog,
+  type ReviewRevocation,
+  type ReviewStatus,
+  verifyReviewerCapability,
+  type Veto,
+  VetoLog,
+  type VetoWithdrawal,
+} from '@thaddeus.run/review';
 import {
   decodeBundle,
   decodeCapability,
   decodeDelegation,
   decodeRelease,
+  decodeReviewRecord,
   DEFAULT_MAX_REPUTATION_ARCHIVE_BYTES,
   DEFAULT_MAX_REPUTATION_CONTRIBUTIONS,
   encodeBundle,
@@ -38,6 +49,7 @@ import {
   encodeClaim,
   encodeDelegation,
   encodeRelease,
+  encodeReviewRecord,
   type RepoPolicyRecord,
   signRequest,
 } from '@thaddeus.run/server/protocol';
@@ -64,6 +76,13 @@ export interface PushResult {
     pending: number;
   };
   rejected: { kind: string; id: string; reason: string }[];
+}
+
+export interface ReviewHistoryEntry {
+  readonly record: ReviewEvent | Veto;
+  readonly legacy?: boolean;
+  readonly status?: ReviewStatus;
+  readonly id?: string;
 }
 
 export interface RevokeOutcome {
@@ -309,6 +328,7 @@ export class Client {
     heads: readonly string[];
     provenance: ProvenanceLog;
     vetoes: VetoLog;
+    reviews: ReviewLog;
     symbols: SymbolOpLog;
   }> {
     const body = await this.#pullResponse(name, view);
@@ -356,7 +376,10 @@ export class Client {
     for (const p of bundle.prov) {
       await provenance.ingest(p);
     }
-    const vetoes = new VetoLog(metaScope);
+    const reviews = await ReviewLog.load(metaScope, name, verified.head.owner);
+    for (const event of bundle.review ?? []) await reviews.import(event);
+    const vetoes = await VetoLog.load(metaScope);
+    for (const veto of reviews.vetoes()) vetoes.append(veto);
     for (const v of bundle.veto) {
       await vetoes.ingest(v);
     }
@@ -371,6 +394,7 @@ export class Client {
       heads: verified.head.heads,
       provenance,
       vetoes,
+      reviews,
       symbols,
     };
   }
@@ -390,6 +414,7 @@ export class Client {
     heads: readonly string[];
     provenance: ProvenanceLog;
     vetoes: VetoLog;
+    reviews: ReviewLog;
     symbols: SymbolOpLog;
   }> {
     const targetView = localView ?? remoteView;
@@ -421,7 +446,10 @@ export class Client {
     for (const p of bundle.prov) {
       await provenance.ingest(p);
     }
-    const vetoes = new VetoLog(metaScope);
+    const reviews = await ReviewLog.load(metaScope, name, verified.head.owner);
+    for (const event of bundle.review ?? []) await reviews.import(event);
+    const vetoes = await VetoLog.load(metaScope);
+    for (const veto of reviews.vetoes()) vetoes.append(veto);
     for (const v of bundle.veto) {
       await vetoes.ingest(v);
     }
@@ -435,6 +463,7 @@ export class Client {
       heads: verified.head.heads,
       provenance,
       vetoes,
+      reviews,
       symbols,
     };
   }
@@ -930,18 +959,130 @@ export class Client {
     return (await this.#ok(res)) as RevealOutcome;
   }
 
-  // Push standing vetoes (P10) with no code — a veto-only bundle. The pusher must
-  // be an authorized writer (owner or delegate), the same gate as any push: a
-  // VERIFIED veto blocks a land, so only writers may lodge one (an unauthenticated
-  // veto endpoint would let anyone deny service). Idempotent — re-pushing an
-  // identical veto is a server-side no-op.
+  // Review-only submissions never require or confer write delegation.
   async pushVetoes(name: string, vetoes: readonly Veto[]): Promise<PushResult> {
     const res = await this.#signed(
       'POST',
-      `/repos/${encodeURIComponent(name)}/push`,
-      encodeBundle([], [], [], [], vetoes)
+      `/repos/${encodeURIComponent(name)}/vetoes`,
+      {
+        veto: encodeBundle([], [], [], [], vetoes).veto,
+      }
     );
     return (await this.#ok(res)) as PushResult;
+  }
+
+  async grantReviewer(
+    name: string,
+    capability: ReviewerCapability
+  ): Promise<{ grant: string }> {
+    return (await this.#ok(
+      await this.#signed(
+        'POST',
+        `/repos/${encodeURIComponent(name)}/reviewers`,
+        {
+          capability: encodeReviewRecord(capability),
+        }
+      )
+    )) as { grant: string };
+  }
+
+  async revokeReviewer(
+    name: string,
+    revocation: ReviewRevocation
+  ): Promise<{ revoked: boolean }> {
+    return (await this.#ok(
+      await this.#signed(
+        'POST',
+        `/repos/${encodeURIComponent(name)}/reviewers/revoke`,
+        {
+          revocation: encodeReviewRecord(revocation),
+        }
+      )
+    )) as { revoked: boolean };
+  }
+
+  async withdrawVeto(
+    name: string,
+    withdrawal: VetoWithdrawal
+  ): Promise<{ withdrawn: boolean }> {
+    return (await this.#ok(
+      await this.#signed(
+        'POST',
+        `/repos/${encodeURIComponent(name)}/vetoes/withdraw`,
+        {
+          withdrawal: encodeReviewRecord(withdrawal),
+        }
+      )
+    )) as { withdrawn: boolean };
+  }
+
+  /** Signed grants are still checked against the caller's pinned repository owner. */
+  async listReviewers(
+    name: string,
+    expectedOwner: string
+  ): Promise<ReviewerCapability[]> {
+    const pages = await this.#collectPages((cursor) =>
+      this.reviewHistoryPage(
+        name,
+        cursor === undefined ? {} : { cursor },
+        'reviewers'
+      )
+    );
+    const grants: ReviewerCapability[] = [];
+    for (const entry of pages.flatMap((page) => page.records)) {
+      if ('kind' in entry.record && entry.record.kind === 'grant') {
+        const cap = entry.record.capability;
+        if (
+          verifyReviewerCapability(cap) &&
+          cap.repo === name &&
+          cap.issuer === expectedOwner
+        )
+          grants.push(cap);
+      }
+    }
+    return grants;
+  }
+
+  async reviewHistory(name: string): Promise<ReviewHistoryEntry[]> {
+    const pages = await this.#collectPages((cursor) =>
+      this.reviewHistoryPage(name, cursor === undefined ? {} : { cursor })
+    );
+    return pages.flatMap((page) => [...page.records]);
+  }
+
+  /** Each page carries signed evidence plus the server's current lifecycle label. */
+  async reviewHistoryPage(
+    name: string,
+    options: PageOptions = {},
+    collection: 'vetoes' | 'reviewers' = 'vetoes'
+  ): Promise<{ records: ReviewHistoryEntry[]; nextCursor: string | null }> {
+    const body = (await this.#ok(
+      await this.#fetch(
+        new Request(
+          this.#pageUrl(
+            `/repos/${encodeURIComponent(name)}/${collection}`,
+            options
+          )
+        )
+      )
+    )) as {
+      records: {
+        record: string;
+        legacy?: boolean;
+        status?: ReviewStatus;
+        id?: string;
+      }[];
+      nextCursor?: unknown;
+    };
+    if (!Array.isArray(body.records))
+      throw new Error('malformed_review_history');
+    return {
+      records: body.records.map((entry) => ({
+        ...entry,
+        record: decodeReviewRecord<ReviewEvent | Veto>(entry.record),
+      })),
+      nextCursor: this.#nextCursor(body.nextCursor),
+    };
   }
 
   /** Collects the complete signed view chain using the existing cursor protocol. */
@@ -1327,6 +1468,7 @@ export class Client {
       caps: unique('caps'),
       prov: unique('prov'),
       veto: unique('veto'),
+      review: unique('review'),
       symop: unique('symop'),
     };
   }

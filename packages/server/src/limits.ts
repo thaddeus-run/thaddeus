@@ -37,7 +37,8 @@ export interface ResolvedLimits {
 export type InputLimitCode =
   | 'archive_too_large'
   | 'contribution_limit_exceeded'
-  | 'field_too_large';
+  | 'field_too_large'
+  | 'veto_limit_exceeded';
 
 /** A privacy-safe limit failure carrying only a stable code and configured cap. */
 export class InputLimitError extends RangeError {

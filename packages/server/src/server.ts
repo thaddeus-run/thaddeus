@@ -44,7 +44,19 @@ import {
   verifyClaim,
   verifyContribution,
 } from '@thaddeus.run/reputation';
-import { VetoLog } from '@thaddeus.run/review';
+import {
+  DEFAULT_REVIEW_LIMITS,
+  type ReviewerCapability,
+  reviewerCapabilityId,
+  ReviewError,
+  ReviewLog,
+  type ReviewRevocation,
+  verifyVeto,
+  type Veto,
+  vetoId,
+  VetoLog,
+  type VetoWithdrawal,
+} from '@thaddeus.run/review';
 import {
   type Backend,
   type Capability,
@@ -66,9 +78,11 @@ import {
   decodeClaim as decodeClaimWire,
   decodeDelegation as decodeDelegationWire,
   decodeRelease as decodeReleaseWire,
+  decodeReviewRecord,
   encodeCapability,
   encodeDelegation,
   encodeRelease,
+  encodeReviewRecord,
 } from './dto';
 import {
   inputLimitBody,
@@ -237,6 +251,12 @@ export interface ServerConfig extends LimitConfig {
   // Per-subject rolling-hour security ceiling. Operators may tighten but never
   // raise the compiled maximum; zero disables issuance.
   attestationRateLimit?: number;
+  /** Per-repository reviewer submission ceilings, independent of write budgets. */
+  reviewLimits?: {
+    maxVetoesPerHour?: number;
+    maxActiveVetoes?: number;
+    maxVetoesPerRequest?: number;
+  };
   // When set, land is additionally gated on durable server-wide reputation:
   // every incoming op's author must have at least this many ATTESTED merges.
   minMerges?: number;
@@ -433,12 +453,45 @@ export function createServer(config: ServerConfig): Server {
   };
   const limits = resolveLimits(config);
   const { maxRequestBodyBytes } = limits;
+  if (
+    config.reviewLimits !== undefined &&
+    (config.reviewLimits === null ||
+      typeof config.reviewLimits !== 'object' ||
+      Array.isArray(config.reviewLimits))
+  )
+    throw new TypeError('invalid review limits');
+  const reviewLimits = {
+    ...DEFAULT_REVIEW_LIMITS,
+    maxVetoesPerRequest: 256,
+    ...config.reviewLimits,
+  };
+  for (const [key, value] of Object.entries(reviewLimits)) {
+    if (
+      !['maxVetoesPerHour', 'maxActiveVetoes', 'maxVetoesPerRequest'].includes(
+        key
+      ) ||
+      !Number.isSafeInteger(value) ||
+      value < 1
+    ) {
+      throw new TypeError(`invalid review limit: ${key}`);
+    }
+  }
   const validateDecoded = <T>(value: T): T => {
     validateLogicalText(value, limits.maxFieldBytes);
     return value;
   };
-  const decodeBundle = (wire: Bundle) =>
-    validateDecoded(decodeBundleWire(wire));
+  const decodeBundle = (wire: Bundle) => {
+    if (
+      Array.isArray(wire.veto) &&
+      wire.veto.length > reviewLimits.maxVetoesPerRequest
+    ) {
+      throw new InputLimitError(
+        'veto_limit_exceeded',
+        reviewLimits.maxVetoesPerRequest
+      );
+    }
+    return validateDecoded(decodeBundleWire(wire));
+  };
   const decodeCapability = (wire: string) =>
     validateDecoded(decodeCapabilityWire(wire));
   const decodeClaim = (wire: string) => validateDecoded(decodeClaimWire(wire));
@@ -617,6 +670,21 @@ export function createServer(config: ServerConfig): Server {
   // Durable per-repo VetoLog cache — the standing human "no" (P10) alongside the
   // code. Single-flight like provenances so concurrent callers share one
   // instance; store-free (a veto carries no capability-gated payload).
+  const reviews = new Map<string, Promise<ReviewLog>>();
+  function reviewFor(name: string, owner: string): Promise<ReviewLog> {
+    let pending = reviews.get(name);
+    if (pending === undefined) {
+      pending = ReviewLog.load(metaBackend(name), name, owner).catch(
+        (error: unknown) => {
+          reviews.delete(name);
+          throw error;
+        }
+      );
+      reviews.set(name, pending);
+    }
+    return pending;
+  }
+
   const vetoes = new Map<string, Promise<VetoLog>>();
 
   function vetoFor(name: string): Promise<VetoLog> {
@@ -625,6 +693,7 @@ export function createServer(config: ServerConfig): Server {
       // Evict a REJECTED load so a transient backend error self-heals next call.
       p = VetoLog.load(metaBackend(name)).catch((e: unknown) => {
         vetoes.delete(name);
+        reviews.delete(name);
         throw e;
       });
       vetoes.set(name, p);
@@ -941,6 +1010,7 @@ export function createServer(config: ServerConfig): Server {
     registries.delete(name);
     provenances.delete(name);
     vetoes.delete(name);
+    reviews.delete(name);
     symops.delete(name);
   }
 
@@ -951,6 +1021,7 @@ export function createServer(config: ServerConfig): Server {
       ...registries.keys(),
       ...provenances.keys(),
       ...vetoes.keys(),
+      ...reviews.keys(),
       ...symops.keys(),
       ...repoRevisions.keys(),
     ]);
@@ -1089,6 +1160,7 @@ export function createServer(config: ServerConfig): Server {
     archive_too_large: 0,
     contribution_limit_exceeded: 0,
     field_too_large: 0,
+    veto_limit_exceeded: 0,
   };
   const paginationOutcomes = {
     completed: 0,
@@ -1405,6 +1477,7 @@ export function createServer(config: ServerConfig): Server {
       `thaddeus_input_limit_rejections_total{reason="archive_too_large"} ${inputLimitRejections.archive_too_large}`,
       `thaddeus_input_limit_rejections_total{reason="contribution_limit_exceeded"} ${inputLimitRejections.contribution_limit_exceeded}`,
       `thaddeus_input_limit_rejections_total{reason="field_too_large"} ${inputLimitRejections.field_too_large}`,
+      `thaddeus_input_limit_rejections_total{reason="veto_limit_exceeded"} ${inputLimitRejections.veto_limit_exceeded}`,
       '# HELP thaddeus_pagination_outcomes_total Pagination outcomes by fixed result.',
       '# TYPE thaddeus_pagination_outcomes_total counter',
       `thaddeus_pagination_outcomes_total{outcome="completed"} ${paginationOutcomes.completed}`,
@@ -1939,6 +2012,7 @@ export function createServer(config: ServerConfig): Server {
           registries.delete(name);
           provenances.delete(name);
           vetoes.delete(name);
+          reviews.delete(name);
           symops.delete(name);
           deleted = true;
           return json(200, { deleted: name });
@@ -2484,6 +2558,7 @@ export function createServer(config: ServerConfig): Server {
         | 'caps'
         | 'prov'
         | 'veto'
+        | 'review'
         | 'symop';
       readonly value: string;
     };
@@ -2532,6 +2607,12 @@ export function createServer(config: ServerConfig): Server {
         }
       }
 
+      const meta = await readMeta(name);
+      if (meta === undefined)
+        throw new Error('repository disappeared during pull');
+      const reviewLog = await reviewFor(name, meta.owner);
+      for (const event of reviewLog.events())
+        yield { kind: 'review', value: encodeReviewRecord(event) };
       const symbolLog = await symopFor(name);
       for (const operation of symbolLog.iterateAll()) {
         yield { kind: 'symop', value: wire(operation) };
@@ -2560,6 +2641,7 @@ export function createServer(config: ServerConfig): Server {
             caps: values('caps'),
             prov: values('prov'),
             veto: values('veto'),
+            review: values('review'),
             symop: values('symop'),
             nextCursor,
           };
@@ -2577,10 +2659,237 @@ export function createServer(config: ServerConfig): Server {
     }
   }
 
+  // Resolve only a verified operation already held by this repository. The
+  // first reachable item is the requested op; no caller-supplied path is used.
+  function reviewTarget(repo: Repo, id: string): Op | undefined {
+    if (!repo.log.verify(id)) return undefined;
+    for (const op of repo.log.reachable([id])) return op;
+    return undefined;
+  }
+
+  function emptyPushResult() {
+    return {
+      accepted: {
+        objects: 0,
+        ops: 0,
+        caps: 0,
+        prov: 0,
+        veto: 0,
+        symop: 0,
+        pending: 0,
+      },
+      rejected: [] as { kind: string; id: string; reason: string }[],
+    };
+  }
+
+  /** Authorizes each veto before durable storage, including legacy bundle paths. */
+  async function ingestVetoes(
+    name: string,
+    repo: Repo,
+    vetoes: readonly Veto[],
+    signer: string
+  ) {
+    const result = emptyPushResult();
+    if (vetoes.length === 0) return result;
+    const meta = await readMeta(name);
+    if (meta === undefined) throw new Error('repository disappeared');
+    const log = await reviewFor(name, meta.owner);
+    for (const veto of vetoes) {
+      try {
+        if (!verifyVeto(veto)) throw new ReviewError('invalid_signature');
+        const target = reviewTarget(repo, veto.op);
+        if (target === undefined) throw new ReviewError('unknown_target');
+        await log.submit(veto, signer, target, Date.parse(now()), reviewLimits);
+        result.accepted.veto += 1;
+      } catch (error) {
+        if (!(error instanceof ReviewError)) throw error;
+        result.rejected.push({
+          kind: 'veto',
+          id: veto?.op ?? '?',
+          reason: error.code,
+        });
+      }
+    }
+    return result;
+  }
+
+  /** Signed review writes share repository serialization with land and revoke. */
+  async function reviewWrite(
+    name: string,
+    action: string,
+    req: Request,
+    body: Uint8Array
+  ): Promise<Response> {
+    const signer = await verifyRequest(
+      'POST',
+      new URL(req.url).pathname,
+      body,
+      headers(req),
+      Date.parse(now())
+    );
+    if (signer instanceof Response) return signer;
+    const parsed = safeParseJson(body);
+    if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed))
+      return json(400, { error: 'malformed_review' });
+    const data = parsed as Record<string, unknown>;
+    const field =
+      action === 'reviewers'
+        ? 'capability'
+        : action === 'reviewers/revoke'
+          ? 'revocation'
+          : action === 'vetoes/withdraw'
+            ? 'withdrawal'
+            : 'veto';
+    if (Object.keys(data).some((key) => key !== field))
+      return json(400, { error: 'unexpected_review_payload' });
+    let record:
+      | ReviewerCapability
+      | ReviewRevocation
+      | VetoWithdrawal
+      | undefined;
+    let vetoes: Veto[] = [];
+    try {
+      if (action === 'vetoes') {
+        if (
+          !Array.isArray(data.veto) ||
+          data.veto.length === 0 ||
+          data.veto.some((v) => typeof v !== 'string')
+        )
+          return json(400, { error: 'malformed_review' });
+        vetoes = decodeBundle({
+          ops: [],
+          objects: [],
+          caps: [],
+          veto: data.veto as string[],
+        }).veto;
+      } else {
+        if (typeof data[field] !== 'string')
+          return json(400, { error: 'malformed_review' });
+        record = validateDecoded(
+          decodeReviewRecord<
+            ReviewerCapability | ReviewRevocation | VetoWithdrawal
+          >(data[field])
+        );
+        if (
+          record === null ||
+          typeof record !== 'object' ||
+          Array.isArray(record)
+        )
+          return json(400, { error: 'malformed_review' });
+      }
+    } catch (error) {
+      if (error instanceof InputLimitError) return inputLimitResponse(error);
+      return json(400, { error: 'malformed_review' });
+    }
+    return withRepoLock(name, async () => {
+      const meta = await readMeta(name);
+      if (meta === undefined)
+        return json(404, { error: 'repository_not_found' });
+      if (action.startsWith('reviewers') && signer !== meta.owner)
+        return json(403, { error: 'not the repo owner' });
+      if (
+        record !== undefined &&
+        ('actor' in record ? record.actor : record.issuer) !== signer
+      )
+        return json(403, { error: 'signer_mismatch' });
+      return quotaMutation(name, meta.owner, false, () =>
+        withRepoRevision(name, async () => {
+          const log = await reviewFor(name, meta.owner);
+          try {
+            if (action === 'reviewers') {
+              await log.grant(record as ReviewerCapability);
+              return json(200, {
+                grant: reviewerCapabilityId(record as ReviewerCapability),
+              });
+            }
+            if (action === 'reviewers/revoke') {
+              await log.revoke(record as ReviewRevocation);
+              return json(200, { revoked: true });
+            }
+            if (action === 'vetoes/withdraw') {
+              await log.withdraw(record as VetoWithdrawal);
+              return json(200, { withdrawn: true });
+            }
+            const repo = await getRepo(name);
+            if (repo === undefined)
+              return json(404, { error: 'repository_not_found' });
+            return json(200, await ingestVetoes(name, repo, vetoes, signer));
+          } catch (error) {
+            // Expected authorization failures must not become storage failures
+            // or evict caches. Storage exceptions still abort the quota journal.
+            if (error instanceof ReviewError)
+              return json(403, { error: error.code });
+            throw error;
+          }
+        })
+      );
+    });
+  }
+
+  /** Bounded history includes signed evidence; status is a current server view. */
+  async function reviewRead(
+    name: string,
+    action: string,
+    url: URL
+  ): Promise<Response> {
+    const meta = await readMeta(name);
+    if (meta === undefined) return json(404, { error: 'repository_not_found' });
+    const repo = await getRepo(name);
+    if (repo === undefined) return json(404, { error: 'repository_not_found' });
+    return paged({
+      url,
+      binding: `${action}:${name}`,
+      revisionNow: repoRevisionNow(name),
+      createSource: async () => {
+        const log = await reviewFor(name, meta.owner);
+        if (action === 'reviewers')
+          return arrayPageSource(
+            log.grants().map((capability) => ({
+              record: encodeReviewRecord({ kind: 'grant', capability }),
+            }))
+          );
+        return asyncIteratorPageSource(
+          (async function* () {
+            for (const event of log.events()) {
+              const target =
+                event.kind === 'veto'
+                  ? reviewTarget(repo, event.veto.op)
+                  : undefined;
+              yield {
+                record: encodeReviewRecord(event),
+                ...(event.kind === 'veto'
+                  ? {
+                      id: vetoId(event.veto),
+                      status:
+                        target === undefined
+                          ? 'unauthorized'
+                          : log.status(event.veto, target),
+                    }
+                  : {}),
+              };
+            }
+            const legacy = await vetoFor(name);
+            for (const op of repo.log.ops())
+              for (const veto of legacy.forOp(op.id)) {
+                yield {
+                  record: Buffer.from(encodeRecord(veto)).toString('base64'),
+                  legacy: true,
+                  id: vetoId(veto),
+                  status: log.status(veto, op),
+                };
+              }
+          })()
+        );
+      },
+      render: (records, nextCursor) => ({ records, nextCursor }),
+    });
+  }
+
   async function ingestBundle(
     name: string,
     repo: Repo,
     bundle: ReturnType<typeof decodeBundle>,
+    signer: string,
     acceptPending = false
   ): Promise<{
     accepted: {
@@ -2785,18 +3094,17 @@ export function createServer(config: ServerConfig): Server {
         rejected.push({ kind: 'prov', id: p.op ?? '?', reason: String(err) });
       }
     }
-    // Ingest the standing "no" (P10) the same way: keep-and-label + durable
-    // write-through so a restarted server still blocks a vetoed land. A forged
-    // veto is kept but rendered `unverified`, and the land gate never counts it.
-    let vetoOk = 0;
-    const vetoLog = await vetoFor(name);
-    for (const v of bundle.veto) {
-      try {
-        await vetoLog.ingest(v);
-        vetoOk += 1;
-      } catch (err) {
-        rejected.push({ kind: 'veto', id: v.op ?? '?', reason: String(err) });
-      }
+    // Every route that accepts a bundle uses the same reviewer authorization.
+    // Successfully ingested operations may be targeted in this same bundle.
+    const vetoResult = await ingestVetoes(name, repo, bundle.veto, signer);
+    const vetoOk = vetoResult.accepted.veto;
+    rejected.push(...vetoResult.rejected);
+    if ((bundle.review?.length ?? 0) > 0) {
+      rejected.push({
+        kind: 'review',
+        id: '?',
+        reason: 'review authority requires the reviewer management routes',
+      });
     }
     // Ingest the signed semantic-graph ops (P08) the same way, so a restarted
     // server still serves a symbol's rename chain. Keep-and-label — an
@@ -2881,7 +3189,7 @@ export function createServer(config: ServerConfig): Server {
           return json(404, { error: `no repo ${name}` });
         }
         return withRepoRevision(name, async () =>
-          json(200, await ingestBundle(name, repo, bundle))
+          json(200, await ingestBundle(name, repo, bundle, signer))
         );
       });
     });
@@ -3059,12 +3367,12 @@ export function createServer(config: ServerConfig): Server {
       // under the internal prefix so it never surfaces as a branch.
       const src = `${INTERNAL_VIEW_PREFIX}incoming`;
       repo.log.view(src, fromHeads);
-      // Compose the base policy with delegation enforcement AND the durable
-      // standing veto: every non-owner op is path+budget gated (the owner is
-      // exempt), and — no matter how green every automated gate is — a verified
-      // veto pushed for any incoming op is the ceiling that blocks the land. With
-      // no vetoes recorded, blockOnVeto allows, so this is a safe always-on gate.
+      // Review authority is separate from write delegation. Re-evaluate each
+      // veto against current grant scope and lifecycle under the land lock.
       const vetoLog = await vetoFor(name);
+      const reviewLog = await reviewFor(name, meta.owner);
+      const currentVetoes = new VetoLog();
+      for (const v of reviewLog.vetoes()) currentVetoes.append(v);
       const provLog = await provenanceFor(name);
       let repoPolicy: RepoPolicyRecord;
       try {
@@ -3076,7 +3384,14 @@ export function createServer(config: ServerConfig): Server {
         policy,
         ...repoPolicyGates(repoPolicy, provLog),
         delegationPolicy(reg, (a) => a === meta.owner),
-        blockOnVeto(vetoLog),
+        blockOnVeto(
+          {
+            forOp: (id) => [...vetoLog.forOp(id), ...currentVetoes.forOp(id)],
+            status: (v) => (verifyVeto(v) ? 'verified' : 'unverified'),
+          },
+          reviewLog.reviewers(),
+          (v, op) => reviewLog.status(v, op) === 'active'
+        ),
       ];
       // When configured with a reputation floor, add a durable tier gate: every
       // incoming op's author must clear `minMerges` ATTESTED merges. Self-claimed
@@ -3330,7 +3645,7 @@ export function createServer(config: ServerConfig): Server {
           const recalled =
             recallBundle === undefined
               ? undefined
-              : await ingestBundle(name, repo, recallBundle, true);
+              : await ingestBundle(name, repo, recallBundle, signer, true);
           const reg = await registryFor(name);
           reg.revoke(agent);
           await metaBackend(name).put(`revoked/${agent}`, encodeRecord(true));
@@ -3754,6 +4069,21 @@ export function createServer(config: ServerConfig): Server {
             return malformedPath();
           }
           return withBody((body) => scheduleReveal(repoName, req, body));
+        }
+        const reviewMatch = path.match(
+          /^\/repos\/(.+)\/(reviewers(?:\/revoke)?|vetoes(?:\/withdraw)?)$/
+        );
+        if (reviewMatch !== null) {
+          const repoName = safeDecode(reviewMatch[1], limits.maxFieldBytes);
+          if (repoName === undefined) return malformedPath();
+          const action = reviewMatch[2];
+          if (req.method === 'POST')
+            return withBody((body) => reviewWrite(repoName, action, req, body));
+          if (
+            req.method === 'GET' &&
+            (action === 'reviewers' || action === 'vetoes')
+          )
+            return reviewRead(repoName, action, url);
         }
         // push / land: POST /repos/:name/push and POST /repos/:name/land
         // Match before the generic catch-all; names can contain '/'.

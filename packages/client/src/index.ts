@@ -31,3 +31,5 @@ export {
   revokeObjects,
   type RevokeObjectsResult,
 } from './share';
+
+export type { ReviewHistoryEntry } from './client';

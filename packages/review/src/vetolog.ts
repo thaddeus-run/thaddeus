@@ -1,10 +1,9 @@
-import { blake3 } from '@noble/hashes/blake3';
 import { bytesToHex } from '@noble/hashes/utils';
 import type { Identity } from '@thaddeus.run/identity';
 import type { Op } from '@thaddeus.run/log';
 import { type Backend, decodeRecord, encodeRecord } from '@thaddeus.run/store';
 
-import { signVeto, verifyVeto, type Veto } from './veto';
+import { signVeto, verifyVeto, type Veto, vetoId } from './veto';
 
 // The render-time trust label. `unverified` covers both unsigned and
 // signature-invalid vetoes (a forged veto must not silently deny service).
@@ -80,9 +79,7 @@ export class VetoLog {
   // is idempotent and dedup stays consistent with the in-memory #insert.
   async #persist(v: Veto): Promise<void> {
     if (this.#backend !== undefined) {
-      const key = `veto/${bytesToHex(
-        blake3(new TextEncoder().encode(this.#contentKey(v)))
-      )}`;
+      const key = `veto/${vetoId(v)}`;
       await this.#backend.put(key, encodeRecord(v));
     }
   }
@@ -94,13 +91,7 @@ export class VetoLog {
   // arrived first win and silently drop the other (never throws — append must
   // not).
   #contentKey(v: Veto): string {
-    return JSON.stringify([
-      v.op,
-      v.reviewer,
-      v.reason,
-      v.at,
-      bytesToHex(v.sig),
-    ]);
+    return vetoId(v);
   }
 
   // Store a veto under its op id, deduped on full content so re-appending the

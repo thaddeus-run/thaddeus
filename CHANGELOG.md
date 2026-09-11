@@ -5,6 +5,24 @@ All notable changes to Thaddeus. Format follows
 
 ## [Unreleased]
 
+### Added
+
+- THA-6 / THA-24: owner-signed scoped reviewer capabilities, reviewer-only veto
+  submission, durable revocation and withdrawal history, per-reviewer limits,
+  and client/CLI management. Review authority grants no code upload or land
+  rights.
+
+### Security
+
+- Require explicit reviewer authority for veto ingestion and recheck grant scope
+  and lifecycle during land. Write delegation alone cannot veto. Existing
+  non-owner v1 vetoes become audit-only; owner v1 vetoes remain effective.
+
+### Changed
+
+- `blockOnVeto` requires an explicit reviewer allowlist. Empty means trust
+  nobody. Hosts may supply a predicate for scope and lifecycle checks.
+
 ### Roadmap — active pipeline (P11–P14)
 
 > The tracking pipeline lives **here** and on the GitHub milestones — not in a
