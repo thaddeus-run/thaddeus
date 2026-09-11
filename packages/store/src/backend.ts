@@ -16,6 +16,8 @@ export interface BackendScan {
 }
 
 export interface Backend {
+  /** Shared process-local coordination identity for instances using one store. */
+  readonly coordinationDomain?: object;
   put(key: string, bytes: Uint8Array): Promise<void>;
   // Atomically creates a key and returns false when it already exists. Durable
   // monotonic records use this to prevent concurrent writers from overwriting.

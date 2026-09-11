@@ -146,3 +146,8 @@ remains observable at the HTTP proxy.
 > shared heads are owner-only. `FileBackend` replay state survives process
 > restart on one node, but cross-node linearizability remains deferred to P14.
 > No TLS.
+
+Repository creation and encrypted-object uploads enforce durable per-owner
+storage quotas and creation windows by default. Configure `ServerConfig.quotas`;
+see
+[quota semantics, HTTP errors, recovery and metrics](../../docs/repository-quotas.md).

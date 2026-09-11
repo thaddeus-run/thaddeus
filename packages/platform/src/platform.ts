@@ -198,6 +198,11 @@ export class Repo {
 export class Platform {
   readonly #repos: Map<string, Repo> = new Map();
 
+  /** Evicts a hot repository after deletion or an aborted durable mutation. */
+  forget(name: string): void {
+    this.#repos.delete(name);
+  }
+
   // Allocate a scope in one call (~ms, no wizard). Idempotent: re-creating an
   // existing name returns the existing repo. Seeds an empty `main` view.
   createRepo(name: string): Repo {

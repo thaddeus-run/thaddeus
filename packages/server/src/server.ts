@@ -87,6 +87,7 @@ import {
   paginationErrorBody,
   parsePagination,
 } from './pagination';
+import { QuotaAccounting, type QuotaConfig, QuotaError } from './quotas';
 import {
   DEFAULT_REPO_POLICY,
   normalizeRepoPolicy,
@@ -211,6 +212,7 @@ function attestationRateLimit(value: number | undefined): number {
 }
 
 export interface ServerConfig extends LimitConfig {
+  quotas?: QuotaConfig;
   backend: Backend & ReplayNonceBackend;
   // Largest request body accepted by application routes. Bun hosts use one
   // additional sentinel byte so the streamed guard can observe the boundary.
@@ -418,6 +420,17 @@ function replacesPendingReveal(
  * the backend or intentionally reset after restart.
  */
 export function createServer(config: ServerConfig): Server {
+  const rawBackend = config.backend;
+  const quotas = new QuotaAccounting(rawBackend, config.quotas, () =>
+    Date.parse(config.now?.() ?? new Date().toISOString())
+  );
+  config = {
+    ...config,
+    backend: {
+      ...quotas.backend,
+      consumeNonce: rawBackend.consumeNonce.bind(rawBackend),
+    },
+  };
   const limits = resolveLimits(config);
   const { maxRequestBodyBytes } = limits;
   const validateDecoded = <T>(value: T): T => {
@@ -459,6 +472,7 @@ export function createServer(config: ServerConfig): Server {
     if (clock === undefined) {
       clock = { activeMutations: 0, sequence: 0 };
       repoRevisions.set(name, clock);
+      trimRepoCache(name);
     }
     return clock;
   };
@@ -568,6 +582,7 @@ export function createServer(config: ServerConfig): Server {
         throw e;
       });
       registries.set(name, p);
+      trimRepoCache(name);
     }
     return p;
   }
@@ -594,6 +609,7 @@ export function createServer(config: ServerConfig): Server {
         throw e;
       });
       provenances.set(name, p);
+      trimRepoCache(name);
     }
     return p;
   }
@@ -612,6 +628,7 @@ export function createServer(config: ServerConfig): Server {
         throw e;
       });
       vetoes.set(name, p);
+      trimRepoCache(name);
     }
     return p;
   }
@@ -628,6 +645,7 @@ export function createServer(config: ServerConfig): Server {
         throw e;
       });
       symops.set(name, p);
+      trimRepoCache(name);
     }
     return p;
   }
@@ -906,20 +924,67 @@ export function createServer(config: ServerConfig): Server {
     }
     await recoverLandEffects(name, repo, await registryFor(name));
     repoCache.set(name, repo);
+    trimRepoCache(name);
     return repo;
   }
 
-  // Serialize mutations per repo.
+  /** Drops all caches together so failed staged writes cannot remain visible. */
+  function evictRepo(name: string): void {
+    repoCache.delete(name);
+    platform.forget(name);
+    registries.delete(name);
+    provenances.delete(name);
+    vetoes.delete(name);
+    symops.delete(name);
+  }
+
+  /** Invalidates cursor revisions while retiring inactive hot repositories. */
+  function trimRepoCache(keep?: string): void {
+    const names = new Set([
+      ...repoCache.keys(),
+      ...registries.keys(),
+      ...provenances.keys(),
+      ...vetoes.keys(),
+      ...symops.keys(),
+      ...repoRevisions.keys(),
+    ]);
+    for (const cached of names) {
+      if (names.size <= 128) break;
+      if (cached === keep || locks.has(cached)) continue;
+      const clock = repoRevisions.get(cached);
+      if (clock !== undefined) bumpRevision(clock);
+      evictRepo(cached);
+      repoRevisions.delete(cached);
+      names.delete(cached);
+    }
+  }
+
+  /** Commits quota-controlled mutations and invalidates hot state on failure. */
+  async function quotaMutation<T>(
+    name: string,
+    owner: string,
+    create: boolean,
+    action: () => Promise<T>
+  ): Promise<T> {
+    try {
+      return await quotas.run(name, owner, create, action);
+    } catch (error) {
+      evictRepo(name);
+      throw error;
+    }
+  }
+
+  // Serialize mutations per repo and retire idle lock entries.
   function withRepoLock<T>(name: string, fn: () => Promise<T>): Promise<T> {
     const prev = locks.get(name) ?? Promise.resolve();
     const next = prev.then(fn, fn);
-    locks.set(
-      name,
-      next.then(
-        () => undefined,
-        () => undefined
-      )
-    );
+    locks.set(name, next);
+    void next
+      .finally(() => {
+        if (locks.get(name) === next) locks.delete(name);
+        trimRepoCache();
+      })
+      .catch(() => {});
     return next;
   }
 
@@ -1280,6 +1345,17 @@ export function createServer(config: ServerConfig): Server {
   /** Renders configured limits and fixed-label process-local rejection counts. */
   function metrics(): Response {
     const lines = [
+      '# HELP thaddeus_quota_outcomes_total Durable quota outcomes by fixed reason.',
+      '# TYPE thaddeus_quota_outcomes_total counter',
+      ...Object.entries(quotas.outcomes).map(
+        ([outcome, count]) =>
+          `thaddeus_quota_outcomes_total{outcome="${outcome}"} ${count}`
+      ),
+      '# HELP thaddeus_quota_limit Configured per-owner storage and creation limits.',
+      '# TYPE thaddeus_quota_limit gauge',
+      ...Object.entries(quotas.limits).map(
+        ([kind, value]) => `thaddeus_quota_limit{kind="${kind}"} ${value}`
+      ),
       '# HELP thaddeus_http_request_body_limit_bytes Maximum request body bytes accepted by application routes.',
       '# TYPE thaddeus_http_request_body_limit_bytes gauge',
       `thaddeus_http_request_body_limit_bytes ${maxRequestBodyBytes}`,
@@ -1420,23 +1496,25 @@ export function createServer(config: ServerConfig): Server {
       }
       const finishCatalogMutation = beginRevision(catalogRevision);
       try {
-        return await withRepoRevision(name, async () => {
-          const repo = await platform.createDurable(name, config.backend);
-          await repo.headRecords.bootstrap(decoded);
-          repo.log.view('main', decoded.heads);
-          // Metadata is written last: it remains the repository visibility marker,
-          // so a failed signed-head write cannot expose an unsigned repository.
-          await metaBackend(name).put(
-            'meta/repo',
-            encodeRecord({ owner: signer })
-          );
-          repoCache.set(name, repo);
-          return json(201, {
-            name,
-            owner: signer,
-            head: encodeHeadRecord(decoded),
-          });
-        });
+        return await quotaMutation(name, signer, true, () =>
+          withRepoRevision(name, async () => {
+            const repo = await platform.createDurable(name, config.backend);
+            await repo.headRecords.bootstrap(decoded);
+            repo.log.view('main', decoded.heads);
+            // Metadata is written last: it remains the repository visibility marker,
+            // so a failed signed-head write cannot expose an unsigned repository.
+            await metaBackend(name).put(
+              'meta/repo',
+              encodeRecord({ owner: signer })
+            );
+            repoCache.set(name, repo);
+            return json(201, {
+              name,
+              owner: signer,
+              head: encodeHeadRecord(decoded),
+            });
+          })
+        );
       } finally {
         finishCatalogMutation();
       }
@@ -1801,27 +1879,60 @@ export function createServer(config: ServerConfig): Server {
       if (signer !== meta.owner) {
         return json(403, { error: 'not the repo owner' });
       }
-      const clock = repoRevisionClock(name);
-      const finishRepoMutation = beginRevision(clock);
-      const finishCatalogMutation = beginRevision(catalogRevision);
-      let deleted = false;
-      try {
-        const b = metaBackend(name);
-        for (const key of await b.list('')) {
-          await b.delete(key);
+      return quotaMutation(name, meta.owner, false, async () => {
+        const clock = repoRevisionClock(name);
+        const finishRepoMutation = beginRevision(clock);
+        const finishCatalogMutation = beginRevision(catalogRevision);
+        let deleted = false;
+        try {
+          const b = metaBackend(name);
+          const scan = await b.openScan('');
+          let inspected = 0;
+          try {
+            while (true) {
+              if (inspected >= 1_000_000)
+                throw new QuotaError('quota_batch_too_large');
+              const budget = Math.min(256, 1_000_000 - inspected);
+              const page = await scan.read(budget);
+              inspected += budget;
+              for (const key of page.keys) {
+                // A slash-containing name can share this textual prefix with
+                // another repository. Its durable metadata owns that subtree.
+                let nested = false;
+                for (
+                  let boundary = key.indexOf('/');
+                  boundary >= 0;
+                  boundary = key.indexOf('/', boundary + 1)
+                ) {
+                  if (!key.slice(boundary + 1).includes('/')) break;
+                  if (
+                    (await readMeta(`${name}/${key.slice(0, boundary)}`)) !==
+                    undefined
+                  ) {
+                    nested = true;
+                    break;
+                  }
+                }
+                if (!nested) await b.delete(key);
+              }
+              if (page.done) break;
+            }
+          } finally {
+            await scan.close();
+          }
+          evictRepo(name);
+          registries.delete(name);
+          provenances.delete(name);
+          vetoes.delete(name);
+          symops.delete(name);
+          deleted = true;
+          return json(200, { deleted: name });
+        } finally {
+          finishRepoMutation();
+          finishCatalogMutation();
+          if (deleted) repoRevisions.delete(name);
         }
-        repoCache.delete(name);
-        registries.delete(name);
-        provenances.delete(name);
-        vetoes.delete(name);
-        symops.delete(name);
-        deleted = true;
-        return json(200, { deleted: name });
-      } finally {
-        finishRepoMutation();
-        finishCatalogMutation();
-        if (deleted) repoRevisions.delete(name);
-      }
+      });
     });
   }
 
@@ -2579,20 +2690,23 @@ export function createServer(config: ServerConfig): Server {
             );
           }
         }
-        if (replacements.length > 0) {
-          await repo.store.ingestRecall(object, pushed, replacements);
-          pendingOk += replacements.length;
-        } else {
-          await repo.store.ingest(
-            object,
-            sameKey
-              ? unionCaps(repo.store.caps(object.plaintext_id), pushed)
-              : pushed
-          );
-        }
+        await quotas.object(async () => {
+          if (replacements.length > 0) {
+            await repo.store.ingestRecall(object, pushed, replacements);
+            pendingOk += replacements.length;
+          } else {
+            await repo.store.ingest(
+              object,
+              sameKey
+                ? unionCaps(repo.store.caps(object.plaintext_id), pushed)
+                : pushed
+            );
+          }
+        });
         objectsOk += 1;
         capsOk += pushed.length;
       } catch (err) {
+        if (err instanceof QuotaError) throw err;
         rejected.push({
           kind: 'object',
           id: object.id ?? '?',
@@ -2738,20 +2852,23 @@ export function createServer(config: ServerConfig): Server {
       // registry AFTER acquiring the lock, so a revoke that ran just before is
       // seen. The owner is always authorized; a non-owner must hold a
       // non-revoked delegation for this repo.
-      const reg = await registryFor(name);
-      if (
-        signer !== meta.owner &&
-        !(reg.delegationFor(signer) !== undefined && !reg.isRevoked(signer))
-      ) {
-        return json(403, { error: 'not authorized to write this repo' });
+      if (signer !== meta.owner) {
+        const reg = await registryFor(name);
+        if (
+          !(reg.delegationFor(signer) !== undefined && !reg.isRevoked(signer))
+        )
+          return json(403, { error: 'not authorized to write this repo' });
       }
-      const repo = await getRepo(name);
-      if (repo === undefined) {
-        return json(404, { error: `no repo ${name}` });
-      }
-      return withRepoRevision(name, async () =>
-        json(200, await ingestBundle(name, repo, bundle))
-      );
+      return quotaMutation(name, meta.owner, false, async () => {
+        await quotas.preflight(bundle.objects);
+        const repo = await getRepo(name);
+        if (repo === undefined) {
+          return json(404, { error: `no repo ${name}` });
+        }
+        return withRepoRevision(name, async () =>
+          json(200, await ingestBundle(name, repo, bundle))
+        );
+      });
     });
   }
 
@@ -3186,22 +3303,26 @@ export function createServer(config: ServerConfig): Server {
         return json(400, { error: 'malformed recall bundle' });
       }
     }
-    return withRepoLock(name, async () => {
-      const repo = await getRepo(name);
-      if (repo === undefined) {
-        return json(404, { error: `no repo ${name}` });
-      }
-      return withRepoRevision(name, async () => {
-        const recalled =
-          recallBundle === undefined
-            ? undefined
-            : await ingestBundle(name, repo, recallBundle, true);
-        const reg = await registryFor(name);
-        reg.revoke(agent);
-        await metaBackend(name).put(`revoked/${agent}`, encodeRecord(true));
-        return json(200, { agent, revoked: true, recalled });
-      });
-    });
+    return withRepoLock(name, () =>
+      quotaMutation(name, meta.owner, false, async () => {
+        if (recallBundle !== undefined)
+          await quotas.preflight(recallBundle.objects);
+        const repo = await getRepo(name);
+        if (repo === undefined) {
+          return json(404, { error: `no repo ${name}` });
+        }
+        return withRepoRevision(name, async () => {
+          const recalled =
+            recallBundle === undefined
+              ? undefined
+              : await ingestBundle(name, repo, recallBundle, true);
+          const reg = await registryFor(name);
+          reg.revoke(agent);
+          await metaBackend(name).put(`revoked/${agent}`, encodeRecord(true));
+          return json(200, { agent, revoked: true, recalled });
+        });
+      })
+    );
   }
 
   /** Returns one bounded page of active delegation records for a repository. */
@@ -3360,7 +3481,7 @@ export function createServer(config: ServerConfig): Server {
     });
   }
 
-  return {
+  const server: Server = {
     /** Promotes every scheduled public capability whose not-before time is due. */
     async revealDue(): Promise<number> {
       let released = 0;
@@ -3420,6 +3541,7 @@ export function createServer(config: ServerConfig): Server {
             throw error;
           }
         }
+        await quotas.ready();
         return handler(body);
       };
       /** Cancels a body before returning the route's stable malformed-path error. */
@@ -3451,6 +3573,7 @@ export function createServer(config: ServerConfig): Server {
 
         if (req.method !== 'POST') {
           await cancelBody(req.body);
+          await quotas.ready();
         }
 
         if (path === '/repos' && req.method === 'GET') {
@@ -3667,6 +3790,40 @@ export function createServer(config: ServerConfig): Server {
           return inputLimitResponse(error);
         }
         throw error;
+      }
+    },
+  };
+  return {
+    ...server,
+    async fetch(req: Request): Promise<Response> {
+      try {
+        return await server.fetch(req);
+      } catch (error) {
+        if (!(error instanceof QuotaError)) throw error;
+        quotas.outcomes[error.code]++;
+        const status =
+          error.code === 'repository_exists'
+            ? 409
+            : error.code === 'quota_storage_unavailable'
+              ? 503
+              : error.code.endsWith('rate_limited')
+                ? 429
+                : error.code === 'quota_batch_too_large'
+                  ? 413
+                  : 403;
+        return new Response(
+          JSON.stringify({ error: error.code, code: error.code }),
+          {
+            status,
+            headers: {
+              'content-type': 'application/json',
+              'cache-control': 'no-store',
+              ...(error.retryAfter === undefined
+                ? {}
+                : { 'retry-after': String(error.retryAfter) }),
+            },
+          }
+        );
       }
     },
   };

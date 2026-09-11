@@ -131,3 +131,26 @@ describe('scoped', () => {
     await scan.close();
   });
 });
+
+describe('FileBackend sharding compatibility', () => {
+  test('new writes spread across shards; legacy duplicates are listed once and deleted together', async () => {
+    const root = mkdtempSync(join(tmp, 'sharded-'));
+    const b = new FileBackend(root);
+    writeFileSync(join(root, encodeURIComponent('obj/legacy')), enc('legacy'));
+    expect(dec((await b.get('obj/legacy'))!)).toBe('legacy');
+    expect(await b.putIfAbsent('obj/legacy', enc('cannot replace'))).toBe(
+      false
+    );
+    await b.put('obj/legacy', enc('new'));
+    // Simulate a crash after publishing the shard but before removing the old file.
+    writeFileSync(join(root, encodeURIComponent('obj/legacy')), enc('stale'));
+    for (let i = 0; i < 32; i++) await b.put(`obj/${i}`, enc(String(i)));
+    expect(dec((await new FileBackend(root).get('obj/legacy'))!)).toBe('new');
+    const keys = await b.list('obj/');
+    expect(keys).toHaveLength(33);
+    expect(keys.filter((key) => key === 'obj/legacy')).toHaveLength(1);
+    await b.delete('obj/legacy');
+    expect(await b.get('obj/legacy')).toBeUndefined();
+    expect(await b.list('obj/legacy')).toEqual([]);
+  });
+});

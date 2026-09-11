@@ -8,6 +8,7 @@ const config: UserConfig = defineConfig([
     dts: { sourcemap: true, tsgo: true },
     unbundle: true,
     platform: 'neutral',
+    external: ['node:async_hooks'],
   },
 ]);
 
