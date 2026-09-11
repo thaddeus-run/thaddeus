@@ -30,6 +30,7 @@ import {
   signClaim,
 } from '@thaddeus.run/reputation';
 import {
+  type ReviewerCapability,
   reviewerCapabilityId,
   ReviewLog,
   reviewScopeMatches,
@@ -164,6 +165,31 @@ async function syncReviews(
 ): Promise<void> {
   for (const entry of await client.reviewHistory(cfg.repo)) {
     if ('kind' in entry.record) await reviews.import(entry.record);
+  }
+}
+
+// A confirmed server mutation stays successful even if local persistence or the
+// history read fails. Save its signed evidence first so offline state can advance.
+async function cacheReviewMutation(
+  client: Client,
+  cfg: Config,
+  reviews: ReviewLog,
+  save: () => Promise<void>,
+  out: (line: string) => void
+): Promise<void> {
+  try {
+    await save();
+  } catch (error) {
+    out(
+      `warning: server accepted the review change, but its local record could not be saved: ${error instanceof Error ? error.message : String(error)}; run thaddeus pull to refresh`
+    );
+  }
+  try {
+    await syncReviews(client, cfg, reviews);
+  } catch (error) {
+    out(
+      `warning: server accepted the review change, but history refresh failed: ${error instanceof Error ? error.message : String(error)}; run thaddeus pull to refresh`
+    );
   }
 }
 
@@ -2307,8 +2333,14 @@ export async function run(
             out('veto withdrawal not accepted');
             return 1;
           }
-          await syncReviews(client, cfg, reviews);
           out(`withdrew veto ${id}`);
+          await cacheReviewMutation(
+            client,
+            cfg,
+            reviews,
+            () => reviews.import({ kind: 'withdraw', withdrawal }),
+            out
+          );
           return 0;
         }
         // Resolve a short op-id prefix (as printed by `log`) to a full op.
@@ -2326,13 +2358,16 @@ export async function run(
         const op = matches[0];
         const reason = values.message ?? 'vetoed';
         let grant = 'owner';
+        let selectedCapability: ReviewerCapability | undefined;
         if (
           identity.did !== local.headRecords.owner ||
           (values.grant !== undefined && values.grant !== 'owner')
         ) {
-          const grants = (
-            await client.listReviewers(cfg.repo, local.headRecords.owner!)
-          )
+          const capabilities = await client.listReviewers(
+            cfg.repo,
+            local.headRecords.owner!
+          );
+          const grants = capabilities
             .filter(
               (cap) =>
                 cap.reviewer === identity.did &&
@@ -2349,6 +2384,9 @@ export async function run(
             return 1;
           }
           grant = selected;
+          selectedCapability = capabilities.find(
+            (cap) => reviewerCapabilityId(cap) === selected
+          );
         }
         const veto = signScopedVeto(
           {
@@ -2371,8 +2409,22 @@ export async function run(
           );
           return 1;
         }
-        await syncReviews(client, cfg, reviews);
         out(`vetoed ${op.id.slice(0, 10)}: ${reason} [${vetoId(veto)}]`);
+        await cacheReviewMutation(
+          client,
+          cfg,
+          reviews,
+          async () => {
+            if (selectedCapability !== undefined)
+              await reviews.import({
+                kind: 'grant',
+                capability: selectedCapability,
+              });
+            // Keep the signed veto without inventing a server receipt timestamp.
+            await new VetoLog(repoScope(root, cfg)).ingest(veto);
+          },
+          out
+        );
         return 0;
       }
       case 'vetoes': {
@@ -2865,23 +2917,37 @@ export async function run(
           return 1;
         }
         if (action === 'grant') {
-          const cap = signReviewerCapability(
-            {
-              repo: cfg.repo,
-              reviewer: target,
-              paths: values.paths?.split(',').map((path) => path.trim()) ?? [],
-              maxVetoesPerHour: Number(values['max-vetoes-per-hour'] ?? 60),
-              maxActiveVetoes: Number(values['max-active-vetoes'] ?? 256),
-              at: new Date().toISOString(),
-              nonce: crypto.randomUUID(),
-            },
-            identity
-          );
+          let cap: ReviewerCapability;
+          try {
+            cap = signReviewerCapability(
+              {
+                repo: cfg.repo,
+                reviewer: target,
+                paths:
+                  values.paths?.split(',').map((path) => path.trim()) ?? [],
+                maxVetoesPerHour: Number(values['max-vetoes-per-hour'] ?? 60),
+                maxActiveVetoes: Number(values['max-active-vetoes'] ?? 256),
+                at: new Date().toISOString(),
+                nonce: crypto.randomUUID(),
+              },
+              identity
+            );
+          } catch (error) {
+            if (!(error instanceof TypeError)) throw error;
+            out(`invalid reviewer grant options: ${error.message}`);
+            return 2;
+          }
           const result = await client.grantReviewer(cfg.repo, cap);
           if (result.grant !== reviewerCapabilityId(cap))
             throw new Error('reviewer grant not accepted');
-          await syncReviews(client, cfg, reviews);
           out(`granted review ${result.grant} to ${target}`);
+          await cacheReviewMutation(
+            client,
+            cfg,
+            reviews,
+            () => reviews.import({ kind: 'grant', capability: cap }),
+            out
+          );
         } else {
           const revocation = signReviewRevocation(
             {
@@ -2897,8 +2963,14 @@ export async function run(
             out('reviewer revocation not accepted');
             return 1;
           }
-          await syncReviews(client, cfg, reviews);
           out(`revoked review ${target}`);
+          await cacheReviewMutation(
+            client,
+            cfg,
+            reviews,
+            () => reviews.import({ kind: 'revoke', revocation }),
+            out
+          );
         }
         return 0;
       }

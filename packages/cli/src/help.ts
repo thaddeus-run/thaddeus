@@ -242,7 +242,8 @@ thaddeus query references <name> [--json]
   thaddeus veto withdraw <veto-id> [-m reason]
 
   Lodge a standing veto on an op (resolved by id prefix). Active review authority blocks
-  any subsequent land of that op. Requires push access on the repo.`,
+  any subsequent land of that op. Requires repository owner authority or an active
+  reviewer grant whose scope covers the operation.`,
 
   vetoes: `thaddeus vetoes <op> [--json]
 

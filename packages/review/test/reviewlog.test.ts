@@ -533,3 +533,21 @@ test('clock rollback cannot reopen a pruned receipt window, including after rest
     );
   }
 });
+
+test('load distinguishes malformed bytes from content-address corruption', async () => {
+  const { owner, log, cap, backend } = setup();
+  await log.grant(cap);
+  const key = (await backend.list('review/'))[0];
+  const bytes = (await backend.get(key))!;
+  await backend.put('review/wrong-address', bytes);
+  await rejects(
+    ReviewLog.load(backend, 'repo', owner.did),
+    'review content address mismatch'
+  );
+  await backend.delete('review/wrong-address');
+  await backend.put('review/malformed', new Uint8Array([255]));
+  await rejects(
+    ReviewLog.load(backend, 'repo', owner.did),
+    'cannot decode review event'
+  );
+});
