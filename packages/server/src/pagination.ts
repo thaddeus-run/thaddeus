@@ -142,6 +142,12 @@ export class CursorRegistry {
       }
       capturedRevision = session.revision;
       source = session.source as BufferedPageSource<T>;
+      // A cache eviction can replace the route's clock with a fresh instance.
+      // The original clock must still agree before its retained source is used.
+      if (session.revisionNow() !== capturedRevision) {
+        await source.close();
+        throw new PaginationError('pagination_snapshot_changed');
+      }
     }
 
     if (

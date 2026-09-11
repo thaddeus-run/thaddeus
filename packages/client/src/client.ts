@@ -525,32 +525,7 @@ export class Client {
         throw new Error('fork: listed view conflicts with the local pin');
       }
       if (pinned?.id !== head.id) {
-        const detailPages = await this.#collectPages(async (cursor) => {
-          const detailResponse = await this.#fetch(
-            new Request(
-              this.#pageUrl(
-                `/repos/${encodeURIComponent(name)}/views/${encodeURIComponent(view)}`,
-                cursor === undefined ? {} : { cursor }
-              )
-            )
-          );
-          const detail = (await this.#ok(detailResponse)) as HeadResponse & {
-            nextCursor?: unknown;
-          };
-          return {
-            ...detail,
-            nextCursor: this.#nextCursor(detail.nextCursor),
-          };
-        });
-        const firstDetail = detailPages[0];
-        if (firstDetail === undefined) {
-          throw new Error('malformed_record: missing view detail');
-        }
-        const detail: HeadResponse = {
-          view: firstDetail.view,
-          head: firstDetail.head,
-          chain: detailPages.flatMap((page) => [...page.chain]),
-        };
+        const detail = await this.#viewDetail(name, view);
         const verified = decodeVerifiedChain(detail, name, view, {
           owner: listedOwner,
           prefix: repo.headRecords.history(view),
@@ -969,23 +944,13 @@ export class Client {
     return (await this.#ok(res)) as PushResult;
   }
 
-  // Land uploaded heads into a target view under the server's policy. A blocked
-  // land returns { landed: false, reason } — it is NOT thrown. `contrib` carries
-  // subject-signed reputation claims (P07) that an attesting host co-signs for
-  // the landed ops.
-  async land(
-    name: string,
-    repo: Repo,
-    fromHeads: readonly string[],
-    into = 'main',
-    contrib: readonly ContributionClaim[] = []
-  ): Promise<LandOutcome> {
-    // Landing must verify the complete history even when it spans pages.
+  /** Collects the complete signed view chain using the existing cursor protocol. */
+  async #viewDetail(name: string, view: string): Promise<HeadResponse> {
     const pages = await this.#collectPages(async (cursor) => {
       const response = await this.#fetch(
         new Request(
           this.#pageUrl(
-            `/repos/${encodeURIComponent(name)}/views/${encodeURIComponent(into)}`,
+            `/repos/${encodeURIComponent(name)}/views/${encodeURIComponent(view)}`,
             cursor === undefined ? {} : { cursor }
           )
         )
@@ -998,10 +963,25 @@ export class Client {
     const first = pages[0];
     if (first === undefined)
       throw new Error('malformed_record: missing view detail');
-    const currentBody: HeadResponse = {
+    return {
       ...first,
       chain: pages.flatMap((page) => [...page.chain]),
     };
+  }
+
+  // Land uploaded heads into a target view under the server's policy. A blocked
+  // land returns { landed: false, reason } — it is NOT thrown. `contrib` carries
+  // subject-signed reputation claims (P07) that an attesting host co-signs for
+  // the landed ops.
+  async land(
+    name: string,
+    repo: Repo,
+    fromHeads: readonly string[],
+    into = 'main',
+    contrib: readonly ContributionClaim[] = []
+  ): Promise<LandOutcome> {
+    // Landing must verify the complete history even when it spans pages.
+    const currentBody = await this.#viewDetail(name, into);
     const current = decodeVerifiedChain(currentBody, name, into, {
       owner: repo.headRecords.owner,
       prefix: repo.headRecords.history(into),

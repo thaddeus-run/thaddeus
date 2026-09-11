@@ -1,6 +1,6 @@
 import { scoped } from '@thaddeus.run/store';
 import { afterAll, describe, expect, test } from 'bun:test';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -142,6 +142,9 @@ describe('FileBackend sharding compatibility', () => {
       false
     );
     await b.put('obj/legacy', enc('new'));
+    expect(existsSync(join(root, encodeURIComponent('obj/legacy')))).toBe(
+      false
+    );
     // Simulate a crash after publishing the shard but before removing the old file.
     writeFileSync(join(root, encodeURIComponent('obj/legacy')), enc('stale'));
     for (let i = 0; i < 32; i++) await b.put(`obj/${i}`, enc(String(i)));

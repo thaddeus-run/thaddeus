@@ -56,6 +56,7 @@ address, filesystem path, or content.
 | 413    | `quota_batch_too_large`            | Absent; split uploads or perform operator maintenance    |
 | 503    | `quota_storage_unavailable`        | 1 second; operational recovery may still be required     |
 | 409    | `repository_exists`                | Absent; another server instance won the same-name create |
+| 404    | `repository_not_found`             | Absent; repository was deleted while a mutation waited   |
 
 Existing malformed-body, authentication, authorization, and same-server name
 conflict responses retain their contracts. Quota failure aborts the whole upload
@@ -91,10 +92,14 @@ while an authoritative journal still retains the allocation.
 Deleting a repository reclaims its encoded object bytes, retained object count
 and repository slot in the same durable batch. Scanning deletion is bounded to
 1,000,000 underlying entries and skips nested repositories with their own owner
-metadata. The server retires idle locks and limits its hot repository cache to
-128 inactive/active entries except while concurrent mutations pin entries;
-eviction invalidates the associated cursor revision. Cursor sessions retain the
-existing THA-9 bounds.
+metadata. A bounded 256-prefix cache avoids repeated nested-owner lookups.
+Deletion holds the backend quota queue through discovery and the atomic commit;
+large deletions can delay other data requests. It does not expose partially
+deleted repositories by committing chunks without a durable deletion state. The
+server retires idle locks and limits its hot repository cache to 128
+inactive/active entries except while concurrent mutations pin entries; eviction
+invalidates the associated cursor revision. Cursor sessions retain the existing
+THA-9 bounds.
 
 `MemoryBackend` coordinates its instance. `FileBackend` instances using the same
 resolved root coordinate in **one process**, matching the existing replay-nonce
@@ -132,9 +137,11 @@ adoption.
 `thaddeus_quota_outcomes_total{outcome="..."}` exposes committed batches,
 recovered journals and the fixed rejection codes above. Counters are local to
 the process and reset on restart; enforcement accounting and windows do not.
-Labels never contain DIDs, names, object IDs or content. Durable owner record
-keys use a domain-separated prefix and a BLAKE3 digest of the public identity;
-these opaque storage keys are not emitted as metrics.
+`GET /metrics` does not wait for quota recovery, so these counters remain
+available while quota storage is degraded. Labels never contain DIDs, names,
+object IDs or content. Durable owner record keys use a domain-separated prefix
+and a BLAKE3 digest of the public identity; these opaque storage keys are not
+emitted as metrics.
 
 A `did:key` identity is free to mint. An attacker can create fresh identities to
 obtain fresh quotas and can grow the durable set of owner records. These limits
