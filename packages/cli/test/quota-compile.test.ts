@@ -6,14 +6,14 @@ import { encodeRecord, MemoryStore } from '@thaddeus.run/store';
 import { afterAll, beforeAll, expect, test } from 'bun:test';
 import { createHash } from 'node:crypto';
 import {
-  mkdirSync,
+  existsSync,
   mkdtempSync,
   readFileSync,
   rmSync,
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { dirname, join, resolve } from 'node:path';
+import { join, resolve } from 'node:path';
 
 const root = mkdtempSync(join(tmpdir(), 'thaddeus-compiled-quotas-'));
 const binary = join(root, 'thaddeus');
@@ -277,6 +277,225 @@ test('compiled serve enforces durable quotas, rate state, concurrency and two id
   }
 }, 120_000);
 
+test('compiled server rejects competing object allocations and reclaims deleted capacity', async () => {
+  const data = mkdtempSync(join(root, 'object-race-'));
+  const owner = Identity.create();
+  const flags = ['--max-repositories', '2', '--max-objects', '2'];
+  let server = await serve(data, flags);
+  try {
+    for (const name of ['a', 'b'])
+      expect(
+        (await send(server.url, owner, 'POST', '/repos', genesis(name, owner)))
+          .status
+      ).toBe(201);
+    const items = await Promise.all(
+      Array.from({ length: 8 }, (_, i) => upload(owner, `concurrent-${i}`))
+    );
+    const responses = await Promise.all(
+      items.map((item, i) =>
+        send(
+          server.url,
+          owner,
+          'POST',
+          `/repos/${i % 2 === 0 ? 'a' : 'b'}/push`,
+          item.bundle
+        )
+      )
+    );
+    expect(
+      responses.filter((response) => response.status === 200)
+    ).toHaveLength(2);
+    expect(
+      responses.filter((response) => response.status === 403)
+    ).toHaveLength(6);
+    const backend = new FileBackend(data);
+    const expectedKeys: string[] = [];
+    for (const [i, response] of responses.entries()) {
+      const key = `repo/${i % 2 === 0 ? 'a' : 'b'}/obj/${items[i].object.id}`;
+      if (response.status === 200) expectedKeys.push(key);
+      else {
+        expect(await response.json()).toEqual({
+          error: 'object_quota_exceeded',
+          code: 'object_quota_exceeded',
+        });
+        expect(response.headers.get('retry-after')).toBeNull();
+        expect(await backend.get(key)).toBeUndefined();
+      }
+    }
+    expect(
+      (await backend.list('repo/'))
+        .filter((key) => /\/obj\/[^/]+$/.test(key))
+        .sort()
+    ).toEqual(expectedKeys.sort());
+    await server.stop();
+    server = await serve(data, flags);
+    const extra = await upload(owner, 'after restart');
+    expect(
+      (await send(server.url, owner, 'POST', '/repos/a/push', extra.bundle))
+        .status
+    ).toBe(403);
+    for (const name of ['a', 'b'])
+      expect(
+        (await send(server.url, owner, 'DELETE', `/repos/${name}`)).status
+      ).toBe(200);
+    expect(await backend.list('repo/')).toEqual([]);
+    expect(
+      (
+        await send(
+          server.url,
+          owner,
+          'POST',
+          '/repos',
+          genesis('reclaimed', owner)
+        )
+      ).status
+    ).toBe(201);
+    expect(
+      (
+        await send(
+          server.url,
+          owner,
+          'POST',
+          '/repos/reclaimed/push',
+          extra.bundle
+        )
+      ).status
+    ).toBe(200);
+  } finally {
+    await server.stop();
+  }
+}, 120_000);
+
+test('compiled server adopts flat legacy data and preserves quotas through sharded writes', async () => {
+  const data = mkdtempSync(join(root, 'legacy-data-'));
+  const owner = Identity.create();
+  const other = Identity.create();
+  const flags = ['--max-repositories', '1', '--max-objects', '1'];
+  let server = await serve(data, flags);
+  try {
+    const item = await upload(owner, 'legacy ciphertext');
+    expect(
+      (
+        await send(
+          server.url,
+          owner,
+          'POST',
+          '/repos',
+          genesis('legacy', owner)
+        )
+      ).status
+    ).toBe(201);
+    expect(
+      (await send(server.url, owner, 'POST', '/repos/legacy/push', item.bundle))
+        .status
+    ).toBe(200);
+    await server.stop();
+    const backend = new FileBackend(data);
+    // Reconstruct the supported pre-upgrade disk layout while the server is stopped.
+    const legacyKeys = [...(await backend.list('repo/'))];
+    for (const key of legacyKeys) {
+      const bytes = (await backend.get(key))!;
+      await backend.delete(key);
+      writeFileSync(join(data, encodeURIComponent(key)), bytes);
+    }
+    for (const key of await backend.list('quota/v1/'))
+      await backend.delete(key);
+    expect(await backend.list('quota/v1/')).toEqual([]);
+    const objectKey = `repo/legacy/obj/${item.object.id}`;
+    expect(existsSync(join(data, encodeURIComponent(objectKey)))).toBe(true);
+    server = await serve(data, flags);
+    expect((await fetch(`${server.url}/repos/legacy/views/main`)).status).toBe(
+      200
+    );
+    expect(
+      (await send(server.url, owner, 'POST', '/repos/legacy/push', item.bundle))
+        .status
+    ).toBe(200);
+    const extra = await upload(other, 'new sharded ciphertext');
+    const over = await send(
+      server.url,
+      owner,
+      'POST',
+      '/repos/legacy/push',
+      extra.bundle
+    );
+    expect(over.status).toBe(403);
+    expect(await over.json()).toMatchObject({ code: 'object_quota_exceeded' });
+    const repoOver = await send(
+      server.url,
+      owner,
+      'POST',
+      '/repos',
+      genesis('over', owner)
+    );
+    expect(repoOver.status).toBe(403);
+    expect(await repoOver.json()).toMatchObject({
+      code: 'repository_quota_exceeded',
+    });
+    expect([...(await backend.list('repo/'))].sort()).toEqual(
+      legacyKeys.sort()
+    );
+    expect(
+      (
+        await send(
+          server.url,
+          other,
+          'POST',
+          '/repos',
+          genesis('independent', other)
+        )
+      ).status
+    ).toBe(201);
+    expect(
+      (
+        await send(
+          server.url,
+          other,
+          'POST',
+          '/repos/independent/push',
+          extra.bundle
+        )
+      ).status
+    ).toBe(200);
+    const newKey = `repo/independent/obj/${extra.object.id}`;
+    const shard = createHash('sha256').update(newKey).digest('hex').slice(0, 2);
+    expect(
+      existsSync(join(data, '.records-v1', shard, encodeURIComponent(newKey)))
+    ).toBe(true);
+    expect(existsSync(join(data, encodeURIComponent(newKey)))).toBe(false);
+    expect(
+      (await send(server.url, owner, 'DELETE', '/repos/legacy')).status
+    ).toBe(200);
+    for (const key of legacyKeys)
+      expect(existsSync(join(data, encodeURIComponent(key)))).toBe(false);
+    expect(await backend.list('repo/legacy/')).toEqual([]);
+    expect(
+      (
+        await send(
+          server.url,
+          owner,
+          'POST',
+          '/repos',
+          genesis('replacement', owner)
+        )
+      ).status
+    ).toBe(201);
+    expect(
+      (
+        await send(
+          server.url,
+          owner,
+          'POST',
+          '/repos/replacement/push',
+          item.bundle
+        )
+      ).status
+    ).toBe(200);
+  } finally {
+    await server.stop();
+  }
+}, 120_000);
+
 test('compiled serve accepts the exact object byte boundary and rejects one byte over it', async () => {
   const owner = Identity.create();
   const item = await upload(owner, 'byte boundary');
@@ -374,7 +593,7 @@ test('compiled CLI clone, push, second upload, pull and repository pagination st
   }
 }, 120_000);
 
-test('compiled server reclaims a failed filesystem upload after restart and recovery', async () => {
+test('compiled server reclaims a failed journal write after filesystem repair and restart', async () => {
   const data = mkdtempSync(join(root, 'failed-data-'));
   const owner = Identity.create();
   const item = await upload(owner, 'retry after failure');
@@ -393,10 +612,13 @@ test('compiled server reclaims a failed filesystem upload after restart and reco
       ).status
     ).toBe(201);
     const key = `repo/failure/obj/${item.object.id}`;
-    const shard = createHash('sha256').update(key).digest('hex').slice(0, 2);
-    const blocked = join(data, '.records-v1', shard, encodeURIComponent(key));
-    mkdirSync(dirname(blocked), { recursive: true });
-    mkdirSync(blocked);
+    const backend = new FileBackend(data);
+    const before = [...(await backend.list('repo/'))].sort();
+    // Reads and nonce consumption remain available, but the journal's first
+    // generic backend write cannot create its staging directory.
+    const blocked = join(data, '.staging');
+    rmSync(blocked, { recursive: true });
+    writeFileSync(blocked, 'injected staging-directory fault');
     const failure = await send(
       server.url,
       owner,
@@ -408,6 +630,8 @@ test('compiled server reclaims a failed filesystem upload after restart and reco
     expect(await failure.json()).toMatchObject({
       code: 'quota_storage_unavailable',
     });
+    expect([...(await backend.list('repo/'))].sort()).toEqual(before);
+    expect(await backend.get('quota/v1/journal')).toBeUndefined();
     await server.stop();
     rmSync(blocked, { recursive: true });
     server = await serve(data, flags);
