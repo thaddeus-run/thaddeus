@@ -1803,22 +1803,30 @@ putIfMatch(key, bytes, expectedVersion): boolean  // compare-and-swap</code></pr
       </h3>
       <p>
         This late-stage project turns “could host all of GitHub” into an
-        explicit workload model and measured reliability envelope. Today
-        <code>packages/server/src/server.ts:1135</code> dynamically builds a
-        complete pull bundle, while ciphertext objects are already
-        content-addressed at <code>packages/store/src/object.ts:15</code>. G1
-        separates signed manifests, immutable hash-addressed ciphertext objects,
-        and private capability responses so the immutable data plane can use a
-        global cache without weakening authorization.
+        explicit workload model and measured reliability envelope. The
+        <a
+          href="https://github.com/thaddeus-run/thaddeus/blob/62dc92f30d4c1c6d5d6bf37a1183e1dca75f30f8/packages/server/src/server.ts#L2332"
+          >server pull handler</a
+        >
+        now returns bounded pages of reachable records, which the client
+        reconstructs into a complete verified bundle. Ciphertext objects are
+        content-addressed by <code>StoredObject</code> in
+        <code>packages/store/src/object.ts</code>. G1 separates signed
+        manifests, immutable hash-addressed ciphertext objects, and private
+        capability responses so the immutable data plane can use a global cache
+        without weakening authorization.
       </p>
       <div class="card verdict" style="border-left-color: var(--crit)">
         <strong>Sequence gate.</strong> G0 measurement may begin now, but no CDN
         or global-routing production rollout proceeds until the P14/H4 CAS
         contract, S3 backend conformance, migration, rollback, and multi-node
         correctness gates pass. The current <code>Backend</code> has no CAS
-        operation (<code>packages/store/src/backend.ts:5</code>), and
-        FileBackend uses one flat directory
-        (<code>packages/persist/src/file.ts:52</code>).
+        operation (the <code>Backend</code> interface in
+        <code>packages/store/src/backend.ts</code>), and
+        <a
+          href="https://github.com/thaddeus-run/thaddeus/blob/62dc92f30d4c1c6d5d6bf37a1183e1dca75f30f8/packages/persist/src/file.ts#L105"
+          >FileBackend still documents a flat directory layout</a
+        >.
       </div>
       <div class="card">
         <strong>Source boundary.</strong> Signed manifests, hash-addressed

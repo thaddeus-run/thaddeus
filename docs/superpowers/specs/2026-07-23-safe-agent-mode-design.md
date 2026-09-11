@@ -446,6 +446,51 @@ interface SafeAgentProof {
 }
 ```
 
+Publication and hosted attestation use separate signed envelopes so a local run
+can finish before a Git result commit or App installation is available:
+
+```ts
+interface SafeAgentPublicationBinding {
+  readonly version: 1;
+  readonly proofDigest: string;
+  readonly repository: {
+    readonly provider: 'github';
+    readonly repositoryId: string;
+  };
+  readonly sourceCommit: string;
+  readonly resultCommit: string;
+  readonly installationId: string | null;
+  readonly operator: string;
+  readonly signature: string;
+}
+
+interface SafeAgentHostAttestation {
+  readonly version: 1;
+  readonly proofDigest: string;
+  readonly publicationDigest: string;
+  readonly host: string;
+  readonly issuedAt: string;
+  readonly signature: string;
+}
+```
+
+The base proof is signed by `grant.operator`. The trusted publisher signs the
+publication binding with that same identity after constructing the result
+commit. Its source commit must equal `proof.source.gitHead`; verification must
+match the commit delta against the proof's changed-path digests, including the
+recorded dirty starting snapshot. Repository identity uses GitHub's immutable
+repository ID, not a mutable owner/name. Without the App, `installationId` is
+null; an App-verified check requires the exact active installation ID and
+repository match. The App refuses absent or inconsistent publication bindings.
+
+Digests cover the complete canonical signed referenced record. Envelope
+signatures use distinct versioned domains (`thaddeus.safe-agent.publication.v1`
+and `thaddeus.safe-agent.host-attestation.v1`) and exclude only their own
+signature field. Host-attested publication additionally requires a valid host
+envelope binding both the same proof and publication, signed by an explicitly
+trusted host key. Absence of that envelope means local operator attestation; a
+valid operator signature never upgrades the trust level by itself.
+
 Changed-path proof entries contain repository-relative path, kind, and before
 and after digests, not source bytes. Raw stdout, stderr, prompts, credentials,
 tool logs, task text, and command arguments are excluded.
