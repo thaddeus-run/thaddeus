@@ -293,6 +293,18 @@
         </p>
       </header>
 
+      <div class="card">
+        <strong>Roadmap status checked 2026-09-11.</strong> The P11/P12
+        checkboxes in <a href="#nextsteps">§7</a> now reflect merged GitHub
+        implementation and verification evidence through
+        <a
+          href="https://github.com/thaddeus-run/thaddeus/commit/bba202fee95cca95f2928a9ae69f900ba900ca92"
+          >main at bba202f</a
+        >. Both phases remain in progress. The July audit below is historical;
+        checked items do not imply that every original finding or the production
+        infrastructure exit gate is complete.
+      </div>
+
       <div class="card verdict" style="border-left-color: var(--high)">
         <strong>⚠ Currency &amp; corrections (read first).</strong> The five
         audits below were run against the working tree at branch
@@ -1402,28 +1414,35 @@ putIfMatch(key, bytes, expectedVersion): boolean  // compare-and-swap</code></pr
       </p>
 
       <h3>
-        P11 — Hardening &amp; Proof <span class="pill">current</span> ·
+        P11 — Hardening &amp; Proof <span class="pill">in progress</span> ·
         <a href="https://github.com/thaddeus-run/thaddeus/milestone/1"
           >milestone</a
         >
       </h3>
       <ul class="checklist">
         <li>
-          <input type="checkbox" disabled /><span
+          <input type="checkbox" checked disabled /><span
             ><strong
               >#72 — Sign <code>wrapped_key</code> + verify object↔op binding at
               read.</strong
             >
-            <span class="tag t-crit">top priority</span> Close the
-            content-integrity gap the whole thesis rests on; ship an
-            exploit-or-refute test.</span
+            <span class="tag t-ok">done</span> Merged in
+            <a href="https://github.com/thaddeus-run/thaddeus/pull/156"
+              >PR #156</a
+            >
+            with tampering and legitimate-read regressions.</span
           >
         </li>
         <li>
-          <input type="checkbox" disabled /><span
+          <input type="checkbox" checked disabled /><span
             ><strong>#73 — Sign view/branch heads;</strong> reject non-monotonic
-            rollback; lay the CT-style head log (also powers ThadHub
-            head-transparency).</span
+            rollback. <span class="tag t-ok">done</span> Merged in
+            <a href="https://github.com/thaddeus-run/thaddeus/pull/203"
+              >PR #203</a
+            >. The cross-client transparency log remains separate in
+            <a href="https://github.com/thaddeus-run/thaddeus/issues/110"
+              >#110</a
+            >.</span
           >
         </li>
         <li>
@@ -1448,8 +1467,9 @@ putIfMatch(key, bytes, expectedVersion): boolean  // compare-and-swap</code></pr
               >#74 — Fix the <code>OpLog</code> <code>O(n²)</code> + graph
               re-derivation</strong
             >
-            so the baseline reflects fixed algorithms, not accidental
-            blowup.</span
+            so the baseline reflects fixed algorithms, not accidental blowup.
+            FileBackend sharding shipped with #76; the algorithm and benchmark
+            exit criteria remain open.</span
           >
         </li>
         <li>
@@ -1461,36 +1481,60 @@ putIfMatch(key, bytes, expectedVersion): boolean  // compare-and-swap</code></pr
       </ul>
 
       <h3>
-        P12 — Single-node security hardening ·
+        P12 — Single-node security hardening
+        <span class="pill">in progress</span> ·
         <a href="https://github.com/thaddeus-run/thaddeus/milestone/2"
           >milestone</a
         >
       </h3>
       <ul class="checklist">
         <li>
-          <input type="checkbox" disabled /><span
+          <input type="checkbox" checked disabled /><span
             ><strong>#75 — Cap/stream request body before buffering</strong>
-            (unauthenticated OOM).
-            <span class="tag t-high">ship first</span></span
+            (unauthenticated OOM). <span class="tag t-ok">done</span> Merged in
+            <a href="https://github.com/thaddeus-run/thaddeus/pull/202"
+              >PR #202</a
+            >.</span
           >
         </li>
         <li>
-          <input type="checkbox" disabled /><span
+          <input type="checkbox" checked disabled /><span
             ><strong>#76 — Per-identity repo/object quotas + rate limits</strong
-            >; shard the FileBackend directory.</span
+            >; shard the FileBackend directory.
+            <span class="tag t-ok">done</span> Implementation
+            <a href="https://github.com/thaddeus-run/thaddeus/pull/211"
+              >PR #211</a
+            >
+            and compiled CLI/server verification
+            <a href="https://github.com/thaddeus-run/thaddeus/pull/212"
+              >PR #212</a
+            >
+            are merged;
+            <a
+              href="https://github.com/thaddeus-run/thaddeus/blob/bba202fee95cca95f2928a9ae69f900ba900ca92/docs/tha-147-verification.md"
+              >426-test evidence</a
+            >.</span
           >
         </li>
         <li>
-          <input type="checkbox" disabled /><span
+          <input type="checkbox" checked disabled /><span
             ><strong>#61 — Persist replay nonces</strong> via a backend-neutral
             atomic <code>consumeNonce()</code> (FileBackend implements the
-            single-node case; distributed CAS arrives in P14).</span
+            single-node case; distributed CAS arrives in P14).
+            <span class="tag t-ok">done</span> Merged in
+            <a href="https://github.com/thaddeus-run/thaddeus/pull/204"
+              >PR #204</a
+            >.</span
           >
         </li>
         <li>
-          <input type="checkbox" disabled /><span
+          <input type="checkbox" checked disabled /><span
             ><strong>#62 — Size/count limits + defensive pagination</strong> on
-            every list/pull route.</span
+            every list/pull route. <span class="tag t-ok">done</span> Merged in
+            <a href="https://github.com/thaddeus-run/thaddeus/pull/207"
+              >PR #207</a
+            >; pagination and second-upload regressions also pass in PR
+            #212.</span
           >
         </li>
         <li>
@@ -1498,8 +1542,13 @@ putIfMatch(key, bytes, expectedVersion): boolean  // compare-and-swap</code></pr
             ><strong
               >#63 — Per-signer rate limits + provenance/veto spam
               control</strong
-            >; fail-closed config validation; security fuzz/property
-            tests.</span
+            >; fail-closed config validation; security fuzz/property tests.
+            <span class="tag t-high">status needs reconciliation</span>
+            <a href="https://github.com/thaddeus-run/thaddeus/issues/63">#63</a>
+            is closed on GitHub, but no implementing merged PR was found. PR
+            #211 and its verification explicitly exclude THA-10 general
+            mutation/provenance/veto spam limiting. This item remains
+            unchecked.</span
           >
         </li>
         <li>
@@ -1509,10 +1558,13 @@ putIfMatch(key, bytes, expectedVersion): boolean  // compare-and-swap</code></pr
           >
         </li>
         <li>
-          <input type="checkbox" disabled /><span
+          <input type="checkbox" checked disabled /><span
             ><strong>#79 — Reputation host allowlist + anti-farming</strong>;
-            move the host key off the volume; reconcile the "no keys"
-            claim.</span
+            move the host key off the volume; reconcile the "no keys" claim.
+            <span class="tag t-ok">done</span> Merged in
+            <a href="https://github.com/thaddeus-run/thaddeus/pull/205"
+              >PR #205</a
+            >.</span
           >
         </li>
       </ul>
