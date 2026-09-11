@@ -106,11 +106,12 @@ final verification; existing `require-await` warnings are not test failures.
 
 ## Post-merge verification
 
-[THA-147 verification](tha-147-verification.md) records a fresh run after PR
-#211 merged, adds compiled object-concurrency and flat-data adoption scenarios,
-and corrects the scope of the original filesystem-failure evidence. The current
-compiled fixture fails the journal write before commit; injected-backend route
-tests provide the separate post-publication rollback and replay evidence.
+[THA-147 verification](tha-147-verification.md) records a fresh run after
+[PR #211](https://github.com/thaddeus-run/thaddeus/pull/211) merged, adds
+compiled object-concurrency and flat-data adoption scenarios, and corrects the
+scope of the original filesystem-failure evidence. The current compiled fixture
+fails the journal write before commit; injected-backend route tests provide the
+separate post-publication rollback and replay evidence.
 
 ## Scope and completion tracking
 
