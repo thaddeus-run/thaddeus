@@ -4,7 +4,13 @@ import type { Op } from '@thaddeus.run/log';
 import type { Release } from '@thaddeus.run/platform';
 import type { Provenance } from '@thaddeus.run/provenance';
 import type { ContributionClaim } from '@thaddeus.run/reputation';
-import type { Veto } from '@thaddeus.run/review';
+import type {
+  ReviewerCapability,
+  ReviewEvent,
+  ReviewRevocation,
+  Veto,
+  VetoWithdrawal,
+} from '@thaddeus.run/review';
 import {
   type Capability,
   decodeRecord,
@@ -24,6 +30,7 @@ export interface Bundle {
   caps: string[];
   prov?: string[];
   veto?: string[];
+  review?: string[];
   symop?: string[];
   // Owner-authorized recall may carry scheduled public capabilities so key
   // rotation does not cancel a reveal. Normal pull never includes this field.
@@ -43,7 +50,8 @@ export function encodeBundle(
   prov: readonly Provenance[] = [],
   veto: readonly Veto[] = [],
   symop: readonly SymbolOp[] = [],
-  pending: readonly Capability[] = []
+  pending: readonly Capability[] = [],
+  review: readonly ReviewEvent[] = []
 ): Bundle {
   return {
     ops: ops.map(toWire),
@@ -51,6 +59,7 @@ export function encodeBundle(
     caps: caps.map(toWire),
     prov: prov.map(toWire),
     veto: veto.map(toWire),
+    ...(review.length > 0 ? { review: review.map(toWire) } : {}),
     symop: symop.map(toWire),
     ...(pending.length > 0 ? { pending: pending.map(toWire) } : {}),
   };
@@ -62,6 +71,7 @@ export function decodeBundle(b: Bundle): {
   caps: Capability[];
   prov: Provenance[];
   veto: Veto[];
+  review?: ReviewEvent[];
   symop: SymbolOp[];
   pending: Capability[];
 } {
@@ -71,6 +81,9 @@ export function decodeBundle(b: Bundle): {
     caps: (b.caps ?? []).map((s) => fromWire(s) as Capability),
     prov: (b.prov ?? []).map((s) => fromWire(s) as Provenance),
     veto: (b.veto ?? []).map((s) => fromWire(s) as Veto),
+    ...(b.review === undefined
+      ? {}
+      : { review: b.review.map((s) => fromWire(s) as ReviewEvent) }),
     symop: (b.symop ?? []).map((s) => fromWire(s) as SymbolOp),
     pending: (b.pending ?? []).map((s) => fromWire(s) as Capability),
   };
@@ -116,4 +129,14 @@ export function encodeRelease(release: Release): string {
 
 export function decodeRelease(s: string): Release {
   return decodeRecord(new Uint8Array(Buffer.from(s, 'base64'))) as Release;
+}
+
+/** Binary-safe review transport; authority is validated by the review domain. */
+export function encodeReviewRecord(
+  record: ReviewEvent | ReviewerCapability | ReviewRevocation | VetoWithdrawal
+): string {
+  return toWire(record);
+}
+export function decodeReviewRecord<T = ReviewEvent>(wire: string): T {
+  return fromWire(wire) as T;
 }

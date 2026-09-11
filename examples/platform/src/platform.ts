@@ -254,7 +254,7 @@ console.log(
 const core = platform.createRepo('acme/core');
 const vetoes = new VetoLog();
 const reviewer = Identity.create();
-const veto = blockOnVeto(vetoes);
+const veto = blockOnVeto(vetoes, [reviewer.did]);
 
 // A clean op lands under the veto policy.
 await branch(core, 'alice/clean', 'src/ok.rs', 'fn ok() {}', alice);

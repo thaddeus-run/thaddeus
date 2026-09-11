@@ -26,7 +26,9 @@ History & meaning
   log    [--since D] [--until D]  main's history with the why per change
   query  <kind> ...               query why, history, callers, and references
   why    <op>                     alias for 'query why <op>'
-  veto   <op> [-m "<reason>"]     lodge a standing veto that blocks a land
+  reviewer grant|list|revoke      manage scoped review authority
+  veto   <op> [-m "<reason>"] [--grant id]  veto an operation
+  veto withdraw <veto-id>         withdraw a veto
   vetoes <op>                     list the standing vetoes on one op
   rename <old> <new> [-m "<why>"] rename a symbol as one signed SymbolOp
   history <symbol>                a symbol's signed rename chain
@@ -229,14 +231,23 @@ thaddeus query references <name> [--json]
   its own trusted clock, so calling this early leaves the content private.
   Normal servers also scan for due reveals automatically. Owner-only.`,
 
-  veto: `thaddeus veto <op> [-m "<reason>"]
+  reviewer: `thaddeus reviewer grant <did> --paths a,b [--max-vetoes-per-hour N] [--max-active-vetoes N]
+  thaddeus reviewer list [--json]
+  thaddeus reviewer revoke <grant-id> [-m reason]
 
-  Lodge a standing veto on an op (resolved by id prefix). A verified veto blocks
+  The owner grants scoped review authority. Defaults are 60 vetoes/hour and 256
+  active vetoes. Scopes accept exact paths, prefix/**, or **. Review authority
+  does not grant write access, read access, or decryption keys.`,
+  veto: `thaddeus veto <op> [-m "<reason>"] [--grant id]
+  thaddeus veto withdraw <veto-id> [-m reason]
+
+  Lodge a standing veto on an op (resolved by id prefix). Active review authority blocks
   any subsequent land of that op. Requires push access on the repo.`,
 
   vetoes: `thaddeus vetoes <op> [--json]
 
-  List the standing vetoes on one op (resolved by id prefix).`,
+  List veto IDs, signature validity, and lifecycle for an op resolved by prefix.
+  Offline log and vetoes show last-synced review state; pull refreshes history.`,
 
   rename: `thaddeus rename <old> <new> [-m "<why>"] [--no-land]
 

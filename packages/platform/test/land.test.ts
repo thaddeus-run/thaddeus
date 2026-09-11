@@ -260,7 +260,7 @@ describe('Repo.land — human veto (Pillar 10)', () => {
     const dev = Identity.create();
     // The floor is allowAll — every automated gate is green — yet the veto is
     // the ceiling: all(allowAll, blockOnVeto) rejects a vetoed op.
-    const gate = all(allowAll, blockOnVeto(vetoes));
+    const gate = all(allowAll, blockOnVeto(vetoes, [reviewer.did]));
 
     // An un-vetoed op lands cleanly.
     await branch(repo, 'dev/ok', 'src/a.rs', 'fn a() {}', dev);

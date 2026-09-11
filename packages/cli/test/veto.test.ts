@@ -1,12 +1,16 @@
 import { ready } from '@thaddeus.run/identity';
-import { MemoryBackend } from '@thaddeus.run/persist';
+import { FileBackend, MemoryBackend } from '@thaddeus.run/persist';
+import { signVeto, VetoLog } from '@thaddeus.run/review';
 import { createServer } from '@thaddeus.run/server';
+import { scoped } from '@thaddeus.run/store';
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
+import { loadIdentity } from '../src/identity';
 import { run } from '../src/run';
+import { loadConfig, storePath } from '../src/workcopy';
 
 beforeAll(async () => {
   await ready();
@@ -77,4 +81,94 @@ describe('thaddeus veto', () => {
     expect(out.join('\n')).toContain('ships a secret');
     expect(out.join('\n')).toContain('[verified]');
   });
+});
+
+test('outside reviewer grant, scoped veto, withdrawal, and revocation persist offline', async () => {
+  const srv = createServer({ backend: new MemoryBackend() });
+  const fetchImpl = srv.fetch.bind(srv);
+  const owner = await clientHome(fetchImpl, 'owner');
+  const reviewer = await clientHome(fetchImpl, 'reviewer');
+  const wc = mkdtempSync(join(tmp, 'review-wc-'));
+  const output: string[] = [];
+  const env = (home = owner) => ({
+    cwd: wc,
+    home,
+    fetchImpl,
+    out: (line: string) => output.push(line),
+  });
+  expect(await run(['create', 'http://t', 'review-project'], env())).toBe(0);
+  expect(await run(['clone', 'http://t', 'review-project', wc], env())).toBe(0);
+  writeFileSync(join(wc, 'auth.rs'), 'fn refresh() {}');
+  expect(await run(['push', '--no-land'], env())).toBe(0);
+  output.length = 0;
+  expect(await run(['log', '--json'], env())).toBe(0);
+  const op = JSON.parse(output[0])[0].id as string;
+  expect(await run(['veto', op], env(reviewer))).toBe(1);
+  expect(
+    await run(
+      [
+        'reviewer',
+        'grant',
+        loadIdentity(reviewer).did,
+        '--paths',
+        'auth.rs',
+        '--max-active-vetoes',
+        '2',
+      ],
+      env()
+    )
+  ).toBe(0);
+  output.length = 0;
+  expect(await run(['reviewer', 'list', '--json'], env())).toBe(0);
+  const grant = JSON.parse(output[0])[0].id as string;
+  expect(await run(['veto', op, '--grant', 'wrong'], env(reviewer))).toBe(1);
+  expect(
+    await run(
+      ['veto', op, '--grant', grant, '-m', 'review required'],
+      env(reviewer)
+    )
+  ).toBe(0);
+  output.length = 0;
+  expect(await run(['vetoes', op, '--json'], env(reviewer))).toBe(0);
+  const veto = JSON.parse(output[0]).vetoes[0];
+  expect(veto.lifecycle).toBe('active');
+  expect(veto.status).toBe('verified');
+  expect(await run(['land'], env())).toBe(1);
+  expect(await run(['veto', 'withdraw', veto.id], env(reviewer))).toBe(0);
+  output.length = 0;
+  const offline = {
+    ...env(reviewer),
+    fetchImpl: () => Promise.reject(new Error('offline')),
+  };
+  expect(await run(['vetoes', op, '--json'], offline)).toBe(0);
+  expect(JSON.parse(output[0]).vetoes[0].lifecycle).toBe('withdrawn');
+  output.length = 0;
+  expect(await run(['log', '--json'], offline)).toBe(0);
+  expect(JSON.parse(output[0])[0].vetoed).toBe(false);
+  // A valid legacy outsider signature has no authority to block an operation.
+  const cfg = loadConfig(wc);
+  const legacy = new VetoLog(
+    scoped(new FileBackend(storePath(wc, cfg)), `repo/${cfg.repo}/`)
+  );
+  await legacy.ingest(
+    signVeto(
+      { op, reason: 'legacy outsider', at: new Date().toISOString() },
+      loadIdentity(reviewer)
+    )
+  );
+  output.length = 0;
+  expect(await run(['log', '--json'], offline)).toBe(0);
+  expect(JSON.parse(output[0])[0].vetoed).toBe(false);
+  output.length = 0;
+  expect(await run(['vetoes', op, '--json'], offline)).toBe(0);
+  expect(
+    JSON.parse(output[0]).vetoes.find(
+      (v: { reason: string }) => v.reason === 'legacy outsider'
+    )
+  ).toMatchObject({ status: 'verified', lifecycle: 'legacy' });
+  expect(await run(['reviewer', 'revoke', grant], env())).toBe(0);
+  expect(await run(['veto', op, '--grant', grant], env(reviewer))).toBe(1);
+  output.length = 0;
+  expect(await run(['reviewer', 'list', '--json'], env())).toBe(0);
+  expect(JSON.parse(output[0])).toEqual([]);
 });

@@ -42,9 +42,11 @@ export {
   decodeClaim,
   decodeDelegation,
   decodeRelease,
+  decodeReviewRecord,
   encodeBundle,
   encodeCapability,
   encodeClaim,
   encodeDelegation,
   encodeRelease,
+  encodeReviewRecord,
 } from './dto';
