@@ -10,7 +10,7 @@ import {
 } from 'node:fs';
 import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 
-import { loadIgnore } from './ignore';
+import { type Ignore, loadIgnore } from './ignore';
 
 export interface Config {
   server: string;
@@ -76,8 +76,10 @@ export function saveConfig(root: string, cfg: Config): void {
 // the repo's `.gitignore`/`.thaddeusignore` and always prunes `.git`,
 // `.thaddeus`, and `node_modules` — so `status`/`diff`/`push` never walk or
 // upload dependency/build trees (the source of the pre-ignore slowness + 413s).
-export function listWorkingFiles(root: string): string[] {
-  const ig = loadIgnore(root);
+export function listWorkingFiles(
+  root: string,
+  ig: Ignore = loadIgnore(root)
+): string[] {
   const out: string[] = [];
   const walk = (dir: string): void => {
     for (const entry of readdirSync(dir, { withFileTypes: true })) {

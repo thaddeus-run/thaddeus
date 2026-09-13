@@ -25,7 +25,12 @@ async function clientHome(
   label: string
 ): Promise<string> {
   const home = mkdtempSync(join(tmp, `${label}-`));
-  await run(['init'], { cwd: home, home, fetchImpl, out: () => {} });
+  await run(['identity', 'init'], {
+    cwd: home,
+    home,
+    fetchImpl,
+    out: () => {},
+  });
   return home;
 }
 

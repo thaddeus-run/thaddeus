@@ -51,7 +51,7 @@ thaddeus help                     # command overview; `thaddeus help <cmd>` for 
 Every write is signed by a self-owned `did:key` — no account, no server trust.
 
 ```sh
-thaddeus init                     # writes a seed to ~/.config/thaddeus/
+thaddeus identity init            # writes a seed to ~/.config/thaddeus/
 thaddeus whoami                   # prints your did:key
 ```
 
@@ -60,10 +60,10 @@ thaddeus whoami                   # prints your did:key
 A Thaddeus server normally holds no decryption keys: it verifies what it ingests
 and serves ciphertext. Timed reveals are the explicit exception—the chosen host
 is trusted to honor the embargo for scheduled files. Run one locally over a
-durable directory:
+durable directory outside your project:
 
 ```sh
-thaddeus serve --port 4000 --data ./thaddeus-data
+thaddeus serve --port 4000 --data /tmp/thaddeus-demo-server
 # add --host to make it attest reputation; --min-merges N to gate landings
 ```
 
@@ -71,7 +71,7 @@ Leave it running in another terminal (or use a remote you trust). Then save a
 default server so you don't repeat it on every command:
 
 ```sh
-thaddeus use http://localhost:4000    # your default for create/clone
+thaddeus use http://localhost:4000    # your default for init/create/clone
 thaddeus use                          # show the current default
 ```
 
@@ -82,27 +82,69 @@ explicitly if you want it:
 thaddeus use --hosted                 # use https://ams1.thaddeus.run
 ```
 
-## 4. Create, clone, edit, publish
+## 4. Adopt your project and publish
+
+Start in the directory containing your existing project. The identity created in
+step 2 signs the new repository. Nothing moves to another directory.
 
 ```sh
-thaddeus create acme/web             # you own it (uses your default server)
-thaddeus clone  acme/web              # → ./acme/web
-# point at a different server just this once with --server https://host
-cd acme/web
-echo 'fn refresh() {}' > src/auth.rs
-thaddeus status                                      # what changed
-thaddeus diff                                        # a line diff vs the base
-thaddeus push -m "add the token refresh path"        # commit + upload + land, with a signed why
+thaddeus init acme/web              # uses your saved default server
+# Or: thaddeus init acme/web --server http://localhost:4000
+thaddeus status                    # existing included files appear as added
+thaddeus diff
+thaddeus push -m "initial import"  # commit, upload and land the first change
 ```
 
-The `-m` message becomes a **signed provenance record** bound to the op — the
-"why" travels with the code to every clone.
+`init <name>` requires an existing identity and an explicitly selected server.
+It creates empty signed `main` and local `.thaddeus` metadata; it does not
+commit or upload your source files. Bare `thaddeus init` no longer creates an
+identity. Use `thaddeus identity init` for that, and
+`thaddeus identity init --force` only when you intend to replace your identity.
 
-Thaddeus keeps its own ignore file, `.thaddeusignore` — on first use it seeds
-one from your `.gitignore` (if present), then reads only `.thaddeusignore`. It
-always skips `.git`, `.thaddeus`, and `node_modules`, so `status`/`push` stay
-fast and never upload dependency or build trees. Edit `.thaddeusignore` to
-change what Thaddeus ignores.
+The `-m` message becomes a signed provenance record bound to the operation. A
+fresh clone carries both the code and its explanation:
+
+```sh
+thaddeus clone acme/web ../web-check
+```
+
+The destination is explicit here. Without a destination, `clone acme/web`
+creates `./web`. Existing `create` and `clone` commands remain available when
+you want to create the remote separately.
+
+Init prints its ignore source and included file count. It uses the root
+`.thaddeusignore` unchanged, or seeds one from the root `.gitignore` when
+present. Later changes to `.gitignore` do not update the seed. With neither
+file, init creates neither. Unreadable or non-regular ignore inputs stop
+initialization.
+
+The matcher reads root-level rules only. It supports glob patterns and negation,
+but does not implement all Git ignore syntax or read nested ignore files. `.git`
+and `.thaddeus` metadata are excluded, including Git worktree marker files;
+`node_modules` directories are always pruned. Other build trees need an ignore
+rule. `.env` is included unless your rules exclude it. Review `status` and edit
+`.thaddeusignore` before pushing.
+
+An empty directory initializes with clean status. Empty subdirectories, symlinks
+and special files stay on disk but are not tracked. Init preserves existing file
+bytes and modes; this does not add executable-mode or symlink tracking to
+clones.
+
+Repeating init with the same repository, server and identity succeeds without
+network access. It refuses another repository at that root, enclosing or nested
+working copies, and fresh remote name collisions. A `.thaddeus/bin` installation
+can coexist with repository metadata; unknown stores and symlinked metadata
+cannot be adopted.
+
+On failure, init removes only working-copy artifacts belonging to its attempt.
+It never changes your identity or deletes a remote repository. If remote
+creation succeeded or its response was lost, init retains a recovery record in
+`~/.config/thaddeus/init/` and prints the exact retry command. Retry in the same
+directory with the same identity and server. Recovery accepts only your empty,
+version-zero remote. If it has changed, clone into a separate directory and
+reconcile your source files. An active init lock blocks another invocation;
+stale locks are recovered only when the recorded process is confirmed absent.
+Unknown locks or changed artifacts require inspection, not `--force`.
 
 List what's on a server with `thaddeus repos` (`--mine` for repos your identity
 owns), and remove one you own with `thaddeus delete <repo> --yes`

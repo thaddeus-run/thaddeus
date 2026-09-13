@@ -23,7 +23,12 @@ afterAll(() => rmSync(tmp, { recursive: true, force: true }));
 async function seededServer(home: string) {
   const srv = createServer({ backend: new MemoryBackend() });
   const fetchImpl = srv.fetch.bind(srv);
-  await run(['init'], { cwd: home, home, fetchImpl, out: () => {} });
+  await run(['identity', 'init'], {
+    cwd: home,
+    home,
+    fetchImpl,
+    out: () => {},
+  });
   // Use the SDK directly to seed (the CLI publish path is Task 6).
   const a = loadIdentity(home);
   const c = new Client('http://t', a, fetchImpl);
@@ -80,7 +85,7 @@ describe('thaddeus clone + status', () => {
     const ownerHome = mkdtempSync(join(tmp, 'owner-home-'));
     const fetchImpl = await seededServer(ownerHome);
     const otherHome = mkdtempSync(join(tmp, 'other-home-'));
-    await run(['init'], {
+    await run(['identity', 'init'], {
       cwd: otherHome,
       home: otherHome,
       fetchImpl,

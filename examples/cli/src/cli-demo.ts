@@ -23,8 +23,8 @@ const env = (cwd: string) => ({ cwd, home, out });
 
 try {
   rule();
-  console.log('$ thaddeus init');
-  let code = await run(['init'], env(root));
+  console.log('$ thaddeus identity init');
+  let code = await run(['identity', 'init'], env(root));
   if (code !== 0) throw new Error(`init failed: ${code}`);
 
   console.log(`$ thaddeus create ${base} proj`);

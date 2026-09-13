@@ -568,7 +568,7 @@ test('compiled CLI clone, push, second upload, pull and repository pagination st
     return stdout;
   };
   try {
-    await cli(['init']);
+    await cli(['identity', 'init']);
     for (const name of ['workflow', 'second', 'third'])
       await cli(['create', name, '--server', server.url]);
     const repos = await cli(['repos', '--server', server.url, '--json']);

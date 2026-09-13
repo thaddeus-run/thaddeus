@@ -24,7 +24,7 @@ describe('CLI signed heads', () => {
   test('pull --bootstrap-head signs the saved base, not the legacy server pointer', async () => {
     const home = mkdtempSync(join(tmp, 'owner-'));
     const work = mkdtempSync(join(tmp, 'work-'));
-    await run(['init'], { cwd: work, home, out: () => {} });
+    await run(['identity', 'init'], { cwd: work, home, out: () => {} });
     const owner = loadIdentity(home);
     const op = signOp(
       {

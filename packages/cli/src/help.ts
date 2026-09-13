@@ -4,7 +4,8 @@ export const USAGE = `thaddeus — the Thaddeus CLI
   thaddeus <command> [args]     run 'thaddeus help <command>' for details
 
 Working tree
-  init                          create a self-owned identity
+  identity init [--force]      create or explicitly rotate your identity
+  init <name> [--server URL]   adopt the current directory as a repository
   whoami                        print the current identity's DID
   use    [<url>] [--hosted]     set (or show) your default server
   create <repo> [--server URL]  create a repo on a server
@@ -55,15 +56,36 @@ Global flags
 Hosted server (optional)
   There is an official server at https://ams1.thaddeus.run. It is never set for
   you — opt in with 'thaddeus use --hosted', or point at your own with
-  'thaddeus use <url>' (or per command, 'create/clone --server <url>').`;
+  'thaddeus use <url>' (or per command, 'init/create/clone --server <url>').`;
 
 // Per-command detailed help, shown by `thaddeus <cmd> --help` or
 // `thaddeus help <cmd>`. Each entry is a self-contained usage block.
 export const HELP: Record<string, string> = {
-  init: `thaddeus init [--force]
+  identity: `thaddeus identity init [--force]
 
-  Create a self-owned identity (a did:key) under the config home. Idempotent:
-  re-running prints the existing DID. --force rotates to a fresh identity.`,
+  Create a self-owned identity (a did:key) under the config home. No server or
+  repository is needed. Re-running prints the existing DID. --force explicitly
+  replaces it with a fresh identity. Use 'thaddeus whoami' to read your DID.
+  Identity setup was previously 'thaddeus init' without a repository name.`,
+
+  init: `thaddeus init <name> [--server <url>]
+
+  Adopt the current directory without moving or overwriting its files. First
+  create your identity with 'thaddeus identity init'. Choose --server or a saved
+  default from 'thaddeus use'. No hosted server is chosen automatically.
+  Creates an empty signed remote and local working-copy metadata. Existing files
+  remain uncommitted; review 'thaddeus status', then 'thaddeus push'.
+
+  Uses the root .thaddeusignore, or seeds it once from the root .gitignore.
+  Without either, only built-in exclusions apply. .git/.thaddeus metadata and
+  node_modules directories are excluded. No implicit .env exclusion is added.
+  Empty directories, symlinks and special files stay on disk but are not tracked.
+
+  Repeating init for the same repository is harmless. Nested working copies,
+  conflicting local state and existing remote names are refused. A failed remote
+  create may leave an empty remote; rerun the exact command to recover it using
+  the saved attempt. Changed remote state requires cloning elsewhere.
+  Bare init and init --force no longer create or rotate an identity.`,
 
   whoami: `thaddeus whoami [--json]
 
@@ -71,7 +93,7 @@ export const HELP: Record<string, string> = {
 
   use: `thaddeus use [<url>] [--hosted] [--clear] [--json]
 
-  Set your default server — the one create/clone use when you don't pass one.
+  Set your default server — the one init/create/clone use when you don't pass one.
   With no argument, print the current default. --hosted sets the official server
   (https://ams1.thaddeus.run); --clear removes the default. The server is always
   your explicit choice — nothing is pre-filled.`,

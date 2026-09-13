@@ -78,8 +78,9 @@ import {
 } from './config';
 import { type FileDiff, fileDiff, isBinary } from './diff';
 import { HELP, USAGE } from './help';
-import { initIdentity, loadIdentity } from './identity';
+import { IdentityMissingError, initIdentity, loadIdentity } from './identity';
 import { runQuery } from './query';
+import { InitConflictError, initRepository } from './repo-init';
 import { startServer } from './serve';
 import { VERSION } from './version';
 import {
@@ -774,11 +775,66 @@ export async function run(
   try {
     switch (command) {
       case 'init': {
-        const { values } = parseArgs({
+        const { values, positionals } = parseArgs({
           args: [...rest],
+          options: { server: { type: 'string' }, force: { type: 'boolean' } },
+          allowPositionals: true,
+        });
+        if (
+          positionals.length !== 1 ||
+          values.force !== undefined ||
+          positionals[0].trim() === '' ||
+          /\p{Cc}/u.test(positionals[0])
+        ) {
+          out('usage: thaddeus init <name> [--server <url>]');
+          out('For identity setup, run thaddeus identity init.');
+          return 2;
+        }
+        const server = values.server ?? loadCliConfig(env.home).defaultServer;
+        if (server === undefined) {
+          out(noServerHint('init'));
+          return 2;
+        }
+        if (!isServerUrl(server)) {
+          out(`invalid --server url: ${server}`);
+          return 2;
+        }
+        const result = await initRepository({
+          cwd: env.cwd,
+          home: env.home,
+          name: positionals[0],
+          server,
+          fetchImpl: env.fetchImpl,
+        });
+        out(
+          `${result.alreadyInitialized ? 'already initialized' : 'initialized'} ${result.repo} in ${result.root}`
+        );
+        out(`owner ${result.owner}`);
+        out(
+          `ignore rules: ${result.ignoreSource}; ${result.includedFiles} included file(s); ${result.skippedEntries} skipped symlink/special entries`
+        );
+        if (!result.alreadyInitialized) {
+          out(
+            'Existing files remain uncommitted. No file contents were uploaded.'
+          );
+          out(
+            'Run thaddeus status to review them, then thaddeus push -m "initial import".'
+          );
+        }
+        for (const warning of result.warnings) err(warning);
+        return 0;
+      }
+      case 'identity': {
+        const [action, ...args] = rest;
+        const { values, positionals } = parseArgs({
+          args,
           options: { force: { type: 'boolean' } },
           allowPositionals: true,
         });
+        if (action !== 'init' || positionals.length !== 0) {
+          out('usage: thaddeus identity init [--force]');
+          return 2;
+        }
         const { did, created } = initIdentity(env.home, values.force === true);
         out(created ? `created identity ${did}` : `identity ${did}`);
         return 0;
@@ -991,7 +1047,9 @@ export async function run(
         });
         const root = findRoot(env.cwd);
         if (root === undefined) {
-          out("not a thaddeus working copy — run 'thaddeus clone' first");
+          out(
+            "not a thaddeus working copy — run 'thaddeus init <name>' or 'thaddeus clone' first"
+          );
           return 2;
         }
         const cfg = loadConfig(root);
@@ -1094,7 +1152,7 @@ export async function run(
         const root = findRoot(env.cwd);
         if (root === undefined) {
           diagnostic(
-            "not a thaddeus working copy — run 'thaddeus clone' first"
+            "not a thaddeus working copy — run 'thaddeus init <name>' or 'thaddeus clone' first"
           );
           return 2;
         }
@@ -1145,7 +1203,9 @@ export async function run(
       case 'branch': {
         const root = findRoot(env.cwd);
         if (root === undefined) {
-          out("not a thaddeus working copy — run 'thaddeus clone' first");
+          out(
+            "not a thaddeus working copy — run 'thaddeus init <name>' or 'thaddeus clone' first"
+          );
           return 2;
         }
         const cfg = loadConfig(root);
@@ -1195,7 +1255,9 @@ export async function run(
         }
         const root = findRoot(env.cwd);
         if (root === undefined) {
-          out("not a thaddeus working copy — run 'thaddeus clone' first");
+          out(
+            "not a thaddeus working copy — run 'thaddeus init <name>' or 'thaddeus clone' first"
+          );
           return 2;
         }
         const cfg = loadConfig(root);
@@ -1290,7 +1352,9 @@ export async function run(
         });
         const root = findRoot(env.cwd);
         if (root === undefined) {
-          out("not a thaddeus working copy — run 'thaddeus clone' first");
+          out(
+            "not a thaddeus working copy — run 'thaddeus init <name>' or 'thaddeus clone' first"
+          );
           return 2;
         }
         const cfg = loadConfig(root);
@@ -1397,7 +1461,9 @@ export async function run(
       case 'status': {
         const root = findRoot(env.cwd);
         if (root === undefined) {
-          out("not a thaddeus working copy — run 'thaddeus clone' first");
+          out(
+            "not a thaddeus working copy — run 'thaddeus init <name>' or 'thaddeus clone' first"
+          );
           return 2;
         }
         const cfg = loadConfig(root);
@@ -1473,7 +1539,9 @@ export async function run(
         }
         const root = findRoot(env.cwd);
         if (root === undefined) {
-          out("not a thaddeus working copy — run 'thaddeus clone' first");
+          out(
+            "not a thaddeus working copy — run 'thaddeus init <name>' or 'thaddeus clone' first"
+          );
           return 2;
         }
         const cfg = loadConfig(root);
@@ -1649,7 +1717,9 @@ export async function run(
         });
         const root = findRoot(env.cwd);
         if (root === undefined) {
-          out("not a thaddeus working copy — run 'thaddeus clone' first");
+          out(
+            "not a thaddeus working copy — run 'thaddeus init <name>' or 'thaddeus clone' first"
+          );
           return 2;
         }
         const cfg = loadConfig(root);
@@ -1757,7 +1827,9 @@ export async function run(
         });
         const root = findRoot(env.cwd);
         if (root === undefined) {
-          out("not a thaddeus working copy — run 'thaddeus clone' first");
+          out(
+            "not a thaddeus working copy — run 'thaddeus init <name>' or 'thaddeus clone' first"
+          );
           return 2;
         }
         const cfg = loadConfig(root);
@@ -1922,7 +1994,9 @@ export async function run(
         }
         const root = findRoot(env.cwd);
         if (root === undefined) {
-          out("not a thaddeus working copy — run 'thaddeus clone' first");
+          out(
+            "not a thaddeus working copy — run 'thaddeus init <name>' or 'thaddeus clone' first"
+          );
           return 2;
         }
         const cfg = loadConfig(root);
@@ -2039,7 +2113,9 @@ export async function run(
         }
         const root = findRoot(env.cwd);
         if (root === undefined) {
-          out("not a thaddeus working copy — run 'thaddeus clone' first");
+          out(
+            "not a thaddeus working copy — run 'thaddeus init <name>' or 'thaddeus clone' first"
+          );
           return 2;
         }
         const cfg = loadConfig(root);
@@ -2111,7 +2187,9 @@ export async function run(
         });
         const root = findRoot(env.cwd);
         if (root === undefined) {
-          out("not a thaddeus working copy — run 'thaddeus clone' first");
+          out(
+            "not a thaddeus working copy — run 'thaddeus init <name>' or 'thaddeus clone' first"
+          );
           return 2;
         }
         const cfg = loadConfig(root);
@@ -2216,7 +2294,9 @@ export async function run(
         }
         const root = findRoot(env.cwd);
         if (root === undefined) {
-          out("not a thaddeus working copy — run 'thaddeus clone' first");
+          out(
+            "not a thaddeus working copy — run 'thaddeus init <name>' or 'thaddeus clone' first"
+          );
           return 2;
         }
         const cfg = loadConfig(root);
@@ -2257,7 +2337,9 @@ export async function run(
         }
         const root = findRoot(env.cwd);
         if (root === undefined) {
-          out("not a thaddeus working copy — run 'thaddeus clone' first");
+          out(
+            "not a thaddeus working copy — run 'thaddeus init <name>' or 'thaddeus clone' first"
+          );
           return 2;
         }
         const cfg = loadConfig(root);
@@ -2304,7 +2386,9 @@ export async function run(
         }
         const root = findRoot(env.cwd);
         if (root === undefined) {
-          out("not a thaddeus working copy — run 'thaddeus clone' first");
+          out(
+            "not a thaddeus working copy — run 'thaddeus init <name>' or 'thaddeus clone' first"
+          );
           return 2;
         }
         const cfg = loadConfig(root);
@@ -2435,7 +2519,9 @@ export async function run(
         }
         const root = findRoot(env.cwd);
         if (root === undefined) {
-          out("not a thaddeus working copy — run 'thaddeus clone' first");
+          out(
+            "not a thaddeus working copy — run 'thaddeus init <name>' or 'thaddeus clone' first"
+          );
           return 2;
         }
         const cfg = loadConfig(root);
@@ -2519,7 +2605,9 @@ export async function run(
         }
         const root = findRoot(env.cwd);
         if (root === undefined) {
-          out("not a thaddeus working copy — run 'thaddeus clone' first");
+          out(
+            "not a thaddeus working copy — run 'thaddeus init <name>' or 'thaddeus clone' first"
+          );
           return 2;
         }
         const cfg = loadConfig(root);
@@ -2624,7 +2712,9 @@ export async function run(
         }
         const root = findRoot(env.cwd);
         if (root === undefined) {
-          out("not a thaddeus working copy — run 'thaddeus clone' first");
+          out(
+            "not a thaddeus working copy — run 'thaddeus init <name>' or 'thaddeus clone' first"
+          );
           return 2;
         }
         const cfg = loadConfig(root);
@@ -2684,7 +2774,9 @@ export async function run(
           values['release-allow'] !== undefined;
         const root = findRoot(env.cwd);
         if (root === undefined) {
-          out("not a thaddeus working copy — run 'thaddeus clone' first");
+          out(
+            "not a thaddeus working copy — run 'thaddeus init <name>' or 'thaddeus clone' first"
+          );
           return 2;
         }
         const cfg = loadConfig(root);
@@ -2993,7 +3085,9 @@ export async function run(
         }
         const root = findRoot(env.cwd);
         if (root === undefined) {
-          out("not a thaddeus working copy — run 'thaddeus clone' first");
+          out(
+            "not a thaddeus working copy — run 'thaddeus init <name>' or 'thaddeus clone' first"
+          );
           return 2;
         }
         const cfg = loadConfig(root);
@@ -3086,7 +3180,9 @@ export async function run(
         }
         const root = findRoot(env.cwd);
         if (root === undefined) {
-          out("not a thaddeus working copy — run 'thaddeus clone' first");
+          out(
+            "not a thaddeus working copy — run 'thaddeus init <name>' or 'thaddeus clone' first"
+          );
           return 2;
         }
         const cfg = loadConfig(root);
@@ -3149,7 +3245,9 @@ export async function run(
       case 'grants': {
         const root = findRoot(env.cwd);
         if (root === undefined) {
-          out("not a thaddeus working copy — run 'thaddeus clone' first");
+          out(
+            "not a thaddeus working copy — run 'thaddeus init <name>' or 'thaddeus clone' first"
+          );
           return 2;
         }
         const cfg = loadConfig(root);
@@ -3592,6 +3690,17 @@ export async function run(
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
     out(`error: ${msg}`);
-    return 1;
+    if (
+      (command === 'init' || command === 'identity') &&
+      e instanceof Error &&
+      'code' in e &&
+      typeof e.code === 'string' &&
+      e.code.startsWith('ERR_PARSE_ARGS')
+    )
+      return 2;
+    return command === 'init' &&
+      (e instanceof IdentityMissingError || e instanceof InitConflictError)
+      ? 2
+      : 1;
   }
 }

@@ -45,8 +45,8 @@ so the selected host is trusted as embargo custodian until release.
 | `THADDEUS_REPLAY_NONCE_CAPACITY`        | `100000`   | maximum live durable replay nonces (maximum `1000000`) |
 | `THADDEUS_REQUEST_SKEW_MS`              | `300000`   | accepted signed timestamp skew (maximum `300000`)      |
 
-The entrypoint does not run `thaddeus init`, interpret `THADDEUS_HOST` or
-`THADDEUS_HOME`, or create an identity beneath `/data`. The active KMS DID is
+The entrypoint does not run `thaddeus identity init`, interpret `THADDEUS_HOST`
+or `THADDEUS_HOME`, or create an identity beneath `/data`. The active KMS DID is
 trusted automatically. Previous/foreign DIDs count only while explicitly listed
 in `THADDEUS_TRUST_HOSTS`; there is no recursive web of trust.
 
@@ -65,7 +65,7 @@ For development-only local attestation, use the CLI outside the production
 container. This loads the private seed from the normal CLI home and warns:
 
 ```sh
-thaddeus init
+thaddeus identity init
 thaddeus serve --host --data ./thaddeus-data --attestation-rate-limit 20
 ```
 

@@ -2,7 +2,7 @@
 //
 // Boots a live server, inits two identities (owner + teammate), and drives the
 // real `thaddeus grant` / `revoke` / `grants` commands to show:
-//   1. A delegated in-scope push lands (src/** is allowed).
+//   1. The delegate uploads; the owner lands the in-scope change (src/**).
 //   2. An out-of-scope push is rejected with a scope reason.
 //   3. After revocation, any push by the delegate is blocked.
 
@@ -40,8 +40,8 @@ try {
   rule();
   console.log('# Act 1: owner sets up repo');
 
-  console.log('$ thaddeus init  (owner)');
-  let code = await run(['init'], env(root, ownerHome));
+  console.log('$ thaddeus identity init  (owner)');
+  let code = await run(['identity', 'init'], env(root, ownerHome));
   if (code !== 0) throw new Error(`owner init failed: ${code}`);
 
   console.log(`$ thaddeus create ${base} proj`);
@@ -57,9 +57,9 @@ try {
   rule();
   console.log('# Act 2: teammate inits their identity');
 
-  console.log('$ thaddeus init  (teammate)');
+  console.log('$ thaddeus identity init  (teammate)');
   lines.length = 0;
-  code = await run(['init'], env(root, mateHome));
+  code = await run(['identity', 'init'], env(root, mateHome));
   if (code !== 0) throw new Error(`teammate init failed: ${code}`);
 
   // Read DID straight from the identity file (same approach as grants.test.ts).
@@ -92,7 +92,7 @@ try {
   if (code !== 0) throw new Error(`grants failed: ${code}`);
   console.log('  grants output:', lines.join(' | '));
 
-  // ── Teammate clones, pushes in-scope change → should land ────────────────
+  // ── Teammate uploads; owner signs the shared head ────────────────
   rule();
   console.log('# Act 4: teammate clones + pushes an in-scope src/ change');
 
@@ -111,13 +111,20 @@ try {
   lines.length = 0;
   code = await run(['push'], env(mateWc, mateHome));
   const inScopeOutput = lines.join(' | ');
-  const inScopeLanded = inScopeOutput.toLowerCase().includes('published');
-  console.log(`  output: ${inScopeOutput}`);
-  console.log(
-    `  ✓ in-scope push landed: ${inScopeLanded ? 'YES' : 'NO (UNEXPECTED!)'}`
-  );
-  if (!inScopeLanded)
-    throw new Error('in-scope push should have landed but did not');
+  if (code !== 1 || !inScopeOutput.includes('owner signature required'))
+    throw new Error(`expected an owner handoff: ${inScopeOutput}`);
+
+  // Both participants run on this demo machine. The owner reviews and lands
+  // the uploaded heads from the teammate copy using the owner's identity.
+  console.log('$ thaddeus land  (owner, in the teammate working copy)');
+  code = await run(['land'], env(mateWc, ownerHome));
+  if (code !== 0) throw new Error('owner could not land the in-scope change');
+  code = await run(['pull'], env(ownerWc, ownerHome));
+  if (
+    code !== 0 ||
+    readFileSync(join(ownerWc, 'src', 'main.rs'), 'utf8') !== 'fn main() {}\n'
+  )
+    throw new Error('owner pull did not reproduce the landed source');
 
   // ── Teammate pushes out-of-scope change → should be rejected ─────────────
   rule();
@@ -129,8 +136,14 @@ try {
   console.log('$ thaddeus push  (out-of-scope: readme.md)');
   lines.length = 0;
   code = await run(['push'], env(mateWc, mateHome));
+  if (code !== 1 || !lines.join(' | ').includes('owner signature required'))
+    throw new Error('expected an owner handoff for the out-of-scope upload');
+  console.log('$ thaddeus land  (owner attempts the out-of-scope change)');
+  lines.length = 0;
+  code = await run(['land'], env(mateWc, ownerHome));
   const outScopeOutput = lines.join(' | ');
   const outScopeBlocked =
+    code !== 0 &&
     outScopeOutput.toLowerCase().includes('not landed') &&
     outScopeOutput.toLowerCase().includes('scope');
   console.log(`  output: ${outScopeOutput}`);

@@ -1,0 +1,2010 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="color-scheme" content="dark" />
+    <title>THA-27: Initialize a repository in place</title>
+    <style>
+      :root {
+        /* Near-black editorial palette. Dark-only by design — do not add a light theme. */
+        --bg: #000000;
+        --surface: #0c0c0c; /* cards */
+        --rule: #232323; /* hairlines, card borders */
+        --fg: #ededed; /* body text */
+        --fg-strong: #ffffff; /* headings */
+        --muted: #8b8b8b; /* secondary text, table heads */
+        --code-bg: #242424; /* inline code chip */
+        --block-bg: #0e0e0e; /* pre blocks */
+        --accent: #6fdc8c; /* links, skill names, checked state */
+        --s: #5ee08a;
+        --a: #a8e05f;
+        --b: #e0c95e;
+        --c: #e0a35e;
+        --d: #e06f6f;
+        --x: #7a7a7a;
+      }
+      * {
+        box-sizing: border-box;
+      }
+      html {
+        -webkit-text-size-adjust: 100%;
+      }
+      body {
+        margin: 0;
+        background: var(--bg);
+        color: var(--fg);
+        font:
+          17px/1.7 system-ui,
+          -apple-system,
+          'Helvetica Neue',
+          'Segoe UI',
+          Arial,
+          sans-serif;
+        font-synthesis-weight: none;
+        -webkit-font-smoothing: antialiased;
+      }
+      .wrap {
+        max-width: 900px;
+        margin: 0 auto;
+        padding: 4rem 1.5rem 8rem;
+      }
+
+      /* ---------- Type ---------- */
+      h1,
+      h2,
+      h3 {
+        color: var(--fg-strong);
+        font-weight: 700;
+        letter-spacing: -0.021em;
+      }
+      h1 {
+        font-size: 2.25rem;
+        line-height: 1.15;
+        margin: 0 0 1rem;
+      }
+      h2 {
+        font-size: 1.4rem;
+        line-height: 1.25;
+        margin: 0 0 1.25rem;
+      }
+      h3 {
+        font-size: 1.05rem;
+        line-height: 1.4;
+        margin: 2rem 0 0.5rem;
+      }
+      p {
+        margin: 0 0 1.1rem;
+      }
+      a {
+        color: var(--accent);
+        text-decoration: none;
+      }
+      a:hover {
+        text-decoration: underline;
+      }
+      .lede {
+        color: var(--muted);
+        font-size: 1.05rem;
+        margin: 0;
+      }
+      .muted {
+        color: var(--muted);
+      }
+
+      /* Sections are separated by a hairline and a lot of air — no boxes around prose. */
+      section.block {
+        border-top: 1px solid var(--rule);
+        padding-top: 2.5rem;
+        margin-top: 2.5rem;
+      }
+      header {
+        padding-bottom: 1.75rem;
+      }
+
+      /* ---------- Code ---------- */
+      code {
+        font-family: ui-monospace, SFMono-Regular, 'SF Mono', Menlo, monospace;
+        font-size: 0.855em;
+        background: var(--code-bg);
+        color: #e8e8e8;
+        padding: 0.12em 0.42em;
+        border-radius: 4px;
+        white-space: nowrap;
+      }
+      pre {
+        background: var(--block-bg);
+        border: 1px solid var(--rule);
+        border-radius: 8px;
+        padding: 1rem 1.1rem;
+        overflow-x: auto;
+        font-size: 0.875rem;
+        line-height: 1.6;
+        margin: 0.9rem 0;
+      }
+      pre code {
+        background: none;
+        padding: 0;
+        font-size: inherit;
+        white-space: pre;
+        color: var(--fg);
+      }
+
+      /* ---------- Stat cards ---------- */
+      .stats {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
+        gap: 0.9rem;
+        margin: 1.75rem 0;
+      }
+      .stat {
+        background: var(--surface);
+        border: 1px solid var(--rule);
+        border-radius: 10px;
+        padding: 1.2rem 1.3rem 1.35rem;
+      }
+      .stat b {
+        display: block;
+        color: var(--fg-strong);
+        font-size: 2rem;
+        font-weight: 500;
+        letter-spacing: -0.02em;
+        line-height: 1.1;
+        margin-bottom: 0.5rem;
+      }
+      .stat span {
+        color: var(--muted);
+        font-size: 0.95rem;
+        line-height: 1.45;
+      }
+
+      /* ---------- Tables: uppercase muted heads, hairline rows, no vertical rules ---------- */
+      .table-scroll {
+        overflow-x: auto;
+        margin: 1.5rem 0;
+      }
+      table {
+        border-collapse: collapse;
+        width: 100%;
+      }
+      th {
+        text-align: left;
+        vertical-align: bottom;
+        color: var(--muted);
+        font-size: 0.74rem;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.1em;
+        padding: 0 1.5rem 0.8rem 0;
+        border-bottom: 1px solid var(--rule);
+        white-space: nowrap;
+      }
+      td {
+        text-align: left;
+        vertical-align: top;
+        padding: 0.95rem 1.5rem 0.95rem 0;
+        border-bottom: 1px solid var(--rule);
+      }
+      th:last-child,
+      td:last-child {
+        padding-right: 0;
+      }
+      tbody tr:last-child td {
+        border-bottom: 0;
+      }
+      td.num {
+        color: var(--muted);
+        font-variant-numeric: tabular-nums;
+      }
+
+      /* ---------- Tier / status legend ---------- */
+      .legend {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 1.25rem;
+        color: var(--muted);
+        font-size: 0.95rem;
+        margin: 0 0 0.75rem;
+      }
+      .tier {
+        font-weight: 700;
+      }
+      .tier-s {
+        color: var(--s);
+      }
+      .tier-a {
+        color: var(--a);
+      }
+      .tier-b {
+        color: var(--b);
+      }
+      .tier-c {
+        color: var(--c);
+      }
+      .tier-d {
+        color: var(--d);
+      }
+      .tier-x {
+        color: var(--x);
+      }
+      .name {
+        color: var(--accent);
+        font-weight: 600;
+      }
+
+      /* ---------- Callout ---------- */
+      .callout {
+        background: var(--surface);
+        border: 1px solid var(--rule);
+        border-radius: 10px;
+        padding: 1.15rem 1.35rem;
+        margin: 1.5rem 0;
+      }
+      .callout > :last-child {
+        margin-bottom: 0;
+      }
+      .callout strong {
+        color: var(--fg-strong);
+      }
+      .callout ul {
+        margin: 0.6rem 0 0;
+        padding-left: 1.15rem;
+      }
+      .callout li {
+        margin: 0.3rem 0;
+      }
+
+      /* ---------- Tasks ---------- */
+      section.task {
+        background: var(--surface);
+        border: 1px solid var(--rule);
+        border-radius: 10px;
+        padding: 1.4rem 1.6rem;
+        margin: 1.25rem 0;
+      }
+      .files {
+        font-size: 0.92rem;
+        color: var(--muted);
+        margin: 0 0 1rem;
+      }
+      .files code {
+        color: var(--fg);
+        white-space: normal;
+      }
+      .io {
+        margin: 0 0 1.25rem;
+        font-size: 0.95rem;
+      }
+      .io dt {
+        color: var(--muted);
+        font-size: 0.74rem;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.1em;
+      }
+      .io dd {
+        margin: 0.2rem 0 0.75rem;
+      }
+      ol.steps {
+        list-style: none;
+        padding: 0;
+        margin: 0;
+      }
+      ol.steps > li {
+        display: flex;
+        gap: 0.7rem;
+        align-items: flex-start;
+        padding: 0.7rem 0;
+        border-top: 1px solid var(--rule);
+      }
+      ol.steps > li:first-child {
+        border-top: 0;
+        padding-top: 0;
+      }
+      ol.steps input {
+        margin: 0.42rem 0 0;
+        flex: none;
+        width: 1rem;
+        height: 1rem;
+        accent-color: var(--accent);
+      }
+      ol.steps input:checked + .label {
+        color: var(--muted);
+      }
+      ol.steps input:checked + .label strong {
+        color: var(--muted);
+        text-decoration: line-through;
+      }
+      .label {
+        flex: 1;
+        min-width: 0;
+      }
+      .label strong {
+        color: var(--fg-strong);
+        font-weight: 600;
+      }
+
+      .progress {
+        color: var(--muted);
+        font-size: 0.95rem;
+        margin-top: 3rem;
+        border-top: 1px solid var(--rule);
+        padding-top: 1.5rem;
+      }
+      .progress b {
+        color: var(--accent);
+      }
+
+      @media (max-width: 620px) {
+        body {
+          font-size: 16px;
+        }
+        h1 {
+          font-size: 1.8rem;
+        }
+        .wrap {
+          padding: 2.5rem 1.1rem 5rem;
+        }
+        section.task {
+          padding: 1.1rem 1.15rem;
+        }
+      }
+    </style>
+  </head>
+
+  <body>
+    <div class="wrap">
+      <header>
+        <h1>THA-27: Initialize a repository in place</h1>
+        <p class="lede">
+          Implementation plan, September 13, 2026. Based on <code>main</code> at
+          <code>8451f4c</code>.
+        </p>
+        <p>
+          Goal: <code>thaddeus init &lt;name&gt;</code> adopts the current
+          directory, preserves its files, and leaves included files ready for
+          the first push.
+        </p>
+        <p>
+          Architecture: Move identity setup to
+          <code>thaddeus identity init [--force]</code>. Repository
+          initialization requires an existing identity and coordinates signed
+          remote creation and verified clone APIs. Stage only Thaddeus metadata,
+          publish the working-copy config last, and retain a recovery record
+          when a remote create may have succeeded. Existing files remain
+          uncommitted.
+        </p>
+        <p>
+          Tech stack: TypeScript, Bun, the existing Client and FileBackend
+          packages, Node filesystem APIs, and moon tasks. No new dependencies or
+          server protocol changes.
+        </p>
+        <p>
+          Spec:
+          <a href="https://linear.app/thaddeus-run/issue/THA-27">THA-27</a>,
+          supplied issue description reproduced below. Supporting source:
+          <code
+            >docs/plans/2026-07-12-thaddeus-analysis-roadmap-thadhub.html</code
+          >, section 3 and product/collaboration P13.
+        </p>
+        <p>
+          Implement the tasks in order. Checkboxes track implementation
+          progress. Do not commit or push without a user request.
+        </p>
+      </header>
+      <section class="block">
+        <h2>Scope and acceptance criteria</h2>
+        <ul>
+          <li>
+            <code>thaddeus init &lt;name&gt;</code> adopts the current directory
+            without moving its files.
+          </li>
+          <li>
+            Existing files become the initial working-copy state with explicit
+            ignore behavior.
+          </li>
+          <li>
+            Identity/repository collisions, nested roots, empty directories, and
+            rollback on failure are handled.
+          </li>
+          <li>
+            The real first-run path is exercised end to end and documented.
+          </li>
+        </ul>
+        <p>
+          Offline checkpointing belongs to
+          <a href="https://linear.app/thaddeus-run/issue/THA-96">THA-96</a>.
+          This command requires an explicitly selected server and creates its
+          empty signed repository. It does not commit, upload file contents, or
+          land changes. The documentation edit overlaps only the getting-started
+          section needed here; version cleanup and the agent demo remain THA-29.
+        </p>
+        <p>
+          Global constraints: use Bun and moon; preserve trailing newlines; no
+          dependency version changes; no default hosted server; no unrequested
+          refactors. Work on
+          <code
+            >feature/tha-27-dx-thaddeus-init-that-adopts-the-current-directory-repo-init</code
+          >. Keep this as one coherent feature change.
+        </p>
+      </section>
+      <section class="block">
+        <h2>What the code does today</h2>
+        <div class="table-scroll">
+          <table>
+            <thead>
+              <tr>
+                <th>Finding</th>
+                <th>Evidence</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>Named init arguments are silently ignored.</td>
+                <td>
+                  <code>packages/cli/src/run.ts:776</code> parses positionals
+                  but reads only <code>force</code>. <code>init</code> creates
+                  or loads an identity.
+                </td>
+              </tr>
+              <tr>
+                <td>Creation and clone already establish signed empty main.</td>
+                <td>
+                  <code>packages/client/src/client.ts:298</code> signs
+                  version-zero genesis. <code>Client.clone</code> verifies the
+                  owner chain and persists it in a supplied backend.
+                </td>
+              </tr>
+              <tr>
+                <td>Clone cannot be called as a CLI shortcut.</td>
+                <td>
+                  <code>packages/cli/src/run.ts:941</code> calls
+                  <code>materializeToDisk</code>, which writes files. Init must
+                  use the SDK clone into staged metadata without materializing.
+                </td>
+              </tr>
+              <tr>
+                <td>Config is the working-copy marker.</td>
+                <td>
+                  <code>packages/cli/src/workcopy.ts:45</code> discovers
+                  <code>.thaddeus/config.json</code>. A bare
+                  <code>.thaddeus</code> directory can contain the installed
+                  binaries.
+                </td>
+              </tr>
+              <tr>
+                <td>Ignore loading can change disk and suppress errors.</td>
+                <td>
+                  <code>packages/cli/src/ignore.ts</code> seeds from root
+                  <code>.gitignore</code>; failed reads or writes fall back to
+                  fewer rules. <code>listWorkingFiles</code> calls that loader.
+                </td>
+              </tr>
+              <tr>
+                <td>
+                  Remote deletion cannot safely serve as automatic rollback.
+                </td>
+                <td>
+                  <code>packages/server/src/server.ts:1940</code>
+                  owner-authenticates and deletes the whole repository. It has
+                  no creation-attempt or unchanged-state condition.
+                </td>
+              </tr>
+              <tr>
+                <td>Tests already cover both entry styles.</td>
+                <td>
+                  <code>packages/cli/test/publish.test.ts</code> uses the real
+                  server with injected transport.
+                  <code>packages/cli/test/quota-compile.test.ts</code> compiles
+                  and launches a real server on an ephemeral port.
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+      <section class="block">
+        <h2>Command and filesystem contract</h2>
+        <div class="table-scroll">
+          <table>
+            <thead>
+              <tr>
+                <th>Case</th>
+                <th>Planned behavior</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td><code>init</code>, <code>init --force</code></td>
+                <td>
+                  Remove identity creation from both forms. Bare
+                  <code>init</code> exits 2 with repository usage and the
+                  migration hint <code>thaddeus identity init</code>. Reject
+                  <code>--force</code> on repository init before any mutation;
+                  no compatibility alias creates identity.
+                </td>
+              </tr>
+              <tr>
+                <td><code>init acme/web --server URL</code></td>
+                <td>
+                  Use the flag, otherwise the saved default. Require exactly one
+                  nonempty repository name. Do not add the legacy leading-server
+                  positional syntax to init. Names may contain slashes but are
+                  never interpreted as a local destination.
+                </td>
+              </tr>
+              <tr>
+                <td><code>identity init [--force]</code></td>
+                <td>
+                  Create identity locally without a server or working copy.
+                  Repeating it reuses the existing DID. Explicit
+                  <code>--force</code> retains the current rotation behavior
+                  under this new command only. Keep <code>whoami</code> as the
+                  existing read command.
+                </td>
+              </tr>
+              <tr>
+                <td>Missing identity</td>
+                <td>
+                  Repository init exits 2 and prints
+                  <code>no identity; run thaddeus identity init first</code>. Do
+                  not create an identity, journal, ignore file, local metadata
+                  or remote repository. A corrupt or unreadable identity exits 1
+                  and is never replaced.
+                </td>
+              </tr>
+              <tr>
+                <td>No server or invalid arguments</td>
+                <td>
+                  Exit 2 with usage or <code>noServerHint("init")</code>.
+                  Validate before writing ignore files, metadata or remote
+                  repository state. Repository init never writes identity files.
+                </td>
+              </tr>
+              <tr>
+                <td>Existing files</td>
+                <td>
+                  Preserve path, bytes, mode, and symlink targets. Files
+                  included by the existing matcher appear as added against empty
+                  main. Init adds no operation, commit, or provenance record.
+                </td>
+              </tr>
+              <tr>
+                <td>Ignore behavior</td>
+                <td>
+                  Root <code>.thaddeusignore</code> wins unchanged. Otherwise
+                  seed once from root <code>.gitignore</code>, using the
+                  existing header. With neither file, create neither. Always
+                  exclude metadata names <code>.git</code> and
+                  <code>.thaddeus</code>, including Git worktree marker files,
+                  and prune <code>node_modules</code> directories. Print the
+                  rule source and included file count; say no file contents were
+                  uploaded.
+                </td>
+              </tr>
+              <tr>
+                <td>Matcher limits</td>
+                <td>
+                  Keep the existing root-only glob implementation. Do not claim
+                  full Git ignore compatibility. Nested ignore files are
+                  ordinary files, not additional rule sources. No new implicit
+                  secret patterns; explain that <code>.env</code> is included
+                  unless an ignore rule excludes it.
+                </td>
+              </tr>
+              <tr>
+                <td>Empty directories and non-regular entries</td>
+                <td>
+                  Empty root succeeds with empty main and clean status. Empty
+                  subdirectories stay on disk but are not tracked. Preserve
+                  symlinks and special files without following or tracking them,
+                  and report the skipped count.
+                </td>
+              </tr>
+              <tr>
+                <td>Roots and metadata collisions</td>
+                <td>
+                  Canonicalize cwd through <code>realpathSync</code>. Reject
+                  initialization inside another working copy and around
+                  descendant working copies. Walk real descendant directories
+                  for config markers independently of user ignore rules, pruning
+                  only <code>.git</code>, <code>.thaddeus</code>, and dependency
+                  directories. Do not follow symlinks. Reject a root containing
+                  the identity config directory so private seeds cannot become
+                  working files.
+                </td>
+              </tr>
+              <tr>
+                <td>Bare metadata directory</td>
+                <td>
+                  Allow a real <code>.thaddeus</code> directory containing
+                  unrelated files such as <code>bin/</code>. Refuse symlink/file
+                  metadata entries and pre-existing reserved
+                  <code>store/</code> state unless a matching recovery record
+                  owns it. Never remove unrelated metadata on failure.
+                </td>
+              </tr>
+              <tr>
+                <td>Successful re-init</td>
+                <td>
+                  Same root, repo, normalized server and pinned owner returns
+                  success without network traffic, reseeding ignores, or
+                  changing files. Different repo/server/identity exits 2.
+                  Corrupt config or store fails with exit 1, without replacing
+                  it.
+                </td>
+              </tr>
+              <tr>
+                <td>Remote name collision</td>
+                <td>
+                  A fresh attempt receiving 409 fails even if the owner is the
+                  same. Never implicitly adopt an unrelated remote or delete it.
+                  Recovery is allowed only for a matching prior local attempt.
+                </td>
+              </tr>
+              <tr>
+                <td>Identity collision</td>
+                <td>
+                  Reject corrupt JSON, invalid seed length/encoding, or a stored
+                  DID inconsistent with the seed. Do not silently rotate or
+                  overwrite. In <code>identity init</code> only, use exclusive
+                  creation for the non-force path; on EEXIST load and validate
+                  the winner.
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+      <section class="block">
+        <h2>Rollback and recovery boundary</h2>
+        <p>
+          A filesystem update and an HTTP request cannot commit atomically. The
+          plan guarantees rollback of invocation-owned working-copy files on a
+          caught failure before config publication. It preserves user files. The
+          pre-existing identity remains untouched, and a possibly created remote
+          remains recoverable. This is a deliberate part of the proposed
+          contract, not a claim that all effects disappear.
+        </p>
+        <div class="table-scroll">
+          <table>
+            <thead>
+              <tr>
+                <th>Phase</th>
+                <th>Failure and retry behavior</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>Preflight</td>
+                <td>
+                  Read and validate arguments, the required existing identity,
+                  roots, and ignore inputs without mutation. Failure leaves all
+                  state unchanged.
+                </td>
+              </tr>
+              <tr>
+                <td>Prepare local state</td>
+                <td>
+                  Load the existing identity without writing it and reserve a
+                  per-root init lock. Create a unique stage beneath
+                  <code>.thaddeus</code>; prepare ignore bytes and config there.
+                  Save a mode-0600 journal under
+                  <code>~/.config/thaddeus/init/</code>, keyed by SHA-256 of
+                  canonical root. Record only paths, DID, repo, server, phase,
+                  and ownership evidence, never private seed bytes.
+                </td>
+              </tr>
+              <tr>
+                <td>Before create request</td>
+                <td>
+                  Persist phase <code>create-attempted</code> before sending
+                  POST. A definite rejected request removes the journal. A
+                  transport failure or 5xx keeps it because the server may have
+                  persisted the repository.
+                </td>
+              </tr>
+              <tr>
+                <td>Create acknowledged</td>
+                <td>
+                  Persist <code>remote-created</code>. Call
+                  <code>Client.clone</code> into the stage with
+                  <code>expectedOwner: identity.did</code>. Require version-zero
+                  empty main and zero operations. Do not call
+                  <code>materializeToDisk</code>.
+                </td>
+              </tr>
+              <tr>
+                <td>Publish local state</td>
+                <td>
+                  Recheck root and ignore inputs. Install a seeded ignore file
+                  exclusively, move staged store into the reserved store path,
+                  and publish config last through an atomic no-replace
+                  operation. The config is the commit point. Record ownership
+                  before each filesystem action so a crash between action and
+                  journal update is recoverable.
+                </td>
+              </tr>
+              <tr>
+                <td>Caught failure before commit point</td>
+                <td>
+                  Remove only stage/store/ignore entries created by this
+                  attempt, and only if their recorded inode and relevant bytes
+                  still match. Retain changed or unfamiliar entries and report
+                  their paths. Remove an invocation-created metadata directory
+                  only if empty. Never alter the identity. Keep the journal if
+                  remote creation succeeded or is uncertain; report the server,
+                  repo and exact retry command.
+                </td>
+              </tr>
+              <tr>
+                <td>Retry after uncertain remote outcome</td>
+                <td>
+                  Require journal root/server/repo/DID to match, and verify no
+                  active init holds the lock. Try verified SDK clone. If remote
+                  is definitively 404, repeat create. If it is owned by this
+                  identity and still version-zero empty main, finish adoption. A
+                  changed head, owner mismatch, malformed response, or ambiguous
+                  error preserves the record and exits 1. No automatic delete or
+                  materialization.
+                </td>
+              </tr>
+              <tr>
+                <td>Crash and post-commit cleanup</td>
+                <td>
+                  A matching config and valid store prove local commit even if
+                  the journal remains. A rerun finishes cleanup and returns
+                  success. Cleanup failure after commit prints a warning and
+                  returns success with initialized state. After a crash before
+                  commit, inspect the journal and ownership evidence before
+                  removing artifacts or resuming. Never recursively clear an
+                  unknown metadata directory.
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        <p>
+          Use an exclusive <code>.thaddeus/init.lock</code> directory with
+          attempt ID and PID. A live or uninspectable PID blocks another init.
+          Recover a stale lock only when the recorded local process is confirmed
+          absent and the journal matches. PID reuse can require manual lock
+          inspection; it must not cause automatic lock stealing. This does not
+          add concurrent access support to the existing single-process object
+          store.
+        </p>
+        <p>
+          Automatic remote deletion is excluded because the current delete API
+          could erase work another process added. Recovery may refuse a
+          now-populated remote; the diagnostic directs the user to clone it into
+          a separate directory and reconcile their files. Full remote
+          transaction rollback would require a separate protocol change.
+        </p>
+      </section>
+      <section class="block">
+        <h2>File map and interfaces</h2>
+        <div class="table-scroll">
+          <table>
+            <thead>
+              <tr>
+                <th>Files</th>
+                <th>Responsibility</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>
+                  <code>packages/cli/src/ignore.ts</code>;
+                  <code>src/workcopy.ts</code>
+                </td>
+                <td>
+                  Extract pure rule compilation and strict read-only ignore
+                  preparation. Let the existing file walker receive prepared
+                  rules. Preserve legacy loading while fixing metadata marker
+                  exclusion.
+                </td>
+              </tr>
+              <tr>
+                <td><code>packages/cli/src/identity.ts</code></td>
+                <td>
+                  Validate loaded seed/DID pairs and make non-force identity
+                  creation exclusive.
+                </td>
+              </tr>
+              <tr>
+                <td><code>packages/cli/src/repo-init.ts</code>, new</td>
+                <td>
+                  Read-only preflight, collision decisions, and the
+                  create/clone/adopt coordinator.
+                </td>
+              </tr>
+              <tr>
+                <td><code>packages/cli/src/init-state.ts</code>, new</td>
+                <td>
+                  Journal serialization, per-root lock, metadata staging,
+                  ownership-aware rollback, and config publication. Keep
+                  filesystem lifecycle separate from network decisions.
+                </td>
+              </tr>
+              <tr>
+                <td>
+                  <code>packages/cli/src/run.ts</code>;
+                  <code>src/help.ts</code>; <code>src/config.ts</code>
+                </td>
+                <td>
+                  Dispatch separate identity and repository commands, resolve
+                  explicit server selection, and update identity migration and
+                  missing-working-copy hints.
+                </td>
+              </tr>
+              <tr>
+                <td>
+                  <code>packages/cli/test/ignore.test.ts</code>;
+                  <code>test/init.test.ts</code>;
+                  <code>test/findroot.test.ts</code>;
+                  <code>test/config.test.ts</code>
+                </td>
+                <td>
+                  Extend existing ignore, identity, root discovery, and
+                  selection regression coverage.
+                </td>
+              </tr>
+              <tr>
+                <td>
+                  <code>packages/cli/test/repo-init.test.ts</code>;
+                  <code>test/init-state.test.ts</code>, new
+                </td>
+                <td>
+                  Real filesystem and real server coverage for adoption,
+                  collisions, rollback and recovery.
+                </td>
+              </tr>
+              <tr>
+                <td>
+                  <code>packages/cli/test/init-compile.test.ts</code>, new
+                </td>
+                <td>
+                  Standalone executable, real HTTP, isolated homes, fresh clone,
+                  repeat init, second push, and server restart.
+                </td>
+              </tr>
+              <tr>
+                <td>
+                  <code>docs/getting-started.md</code>;
+                  <code>docs/deploy.md</code>;
+                  <code>packages/cli/README.md</code>;
+                  <code>examples/cli/src/cli-demo.ts</code>;
+                  <code>examples/cli/src/grant-demo.ts</code>
+                </td>
+                <td>
+                  Runnable first-run guide with explicit identity setup and
+                  updated create/clone examples.
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+      <section class="block">
+        <h2>Task 1: Prepare ignores without changing disk</h2>
+        <section class="task">
+          <p>
+            <span class="files"
+              >Modify <code>packages/cli/src/ignore.ts</code>,
+              <code>packages/cli/src/workcopy.ts</code>; test
+              <code>packages/cli/test/ignore.test.ts</code>.</span
+            >
+          </p>
+          <dl class="io">
+            <dt>Consumes</dt>
+            <dd>
+              Existing <code>Ignore</code>, <code>parse</code>,
+              <code>SEED_HEADER</code>, and the sorted directory walker.
+            </dd>
+            <dt>Produces</dt>
+            <dd>
+              <code>prepareIgnore(root: string): PreparedIgnore</code> and
+              <code
+                >listWorkingFiles(root: string, ignore?: Ignore): string[]</code
+              >.
+            </dd>
+          </dl>
+          <ol class="steps">
+            <li>
+              <input
+                type="checkbox"
+                checked
+                id="t1s1"
+                aria-label="Task 1, step 1"
+              />
+              <div class="label">
+                <p>
+                  Add this test to the existing ignore suite, which already owns
+                  a temporary <code>tmp</code>. Also test an existing ignore
+                  file taking precedence and a directory or symlink at either
+                  ignore path failing before mutation.
+                </p>
+                <pre><code>test(&#x27;prepares seeded rules without writing the seed file&#x27;, () =&gt; {
+  const root = mkdtempSync(join(tmp, &#x27;prepare-&#x27;));
+  writeFileSync(join(root, &#x27;.gitignore&#x27;), &#x27;.env\ndist/\n&#x27;);
+  const prepared = prepareIgnore(root);
+  expect(prepared.source).toBe(&#x27;gitignore&#x27;);
+  expect(prepared.ignore.ignored(&#x27;.env&#x27;, false)).toBe(true);
+  expect(prepared.seed).toContain(&#x27;.env\n&#x27;);
+  expect(existsSync(join(root, &#x27;.thaddeusignore&#x27;))).toBe(false);
+});</code></pre>
+              </div>
+            </li>
+            <li>
+              <input
+                type="checkbox"
+                checked
+                id="t1s2"
+                aria-label="Task 1, step 2"
+              />
+              <div class="label">
+                <p>
+                  Run the new test before implementation. Expect the missing
+                  <code>prepareIgnore</code> export to fail.
+                </p>
+                <pre><code>moon run cli:test -- test/ignore.test.ts</code></pre>
+              </div>
+            </li>
+            <li>
+              <input
+                type="checkbox"
+                checked
+                id="t1s3"
+                aria-label="Task 1, step 3"
+              />
+              <div class="label">
+                <p>
+                  Extract rule matching from <code>loadIgnore</code> into one
+                  shared compiler. Add this contract. Read through lstat-checked
+                  regular files; distinguish ENOENT from permission/read errors
+                  and propagate all other failures. Never write in
+                  <code>prepareIgnore</code>. Preserve the seed header and
+                  trailing newline logic.
+                </p>
+                <pre><code>export interface PreparedIgnore {
+  readonly source: &#x27;thaddeusignore&#x27; | &#x27;gitignore&#x27; | &#x27;defaults&#x27;;
+  readonly ignore: Ignore;
+  readonly seed: string | null;
+  readonly input: { path: string; text: string } | null;
+}
+// Uses the same parser and matcher as loadIgnore; input records exact bytes
+// to detect an ignore edit before publishing the working-copy marker.
+export function prepareIgnore(root: string): PreparedIgnore;
+
+export function listWorkingFiles(
+  root: string,
+  ig: Ignore = loadIgnore(root),
+): string[];</code></pre>
+                <p>
+                  The signatures above are the required interface, not
+                  declaration files to add. In the shared matcher, return true
+                  for basename <code>.git</code> or
+                  <code>.thaddeus</code> regardless of entry type; keep
+                  <code>node_modules</code> pruning directory-only. The walker
+                  otherwise retains its existing sorted regular-file result.
+                </p>
+              </div>
+            </li>
+            <li>
+              <input
+                type="checkbox"
+                checked
+                id="t1s4"
+                aria-label="Task 1, step 4"
+              />
+              <div class="label">
+                <p>
+                  Add regression assertions for a <code>.git</code> file,
+                  existing negations, directory rules, root anchoring, default
+                  pruning, and the no-ignore case. Keep legacy seeding tests.
+                  Run the suite and typecheck; expect all to pass.
+                </p>
+                <pre><code>moon run cli:test -- test/ignore.test.ts
+moon run cli:typecheck</code></pre>
+              </div>
+            </li>
+          </ol>
+        </section>
+      </section>
+      <section class="block">
+        <h2>Task 2: Validate roots and identity files</h2>
+        <section class="task">
+          <p>
+            <span class="files"
+              >Create <code>packages/cli/src/repo-init.ts</code>; modify
+              <code>packages/cli/src/identity.ts</code>; test
+              <code>packages/cli/test/repo-init.test.ts</code>,
+              <code>test/init.test.ts</code>,
+              <code>test/findroot.test.ts</code>.</span
+            >
+          </p>
+          <dl class="io">
+            <dt>Consumes</dt>
+            <dd>
+              <code>prepareIgnore</code>, <code>findRoot</code>,
+              <code>loadConfig</code>, <code>loadIdentity</code>,
+              <code>Identity.fromSeed</code>.
+            </dd>
+            <dt>Produces</dt>
+            <dd>
+              <code
+                >inspectInit(root: string, home: string): InitInspection</code
+              >. The coordinator added in task 3 consumes this inspection.
+            </dd>
+          </dl>
+          <ol class="steps">
+            <li>
+              <input
+                type="checkbox"
+                checked
+                id="t2s1"
+                aria-label="Task 2, step 1"
+              />
+              <div class="label">
+                <p>
+                  Create the new test module with Bun test imports, fs/path/os
+                  imports, and this test. Keep inspection independent of
+                  identity creation and network access.
+                </p>
+                <pre><code>test(&#x27;rejects a parent working copy without changing the child&#x27;, () =&gt; {
+  const root = mkdtempSync(join(tmpdir(), &#x27;thaddeus-init-root-&#x27;));
+  try {
+    const home = join(root, &#x27;home&#x27;);
+    const parent = join(root, &#x27;repo&#x27;);
+    const child = join(parent, &#x27;child&#x27;);
+    mkdirSync(child, { recursive: true });
+    saveConfig(parent, { server: &#x27;http://t&#x27;, repo: &#x27;r&#x27;, base: [] });
+    writeFileSync(join(child, &#x27;a.txt&#x27;), &#x27;keep&#x27;);
+    expect(() =&gt; inspectInit(child, home)).toThrow(&#x27;inside&#x27;);
+    expect(readdirSync(child)).toEqual([&#x27;a.txt&#x27;]);
+    expect(existsSync(join(home, &#x27;.config&#x27;))).toBe(false);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});</code></pre>
+              </div>
+            </li>
+            <li>
+              <input
+                type="checkbox"
+                checked
+                id="t2s2"
+                aria-label="Task 2, step 2"
+              />
+              <div class="label">
+                <p>
+                  Run before implementation and expect the missing inspection
+                  export to fail.
+                </p>
+                <pre><code>moon run cli:test -- test/repo-init.test.ts</code></pre>
+              </div>
+            </li>
+            <li>
+              <input
+                type="checkbox"
+                checked
+                id="t2s3"
+                aria-label="Task 2, step 3"
+              />
+              <div class="label">
+                <p>
+                  Implement the read-only inspection contract. For same-root
+                  existing config, return existing state for coordinator
+                  comparison instead of treating it as an enclosing root. Reject
+                  malformed/symlink metadata and unsafe home containment.
+                  Inspect descendants before any writes, even if a user ignore
+                  rule excludes the directory.
+                </p>
+                <pre><code>export interface InitInspection {
+  readonly root: string;
+  readonly preparedIgnore: PreparedIgnore;
+  readonly files: readonly string[];
+  readonly skippedEntries: number;
+  readonly existing: Config | null;
+}
+export function inspectInit(root: string, home: string): InitInspection;
+
+// After canonicalizing paths, use path segments rather than string prefixes.
+const rel = relative(root, identityDirectory);
+const containsIdentity = rel === &#x27;&#x27; ||
+  (!isAbsolute(rel) &amp;&amp; rel !== &#x27;..&#x27; &amp;&amp; !rel.startsWith(`..${sep}`));
+if (containsIdentity) throw new Error(&#x27;directory contains identity configuration&#x27;);</code></pre>
+                <p>
+                  Here <code>identityDirectory</code> is
+                  <code>join(home, ".config", "thaddeus")</code>, canonicalized
+                  through its nearest existing ancestor when absent. Check
+                  descendant config markers with lstat before pruning their
+                  metadata directory. Fail on unreadable traversed directories
+                  rather than assuming there is no nested root.
+                </p>
+              </div>
+            </li>
+            <li>
+              <input
+                type="checkbox"
+                checked
+                id="t2s4"
+                aria-label="Task 2, step 4"
+              />
+              <div class="label">
+                <p>
+                  Extend identity helper tests for invalid JSON, a short seed,
+                  invalid base64, DID mismatch, absent seed, and explicit force
+                  rotation. Add a typed <code>IdentityMissingError</code> for
+                  ENOENT to <code>identity.ts</code>; other read and parse
+                  failures must propagate. Its message points to
+                  <code>thaddeus identity init</code>, replacing the old
+                  bare-init hint. Derive DID from a validated 32-byte seed. For
+                  non-force creation use exclusive write and load/validate the
+                  existing winner on EEXIST; use the existing explicit force
+                  helper branch for rotation, callable from
+                  <code>identity init --force</code> only.
+                </p>
+                <pre><code>try {
+  writeFileSync(path, serializedIdentity, { flag: &#x27;wx&#x27;, mode: 0o600 });
+} catch (error) {
+  if ((error as NodeJS.ErrnoException).code !== &#x27;EEXIST&#x27;) throw error;
+  return { did: loadIdentity(home).did, created: false };
+}</code></pre>
+                <p>
+                  The code belongs in <code>initIdentity</code> after seed
+                  generation and parent directory creation;
+                  <code>serializedIdentity</code> is the existing JSON
+                  representation. A concurrently visible partial identity file
+                  must fail clearly, never trigger overwrite.
+                </p>
+              </div>
+            </li>
+            <li>
+              <input
+                type="checkbox"
+                checked
+                id="t2s5"
+                aria-label="Task 2, step 5"
+              />
+              <div class="label">
+                <p>
+                  Add concrete cases for descendant roots under ignored
+                  directories; cwd through a symlink; empty roots;
+                  <code>.thaddeus/bin</code> only; a reserved store without a
+                  recovery record; symlinked metadata; a root containing the
+                  identity home; and a sibling path with a shared string prefix.
+                  Assert original file bytes and modes after each refusal. Run
+                  the focused suites.
+                </p>
+                <pre><code>moon run cli:test -- test/repo-init.test.ts test/init.test.ts test/findroot.test.ts
+moon run cli:typecheck</code></pre>
+              </div>
+            </li>
+          </ol>
+        </section>
+      </section>
+      <section class="block">
+        <h2>Task 3: Stage metadata and recover interrupted creation</h2>
+        <section class="task">
+          <p>
+            <span class="files"
+              >Create <code>packages/cli/src/init-state.ts</code> and
+              <code>packages/cli/test/init-state.test.ts</code>; extend
+              <code>packages/cli/src/repo-init.ts</code> and
+              <code>test/repo-init.test.ts</code>.</span
+            >
+          </p>
+          <dl class="io">
+            <dt>Consumes</dt>
+            <dd>
+              <code>InitInspection</code>, <code>loadIdentity</code>,
+              <code>Client.createRepo</code>, <code>Client.clone</code>,
+              <code>FileBackend</code>.
+            </dd>
+            <dt>Produces</dt>
+            <dd>
+              <code
+                >initRepository(input: InitRepositoryInput):
+                Promise&lt;InitResult&gt;</code
+              >
+              and the filesystem transaction interfaces below.
+            </dd>
+          </dl>
+          <ol class="steps">
+            <li>
+              <input
+                type="checkbox"
+                checked
+                id="t3s1"
+                aria-label="Task 3, step 1"
+              />
+              <div class="label">
+                <p>
+                  Implement failing filesystem tests for the config commit point
+                  and rollback ownership. The test module imports these new
+                  interfaces from <code>../src/init-state</code> and uses real
+                  temporary directories. In this example,
+                  <code>beginInitState</code> creates its stage and reserved
+                  metadata, but no config marker.
+                </p>
+                <pre><code>test(&#x27;rollback preserves unrelated metadata and original files&#x27;, () =&gt; {
+  const root = mkdtempSync(join(tmpdir(), &#x27;thaddeus-init-state-&#x27;));
+  const home = mkdtempSync(join(tmpdir(), &#x27;thaddeus-init-home-&#x27;));
+  try {
+    mkdirSync(join(root, &#x27;.thaddeus&#x27;, &#x27;bin&#x27;), { recursive: true });
+    writeFileSync(join(root, &#x27;.thaddeus&#x27;, &#x27;bin&#x27;, &#x27;keep&#x27;), &#x27;binary&#x27;);
+    writeFileSync(join(root, &#x27;a.txt&#x27;), &#x27;original&#x27;);
+    const state = beginInitState({ root, home, repo: &#x27;r&#x27;,
+      server: &#x27;http://t&#x27;, owner: &#x27;test-owner&#x27; });
+    state.rollback();
+    state.finish();
+    expect(readFileSync(join(root, &#x27;a.txt&#x27;), &#x27;utf8&#x27;)).toBe(&#x27;original&#x27;);
+    expect(readFileSync(join(root, &#x27;.thaddeus&#x27;, &#x27;bin&#x27;, &#x27;keep&#x27;), &#x27;utf8&#x27;))
+      .toBe(&#x27;binary&#x27;);
+    expect(existsSync(join(root, &#x27;.thaddeus&#x27;, &#x27;config.json&#x27;))).toBe(false);
+    expect(readdirSync(join(root, &#x27;.thaddeus&#x27;))).toEqual([&#x27;bin&#x27;]);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+    rmSync(home, { recursive: true, force: true });
+  }
+});</code></pre>
+              </div>
+            </li>
+            <li>
+              <input
+                type="checkbox"
+                checked
+                id="t3s2"
+                aria-label="Task 3, step 2"
+              />
+              <div class="label">
+                <p>
+                  Run and expect a missing module/export failure. Add failure
+                  cases using actual filesystem obstacles: create a directory at
+                  a pending config destination or replace a reserved path after
+                  begin. Do not rely on chmod-only permission tests under root.
+                </p>
+                <pre><code>moon run cli:test -- test/init-state.test.ts</code></pre>
+              </div>
+            </li>
+            <li>
+              <input
+                type="checkbox"
+                checked
+                id="t3s3"
+                aria-label="Task 3, step 3"
+              />
+              <div class="label">
+                <p>
+                  Implement these concrete contracts in the two new files. Use
+                  <code>NonNullable&lt;CliEnv["fetchImpl"]&gt;</code> from a
+                  type-only import of <code>CliEnv</code> in run, and
+                  <code>Config</code> from workcopy. The journal includes a
+                  version, random attempt ID, stage path, process ownership and
+                  per-artifact inode/content evidence in addition to
+                  <code>InitStateInput</code>. Reject unknown journal versions
+                  or any path outside the exact expected root/stage locations.
+                </p>
+                <pre><code>export interface InitStateInput {
+  root: string;
+  home: string;
+  repo: string;
+  server: string;
+  owner: string;
+}
+export type InitPhase = &#x27;prepared&#x27; | &#x27;create-attempted&#x27; | &#x27;remote-created&#x27;;
+export interface InitState {
+  readonly stage: string;
+  readonly phase: InitPhase;
+  readonly resumed: boolean;
+  mark(phase: InitPhase): void;
+  publish(config: Config, preparedIgnore: PreparedIgnore): void;
+  rollback(): void;
+  finish(): void;
+  release(): void;
+}
+export function beginInitState(input: InitStateInput, completed?: boolean): InitState;
+
+export interface InitRepositoryInput {
+  cwd: string;
+  home: string;
+  name: string;
+  server: string;
+  fetchImpl?: NonNullable&lt;CliEnv[&quot;fetchImpl&quot;]&gt;;
+}
+export interface InitResult {
+  root: string;
+  repo: string;
+  owner: string;
+  alreadyInitialized: boolean;
+  includedFiles: number;
+  skippedEntries: number;
+  ignoreSource: PreparedIgnore[&#x27;source&#x27;];
+  warnings: string[];
+}
+export function initRepository(input: InitRepositoryInput): Promise&lt;InitResult&gt;;</code></pre>
+                <p>
+                  <code>publish</code> installs the prepared seed and staged
+                  store, then publishes config last without replacing a
+                  destination. <code>rollback</code> removes only artifacts
+                  owned by this attempt and retains the journal.
+                  <code>finish</code> removes the journal and stage after
+                  successful adoption or a definitely rejected create, and
+                  releases the lock. <code>release</code> releases only the lock
+                  and is called in finally. All cleanup methods are idempotent.
+                  Cleanup failures preserve evidence and are reported; they
+                  never hide the primary error.
+                </p>
+              </div>
+            </li>
+            <li>
+              <input
+                type="checkbox"
+                checked
+                id="t3s4"
+                aria-label="Task 3, step 4"
+              />
+              <div class="label">
+                <p>
+                  Implement the network decision order below inside
+                  <code>initRepository</code>. Before a new create, persist its
+                  intent. For recovery, first try clone into a fresh stage; only
+                  a structured or explicitly classified 404 permits create. Use
+                  the existing <code>ClientResponseError.status</code> for HTTP
+                  classification; do not interpret message substrings as success
+                  or absence. Never turn a fresh 409 into recovery.
+                </p>
+                <pre><code>state.mark(&#x27;create-attempted&#x27;);
+await client.createRepo(input.name);
+state.mark(&#x27;remote-created&#x27;);
+const cloned = await client.clone(
+  input.name,
+  new FileBackend(join(state.stage, &#x27;store&#x27;)),
+  &#x27;main&#x27;,
+  { expectedOwner: identity.did },
+);
+if (cloned.head.version !== 0 || cloned.heads.length !== 0 ||
+    cloned.repo.log.ops().length !== 0) {
+  throw new Error(&#x27;repository changed during init; clone into a separate directory&#x27;);
+}
+state.publish(
+  { server: input.server, repo: input.name, base: [], view: &#x27;main&#x27; },
+  inspection.preparedIgnore,
+);</code></pre>
+                <p>
+                  This is the fresh-attempt success branch. Surround it with the
+                  phase-specific recovery and cleanup behavior in the rollback
+                  table. Inspect and compare an existing working copy before
+                  opening a new transaction. Load its durable store to verify
+                  the owner pin; never accept config equality alone. A
+                  post-publication cleanup error becomes a warning in
+                  <code>InitResult</code>, not a rollback.
+                </p>
+              </div>
+            </li>
+            <li>
+              <input
+                type="checkbox"
+                checked
+                id="t3s5"
+                aria-label="Task 3, step 5"
+              />
+              <div class="label">
+                <p>
+                  Add transport failure tests against an actual
+                  <code>createServer</code> instance. The wrapper below lets the
+                  server persist creation, then loses the response once. It is
+                  fault injection around real server behavior, not a fabricated
+                  success response.
+                </p>
+                <pre><code>let loseCreateResponse = true;
+const fetchImpl = async (request: Request): Promise&lt;Response&gt; =&gt; {
+  const response = await srv.fetch(request);
+  if (request.method === &#x27;POST&#x27; &amp;&amp; new URL(request.url).pathname === &#x27;/repos&#x27;
+      &amp;&amp; response.ok &amp;&amp; loseCreateResponse) {
+    loseCreateResponse = false;
+    throw new Error(&#x27;connection lost after create&#x27;);
+  }
+  return response;
+};</code></pre>
+                <p>
+                  Set up the identity explicitly before invoking the
+                  coordinator. Assert first attempt fails, file bytes and mode
+                  remain unchanged, no config is visible, and the journal
+                  remains. Compare identity file bytes before and after failure
+                  and retry. Rerun with the same home/root/name/server and
+                  assert one remote repository, matching DID and empty local
+                  main. Also test a real 409 from another owner, a same-owner
+                  fresh collision, known success followed by failed clone, a
+                  wrong-owner recovery, a nonempty recovered remote, and a
+                  definitely absent remote after a refused connection.
+                </p>
+              </div>
+            </li>
+            <li>
+              <input
+                type="checkbox"
+                checked
+                id="t3s6"
+                aria-label="Task 3, step 6"
+              />
+              <div class="label">
+                <p>
+                  Test lock contention with two invocations and a real child
+                  process for crash recovery. Kill the child after
+                  journal/create or store installation; retry with its process
+                  absent. Test a stale journal after config publication, a
+                  user-edited seeded ignore file, a preexisting store, and
+                  cleanup failure. Assert that neither a remote DELETE request
+                  nor source-file writes occur. Run all new tests and typecheck.
+                </p>
+                <pre><code>moon run cli:test -- test/init-state.test.ts test/repo-init.test.ts
+moon run cli:typecheck</code></pre>
+              </div>
+            </li>
+          </ol>
+        </section>
+      </section>
+      <section class="block">
+        <h2>Task 4: Separate identity setup from repository init</h2>
+        <section class="task">
+          <p>
+            <span class="files"
+              >Modify <code>packages/cli/src/run.ts</code>,
+              <code>src/help.ts</code>, <code>src/config.ts</code>; extend
+              <code>packages/cli/test/init.test.ts</code>,
+              <code>test/repo-init.test.ts</code>,
+              <code>test/config.test.ts</code>.</span
+            >
+          </p>
+          <dl class="io">
+            <dt>Consumes</dt>
+            <dd>
+              <code>initRepository</code>, <code>initIdentity</code>,
+              <code>IdentityMissingError</code>, existing
+              <code>parseArgs</code>, <code>isServerUrl</code>,
+              <code>loadCliConfig</code>, <code>noServerHint</code>.
+            </dd>
+            <dt>Produces</dt>
+            <dd>
+              <code>thaddeus identity init [--force]</code> and
+              <code>thaddeus init &lt;name&gt; [--server &lt;url&gt;]</code>,
+              with exit 0 on success, 2 for usage/local collisions, 1 for
+              filesystem/identity/network failures.
+            </dd>
+          </dl>
+          <ol class="steps">
+            <li>
+              <input
+                type="checkbox"
+                checked
+                id="t4s1"
+                aria-label="Task 4, step 1"
+              />
+              <div class="label">
+                <p>
+                  Add a first-run test with a real server and new, separate home
+                  and source directory. The test file imports
+                  <code>createServer</code>, <code>MemoryBackend</code>,
+                  <code>ready</code>, <code>run</code> and existing filesystem
+                  helpers; call <code>ready</code> in beforeAll. Put these
+                  assertions inside a test that owns and finally removes both
+                  temporary directories.
+                </p>
+                <pre><code>const srv = createServer({ backend: new MemoryBackend() });
+const home = mkdtempSync(join(tmpdir(), &#x27;thaddeus-init-home-&#x27;));
+const cwd = mkdtempSync(join(tmpdir(), &#x27;thaddeus-init-work-&#x27;));
+writeFileSync(join(cwd, &#x27;hello.txt&#x27;), &#x27;hello&#x27;);
+const lines: string[] = [];
+const env = { home, cwd, fetchImpl: srv.fetch.bind(srv),
+  out: (line: string) =&gt; lines.push(line) };
+expect(await run([&#x27;init&#x27;, &#x27;acme/web&#x27;, &#x27;--server&#x27;, &#x27;http://t&#x27;], env)).toBe(2);
+expect(existsSync(join(home, &#x27;.config&#x27;))).toBe(false);
+expect(existsSync(join(cwd, &#x27;.thaddeus&#x27;))).toBe(false);
+expect(await run([&#x27;identity&#x27;, &#x27;init&#x27;], env)).toBe(0);
+const identityPath = join(home, &#x27;.config&#x27;, &#x27;thaddeus&#x27;, &#x27;identity.json&#x27;);
+const identityBefore = readFileSync(identityPath);
+expect(await run([&#x27;init&#x27;, &#x27;acme/web&#x27;, &#x27;--server&#x27;, &#x27;http://t&#x27;], env)).toBe(0);
+expect(readFileSync(identityPath)).toEqual(identityBefore);
+expect(readFileSync(join(cwd, &#x27;hello.txt&#x27;), &#x27;utf8&#x27;)).toBe(&#x27;hello&#x27;);
+expect(existsSync(join(cwd, &#x27;web&#x27;))).toBe(false);
+lines.length = 0;
+expect(await run([&#x27;status&#x27;, &#x27;--json&#x27;], env)).toBe(0);
+expect(JSON.parse(lines[0])).toMatchObject({
+  branch: &#x27;main&#x27;, clean: false, added: [&#x27;hello.txt&#x27;], ahead: 0,
+});</code></pre>
+              </div>
+            </li>
+            <li>
+              <input
+                type="checkbox"
+                checked
+                id="t4s2"
+                aria-label="Task 4, step 2"
+              />
+              <div class="label">
+                <p>
+                  Run before wiring dispatch. Expect the current
+                  <code>init</code> path to reject <code>--server</code> or fail
+                  the working-copy assertions. It must not pass merely because
+                  an identity was created.
+                </p>
+                <pre><code>moon run cli:test -- test/repo-init.test.ts</code></pre>
+              </div>
+            </li>
+            <li>
+              <input
+                type="checkbox"
+                checked
+                id="t4s3"
+                aria-label="Task 4, step 3"
+              />
+              <div class="label">
+                <p>
+                  Replace the init case with repository-only dispatch. Resolve
+                  its server from flag or saved default; the create/clone legacy
+                  positional resolver must not consume the name. Reject any
+                  force flag, even false, because it belongs only to identity
+                  setup. Catch <code>IdentityMissingError</code> from the
+                  coordinator as exit 2; keep other identity errors as exit 1.
+                  Validate arguments before loading identity, then load identity
+                  before the transaction or any network request.
+                </p>
+                <pre><code>const { values, positionals } = parseArgs({
+  args: [...rest],
+  options: { force: { type: &#x27;boolean&#x27; }, server: { type: &#x27;string&#x27; } },
+  allowPositionals: true,
+});
+if (positionals.length !== 1 || values.force !== undefined) {
+  out(&#x27;usage: thaddeus init &lt;name&gt; [--server &lt;url&gt;]&#x27;);
+  out(&#x27;For identity setup, run thaddeus identity init.&#x27;);
+  return 2;
+}
+// Validate the name and server, then call initRepository.
+// This branch must never call initIdentity.
+const server = values.server ?? loadCliConfig(env.home).defaultServer;
+if (server === undefined) {
+  out(noServerHint(&#x27;init&#x27;));
+  return 2;
+}
+if (!isServerUrl(server)) {
+  out(`invalid server url: ${server}`);
+  return 2;
+}</code></pre>
+                <p>
+                  Normalize server trailing slashes for config/journal
+                  comparisons. Reject empty or whitespace-only names, NUL and
+                  control characters. Retain slash-containing logical names;
+                  never join them into a filesystem destination. Print root,
+                  repo, DID, ignore source and included/skipped counts from
+                  <code>InitResult</code>. Print initialization success only
+                  after the config commit point.
+                </p>
+              </div>
+            </li>
+            <li>
+              <input
+                type="checkbox"
+                checked
+                id="t4s4"
+                aria-label="Task 4, step 4"
+              />
+              <div class="label">
+                <p>
+                  Add a separate identity command case with exact subcommand and
+                  argument validation. It delegates to the existing identity
+                  helper, without opening a repository, loading a default
+                  server, or making a request.
+                </p>
+                <pre><code>case &#x27;identity&#x27;: {
+  const [action, ...args] = rest;
+  const { values, positionals } = parseArgs({
+    args, options: { force: { type: &#x27;boolean&#x27; } }, allowPositionals: true,
+  });
+  if (action !== &#x27;init&#x27; || positionals.length !== 0) {
+    out(&#x27;usage: thaddeus identity init [--force]&#x27;);
+    return 2;
+  }
+  const { did, created } = initIdentity(env.home, values.force === true);
+  out(created ? `created identity ${did}` : `identity ${did}`);
+  return 0;
+}</code></pre>
+              </div>
+            </li>
+            <li>
+              <input
+                type="checkbox"
+                checked
+                id="t4s5"
+                aria-label="Task 4, step 5"
+              />
+              <div class="label">
+                <p>
+                  Update separate identity and init help entries, explicit
+                  server choice, uncommitted files, ignore precedence and retry
+                  behavior. Update the overview, config comments and
+                  missing-working-copy diagnostics to mention init alongside
+                  clone. Keep existing create/clone help and behavior. Add this
+                  user-facing copy to named init output, with actual counts on
+                  separate lines.
+                </p>
+                <pre><code>Existing files remain uncommitted. No file contents were uploaded.
+Run &#x27;thaddeus status&#x27; to review them, then &#x27;thaddeus push -m &quot;initial import&quot;&#x27;.</code></pre>
+              </div>
+            </li>
+            <li>
+              <input
+                type="checkbox"
+                checked
+                id="t4s6"
+                aria-label="Task 4, step 6"
+              />
+              <div class="label">
+                <p>
+                  Add tests for identity creation without network or
+                  working-copy metadata, repeat identity init with stable
+                  seed/DID, explicit identity force rotation, invalid identity
+                  subcommands, bare-init migration errors, and missing identity
+                  with zero fetch calls. Also cover server precedence, arity,
+                  force rejection, corrupt identity without replacement, empty
+                  root, re-init without fetch, and a second repo sharing the
+                  identity. Migrate every existing test fixture that uses bare
+                  init for identity setup to the new command; retain explicit
+                  bare-init refusal tests. This includes the CLI collaboration,
+                  publish, clone, config, signed-head, serve, quota-compile and
+                  other affected suites. Search all executable examples and
+                  tests rather than assuming only the new init tests need
+                  updating.
+                </p>
+                <pre><code>moon run cli:test -- test/init.test.ts test/repo-init.test.ts test/config.test.ts test/clone.test.ts test/publish.test.ts test/signed-heads.test.ts test/findroot.test.ts
+moon run cli:typecheck</code></pre>
+              </div>
+            </li>
+          </ol>
+        </section>
+      </section>
+      <section class="block">
+        <h2>Task 5: Exercise the standalone first-run flow and document it</h2>
+        <section class="task">
+          <p>
+            <span class="files"
+              >Create <code>packages/cli/test/init-compile.test.ts</code>;
+              modify <code>docs/getting-started.md</code>,
+              <code>docs/deploy.md</code>, <code>packages/cli/README.md</code>,
+              <code>examples/cli/src/cli-demo.ts</code> and
+              <code>examples/cli/src/grant-demo.ts</code>.</span
+            >
+          </p>
+          <dl class="io">
+            <dt>Consumes</dt>
+            <dd>
+              The finished named init command and the compiled-server startup
+              pattern in <code>packages/cli/test/quota-compile.test.ts</code>.
+            </dd>
+            <dt>Produces</dt>
+            <dd>
+              A real HTTP first-run acceptance test and commands a new user can
+              execute in an existing directory.
+            </dd>
+          </dl>
+          <ol class="steps">
+            <li>
+              <input
+                type="checkbox"
+                checked
+                id="t5s1"
+                aria-label="Task 5, step 1"
+              />
+              <div class="label">
+                <p>
+                  Add a standalone test that compiles
+                  <code>src/bin.ts</code> using the existing compile-test
+                  command. Launch that executable with
+                  <code>serve --data &lt;temporary-path&gt; --port 0</code>,
+                  parse its actual listening URL, use a startup timeout and
+                  always stop the process in finally. Use a temporary client
+                  home in child-process environment settings and a distinct cwd;
+                  do not change the test runner home or introduce
+                  <code>THADDEUS_HOME</code>, which the CLI does not read.
+                  Windows tests must set the home environment used by
+                  <code>node:os.homedir</code>.
+                </p>
+              </div>
+            </li>
+            <li>
+              <input
+                type="checkbox"
+                checked
+                id="t5s2"
+                aria-label="Task 5, step 2"
+              />
+              <div class="label">
+                <p>
+                  Add an asynchronous process runner that calls the compiled
+                  binary. Avoid synchronous child execution while an in-process
+                  listener needs the same event loop. The standalone server is a
+                  separate process, and stdout/stderr and exit status must
+                  appear in failure assertions.
+                </p>
+                <pre><code>async function cli(args: string[], cwd: string, home: string) {
+  const child = Bun.spawn({
+    cmd: [binary, ...args], cwd,
+    env: { ...process.env, HOME: home, USERPROFILE: home },
+    stdout: &#x27;pipe&#x27;, stderr: &#x27;pipe&#x27;,
+  });
+  const [exitCode, stdout, stderr] = await Promise.all([
+    child.exited, new Response(child.stdout).text(),
+    new Response(child.stderr).text(),
+  ]);
+  expect(exitCode, `${stdout}\n${stderr}`).toBe(0);
+  return stdout;
+}</code></pre>
+                <p>
+                  Define <code>binary</code> as the temporary compiled
+                  executable path in this test module. Use a separate raw spawn
+                  for expected failures so this helper cannot accidentally turn
+                  failures into successes.
+                </p>
+              </div>
+            </li>
+            <li>
+              <input
+                type="checkbox"
+                checked
+                id="t5s3"
+                aria-label="Task 5, step 3"
+              />
+              <div class="label">
+                <p>
+                  Run this sequence with real files created before init: source
+                  with binary bytes, an executable file, an ignored
+                  <code>.env</code>, <code>dist/</code>,
+                  <code>node_modules/</code>, and a <code>.git</code> worktree
+                  marker. Compare original bytes/modes immediately after init.
+                  Confirm remote empty main before push by cloning into a
+                  separate empty directory using the same identity.
+                </p>
+                <pre><code>await cli([&#x27;identity&#x27;, &#x27;init&#x27;], source, home);
+await cli([&#x27;init&#x27;, &#x27;acme/web&#x27;, &#x27;--server&#x27;, url], source, home);
+const initial = JSON.parse(await cli([&#x27;status&#x27;, &#x27;--json&#x27;], source, home));
+expect(initial.ahead).toBe(0);
+expect(initial.added).toContain(&#x27;src/main.ts&#x27;);
+expect(initial.added).not.toContain(&#x27;.env&#x27;);
+await cli([&#x27;clone&#x27;, &#x27;acme/web&#x27;, beforePush, &#x27;--server&#x27;, url], sandbox, home);
+expect(existsSync(join(beforePush, &#x27;src&#x27;, &#x27;main.ts&#x27;))).toBe(false);
+await cli([&#x27;push&#x27;, &#x27;-m&#x27;, &#x27;initial import&#x27;], source, home);
+await cli([&#x27;clone&#x27;, &#x27;acme/web&#x27;, freshClone, &#x27;--server&#x27;, url], sandbox, home);
+expect(readFileSync(join(freshClone, &#x27;src&#x27;, &#x27;main.ts&#x27;), &#x27;utf8&#x27;))
+  .toBe(readFileSync(join(source, &#x27;src&#x27;, &#x27;main.ts&#x27;), &#x27;utf8&#x27;));
+expect(existsSync(join(freshClone, &#x27;.env&#x27;))).toBe(false);</code></pre>
+                <p>
+                  The test creates <code>source</code>, <code>home</code>, and
+                  <code>sandbox</code> with mkdtemp; <code>beforePush</code> and
+                  <code>freshClone</code> are distinct nonexistent children of
+                  sandbox. <code>url</code> comes from the live server output.
+                  Assert remote-pulled content and ignored absence, not only
+                  console messages. Then edit the source, push again, pull in
+                  the fresh clone, and compare the new bytes.
+                </p>
+              </div>
+            </li>
+            <li>
+              <input
+                type="checkbox"
+                checked
+                id="t5s4"
+                aria-label="Task 5, step 4"
+              />
+              <div class="label">
+                <p>
+                  Extend the same executable test with repeated init, another
+                  repository from the same home, an empty repository, a second
+                  independent identity attempting the existing name, and server
+                  restart over the same durable data followed by a fresh clone.
+                  Exercise <code>identity init</code> then the existing
+                  <code>create</code>/<code>clone</code> flow too. Run bare init
+                  in a separate fresh home and assert exit 2 with the migration
+                  hint and no identity file. Run repository init without
+                  identity and assert it makes no remote repository. Create the
+                  second identity explicitly with <code>identity init</code>.
+                  Use actual exit codes and filesystem assertions for every
+                  case. Run this focused test before and after fixes until all
+                  cases pass.
+                </p>
+                <pre><code>moon run cli:test -- test/init-compile.test.ts</code></pre>
+              </div>
+            </li>
+            <li>
+              <input
+                type="checkbox"
+                checked
+                id="t5s5"
+                aria-label="Task 5, step 5"
+              />
+              <div class="label">
+                <p>
+                  Replace getting-started identity/create/clone-first
+                  instructions with an existing-directory example. Document
+                  <code>thaddeus identity init</code> as a one-time
+                  prerequisite, followed by repository-only
+                  <code>thaddeus init &lt;name&gt;</code>. State that bare init
+                  no longer creates an identity and give the replacement
+                  command. Keep server data outside the adopted directory. Use
+                  this exact working example in the guide, with the server
+                  command in a separate terminal.
+                </p>
+                <pre><code># Terminal 1: use a data directory outside your source directory.
+thaddeus serve --data /tmp/thaddeus-demo-server --port 4000
+
+# Terminal 2: create your identity once, then initialize this project.
+thaddeus identity init
+thaddeus init acme/web --server http://localhost:4000
+thaddeus status
+thaddeus diff
+thaddeus push -m &quot;initial import&quot;
+
+# A separate checkout, with its destination spelled out.
+thaddeus clone acme/web ../web-check --server http://localhost:4000</code></pre>
+                <p>
+                  Document the ignore source printed by init, root-only matcher
+                  limitations, uncommitted status, empty directory behavior,
+                  same-repo re-init, unchanged identity, and remote recovery
+                  limits. Update development attestation setup in
+                  <code>docs/deploy.md</code> and executable CLI demos to call
+                  <code>identity init</code>. Preserve historical plans/specs as
+                  historical records. The existing getting-started claim that
+                  default clone of <code>acme/web</code> goes to
+                  <code>./acme/web</code> is wrong; use an explicit destination
+                  in the touched example. Do not expand this task into THA-29
+                  version or demo work.
+                </p>
+              </div>
+            </li>
+            <li>
+              <input
+                type="checkbox"
+                checked
+                id="t5s6"
+                aria-label="Task 5, step 6"
+              />
+              <div class="label">
+                <p>
+                  Run the final verification baseline and the complete CLI
+                  suite. Discover the CLI example project tasks through moon,
+                  run its affected typecheck and execute both updated demos
+                  against temporary data. Exercise the documented commands with
+                  the compiled binary against temporary data as well; preserve a
+                  short transcript in <code>.agents/ignore/</code>. Report
+                  observed outputs and any unexercised platform or failure case.
+                </p>
+                <pre><code>moon run root:format root:lint
+moon run cli:typecheck
+moon run cli:test
+CI= moon run cli:compile</code></pre>
+              </div>
+            </li>
+          </ol>
+        </section>
+      </section>
+      <section class="block">
+        <h2>Acceptance coverage and review</h2>
+        <div class="table-scroll">
+          <table>
+            <thead>
+              <tr>
+                <th>Issue requirement</th>
+                <th>Evidence required before implementation is complete</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>Adopt current directory without moving files</td>
+                <td>
+                  Tasks 2, 4 and 5. File paths, byte comparisons and modes
+                  before/after init, no repo-name destination directory, usable
+                  config in cwd.
+                </td>
+              </tr>
+              <tr>
+                <td>Initial working state and explicit ignores</td>
+                <td>
+                  Tasks 1, 4 and 5. Added files against empty main, no upload
+                  until push, seeded/existing/default ignore cases, ignored
+                  files absent from a fresh clone.
+                </td>
+              </tr>
+              <tr>
+                <td>Identity and repository collisions</td>
+                <td>
+                  Tasks 2 through 5. Separate identity command exercised;
+                  missing identity refused without side effects; existing DID
+                  unchanged; corrupt identity refused; fresh
+                  same/different-owner collision refused; same-root re-init;
+                  second repo and second identity.
+                </td>
+              </tr>
+              <tr>
+                <td>Nested roots and empty directories</td>
+                <td>
+                  Tasks 2, 4 and 5. Canonical parent/descendant detection,
+                  ignored descendant root detection, installation metadata
+                  preserved, empty root clean.
+                </td>
+              </tr>
+              <tr>
+                <td>Rollback on failure</td>
+                <td>
+                  Task 3. Local artifact cleanup, unchanged original files,
+                  unchanged pre-existing identity, lost-create-response
+                  recovery, stale journal/lock handling, no unconditional remote
+                  delete.
+                </td>
+              </tr>
+              <tr>
+                <td>Real first-run exercised and documented</td>
+                <td>
+                  Task 5. Compiled binary, real socket, separate durable server
+                  process, first and second pushes, fresh clone, restart, and
+                  the exact guide commands.
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        <p>
+          Self-review: all supplied acceptance criteria have assigned tasks.
+          Interface names and transaction phases match across tasks. Identity
+          creation belongs exclusively to <code>thaddeus identity init</code>;
+          repository init never creates or rotates identity. No server API
+          extension, offline commit command or dependency addition is required.
+          Source history and permissions are not imported into Thaddeus history;
+          the guarantee is preservation of files in the adopted directory, not
+          new mode/symlink tracking in clones.
+        </p>
+        <p>
+          Implementation is present in the working tree on the feature branch.
+          Identity setup is now a separate command; repository init does not
+          create or rotate identity. No commits or pushes were made.
+        </p>
+        <p>
+          Observed on Linux: the compiled CLI completed identity setup, in-place
+          initialization, status/diff, two pushes, clone/pull, and a fresh clone
+          after durable server restart. A real process killed after remote
+          creation recovered with one create request. A separate process killed
+          after store installation recovered without publishing a partial
+          config. The standalone smoke run preserved existing bytes, excluded
+          .env, and finished with clean status after re-init.
+        </p>
+        <p>
+          The original grant demo failed because it expected a delegate to land
+          directly. The updated demo exercises the owner handoff, verifies the
+          owner can pull the landed file, then observes scope rejection and
+          revocation. Both CLI demos now pass. No runtime dependencies were
+          added. macOS and Windows have not been exercised.
+        </p>
+      </section>
+      <p class="progress">
+        <b><span id="done">27</span></b> of
+        <span id="total">27</span> implementation steps complete
+      </p>
+    </div>
+    <script>
+      // Progress counter. Inline only — external script src is rejected by postplan.
+      var boxes = document.querySelectorAll('ol.steps input[type=checkbox]');
+      var doneEl = document.getElementById('done');
+      document.getElementById('total').textContent = String(boxes.length);
+      function refresh() {
+        var n = 0;
+        boxes.forEach(function (b) {
+          if (b.checked) n++;
+        });
+        doneEl.textContent = String(n);
+      }
+      boxes.forEach(function (b) {
+        b.addEventListener('change', refresh);
+      });
+      refresh();
+    </script>
+  </body>
+</html>

@@ -33,7 +33,7 @@ describe('thaddeus release and releases', () => {
       out: (line: string) => out.push(line),
     });
 
-    expect(await run(['init'], env(home))).toBe(0);
+    expect(await run(['identity', 'init'], env(home))).toBe(0);
     expect(await run(['create', 'http://t', 'r'], env(home))).toBe(0);
     expect(await run(['clone', 'http://t', 'r', wc], env(wc))).toBe(0);
     writeFileSync(join(wc, 'README.md'), 'server version');
