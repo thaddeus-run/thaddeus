@@ -1,6 +1,6 @@
 import { Client } from '@thaddeus.run/client';
 import { ready } from '@thaddeus.run/identity';
-import { MemoryBackend } from '@thaddeus.run/persist';
+import { FileBackend, MemoryBackend } from '@thaddeus.run/persist';
 import { createServer } from '@thaddeus.run/server';
 import { afterAll, beforeAll, expect, test } from 'bun:test';
 import {
@@ -18,6 +18,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import { loadIdentity } from '../src/identity';
+import { prepareIgnore } from '../src/ignore';
+import { beginInitState } from '../src/init-state';
 import { inspectInit } from '../src/repo-init';
 import { run } from '../src/run';
 import { saveConfig } from '../src/workcopy';
@@ -332,4 +334,48 @@ test('recovery pins the original owner when a remote is replaced', async () => {
   expect(
     f.requests.slice(count).some((request) => request.method === 'DELETE')
   ).toBe(false);
+});
+
+test('first retry recovers an ignore seed installed before interruption', async () => {
+  const f = await fixture();
+  writeFileSync(join(f.cwd, '.gitignore'), '.env\n');
+  writeFileSync(join(f.cwd, '.env'), 'secret');
+  writeFileSync(join(f.cwd, 'keep.txt'), 'source');
+  const owner = loadIdentity(f.home);
+  const prepared = prepareIgnore(f.cwd);
+  const state = beginInitState({
+    root: f.cwd,
+    home: f.home,
+    repo: 'seeded-recovery',
+    server: 'http://t',
+    owner: owner.did,
+  });
+  const client = new Client('http://t', owner, f.env.fetchImpl);
+  await client.createRepo('seeded-recovery');
+  state.mark('remote-created');
+  await client.clone(
+    'seeded-recovery',
+    new FileBackend(join(state.stage, 'store')),
+    'main',
+    { expectedOwner: owner.did }
+  );
+  const config = join(f.cwd, '.thaddeus', 'config.json');
+  mkdirSync(config);
+  expect(() =>
+    state.publish(
+      { server: 'http://t', repo: 'seeded-recovery', base: [] },
+      prepared
+    )
+  ).toThrow();
+  expect(existsSync(join(f.cwd, '.thaddeusignore'))).toBe(true);
+  rmSync(config, { recursive: true });
+  state.release();
+  // Leave the same artifacts a crash before config publication would leave.
+  expect(
+    await run(['init', 'seeded-recovery', '--server', 'http://t'], f.env)
+  ).toBe(0);
+  expect(readFileSync(join(f.cwd, 'keep.txt'), 'utf8')).toBe('source');
+  f.lines.length = 0;
+  expect(await run(['status', '--json'], f.env)).toBe(0);
+  expect(JSON.parse(f.lines[0]).added).not.toContain('.env');
 });

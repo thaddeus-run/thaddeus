@@ -203,6 +203,13 @@ export async function initRepository(
       { expectedOwner: identity.did }
     );
   try {
+    // Recovery rolls back an ignore seed installed by the interrupted attempt.
+    // Inspect its inputs again before the network round trip, so publication
+    // compares against the recovered tree while still catching later edits.
+    const preparedIgnore = state.resumed
+      ? prepareIgnore(root)
+      : inspection.preparedIgnore;
+    result.ignoreSource = preparedIgnore.source;
     let cloned: Awaited<ReturnType<typeof clone>> | undefined;
     if (state.resumed && state.phase !== 'prepared') {
       try {
@@ -249,7 +256,7 @@ export async function initRepository(
       throw new InitConflictError('working-copy config appeared during init');
     state.publish(
       { server, repo: input.name, base: [], view: 'main' },
-      inspection.preparedIgnore
+      preparedIgnore
     );
     published = true;
     result.includedFiles = listWorkingFiles(
