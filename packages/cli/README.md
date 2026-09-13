@@ -22,8 +22,8 @@ server reputation attester is a separate host-security role described below.
 | ------------------------------------------------------------------------ | ------------------------------------------------------ |
 | `identity init [--force]`                                                | Create a self-owned `did:key` identity                 |
 | `init <name> [--server URL]`                                             | Adopt the current directory using an existing identity |
-| `create <server> <repo>`                                                 | Create a repo on a server                              |
-| `clone <server> <repo> [dir] [--owner DID]`                              | Clone and pin a signed head chain                      |
+| `create <repo> [--server URL]`                                           | Create a repo on a server                              |
+| `clone <repo> [dir] [--server URL] [--owner DID]`                        | Clone and pin a signed head chain                      |
 | `pull [--bootstrap-head]`                                                | Verify and fetch signed remote changes                 |
 | `status`                                                                 | Show working-tree changes                              |
 | `push [--no-land]`                                                       | Commit/upload; owner-sign the landing                  |
@@ -40,6 +40,10 @@ server reputation attester is a separate host-security role described below.
 | `reputation export <did> [--output path]`                                | Export a public reputation archive                     |
 | `reputation import <path\|->` / `import --from URL`                      | Import or directly copy your archive                   |
 | `serve [--port 4000] [--data DIR] [--attestation-aws-kms-key-arn ARN]`   | Run a durable server                                   |
+
+Set a default server with `thaddeus use <url>`, or select one for a command with
+`--server URL`. The explicit positional forms `create <server> <repo>` and
+`clone <server> <repo> [dir] [--owner DID]` also remain supported.
 
 ## Signed remote heads
 
