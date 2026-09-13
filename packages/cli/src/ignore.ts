@@ -1,4 +1,4 @@
-import { existsSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, lstatSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 // Directory names never walked into, whatever the ignore files say — VCS
@@ -17,6 +17,45 @@ export interface Ignore {
   // Whether a repo-relative POSIX path is ignored. `isDir` matches prune the
   // whole subtree (the walk never descends into an ignored directory).
   ignored(relPath: string, isDir: boolean): boolean;
+}
+
+export interface PreparedIgnore {
+  readonly source: 'thaddeusignore' | 'gitignore' | 'defaults';
+  readonly ignore: Ignore;
+  readonly seed: string | null;
+  readonly input: { path: string; text: string } | null;
+}
+
+// Init must know its rules before writing anything, and must not silently
+// include private files when an ignore file cannot be read.
+export function prepareIgnore(root: string): PreparedIgnore {
+  for (const source of ['thaddeusignore', 'gitignore'] as const) {
+    const path = join(root, `.${source}`);
+    let stat;
+    try {
+      stat = lstatSync(path);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') continue;
+      throw error;
+    }
+    if (!stat.isFile()) throw new Error(`${path} must be a regular file`);
+    const text = readFileSync(path, 'utf8');
+    return {
+      source,
+      ignore: compileIgnore(parse(text)),
+      input: { path, text },
+      seed:
+        source === 'gitignore'
+          ? `${SEED_HEADER}${text}${text.endsWith('\n') ? '' : '\n'}`
+          : null,
+    };
+  }
+  return {
+    source: 'defaults',
+    ignore: compileIgnore([]),
+    seed: null,
+    input: null,
+  };
 }
 
 // Translate one gitignore glob (already stripped of a leading `!`/`/` and a
@@ -123,9 +162,16 @@ export function loadIgnore(root: string): Ignore {
       // An unreadable ignore file is treated as absent, not fatal.
     }
   }
+  return compileIgnore(rules);
+}
+
+// Share identical matching rules between strict init inspection and the
+// existing working-copy loader.
+function compileIgnore(rules: readonly Rule[]): Ignore {
   return {
     ignored(relPath: string, isDir: boolean): boolean {
       const base = relPath.slice(relPath.lastIndexOf('/') + 1);
+      if (base === '.git' || base === '.thaddeus') return true;
       if (isDir && ALWAYS_IGNORED_DIRS.has(base)) return true;
       // Last matching rule wins (gitignore semantics); a dir-only rule never
       // applies to a file.

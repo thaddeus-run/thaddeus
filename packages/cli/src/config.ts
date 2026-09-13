@@ -11,7 +11,7 @@ export const HOSTED_SERVER = 'https://ams1.thaddeus.run';
 // `.thaddeus/config.json` (workcopy.ts). Lives beside the identity seed so all
 // user-scoped state is under one `~/.config/thaddeus/` dir.
 export interface CliConfig {
-  // The default server for `create`/`clone` when none is passed. Absent until
+  // The default server for `init`/`create`/`clone` when none is passed. Absent until
   // the user runs `thaddeus use`.
   defaultServer?: string;
 }
@@ -61,7 +61,7 @@ export function isServerUrl(s: string | undefined): boolean {
   }
 }
 
-// The message shown when `create`/`clone` can't resolve a server. This is the
+// The message shown when `init`/`create`/`clone` can't resolve a server. This is the
 // first-run hint: it lays out every way to provide one — inline, saved default,
 // or the hosted server — without ever pre-choosing for the user.
 export function noServerHint(command: string): string {

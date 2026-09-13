@@ -174,7 +174,7 @@ async function seedWatchRepo(): Promise<{
       writerOut.push(line);
     },
   };
-  await run(['init'], { ...writerEnv, cwd: home });
+  await run(['identity', 'init'], { ...writerEnv, cwd: home });
   await run(['create', 'http://t', 'proj'], { ...writerEnv, cwd: home });
   await run(['clone', 'http://t', 'proj', writer], writerEnv);
   writeFileSync(

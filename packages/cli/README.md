@@ -4,7 +4,7 @@ The **Thaddeus** CLI — `thaddeus` (alias `thad`).
 
 ```sh
 thaddeus serve --data ./srv-data &       # run a server
-thaddeus init                            # create a self-owned identity
+thaddeus identity init                   # create a self-owned identity
 thaddeus create http://localhost:4000 me/notes
 thaddeus clone http://localhost:4000 me/notes ~/notes
 cd ~/notes && echo "# notes" > readme.md && thaddeus push
@@ -18,27 +18,28 @@ server reputation attester is a separate host-security role described below.
 
 ## Commands
 
-| Command                                                                  | Description                            |
-| ------------------------------------------------------------------------ | -------------------------------------- |
-| `init`                                                                   | Create a self-owned `did:key` identity |
-| `create <server> <repo>`                                                 | Create a repo on a server              |
-| `clone <server> <repo> [dir] [--owner DID]`                              | Clone and pin a signed head chain      |
-| `pull [--bootstrap-head]`                                                | Verify and fetch signed remote changes |
-| `status`                                                                 | Show working-tree changes              |
-| `push [--no-land]`                                                       | Commit/upload; owner-sign the landing  |
-| `land`                                                                   | Owner-land uploaded commits            |
-| `grant <did> [--paths a,b] [--max-changes N] [--max-changes-per-hour N]` | Grant push rights to a DID/agent       |
-| `revoke <did>`                                                           | Revoke a previously granted delegation |
-| `grants`                                                                 | List active grants for this repo       |
-| `policy [set\|clear]`                                                    | Show or select repo land policy        |
-| `query <kind> ...`                                                       | Query history and the semantic graph   |
-| `watch [symbol] [--kind <event>]...`                                     | Stream remote semantic changes         |
-| `schedule-reveal <path> --at <ISO>`                                      | Make committed content public later    |
-| `reveal <path>`                                                          | Trigger a due public reveal            |
-| `reputation <did>`                                                       | Show trusted/untrusted reputation      |
-| `reputation export <did> [--output path]`                                | Export a public reputation archive     |
-| `reputation import <path\|->` / `import --from URL`                      | Import or directly copy your archive   |
-| `serve [--port 4000] [--data DIR] [--attestation-aws-kms-key-arn ARN]`   | Run a durable server                   |
+| Command                                                                  | Description                                            |
+| ------------------------------------------------------------------------ | ------------------------------------------------------ |
+| `identity init [--force]`                                                | Create a self-owned `did:key` identity                 |
+| `init <name> [--server URL]`                                             | Adopt the current directory using an existing identity |
+| `create <server> <repo>`                                                 | Create a repo on a server                              |
+| `clone <server> <repo> [dir] [--owner DID]`                              | Clone and pin a signed head chain                      |
+| `pull [--bootstrap-head]`                                                | Verify and fetch signed remote changes                 |
+| `status`                                                                 | Show working-tree changes                              |
+| `push [--no-land]`                                                       | Commit/upload; owner-sign the landing                  |
+| `land`                                                                   | Owner-land uploaded commits                            |
+| `grant <did> [--paths a,b] [--max-changes N] [--max-changes-per-hour N]` | Grant push rights to a DID/agent                       |
+| `revoke <did>`                                                           | Revoke a previously granted delegation                 |
+| `grants`                                                                 | List active grants for this repo                       |
+| `policy [set\|clear]`                                                    | Show or select repo land policy                        |
+| `query <kind> ...`                                                       | Query history and the semantic graph                   |
+| `watch [symbol] [--kind <event>]...`                                     | Stream remote semantic changes                         |
+| `schedule-reveal <path> --at <ISO>`                                      | Make committed content public later                    |
+| `reveal <path>`                                                          | Trigger a due public reveal                            |
+| `reputation <did>`                                                       | Show trusted/untrusted reputation                      |
+| `reputation export <did> [--output path]`                                | Export a public reputation archive                     |
+| `reputation import <path\|->` / `import --from URL`                      | Import or directly copy your archive                   |
+| `serve [--port 4000] [--data DIR] [--attestation-aws-kms-key-arn ARN]`   | Run a durable server                                   |
 
 ## Signed remote heads
 
@@ -191,3 +192,25 @@ thaddeus revoke did:key:z6Mk…
 `--max-object-bytes`, `--repository-creation-limit`, `--object-creation-limit`,
 and `--creation-window-ms`. These per-owner budgets persist across restart. See
 [durable quota defaults and operational details](../../docs/repository-quotas.md).
+
+## Initialize an existing project
+
+Create your identity once with `thaddeus identity init`. In your existing
+project, run `thaddeus init acme/web --server http://localhost:4000`, inspect
+`status` and `diff`, then `push -m "initial import"`. Init preserves files in
+place and creates empty signed main; included files remain uncommitted until
+push. Server choice is explicit or comes from `thaddeus use`.
+
+The root `.thaddeusignore` wins; otherwise init seeds it once from `.gitignore`.
+With neither, only built-in metadata and dependency exclusions apply. Nested
+ignore files are not read, and `.env` needs an explicit ignore rule. Empty
+directories, symlinks and special files stay on disk but are not tracked.
+
+Bare `init` no longer creates identity. Rotation is explicitly
+`thaddeus identity init --force`. Repository init never creates or changes a
+seed. Same-repository re-init succeeds, while conflicting or nested roots fail.
+If a remote create is interrupted, init rolls back its local artifacts and
+prints a retry command; it never deletes the remote. Recovery requires the same
+identity and an empty unchanged remote. See
+[getting started](../../docs/getting-started.md) for the full first-run and
+recovery flow.

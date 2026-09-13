@@ -37,8 +37,8 @@ describe('owner ⇄ delegate collaboration', () => {
     const dirA = join(tmp, 'work-owner');
     const dirB = join(tmp, 'work-delegate');
 
-    await run(['init'], quiet(ownerHome, tmp));
-    await run(['init'], quiet(delHome, tmp));
+    await run(['identity', 'init'], quiet(ownerHome, tmp));
+    await run(['identity', 'init'], quiet(delHome, tmp));
     const delegateDid = loadIdentity(delHome).did;
     const ownerDid = loadIdentity(ownerHome).did;
 
@@ -150,7 +150,7 @@ describe('owner ⇄ delegate collaboration', () => {
   test('pull refuses a dirty tree and unpublished commits', async () => {
     const home = mkdtempSync(join(tmp, 'gate-'));
     const dir = join(tmp, 'work-gate');
-    await run(['init'], quiet(home, tmp));
+    await run(['identity', 'init'], quiet(home, tmp));
     await run(['create', 'gated', '--server', 'http://t'], quiet(home, tmp));
     await run(
       ['clone', 'gated', dir, '--server', 'http://t'],

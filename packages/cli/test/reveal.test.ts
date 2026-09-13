@@ -28,7 +28,7 @@ describe('schedule-reveal / reveal', () => {
       out: (line: string) => output.push(line),
     });
 
-    expect(await run(['init'], env(home))).toBe(0);
+    expect(await run(['identity', 'init'], env(home))).toBe(0);
     expect(await run(['create', 'http://t', 'r'], env(home))).toBe(0);
     expect(await run(['clone', 'http://t', 'r', work], env(home))).toBe(0);
     writeFileSync(join(work, 'announcement.md'), 'not yet');

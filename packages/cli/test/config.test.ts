@@ -89,7 +89,7 @@ describe('thaddeus use (default server)', () => {
 describe('create/clone server resolution', () => {
   test('uses the saved default when no server is passed', async () => {
     const { out, e } = harness();
-    await run(['init'], { ...e, out: () => {} });
+    await run(['identity', 'init'], { ...e, out: () => {} });
     await run(['use', 'http://t'], { ...e, out: () => {} });
     out.length = 0;
     expect(await run(['create', 'r'], e)).toBe(0);
@@ -98,7 +98,7 @@ describe('create/clone server resolution', () => {
 
   test('--server overrides, and a leading url still works (back-compat)', async () => {
     const { e } = harness();
-    await run(['init'], { ...e, out: () => {} });
+    await run(['identity', 'init'], { ...e, out: () => {} });
 
     const flag: string[] = [];
     expect(
@@ -133,7 +133,7 @@ describe('create/clone server resolution', () => {
 
   test('clone resolves the default and records it', async () => {
     const { e } = harness();
-    await run(['init'], { ...e, out: () => {} });
+    await run(['identity', 'init'], { ...e, out: () => {} });
     await run(['use', 'http://t'], { ...e, out: () => {} });
     await run(['create', 'repo1'], { ...e, out: () => {} });
 

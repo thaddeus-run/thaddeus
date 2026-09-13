@@ -45,7 +45,7 @@ describe('thaddeus query', () => {
       return run(args, env(cwd));
     };
 
-    expect(await invoke(home, ['init'])).toBe(0);
+    expect(await invoke(home, ['identity', 'init'])).toBe(0);
     expect(await invoke(home, ['create', 'http://t', 'proj'])).toBe(0);
     expect(await invoke(wc, ['clone', 'http://t', 'proj', wc])).toBe(0);
 

@@ -38,8 +38,8 @@ describe('thaddeus grant/revoke/grants', () => {
         out: (l: string) => out.push(l),
       });
 
-      await run(['init'], e(ownerHome, ownerHome));
-      await run(['init'], e(teammateHome, teammateHome));
+      await run(['identity', 'init'], e(ownerHome, ownerHome));
+      await run(['identity', 'init'], e(teammateHome, teammateHome));
       // Read the teammate DID from their identity file.
       const teammateDid = (
         JSON.parse(
@@ -156,8 +156,8 @@ describe('thaddeus grant/revoke/grants', () => {
         home,
         out: (l: string) => out.push(l),
       });
-      await run(['init'], e(ownerHome, ownerHome));
-      await run(['init'], e(mateHome, mateHome));
+      await run(['identity', 'init'], e(ownerHome, ownerHome));
+      await run(['identity', 'init'], e(mateHome, mateHome));
       const mateDid = (
         JSON.parse(
           readFileSync(

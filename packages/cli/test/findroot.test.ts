@@ -50,7 +50,7 @@ describe('findRoot identifies a working copy by its config', () => {
     mkdirSync(join(home, '.thaddeus', 'bin'), { recursive: true });
     const out: string[] = [];
     const e = { cwd: home, home, fetchImpl, out: (l: string) => out.push(l) };
-    await run(['init'], { ...e, out: () => {} });
+    await run(['identity', 'init'], { ...e, out: () => {} });
 
     expect(await run(['status'], e)).toBe(2);
     expect(out.join('\n')).toContain('not a thaddeus working copy');
@@ -64,7 +64,7 @@ describe('reputation is server-scoped, not repo-scoped', () => {
     mkdirSync(join(home, '.thaddeus', 'bin'), { recursive: true });
     const out: string[] = [];
     const e = { cwd: home, home, fetchImpl, out: (l: string) => out.push(l) };
-    await run(['init'], { ...e, out: () => {} });
+    await run(['identity', 'init'], { ...e, out: () => {} });
     await run(['use', 'http://t'], { ...e, out: () => {} });
 
     out.length = 0;
@@ -77,7 +77,7 @@ describe('reputation is server-scoped, not repo-scoped', () => {
     const home = mkdtempSync(join(tmp, 'rep2-'));
     const out: string[] = [];
     const e = { cwd: home, home, fetchImpl, out: (l: string) => out.push(l) };
-    await run(['init'], { ...e, out: () => {} });
+    await run(['identity', 'init'], { ...e, out: () => {} });
 
     const did = 'did:key:z6MkjydYfM38y8PSRpkvxtyNvfyQj4GqEXrF79nvhUqRG7fC';
     expect(await run(['reputation', did, '--server', 'http://t'], e)).toBe(0);
@@ -92,7 +92,7 @@ describe('reputation is server-scoped, not repo-scoped', () => {
     const home = mkdtempSync(join(tmp, 'rep3-'));
     const out: string[] = [];
     const e = { cwd: home, home, fetchImpl, out: (l: string) => out.push(l) };
-    await run(['init'], { ...e, out: () => {} });
+    await run(['identity', 'init'], { ...e, out: () => {} });
 
     const did = 'did:key:z6MkjydYfM38y8PSRpkvxtyNvfyQj4GqEXrF79nvhUqRG7fC';
     expect(await run(['reputation', did], e)).toBe(2);

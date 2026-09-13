@@ -296,7 +296,7 @@ describe('startServer', () => {
   test('warns before starting with the development-only local host seed', async () => {
     const home = mkdtempSync(join(tmp, 'local-host-home-'));
     expect(
-      await run(['init'], {
+      await run(['identity', 'init'], {
         cwd: tmp,
         home,
         out: () => {},
@@ -596,7 +596,7 @@ describe('startServer', () => {
     try {
       const home = mkdtempSync(join(tmp, 'home-'));
       const e = (cwd: string) => ({ cwd, home, out: () => {} });
-      expect(await run(['init'], e(home))).toBe(0);
+      expect(await run(['identity', 'init'], e(home))).toBe(0);
       expect(await run(['create', s.url, 'proj'], e(home))).toBe(0);
       const a = mkdtempSync(join(tmp, 'a-'));
       expect(await run(['clone', s.url, 'proj', a], e(a))).toBe(0);
@@ -620,7 +620,7 @@ describe('startServer', () => {
       const home = mkdtempSync(join(tmp, 'reveal-home-'));
       const work = mkdtempSync(join(tmp, 'reveal-work-'));
       const e = (cwd: string) => ({ cwd, home, out: () => {} });
-      expect(await run(['init'], e(home))).toBe(0);
+      expect(await run(['identity', 'init'], e(home))).toBe(0);
       expect(await run(['create', s.url, 'reveal'], e(home))).toBe(0);
       expect(await run(['clone', s.url, 'reveal', work], e(work))).toBe(0);
       writeFileSync(join(work, 'news.md'), 'public now');
@@ -651,7 +651,9 @@ describe('startServer', () => {
         home: outsiderHome,
         out: () => {},
       });
-      expect(await run(['init'], outsiderEnv(outsiderHome))).toBe(0);
+      expect(await run(['identity', 'init'], outsiderEnv(outsiderHome))).toBe(
+        0
+      );
       expect(
         await run(['clone', s.url, 'reveal', outsider], outsiderEnv(outsider))
       ).toBe(0);

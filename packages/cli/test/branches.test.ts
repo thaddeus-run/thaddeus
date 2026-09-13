@@ -36,7 +36,7 @@ describe('branches as workspaces (copy-on-write, shared store)', () => {
   test('branch → workspace → push on branch → land into main', async () => {
     const home = mkdtempSync(join(tmp, 'home-'));
     const dir = join(tmp, 'work');
-    await run(['init'], quiet(home, tmp));
+    await run(['identity', 'init'], quiet(home, tmp));
     await run(['create', 'proj', '--server', 'http://t'], quiet(home, tmp));
     await run(['clone', 'proj', dir, '--server', 'http://t'], quiet(home, tmp));
 
@@ -126,7 +126,7 @@ describe('branches as workspaces (copy-on-write, shared store)', () => {
   test('guards: duplicate, reserved, self-land, nested workspace, stubs', async () => {
     const home = mkdtempSync(join(tmp, 'guard-'));
     const dir = join(tmp, 'guard-work');
-    await run(['init'], quiet(home, tmp));
+    await run(['identity', 'init'], quiet(home, tmp));
     await run(['create', 'g', '--server', 'http://t'], quiet(home, tmp));
     await run(['clone', 'g', dir, '--server', 'http://t'], quiet(home, tmp));
     writeFileSync(join(dir, 'x.txt'), 'x');

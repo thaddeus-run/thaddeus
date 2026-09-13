@@ -29,7 +29,7 @@ describe('thaddeus policy', () => {
       out: (l: string) => out.push(l),
     });
 
-    expect(await run(['init'], e(home))).toBe(0);
+    expect(await run(['identity', 'init'], e(home))).toBe(0);
     expect(await run(['create', 'http://t', 'proj'], e(home))).toBe(0);
     expect(await run(['clone', 'http://t', 'proj', wc], e(wc))).toBe(0);
     writeFileSync(join(wc, 'a.txt'), 'a\n');

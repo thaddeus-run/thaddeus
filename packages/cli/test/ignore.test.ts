@@ -5,16 +5,47 @@ import {
   mkdtempSync,
   readFileSync,
   rmSync,
+  symlinkSync,
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import { loadIgnore } from '../src/ignore';
+import { loadIgnore, prepareIgnore } from '../src/ignore';
 import { listWorkingFiles } from '../src/workcopy';
 
 const tmp = mkdtempSync(join(tmpdir(), 'thaddeus-ignore-'));
 afterAll(() => rmSync(tmp, { recursive: true, force: true }));
+
+describe('prepareIgnore', () => {
+  test('prepares seeded rules without writing to the source directory', () => {
+    const root = mkdtempSync(join(tmp, 'prepare-'));
+    writeFileSync(join(root, '.gitignore'), '.env\ndist/\n');
+    writeFileSync(join(root, '.git'), 'gitdir: ../git');
+    writeFileSync(join(root, 'source.ts'), 'source');
+    const prepared = prepareIgnore(root);
+    expect(prepared.source).toBe('gitignore');
+    expect(prepared.seed).toContain('.env\n');
+    expect(prepared.ignore.ignored('.env', false)).toBe(true);
+    expect(listWorkingFiles(root, prepared.ignore)).toEqual([
+      '.gitignore',
+      'source.ts',
+    ]);
+    expect(existsSync(join(root, '.thaddeusignore'))).toBe(false);
+  });
+
+  test('uses the existing Thaddeus rules and rejects non-regular inputs', () => {
+    const root = mkdtempSync(join(tmp, 'strict-'));
+    writeFileSync(join(root, '.thaddeusignore'), 'private\n');
+    mkdirSync(join(root, '.gitignore'));
+    expect(prepareIgnore(root).source).toBe('thaddeusignore');
+    rmSync(join(root, '.thaddeusignore'));
+    expect(() => prepareIgnore(root)).toThrow('regular file');
+    rmSync(join(root, '.gitignore'), { recursive: true });
+    symlinkSync('missing', join(root, '.thaddeusignore'));
+    expect(() => prepareIgnore(root)).toThrow('regular file');
+  });
+});
 
 describe('loadIgnore', () => {
   test('always prunes .git/.thaddeus/node_modules with no ignore files', () => {

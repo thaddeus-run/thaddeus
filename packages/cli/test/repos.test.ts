@@ -35,7 +35,7 @@ describe('thaddeus repos + delete', () => {
     const quiet = (h: string) => env(h, () => {});
 
     for (const h of [a, b]) {
-      await run(['init'], quiet(h));
+      await run(['identity', 'init'], quiet(h));
       await run(['use', 'http://t'], quiet(h));
     }
     await run(['create', 'alice/one'], quiet(a));
