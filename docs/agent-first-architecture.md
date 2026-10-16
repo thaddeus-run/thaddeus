@@ -69,9 +69,13 @@ rules out browsing, search and execution.
 | Isolated execution workers | Builds and tests for checkpoints, isolated from other tenants and from service credentials. |
 | Durable repository store   | Immutable objects, history and the records the other components rebuild from.               |
 
-These are lines of responsibility. They need not be separate deployments. This
-document makes no multi-node correctness claim while durable state still lives
-in process memory.
+These are lines of responsibility. They need not be separate deployments. The
+shipped server already writes durable state through to its storage backend.
+Per-node caches and counters live in process memory, and the backend has no
+conditional-write contract yet, so this document makes no multi-node correctness
+claim. [THA-15](https://linear.app/thaddeus-run/issue/THA-15),
+[THA-69](https://linear.app/thaddeus-run/issue/THA-69) and
+[THA-68](https://linear.app/thaddeus-run/issue/THA-68) own that work.
 
 **Workspaces.** A workspace points at an immutable base revision and stores only
 what changed. Each save carries a retry identifier and a sequence number, and
@@ -130,19 +134,19 @@ observed in a named benchmark environment with a recorded method. Documents in
 this repository may cite a target only with the word "target" next to it. They
 may cite a measurement only with a link to the run that produced it.
 
-| Target                                | Value                              | Measured | Owner                                    |
-| ------------------------------------- | ---------------------------------- | -------- | ---------------------------------------- |
-| Warm workspace materialization        | Sub-second                         | No       | THA-117 defines it, THA-5 measures it    |
-| Branch or workspace creation          | Single-digit milliseconds          | No       | THA-117, THA-5                           |
-| Indexed repository query              | Milliseconds                       | No       | THA-117, THA-5                           |
-| Repository creation throughput        | About 15,000 per minute, sustained | No       | THA-117, THA-5                           |
-| Simultaneous agents on one repository | 1,000 or more                      | No       | THA-117 defines it, THA-130 qualifies it |
+| Target                                          | Value                                                | Measured | Owner                                    |
+| ----------------------------------------------- | ---------------------------------------------------- | -------- | ---------------------------------------- |
+| Cold install or checkout                        | Sub-second on any OS                                 | No       | THA-117 defines it, THA-5 measures it    |
+| Repository or scope creation, ready to push     | Single-digit milliseconds                            | No       | THA-117, THA-5                           |
+| Query over repository history                   | Milliseconds                                         | No       | THA-117, THA-5                           |
+| Repository creation throughput under agent load | About 15,000 per minute, sustained, with no downtime | No       | THA-117, THA-5                           |
+| Simultaneous agents on one repository           | 1,000 or more                                        | No       | THA-117 defines it, THA-130 qualifies it |
 
 Cold and warm paths get separate reports. One hot repository and many
 independent repositories are separate workloads with separate benchmarks. An
-architecture diagram supports no scale claim. These numbers come from the floor
-table in [the manifesto](../the-new-age-of-source-control.html), which predates
-any measurement.
+architecture diagram supports no scale claim. The first four rows restate the
+floor table in [the manifesto](../the-new-age-of-source-control.html), which
+predates any measurement. The agent count comes from ADR 0004.
 
 ## 6. Build queue
 

@@ -94,6 +94,11 @@ explicitly if you want it:
 thaddeus use --hosted                 # use https://ams1.thaddeus.run
 ```
 
+The official hosted server runs this same open-source server today, so it holds
+no repository decryption keys either, apart from timed reveals. It becomes a
+trusted service only when the work in
+[ADR 0003](adr/0003-trusted-code-processing-service.md) ships.
+
 ## 4. Adopt your project and publish
 
 Start in the directory containing your existing project. The identity created in
