@@ -3,6 +3,8 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 
+import { VERSION } from '../src/version';
+
 // The package root (this file is packages/cli/test/compile.test.ts).
 const pkgRoot = resolve(import.meta.dir, '..');
 const tmp = mkdtempSync(join(tmpdir(), 'thaddeus-cli-compile-'));
@@ -26,7 +28,7 @@ describe('compiled standalone binary', () => {
     // The binary runs with no Bun on PATH — it IS the runtime.
     const version = Bun.spawnSync({ cmd: [bin, '--version'] });
     expect(version.exitCode).toBe(0);
-    expect(dec(version.stdout).trim()).toMatch(/^\d+\.\d+\.\d+/);
+    expect(dec(version.stdout).trim()).toBe(VERSION);
 
     const help = Bun.spawnSync({ cmd: [bin, '--help'] });
     expect(help.exitCode).toBe(0);

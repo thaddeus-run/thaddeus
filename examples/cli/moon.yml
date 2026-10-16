@@ -6,7 +6,17 @@ layer: 'application'
 
 tasks:
   test:
-    args: '--pass-with-no-tests'
+    deps:
+      - 'cli:compile'
+    options:
+      cache: false
+  agent-demo:
+    command: 'bun src/agent-governed-demo.ts'
+    deps:
+      - 'cli:compile'
+    options:
+      cache: false
+      runInCI: 'skip'
   demo:
     command: 'bun src/cli-demo.ts'
     deps:

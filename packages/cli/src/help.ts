@@ -20,7 +20,7 @@ Working tree
   status                        show working-tree changes
   show   [--view B] [path...]   inspect a committed view without touching files
   diff   [--staged] [path...]   show line diffs (or --from/--to views)
-  push   [-m "<why>"]           commit + upload; owner-sign the shared head
+  push   [-m "<why>"] [--actor-kind kind]  commit + upload; owner-sign the shared head
   land   [<branch>] [--dry-run] owner-land commits or a branch under policy
 
 History & meaning
@@ -31,7 +31,7 @@ History & meaning
   veto   <op> [-m "<reason>"] [--grant id]  veto an operation
   veto withdraw <veto-id>         withdraw a veto
   vetoes <op>                     list the standing vetoes on one op
-  rename <old> <new> [-m "<why>"] rename a symbol as one signed SymbolOp
+  rename <old> <new> [-m "<why>"] [--actor-kind kind]  rename a symbol
   history <symbol>                a symbol's signed rename chain
   release <tag>                   sign immutable server-history metadata
   releases [tag]                  list releases or show one
@@ -190,13 +190,18 @@ thaddeus diff [--from <branch>] [--to <branch>] [path...] [--json]
   side means this working copy's current branch. --staged cannot be combined
   with --from/--to.`,
 
-  push: `thaddeus push [-m "<why>"] [--no-land]
+  push: `thaddeus push [-m "<why>"] [--actor-kind human|agent:<name>@<version>] [--no-land]
 
   Commit the working-tree diff, upload it, and land it on 'main'. -m attaches a
   signed provenance "why" to each uploaded op. --no-land uploads without
   landing. Shared heads require the repository owner's signature: a delegate's
   automatic landing stops after upload and prints the uploaded head IDs for the
-  owner; it never claims the change was published.`,
+  owner; it never claims the change was published.
+
+  --actor-kind declares the explanation signer's kind and requires a nonblank -m.
+  Omission keeps the human default, including for delegates. The signed label
+  does not prove agent execution or grant authority. Retrying ahead operations
+  with a new explanation appends claims; earlier claims and signatures remain.`,
 
   land: `thaddeus land [<branch>] [--dry-run] [--json]
 
@@ -272,10 +277,13 @@ thaddeus query references <name> [--json]
   List veto IDs, signature validity, and lifecycle for an op resolved by prefix.
   Offline log and vetoes show last-synced review state; pull refreshes history.`,
 
-  rename: `thaddeus rename <old> <new> [-m "<why>"] [--no-land]
+  rename: `thaddeus rename <old> <new> [-m "<why>"] [--actor-kind human|agent:<name>@<version>] [--no-land]
 
   Rename a symbol as ONE signed SymbolOp rendered across its definition and
-  every reference, then push + land. -m attaches a why; --no-land uploads only.`,
+  every reference, then push + land. -m attaches a why; --no-land uploads only.
+  --actor-kind declares the explanation signer's kind and requires a nonblank -m.
+  Omission keeps the human default. The declaration does not prove agent
+  execution or grant authority. Invalid declarations stop before any edits.`,
 
   history: `thaddeus history <symbol> [--json]
 

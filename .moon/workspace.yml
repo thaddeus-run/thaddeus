@@ -23,6 +23,10 @@ vcs:
   sync: true
   hooks:
     pre-commit:
+      # GUI Git clients may not load the shell profile that adds proto to PATH.
+      # Load its pinned tools here so hooks use the same toolchain as the CLI.
+      - 'export
+        PATH="${PROTO_HOME:-$HOME/.proto}/shims:${PROTO_HOME:-$HOME/.proto}/bin:$PATH"'
       # Typecheck the projects affected by staged files (and their dependents),
       # format the worktree, then run lint-staged (which re-stages fixes).
       - 'moon exec :typecheck --affected --status staged'

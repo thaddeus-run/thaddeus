@@ -19,6 +19,7 @@ tasks:
     command: 'noop'
     deps:
       - 'build'
+      - 'root:version-check'
     options:
       cache: false
       runInCI: 'skip'

@@ -1,0 +1,2359 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="color-scheme" content="dark" />
+    <title>
+      Issue 82: Getting started and agent-governed demo implementation plan
+    </title>
+    <style>
+      :root {
+        /* Near-black editorial palette. Dark-only by design — do not add a light theme. */
+        --bg: #000000;
+        --surface: #0c0c0c; /* cards */
+        --rule: #232323; /* hairlines, card borders */
+        --fg: #ededed; /* body text */
+        --fg-strong: #ffffff; /* headings */
+        --muted: #8b8b8b; /* secondary text, table heads */
+        --code-bg: #242424; /* inline code chip */
+        --block-bg: #0e0e0e; /* pre blocks */
+        --accent: #6fdc8c; /* links, skill names, checked state */
+        --s: #5ee08a;
+        --a: #a8e05f;
+        --b: #e0c95e;
+        --c: #e0a35e;
+        --d: #e06f6f;
+        --x: #7a7a7a;
+      }
+      * {
+        box-sizing: border-box;
+      }
+      html {
+        -webkit-text-size-adjust: 100%;
+      }
+      body {
+        margin: 0;
+        background: var(--bg);
+        color: var(--fg);
+        font:
+          17px/1.7 system-ui,
+          -apple-system,
+          'Helvetica Neue',
+          'Segoe UI',
+          Arial,
+          sans-serif;
+        font-synthesis-weight: none;
+        -webkit-font-smoothing: antialiased;
+      }
+      .wrap {
+        max-width: 900px;
+        margin: 0 auto;
+        padding: 4rem 1.5rem 8rem;
+      }
+
+      /* ---------- Type ---------- */
+      h1,
+      h2,
+      h3 {
+        color: var(--fg-strong);
+        font-weight: 700;
+        letter-spacing: -0.021em;
+      }
+      h1 {
+        font-size: 2.25rem;
+        line-height: 1.15;
+        margin: 0 0 1rem;
+      }
+      h2 {
+        font-size: 1.4rem;
+        line-height: 1.25;
+        margin: 0 0 1.25rem;
+      }
+      h3 {
+        font-size: 1.05rem;
+        line-height: 1.4;
+        margin: 2rem 0 0.5rem;
+      }
+      p {
+        margin: 0 0 1.1rem;
+      }
+      a {
+        color: var(--accent);
+        text-decoration: none;
+      }
+      a:hover {
+        text-decoration: underline;
+      }
+      .lede {
+        color: var(--muted);
+        font-size: 1.05rem;
+        margin: 0;
+      }
+      .muted {
+        color: var(--muted);
+      }
+
+      /* Sections are separated by a hairline and a lot of air — no boxes around prose. */
+      section.block {
+        border-top: 1px solid var(--rule);
+        padding-top: 2.5rem;
+        margin-top: 2.5rem;
+      }
+      header {
+        padding-bottom: 1.75rem;
+      }
+
+      /* ---------- Code ---------- */
+      code {
+        font-family: ui-monospace, SFMono-Regular, 'SF Mono', Menlo, monospace;
+        font-size: 0.855em;
+        background: var(--code-bg);
+        color: #e8e8e8;
+        padding: 0.12em 0.42em;
+        border-radius: 4px;
+        white-space: nowrap;
+      }
+      pre {
+        background: var(--block-bg);
+        border: 1px solid var(--rule);
+        border-radius: 8px;
+        padding: 1rem 1.1rem;
+        overflow-x: auto;
+        font-size: 0.875rem;
+        line-height: 1.6;
+        margin: 0.9rem 0;
+      }
+      pre code {
+        background: none;
+        padding: 0;
+        font-size: inherit;
+        white-space: pre;
+        color: var(--fg);
+      }
+
+      /* ---------- Stat cards ---------- */
+      .stats {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
+        gap: 0.9rem;
+        margin: 1.75rem 0;
+      }
+      .stat {
+        background: var(--surface);
+        border: 1px solid var(--rule);
+        border-radius: 10px;
+        padding: 1.2rem 1.3rem 1.35rem;
+      }
+      .stat b {
+        display: block;
+        color: var(--fg-strong);
+        font-size: 2rem;
+        font-weight: 500;
+        letter-spacing: -0.02em;
+        line-height: 1.1;
+        margin-bottom: 0.5rem;
+      }
+      .stat span {
+        color: var(--muted);
+        font-size: 0.95rem;
+        line-height: 1.45;
+      }
+
+      /* ---------- Tables: uppercase muted heads, hairline rows, no vertical rules ---------- */
+      .table-scroll {
+        overflow-x: auto;
+        margin: 1.5rem 0;
+      }
+      table {
+        border-collapse: collapse;
+        width: 100%;
+      }
+      th {
+        text-align: left;
+        vertical-align: bottom;
+        color: var(--muted);
+        font-size: 0.74rem;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.1em;
+        padding: 0 1.5rem 0.8rem 0;
+        border-bottom: 1px solid var(--rule);
+        white-space: nowrap;
+      }
+      td {
+        text-align: left;
+        vertical-align: top;
+        padding: 0.95rem 1.5rem 0.95rem 0;
+        border-bottom: 1px solid var(--rule);
+      }
+      th:last-child,
+      td:last-child {
+        padding-right: 0;
+      }
+      tbody tr:last-child td {
+        border-bottom: 0;
+      }
+      td.num {
+        color: var(--muted);
+        font-variant-numeric: tabular-nums;
+      }
+
+      /* ---------- Tier / status legend ---------- */
+      .legend {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 1.25rem;
+        color: var(--muted);
+        font-size: 0.95rem;
+        margin: 0 0 0.75rem;
+      }
+      .tier {
+        font-weight: 700;
+      }
+      .tier-s {
+        color: var(--s);
+      }
+      .tier-a {
+        color: var(--a);
+      }
+      .tier-b {
+        color: var(--b);
+      }
+      .tier-c {
+        color: var(--c);
+      }
+      .tier-d {
+        color: var(--d);
+      }
+      .tier-x {
+        color: var(--x);
+      }
+      .name {
+        color: var(--accent);
+        font-weight: 600;
+      }
+
+      /* ---------- Callout ---------- */
+      .callout {
+        background: var(--surface);
+        border: 1px solid var(--rule);
+        border-radius: 10px;
+        padding: 1.15rem 1.35rem;
+        margin: 1.5rem 0;
+      }
+      .callout > :last-child {
+        margin-bottom: 0;
+      }
+      .callout strong {
+        color: var(--fg-strong);
+      }
+      .callout ul {
+        margin: 0.6rem 0 0;
+        padding-left: 1.15rem;
+      }
+      .callout li {
+        margin: 0.3rem 0;
+      }
+
+      /* ---------- Tasks ---------- */
+      section.task {
+        background: var(--surface);
+        border: 1px solid var(--rule);
+        border-radius: 10px;
+        padding: 1.4rem 1.6rem;
+        margin: 1.25rem 0;
+      }
+      .files {
+        font-size: 0.92rem;
+        color: var(--muted);
+        margin: 0 0 1rem;
+      }
+      .files code {
+        color: var(--fg);
+        white-space: normal;
+      }
+      .io {
+        margin: 0 0 1.25rem;
+        font-size: 0.95rem;
+      }
+      .io dt {
+        color: var(--muted);
+        font-size: 0.74rem;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.1em;
+      }
+      .io dd {
+        margin: 0.2rem 0 0.75rem;
+      }
+      ol.steps {
+        list-style: none;
+        padding: 0;
+        margin: 0;
+      }
+      ol.steps > li {
+        display: flex;
+        gap: 0.7rem;
+        align-items: flex-start;
+        padding: 0.7rem 0;
+        border-top: 1px solid var(--rule);
+      }
+      ol.steps > li:first-child {
+        border-top: 0;
+        padding-top: 0;
+      }
+      ol.steps input {
+        margin: 0.42rem 0 0;
+        flex: none;
+        width: 1rem;
+        height: 1rem;
+        accent-color: var(--accent);
+      }
+      ol.steps input:checked + .label {
+        color: var(--muted);
+      }
+      ol.steps input:checked + .label strong {
+        color: var(--muted);
+        text-decoration: line-through;
+      }
+      .label {
+        flex: 1;
+        min-width: 0;
+      }
+      .label strong {
+        color: var(--fg-strong);
+        font-weight: 600;
+      }
+
+      .progress {
+        color: var(--muted);
+        font-size: 0.95rem;
+        margin-top: 3rem;
+        border-top: 1px solid var(--rule);
+        padding-top: 1.5rem;
+      }
+      .progress b {
+        color: var(--accent);
+      }
+
+      @media (max-width: 620px) {
+        body {
+          font-size: 16px;
+        }
+        h1 {
+          font-size: 1.8rem;
+        }
+        .wrap {
+          padding: 2.5rem 1.1rem 5rem;
+        }
+        section.task {
+          padding: 1.1rem 1.15rem;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="wrap">
+      <header>
+        <h1>Issue 82: Getting started and agent-governed demo</h1>
+        <p class="lede">
+          An implementation plan preserving nine recorded design decisions. The
+          demo runs the checkout's compiled CLI, proves separate policy gates,
+          and leaves inspectable evidence when it fails.
+        </p>
+        <p>
+          Refreshed 2026-10-16 against <code>main</code> at
+          <code>6dda4eb</code> in <code>/root/Coding/thaddeus</code>. The
+          original file path is retained so uploading updates the same Postplan
+          draft. This is planning work on <code>plan/issue-82-dx</code>. Feature
+          implementation has not started.
+        </p>
+        <p>
+          Spec:
+          <a
+            href="https://linear.app/thaddeus-run/issue/THA-29/dx-fix-getting-started-clone-path-bug-version-drift-and-ship-a"
+            >THA-29</a
+          >, mirrored as
+          <a href="https://github.com/thaddeus-run/thaddeus/issues/82"
+            >GitHub #82</a
+          >, plus the accepted design decisions recorded below.
+        </p>
+        <p>
+          For agentic workers: implement task by task using
+          <code>superpowers:executing-plans</code> when available. Check off a
+          step only after observing its result. Do not commit, push, tag,
+          publish packages, or run the release publication workflow without a
+          separate request.
+        </p>
+      </header>
+      <section class="block">
+        <h2>Goal and architecture</h2>
+        <p>
+          Make the existing first-run instructions reproducible, enforce the
+          shared release version, and ship <code>make demo</code> as a live
+          demonstration of agent-governed changes. The clone-path guidance is
+          already corrected by THA-27; preserve it and exercise both destination
+          forms.
+        </p>
+        <p>
+          A Bun driver starts the compiled CLI server, initializes separate
+          temporary identities, and runs every actor command through that same
+          executable over HTTP. The owner signs shared-head changes; a distinct
+          reviewer vetoes a candidate through an explicit local checkout
+          handoff. An isolated second repository proves that the agent's
+          operation budget is enforced.
+        </p>
+        <p>
+          Two small CLI changes support truthful provenance:
+          <code>push -m</code> and <code>rename -m</code> accept a constrained
+          actor-kind declaration. A dependency-free version checker covers
+          source manifests and lock entries. Release preflight verifies the
+          selected tag and fixes one source commit for all jobs; native runners
+          check the built binary artifacts before publication.
+        </p>
+        <p>
+          Tech stack: existing TypeScript, Bun <code>1.3.14</code>, Moon
+          <code>2.3.3</code>, Rust <code>1.95.0</code>, GitHub Actions, and a
+          thin Make entry point. No new package dependency or recording tool is
+          required.
+        </p>
+        <div class="callout">
+          <p>Global constraints</p>
+          <ul>
+            <li>
+              Set <code>AGENT=1</code> for terminal work. Run repository tasks
+              through Moon. Use <code>CI=</code> for the existing CI-skipped
+              binary compilation and demo tasks.
+            </li>
+            <li>
+              Implement after plan review, on a non-default branch based on
+              <code>main</code> at <code>6dda4eb</code> or newer. That base
+              already includes in-place initialization, query CLI verbs, signed
+              view heads, and scoped reviewer capabilities. Preserve the
+              existing untracked glossary and ADRs; read them alongside this
+              plan.
+            </li>
+            <li>
+              Keep clone path selection, ownership, review permissions,
+              operation accounting, and append-only provenance semantics intact.
+            </li>
+            <li>
+              The actor label is a signed declaration. It establishes neither
+              agent behavior nor authority. Human collaborators can also hold
+              delegations.
+            </li>
+            <li>
+              Keep the existing CLI and grant demos. The new demo uses generated
+              identities and its own server data, requires no model service, and
+              never changes the user's saved CLI identity or server.
+            </li>
+            <li>
+              Retain historical version references. This issue corrects current
+              labels and adds enforcement; it does not cut a new release.
+            </li>
+            <li>
+              Store verification logs and scratch work under
+              <code>.agents/ignore/</code>. The plan, glossary, ADRs, source,
+              and tests belong in their normal repository locations.
+            </li>
+          </ul>
+        </div>
+      </section>
+      <section class="block">
+        <h2>Decisions recorded in the existing plan</h2>
+        <div class="table-scroll">
+          <table>
+            <thead>
+              <tr>
+                <th>Decision</th>
+                <th>Contract</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>Q1 and Q6</td>
+                <td>
+                  Run the complete story through the compiled CLI built from the
+                  current checkout, including the server. Do not select an
+                  installed executable from <code>PATH</code>.
+                </td>
+              </tr>
+              <tr>
+                <td>Q2</td>
+                <td>
+                  Demonstrate an actual budget-exhaustion rejection in an
+                  independent sequence. A displayed limit is insufficient.
+                </td>
+              </tr>
+              <tr>
+                <td>Q3 and Q9</td>
+                <td>
+                  Add per-invocation
+                  <code
+                    >--actor-kind human|agent:&lt;name&gt;@&lt;version&gt;</code
+                  >
+                  to <code>push -m</code> and <code>rename -m</code>. Explicit
+                  attribution requires a nonempty message and validation before
+                  mutation. Omission keeps the human default; retries preserve
+                  older claims.
+                </td>
+              </tr>
+              <tr>
+                <td>Q4</td>
+                <td>
+                  Use an explicit local handoff of the candidate checkout to the
+                  reviewer, with a separate reviewer identity and grant.
+                  Independent retrieval of an unlanded candidate is outside this
+                  issue.
+                </td>
+              </tr>
+              <tr>
+                <td>Q5</td>
+                <td>
+                  Enforce the existing shared release version across first-party
+                  release packages, both binary launchers, the Rust crate,
+                  matching lock entries, built binaries, and the release tag.
+                </td>
+              </tr>
+              <tr>
+                <td>Q7</td>
+                <td>
+                  Ship a live narrated and repeatable terminal demo. A
+                  checked-in recording is not an acceptance requirement.
+                </td>
+              </tr>
+              <tr>
+                <td>Q8</td>
+                <td>
+                  Always stop and reap child processes. Remove successful runs;
+                  retain failed or interrupted runs and print their actual
+                  evidence directory.
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        <p>
+          Domain terms are recorded in <code>CONTEXT.md</code>. Durable
+          decisions are
+          <code>docs/adr/0001-actor-attribution-is-a-declaration.md</code> and
+          <code>docs/adr/0002-one-version-per-product-release.md</code>.
+        </p>
+      </section>
+      <section class="block">
+        <h2>Review focus</h2>
+        <p>
+          These five failure cases need direct evidence. The corresponding task
+          defines the assertions and commands.
+        </p>
+        <ol>
+          <li>
+            An invalid attribution on a dirty checkout must leave files,
+            operation history, configuration, and the remote unchanged. Task 1
+            tests both <code>push</code> and <code>rename</code>, including
+            existing human defaults and append-only retries.
+          </li>
+          <li>
+            A policy example must fail for the stated policy. Task 4 uses
+            distinct candidates and a second repository so owner-signature,
+            protection, budget, and veto failures cannot mask one another.
+          </li>
+          <li>
+            A version change outside the CLI directory must invalidate the
+            relevant check. Task 2 covers each manifest and lock entry, private
+            release packages, missing metadata, and repeat invocations.
+          </li>
+          <li>
+            A manual release must build the selected tag's commit. Task 3
+            rejects malformed or mismatching tags before building and verifies
+            downloaded binaries before either publication job can run.
+          </li>
+          <li>
+            A second demo run, failed server, or interruption must leave no live
+            children or overwritten user data. Task 4 tests each lifecycle and
+            retains failed-run evidence. Task 5 also runs the existing demos.
+          </li>
+        </ol>
+      </section>
+      <section class="block">
+        <h2>Evidence from the current checkout</h2>
+        <div class="table-scroll">
+          <table>
+            <thead>
+              <tr>
+                <th>Fact</th>
+                <th>Consequence</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>
+                  Getting-started section 4 teaches in-place init and explicitly
+                  documents <code>./web</code> for <code>clone acme/web</code>.
+                  Section 6 uses <code>cd web</code>.
+                </td>
+                <td>
+                  Preserve <code>docs/getting-started.md</code> and
+                  <code>run.ts</code> basename behavior. The new compiled demo
+                  provides the regression exercise.
+                </td>
+              </tr>
+              <tr>
+                <td>
+                  All 17 <code>packages/*</code> manifests, both npm launchers,
+                  and the Rust crate say <code>0.1.10-alpha</code>.
+                  <code>README</code> says <code>0.1.0-alpha</code>.
+                </td>
+                <td>
+                  Correct the active README label. Check the full release set;
+                  do not downgrade manifests to the issue's July versions.
+                </td>
+              </tr>
+              <tr>
+                <td>
+                  <code>packages/cli/src/run.ts</code> hardcodes
+                  <code>human</code> in push and rename provenance. The protocol
+                  accepts arbitrary actor-kind strings.
+                </td>
+                <td>
+                  Add a constrained CLI parser. Do not broaden the CLI to
+                  arbitrary checker labels or change the protocol schema.
+                </td>
+              </tr>
+              <tr>
+                <td>
+                  <code>ProvenanceLog</code> permits several signed claims per
+                  operation, and a claim signer can differ from the operation
+                  author.
+                </td>
+                <td>
+                  The option labels the current signed explanation. It does not
+                  relabel the operation, infer a role, or supersede an earlier
+                  claim.
+                </td>
+              </tr>
+              <tr>
+                <td>
+                  Shared-head changes require the owner signature. Agent gates
+                  inspect incoming operation authors even when the owner submits
+                  land.
+                </td>
+                <td>
+                  Show owner handoff explicitly. A missing-owner error is not
+                  evidence of a protected-path, budget, or veto rejection.
+                </td>
+              </tr>
+              <tr>
+                <td>
+                  Fresh clone/pull returns published-head history. CLI veto
+                  resolves the operation in the local candidate view.
+                </td>
+                <td>
+                  Give the reviewer the provided candidate checkout. A reviewer
+                  grant does not independently retrieve the candidate or grant
+                  content decryption.
+                </td>
+              </tr>
+              <tr>
+                <td>
+                  Version files outside <code>packages/cli</code> are absent
+                  from the current CLI test inputs. There is no root
+                  <code>Makefile</code> or agent-governed example yet.
+                </td>
+                <td>
+                  Add complete version-check inputs and exercise Make itself in
+                  CI. The existing integration test covers component behavior;
+                  it does not establish that the full compiled CLI story works.
+                </td>
+              </tr>
+              <tr>
+                <td>
+                  Release jobs currently omit an explicit checkout ref; npm
+                  overwrites launcher versions from the selected tag.
+                </td>
+                <td>
+                  Resolve one tag commit before building. Use that SHA in every
+                  job and replace version rewriting with assertions.
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+      <section class="block">
+        <h2>File map and boundaries</h2>
+        <div class="table-scroll">
+          <table>
+            <thead>
+              <tr>
+                <th>Task</th>
+                <th>Files and responsibility</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>1. Attribution</td>
+                <td>
+                  Create <code>packages/cli/src/actor-kind.ts</code> and
+                  <code>packages/cli/test/actor-kind.test.ts</code>. Modify
+                  <code>packages/cli/src/run.ts</code>,
+                  <code>packages/cli/src/help.ts</code>,
+                  <code>packages/cli/README.md</code>, and focused
+                  publish/rename tests.
+                </td>
+              </tr>
+              <tr>
+                <td>2. Version consistency</td>
+                <td>
+                  Create
+                  <code>packages/cli/scripts/check-release-version.ts</code> and
+                  <code>packages/cli/test/version.test.ts</code>. Modify
+                  <code>moon.yml</code>, <code>packages/cli/moon.yml</code>,
+                  <code>packages/cli/tsconfig.json</code>,
+                  <code>.moon/tasks/tag-publishable.yml</code>,
+                  <code>packages/cli/test/compile.test.ts</code>,
+                  <code>README</code>, and <code>CONTRIBUTING.md</code>.
+                </td>
+              </tr>
+              <tr>
+                <td>3. Release provenance</td>
+                <td>
+                  Modify <code>.github/workflows/release.yml</code> for
+                  preflight, one source SHA, native artifact verification, and
+                  asserted launcher versions. Preserve existing build targets,
+                  publication channels, and retry behavior.
+                </td>
+              </tr>
+              <tr>
+                <td>4. Demo and CI</td>
+                <td>
+                  Create <code>examples/cli/src/agent-governed-demo.ts</code>,
+                  <code>examples/cli/test/agent-governed-demo.test.ts</code>,
+                  <code>examples/cli/README.md</code>, and root
+                  <code>Makefile</code>. Modify
+                  <code>examples/cli/moon.yml</code>,
+                  <code>examples/cli/tsconfig.json</code>,
+                  <code>.github/workflows/ci.yml</code>, <code>README</code>,
+                  <code>docs/getting-started.md</code>, and
+                  <code>CHANGELOG.md</code>.
+                </td>
+              </tr>
+              <tr>
+                <td>5. Verification</td>
+                <td>
+                  Run the actual source-built binary, Make entry point, focused
+                  suites, and repository baseline. Keep local evidence under
+                  <code>.agents/ignore/</code>.
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        <p>
+          Only correct a manifest or lock entry if inspection finds real drift.
+          There is no new dependency or blanket lockfile update in this plan.
+        </p>
+      </section>
+      <section class="block" id="task-1">
+        <h2>
+          Task 1: Add explicit actor attribution without changing claim
+          semantics
+        </h2>
+        <section class="task">
+          <p class="files">
+            Create <code>packages/cli/src/actor-kind.ts</code>,
+            <code>packages/cli/test/actor-kind.test.ts</code>. Modify CLI
+            command handling, help, README, and
+            <code>test/publish.test.ts</code> /
+            <code>test/rename.test.ts</code>.
+          </p>
+          <dl class="io">
+            <dt>Consumes</dt>
+            <dd>
+              Existing
+              <code
+                >ProvenanceLog.record(op, { intent, reasoning, actorKind },
+                identity)</code
+              >
+              and the two provenance-producing CLI commands.
+            </dd>
+            <dt>Produces</dt>
+            <dd>
+              <code
+                >parseCliActorKind(raw: string | undefined, message: string |
+                undefined): CliActorKindResult</code
+              >. Explicit labels require a message; omitted labels return
+              <code>human</code>.
+            </dd>
+          </dl>
+          <ol class="steps">
+            <li>
+              <input
+                type="checkbox"
+                id="t1s1"
+                aria-label="Write the parser contract tests"
+              />
+              <div class="label">
+                <strong>Write the parser contract tests</strong>
+                <pre><code data-language="typescript">import { expect, test } from &#x27;bun:test&#x27;;
+import { parseCliActorKind } from &#x27;../src/actor-kind&#x27;;
+
+test(&#x27;actor attribution is explicit, constrained, and message-bound&#x27;, () =&gt; {
+  expect(parseCliActorKind(undefined, undefined)).toEqual({ kind: &#x27;human&#x27; });
+  expect(parseCliActorKind(&#x27;human&#x27;, &#x27;explain&#x27;)).toEqual({ kind: &#x27;human&#x27; });
+  expect(parseCliActorKind(&#x27;agent:demo@0.1.10-alpha&#x27;, &#x27;explain&#x27;)).toEqual({
+    kind: &#x27;agent:demo@0.1.10-alpha&#x27;,
+  });
+  for (const raw of [&#x27;&#x27;, &#x27; &#x27;, &#x27;ci&#x27;, &#x27;proof&#x27;, &#x27;agent&#x27;, &#x27;agent:x&#x27;,
+    &#x27;agent:@1&#x27;, &#x27;agent:x@&#x27;, &#x27;agent:x@y@z&#x27;, &#x27;human &#x27;, &#x27;agent:x y@1&#x27;]) {
+    expect(parseCliActorKind(raw, &#x27;explain&#x27;)).toHaveProperty(&#x27;error&#x27;);
+  }
+  for (const message of [undefined, &#x27;&#x27;, &#x27;   &#x27;]) {
+    expect(parseCliActorKind(&#x27;agent:demo@1&#x27;, message)).toHaveProperty(&#x27;error&#x27;);
+  }
+});</code></pre>
+                <pre><code data-language="shell">moon run cli:test -- test/actor-kind.test.ts</code></pre>
+                <p>
+                  Expect the first run to fail because the parser does not
+                  exist.
+                </p>
+              </div>
+            </li>
+            <li>
+              <input
+                type="checkbox"
+                id="t1s2"
+                aria-label="Implement the parser and validate before mutation"
+              />
+              <div class="label">
+                <strong
+                  >Implement the parser and validate before mutation</strong
+                >
+                <pre><code data-language="typescript">export type CliActorKindResult = { kind: string } | { error: string };
+
+// Validate a declaration before either command commits edits or uploads data.
+export function parseCliActorKind(
+  raw: string | undefined,
+  message: string | undefined,
+): CliActorKindResult {
+  if (raw === undefined) return { kind: &#x27;human&#x27; };
+  if (raw !== &#x27;human&#x27; &amp;&amp;
+      !/^agent:[A-Za-z0-9][A-Za-z0-9._-]*@[A-Za-z0-9][A-Za-z0-9._+-]*$/.test(raw)) {
+    return { error: &#x27;invalid --actor-kind: use human or agent:&lt;name&gt;@&lt;version&gt;&#x27; };
+  }
+  if (message === undefined || message.trim().length === 0) {
+    return { error: &#x27;--actor-kind requires a nonempty -m message&#x27; };
+  }
+  return { kind: raw };
+}</code></pre>
+                <p>
+                  Register <code>actor-kind: { type: string }</code> in both
+                  command parsers. Immediately after argument/positional
+                  parsing, call the helper, print its error and return 2 on
+                  failure. Do this before <code>findRoot</code>, local-store
+                  opening, <code>commitDiff</code>, symbol rewriting, or network
+                  work. Replace only the two hardcoded provenance kinds with the
+                  parsed kind.
+                </p>
+                <pre><code data-language="typescript">const actorKind = parseCliActorKind(values[&#x27;actor-kind&#x27;], values.message);
+if (&#x27;error&#x27; in actorKind) {
+  out(actorKind.error);
+  return 2;
+}
+// The later record call uses actorKind.kind.</code></pre>
+                <p>
+                  The grammar permits nonempty ASCII name/version tokens,
+                  including current short version conventions. Do not trim or
+                  infer a label. Existing invocations without the flag retain
+                  their behavior, including optional messages.
+                </p>
+              </div>
+            </li>
+            <li>
+              <input
+                type="checkbox"
+                id="t1s3"
+                aria-label="Exercise signed claims and mutation-free rejection"
+              />
+              <div class="label">
+                <strong
+                  >Exercise signed claims and mutation-free rejection</strong
+                >
+                <p>
+                  Extend the existing real-server fixtures in
+                  <code>publish.test.ts</code> and <code>rename.test.ts</code>.
+                  First add the failing command-level cases, then wire the
+                  handlers above.
+                </p>
+                <div class="table-scroll">
+                  <table>
+                    <thead>
+                      <tr>
+                        <th>Case</th>
+                        <th>Assertion</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      <tr>
+                        <td>Explicit agent push and rename</td>
+                        <td>
+                          Query the resulting operation with
+                          <code>query why --json</code>. A record has the exact
+                          declared kind, signer DID, intent, and verified
+                          status. Fresh-clone readback preserves the record and
+                          source content.
+                        </td>
+                      </tr>
+                      <tr>
+                        <td>Omitted kind</td>
+                        <td>
+                          Existing human push and rename retain
+                          <code>actor_kind: human</code>. A delegation does not
+                          change the default.
+                        </td>
+                      </tr>
+                      <tr>
+                        <td>
+                          Bad kind or explicit kind without a nonblank message
+                        </td>
+                        <td>
+                          Return 2. Compare source bytes, local operation IDs,
+                          working-copy configuration, and remote main
+                          before/after. Count requests by wrapping the real
+                          server fetch, and require zero requests during the
+                          invalid invocation.
+                        </td>
+                      </tr>
+                      <tr>
+                        <td>Ahead operations and retries</td>
+                        <td>
+                          Upload with
+                          <code
+                            >--no-land -m first --actor-kind agent:demo@1</code
+                          >. With no new disk edit, push another message using
+                          the omitted human default. Both distinct signed claims
+                          remain; the first kind and signature are unchanged. An
+                          exact repeated claim is idempotent.
+                        </td>
+                      </tr>
+                      <tr>
+                        <td>Owner handoff</td>
+                        <td>
+                          The demo uses owner <code>land</code>, which adds no
+                          new provenance claim. It never retries the agent
+                          upload as owner <code>push -m</code>.
+                        </td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
+                <pre><code data-language="shell">moon run cli:test -- test/actor-kind.test.ts test/publish.test.ts test/rename.test.ts test/query.test.ts
+moon run cli:typecheck</code></pre>
+              </div>
+            </li>
+            <li>
+              <input
+                type="checkbox"
+                id="t1s4"
+                aria-label="Update the command help"
+              />
+              <div class="label">
+                <strong>Update the command help</strong>
+                <p>
+                  Update command overview and detailed push/rename help, the CLI
+                  README, and examples. Describe actor kind as the current
+                  explanation signer's declaration, distinct from the operation
+                  author. Show this syntax:
+                </p>
+                <pre><code data-language="shell">thaddeus push -m &quot;make greeting welcoming&quot; --actor-kind agent:demo@0.1.10-alpha
+thaddeus rename refresh refreshToken -m &quot;clarify the name&quot; --actor-kind agent:demo@0.1.10-alpha</code></pre>
+                <p>
+                  Document the nonempty-message requirement, human default, and
+                  append-only retry behavior. Do not claim that the label proves
+                  agent execution or that this CLI restriction repairs the
+                  existing general checker-trust model.
+                </p>
+              </div>
+            </li>
+          </ol>
+        </section>
+      </section>
+      <section class="block">
+        <h2>Shared release-version contract</h2>
+        <p>
+          Read the expected shared value from
+          <code>packages/cli/package.json</code>, then require every member of
+          the established release set to agree. The comparison baseline is
+          already embedded by the CLI; this introduces no second version
+          constant.
+        </p>
+        <div class="table-scroll">
+          <table>
+            <thead>
+              <tr>
+                <th>Member</th>
+                <th>Checked value</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>All <code>packages/*/package.json</code></td>
+                <td>
+                  <code>version</code> for all 17 current packages, including
+                  private CLI source: agent, cli, client, fs, graph, identity,
+                  log, persist, platform, provenance, query, reputation, review,
+                  server, store, theme, watch. Discover package directories
+                  rather than filtering by <code>private</code>.
+                </td>
+              </tr>
+              <tr>
+                <td>Bun lockfile</td>
+                <td>
+                  <code>workspaces["packages/&lt;name&gt;"].version</code> for
+                  each release package. Use <code>Bun.JSONC.parse</code>; the
+                  actual file contains trailing commas.
+                </td>
+              </tr>
+              <tr>
+                <td>Both npm launcher manifests</td>
+                <td>
+                  <code>npm/thaddeus/package.json</code> and
+                  <code>npm/lazythad/package.json</code>. These are outside Bun
+                  workspaces and have no corresponding Bun lock entries.
+                </td>
+              </tr>
+              <tr>
+                <td>Rust manifest and lock</td>
+                <td>
+                  <code>lazythad/Cargo.toml</code> package version and the
+                  unique local <code>lazythad</code> package in
+                  <code>Cargo.lock</code>, identified by name and absent
+                  <code>source</code>. Parse with <code>Bun.TOML.parse</code>.
+                </td>
+              </tr>
+              <tr>
+                <td>Active README status</td>
+                <td>
+                  Require
+                  <code>STATUS: PRE-ALPHA (v&lt;shared-version&gt;)</code> at
+                  the current baseline. Historical plans/changelog entries are
+                  not rewritten or compared.
+                </td>
+              </tr>
+              <tr>
+                <td>Selected tag and binaries</td>
+                <td>
+                  A supplied tag must exactly equal
+                  <code>v&lt;shared-version&gt;</code>. Every built executable
+                  must exit 0 and print that bare version, preserving its
+                  prerelease suffix.
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        <p>
+          Exclude root package metadata, which has no version, and the private
+          <code>0.0.0</code> examples, applications, and integration workspace.
+          Missing release members, missing lock entries, or multiple local Rust
+          lock entries are errors.
+        </p>
+      </section>
+      <section class="block" id="task-2">
+        <h2>Task 2: Build a complete, cache-correct version guard</h2>
+        <section class="task">
+          <p class="files">
+            Create <code>packages/cli/scripts/check-release-version.ts</code>,
+            <code>packages/cli/test/version.test.ts</code>. Modify root/CLI Moon
+            tasks, CLI tsconfig and compiled-version test, the prepublish task,
+            README, and CONTRIBUTING.
+          </p>
+          <dl class="io">
+            <dt>Consumes</dt>
+            <dd>
+              The release set above, current value <code>0.1.10-alpha</code>,
+              and optional <code>THADDEUS_RELEASE_TAG</code>.
+            </dd>
+            <dt>Produces</dt>
+            <dd>
+              <code
+                >checkReleaseVersions(root: string, expectedTag?: string):
+                string</code
+              >, plus <code>root:version-check</code> and
+              <code>root:version-test</code>. Mismatch throws a file-specific
+              error; executable mode exits nonzero.
+            </dd>
+          </dl>
+          <ol class="steps">
+            <li>
+              <input
+                type="checkbox"
+                id="t2s1"
+                aria-label="Write real filesystem consistency tests"
+              />
+              <div class="label">
+                <strong>Write real filesystem consistency tests</strong>
+                <p>
+                  Export the checker from its script without side effects when
+                  imported. Test the actual repository, then use separate
+                  temporary fixture trees to exercise mismatches without
+                  mutating the checkout. Each fixture contains CLI and store
+                  manifests, both launcher manifests, matching Bun workspace
+                  entries, a Rust manifest/local lock entry, and a README, all
+                  at <code>1.2.3-alpha</code>.
+                </p>
+                <pre><code data-language="typescript">test(&#x27;current repository has one release version&#x27;, () =&gt; {
+  expect(checkReleaseVersions(repoRoot)).toBe(VERSION);
+  expect(checkReleaseVersions(repoRoot, `v${VERSION}`)).toBe(VERSION);
+  expect(() =&gt; checkReleaseVersions(repoRoot, &#x27;v999.0.0&#x27;)).toThrow();
+  expect(() =&gt; checkReleaseVersions(repoRoot, &#x27;&#x27;)).toThrow();
+});</code></pre>
+                <p>
+                  In this test,
+                  <code>repoRoot = resolve(import.meta.dir, "../../..")</code>
+                  and <code>VERSION</code> is imported from the existing version
+                  module. Run
+                  <code>moon run cli:test -- test/version.test.ts</code> before
+                  implementation. The missing checker fails first; once
+                  implemented, the real README mismatch must fail until
+                  corrected.
+                </p>
+                <div class="table-scroll">
+                  <table>
+                    <thead>
+                      <tr>
+                        <th>Fixture mutation</th>
+                        <th>Expected result</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      <tr>
+                        <td>
+                          Change one package, launcher, README label, Bun
+                          workspace version, Rust manifest, or Rust lock version
+                          independently
+                        </td>
+                        <td>
+                          Reject and identify the offending path/entry, expected
+                          value, and actual value.
+                        </td>
+                      </tr>
+                      <tr>
+                        <td>
+                          Remove a workspace lock entry or duplicate the local
+                          Rust lock record
+                        </td>
+                        <td>
+                          Reject incomplete or ambiguous release metadata.
+                        </td>
+                      </tr>
+                      <tr>
+                        <td>
+                          Add a new release package under packages with a
+                          different version
+                        </td>
+                        <td>Reject it even when its manifest is private.</td>
+                      </tr>
+                      <tr>
+                        <td>
+                          Keep an example/application at 0.0.0 and old changelog
+                          text at older versions
+                        </td>
+                        <td>
+                          Accept; these are outside the current release set.
+                        </td>
+                      </tr>
+                      <tr>
+                        <td>
+                          Use a matching, mismatching, blank, or multiline
+                          supplied tag
+                        </td>
+                        <td>Accept only the exact full matching tag.</td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
+                <p>
+                  Use actual files and parsers. Do not mock the checker or
+                  substitute a constant expected result.
+                </p>
+              </div>
+            </li>
+            <li>
+              <input
+                type="checkbox"
+                id="t2s2"
+                aria-label="Implement the checker and script entry point"
+              />
+              <div class="label">
+                <strong>Implement the checker and script entry point</strong>
+                <p>
+                  Use Node filesystem/path utilities and Bun's built-in
+                  JSONC/TOML parsers. Collect mismatches so one run identifies
+                  all drift. Return the shared version only after all checks
+                  pass. The script's main block resolves the repository root
+                  relative to its own file, passes the optional tag environment
+                  variable, prints only the version on success, and prints
+                  diagnostics to stderr with exit code 1 on failure.
+                </p>
+                <pre><code data-language="typescript">export function checkReleaseVersions(
+  root: string,
+  expectedTag?: string,
+): string;</code></pre>
+                <p>
+                  Discover every directory under <code>packages/</code> and
+                  validate its manifest and matching Bun workspace lock entry.
+                  Apply the shared release-version contract above to the two
+                  launchers, both Rust files, README status, and optional tag.
+                  Require exactly one source-free <code>lazythad</code> lock
+                  record. Guard the executable entry point with
+                  <code>import.meta.main</code> so fixture tests can import the
+                  function without running the repository check.
+                </p>
+                <p>
+                  Import <code>readFileSync</code> and
+                  <code>readdirSync</code> from <code>node:fs</code>, and
+                  <code>join</code> and <code>resolve</code> from
+                  <code>node:path</code>. Missing or malformed files must fail
+                  with their path in the diagnostic; wrap parser failures with
+                  that context. Keep the checker out of the application
+                  entry-point exports. Add <code>scripts/**/*.ts</code> to the
+                  CLI tsconfig include list.
+                </p>
+              </div>
+            </li>
+            <li>
+              <input
+                type="checkbox"
+                id="t2s3"
+                aria-label="Give the guard complete Moon inputs"
+              />
+              <div class="label">
+                <strong>Give the guard complete Moon inputs</strong>
+                <p>
+                  Define these root tasks. They require no package build, so the
+                  release preflight can inspect metadata before compiling.
+                  Disable the inexpensive consistency check's cache so an
+                  environment-provided tag is always evaluated.
+                </p>
+                <pre><code data-language="yaml">version-check:
+  command: &#x27;bun packages/cli/scripts/check-release-version.ts&#x27;
+  inputs:
+    - &#x27;packages/cli/scripts/check-release-version.ts&#x27;
+    - &#x27;packages/*/package.json&#x27;
+    - &#x27;npm/*/package.json&#x27;
+    - &#x27;bun.lock&#x27;
+    - &#x27;lazythad/Cargo.toml&#x27;
+    - &#x27;lazythad/Cargo.lock&#x27;
+    - &#x27;README&#x27;
+  options:
+    cache: false
+version-test:
+  command: &#x27;bun test packages/cli/test/version.test.ts&#x27;
+  inputs:
+    - &#x27;packages/cli/test/version.test.ts&#x27;
+    - &#x27;packages/cli/scripts/check-release-version.ts&#x27;
+    - &#x27;packages/cli/src/version.ts&#x27;
+    - &#x27;packages/*/package.json&#x27;
+    - &#x27;npm/*/package.json&#x27;
+    - &#x27;bun.lock&#x27;
+    - &#x27;lazythad/Cargo.toml&#x27;
+    - &#x27;lazythad/Cargo.lock&#x27;
+    - &#x27;README&#x27;
+  options:
+    cache: false</code></pre>
+                <p>
+                  Add <code>root:version-check</code> as a dependency of CLI
+                  tests and the shared publishable
+                  <code>prepublish</code> guard. The checker has no build
+                  dependencies, so this introduces no cycle. CLI test inputs
+                  must still include the external files read by its version
+                  test, using root-relative paths, alongside its existing
+                  source/test/package inputs.
+                </p>
+              </div>
+            </li>
+            <li>
+              <input
+                type="checkbox"
+                id="t2s4"
+                aria-label="Reconcile active documentation and run the guard"
+              />
+              <div class="label">
+                <strong
+                  >Reconcile active documentation and run the guard</strong
+                >
+                <p>
+                  Update README status to the actual shared version. Correct its
+                  compact quickstart to start with <code>identity init</code>.
+                  CONTRIBUTING documents the full release set and lock entries,
+                  the version guard, and the rule that historical records keep
+                  their original numbers. A release bump remains a separate
+                  action.
+                </p>
+                <pre><code data-language="text">STATUS: PRE-ALPHA (v0.1.10-alpha)
+
+QUICKSTART: see docs/getting-started.md
+  identity init → serve → use → init acme/web → edit → push -m → log / query why</code></pre>
+                <p>
+                  In <code>compile.test.ts</code>, compare the compiled CLI
+                  output to <code>VERSION</code>, replacing the loose
+                  semver-shaped regex.
+                </p>
+                <pre><code data-language="shell">moon run root:version-check root:version-test
+moon run cli:test -- test/version.test.ts test/compile.test.ts
+moon run cli:typecheck</code></pre>
+                <p>
+                  Verify a changed external fixture file changes the checker
+                  result on the next invocation. An old cached pass must not
+                  conceal it.
+                </p>
+              </div>
+            </li>
+          </ol>
+        </section>
+      </section>
+      <section class="block" id="task-3">
+        <h2>
+          Task 3: Bind release checks, builds, and publication to one verified
+          tag
+        </h2>
+        <section class="task">
+          <p class="files">
+            Modify <code>.github/workflows/release.yml</code>. Reuse the version
+            guard from task 2.
+          </p>
+          <dl class="io">
+            <dt>Consumes</dt>
+            <dd>
+              The selected push-event or workflow-dispatch tag,
+              <code>root:version-check</code>, and existing CLI/TUI artifact
+              names.
+            </dd>
+            <dt>Produces</dt>
+            <dd>
+              Preflight outputs <code>tag</code>, <code>version</code>, and
+              <code>sha</code>; all nine built artifacts pass native version
+              checks before publication.
+            </dd>
+          </dl>
+          <ol class="steps">
+            <li>
+              <input
+                type="checkbox"
+                id="t3s1"
+                aria-label="Move tag selection and validation before builds"
+              />
+              <div class="label">
+                <strong>Move tag selection and validation before builds</strong>
+                <p>
+                  Add a preflight job. Pass event values through environment
+                  variables; validate the entire tag string before using it in
+                  an output or checkout ref. This replaces the old line-oriented
+                  grep check, which can accept one matching line inside a
+                  multiline input.
+                </p>
+                <pre><code data-language="yaml">- name: Select release tag
+  id: tag
+  env:
+    TAG_INPUT: ${{ github.event.inputs.tag }}
+    REF_NAME: ${{ github.ref_name }}
+  shell: bash
+  run: |
+    set -euo pipefail
+    tag=&quot;${TAG_INPUT:-$REF_NAME}&quot;
+    if ! [[ &quot;$tag&quot; =~ ^v[0-9A-Za-z.+-]+$ ]]; then
+      echo &quot;invalid release tag&quot; &gt;&amp;2
+      exit 1
+    fi
+    echo &quot;tag=$tag&quot; &gt;&gt; &quot;$GITHUB_OUTPUT&quot;
+- uses: actions/checkout@v4
+  with:
+    ref: refs/tags/${{ steps.tag.outputs.tag }}
+    fetch-depth: 0</code></pre>
+                <p>
+                  Use the existing pinned proto setup action to install the
+                  selected checkout's tools, then run
+                  <code>root:version-check</code> with
+                  <code>THADDEUS_RELEASE_TAG</code> set to that validated tag.
+                  After it passes, export the version and
+                  <code>git rev-parse HEAD</code> as job outputs. A missing tag
+                  or inconsistent historical tag fails before any build or
+                  publication; do not repair or move the tag.
+                </p>
+              </div>
+            </li>
+            <li>
+              <input
+                type="checkbox"
+                id="t3s2"
+                aria-label="Make every job consume the verified source"
+              />
+              <div class="label">
+                <strong>Make every job consume the verified source</strong>
+                <p>
+                  CLI and TUI jobs need preflight and check out
+                  <code>needs.preflight.outputs.sha</code>. Artifact
+                  verification needs preflight plus both builds. GitHub Release
+                  publication needs preflight plus artifact verification. npm
+                  publication needs preflight plus GitHub Release publication.
+                  Every downstream checkout explicitly uses that SHA, and every
+                  tag/version value comes from preflight outputs.
+                </p>
+                <pre><code data-language="yaml">needs: [preflight]
+steps:
+  - uses: actions/checkout@v4
+    with:
+      ref: ${{ needs.preflight.outputs.sha }}
+      fetch-depth: 0</code></pre>
+                <p>
+                  Preserve the current binary build target lists. Remove
+                  duplicate downstream tag derivation so a manual input cannot
+                  label a build from another checkout.
+                </p>
+              </div>
+            </li>
+            <li>
+              <input
+                type="checkbox"
+                id="t3s3"
+                aria-label="Verify the exact downloaded artifacts on native runners"
+              />
+              <div class="label">
+                <strong
+                  >Verify the exact downloaded artifacts on native
+                  runners</strong
+                >
+                <p>
+                  The CLI currently cross-compiles five targets on Linux x64;
+                  both macOS TUI variants build on ARM64. Add the following
+                  five-row verification matrix, which executes all nine
+                  binaries. This adds release-job time, but makes the
+                  binary-version assertion apply to every shipped artifact.
+                </p>
+                <div class="table-scroll">
+                  <table>
+                    <thead>
+                      <tr>
+                        <th>Runner</th>
+                        <th>Artifacts to run</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      <tr>
+                        <td><code>ubuntu-24.04</code></td>
+                        <td>
+                          <code>thaddeus-linux-x64</code> and
+                          <code>lazythad-linux-x64</code>
+                        </td>
+                      </tr>
+                      <tr>
+                        <td><code>ubuntu-24.04-arm</code></td>
+                        <td><code>thaddeus-linux-arm64</code></td>
+                      </tr>
+                      <tr>
+                        <td><code>macos-14</code></td>
+                        <td>
+                          <code>thaddeus-darwin-arm64</code> and
+                          <code>lazythad-darwin-arm64</code>
+                        </td>
+                      </tr>
+                      <tr>
+                        <td><code>macos-15-intel</code></td>
+                        <td>
+                          <code>thaddeus-darwin-x64</code> and
+                          <code>lazythad-darwin-x64</code>
+                        </td>
+                      </tr>
+                      <tr>
+                        <td><code>windows-latest</code></td>
+                        <td>Both <code>*-windows-x64.exe</code> binaries</td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
+                <p>
+                  These native architectures are listed in
+                  <a
+                    href="https://docs.github.com/en/actions/reference/runners/github-hosted-runners"
+                    >GitHub's runner reference</a
+                  >. Download <code>cli-binaries</code> and the row's
+                  <code>tui-&lt;platform&gt;</code> artifact, with no TUI
+                  download for Linux ARM64. Restore Unix executable bits because
+                  <a
+                    href="https://github.com/actions/download-artifact/blob/v4/README.md#permission-loss"
+                    >artifact downloads do not preserve file permissions</a
+                  >. Run the downloaded files, never rebuild substitutes.
+                </p>
+                <pre><code data-language="shell">set -euo pipefail
+check_binary() {
+  local binary_path=&quot;$1&quot;
+  if [ &quot;$RUNNER_OS&quot; != &quot;Windows&quot; ]; then
+    chmod +x &quot;$binary_path&quot;
+  fi
+  local actual_version
+  actual_version=$(&quot;$binary_path&quot; --version)
+  if [ &quot;$actual_version&quot; != &quot;$EXPECTED_VERSION&quot; ]; then
+    echo &quot;$binary_path reports $actual_version; expected $EXPECTED_VERSION&quot; &gt;&amp;2
+    return 1
+  fi
+}</code></pre>
+                <p>
+                  Set <code>EXPECTED_VERSION</code> from preflight. Invoke the
+                  function for each concrete path in the row. A launch failure
+                  or any differing output blocks publication. Preserve the
+                  prerelease suffix.
+                </p>
+              </div>
+            </li>
+            <li>
+              <input
+                type="checkbox"
+                id="t3s4"
+                aria-label="Assert launcher versions instead of rewriting them"
+              />
+              <div class="label">
+                <strong
+                  >Assert launcher versions instead of rewriting them</strong
+                >
+                <p>
+                  In the npm job, use the verified version and assert each
+                  checked-out launcher manifest already matches before checking
+                  whether that version is published. Remove
+                  <code>npm version --no-git-tag-version</code>. Retain
+                  alpha/beta channel selection, idempotent skips, and the
+                  existing bounded publish retries.
+                </p>
+                <pre><code data-language="shell">actual_version=$(node -p &quot;require(&#x27;./package.json&#x27;).version&quot;)
+if [ &quot;$actual_version&quot; != &quot;$EXPECTED_VERSION&quot; ]; then
+  echo &quot;launcher version $actual_version differs from $EXPECTED_VERSION&quot; &gt;&amp;2
+  exit 1
+fi</code></pre>
+                <p>
+                  GitHub Release collection and checksum generation consume the
+                  same uploaded artifacts that passed verification.
+                </p>
+              </div>
+            </li>
+            <li>
+              <input
+                type="checkbox"
+                id="t3s5"
+                aria-label="Exercise the pre-publication failures"
+              />
+              <div class="label">
+                <strong>Exercise the pre-publication failures</strong>
+                <p>
+                  Test the exact tag-validation shell with valid
+                  alpha/build-metadata tags, an empty value, a branch name, and
+                  a multiline value. Run the actual checker against matching and
+                  mismatching tags. Confirm the workflow's dependency chain
+                  makes a preflight or artifact failure block both publication
+                  jobs, and all downstream checkouts reference the verified SHA.
+                </p>
+                <pre><code data-language="shell">moon run root:version-test
+THADDEUS_RELEASE_TAG=v999.0.0 moon run root:version-check</code></pre>
+                <p>
+                  The second command must fail for tag mismatch. Test a
+                  deliberately mismatched fixture binary version using a real
+                  previously built executable when available; do not replace it
+                  with an echo stub. Record local checks separately from native
+                  GitHub matrix execution. Do not trigger package or GitHub
+                  Release publication during implementation verification without
+                  explicit authorization.
+                </p>
+              </div>
+            </li>
+          </ol>
+        </section>
+      </section>
+      <section class="block">
+        <h2>The narrated demo</h2>
+        <p>
+          Use one generated owner, agent, and reviewer identity. The agent is a
+          deterministic script. Its declaration is
+          <code>agent:thaddeus-demo@&lt;checkout-version&gt;</code>, where the
+          version comes from the actual compiled executable. A printed command
+          always corresponds to an executed command.
+        </p>
+        <p>
+          Create one temporary root. Under it, keep actor homes, server data, a
+          transcript, and separate checkouts for accepted work, protected
+          attempts, review candidates, and readback. Use argument arrays and the
+          home-isolation pattern from
+          <code>packages/cli/test/init-compile.test.ts</code> in child
+          environments only. Resolve the executable from
+          <code>packages/cli/release/</code>; the driver does not search
+          <code>PATH</code> for Thaddeus.
+        </p>
+        <p>
+          Start
+          <code
+            >thaddeus serve --data &lt;owned-server-directory&gt; --port 0</code
+          >. Parse its actual serving URL while continuously draining both
+          streams, then require <code>GET /repos</code> to return 200 and the
+          JSON object <code>{ repos: [], owners: {}, nextCursor: null }</code>.
+          Startup has a 15-second deadline. Each finite CLI command has a
+          15-second deadline, excluding build time; the full demonstration has a
+          120-second deadline. A premature server exit is a demo failure.
+        </p>
+        <p>
+          The driver connects through localhost. This does not claim the
+          existing server binds exclusively to loopback; <code>--host</code> is
+          an attestation option, not a bind-address option.
+        </p>
+        <div class="table-scroll">
+          <table>
+            <thead>
+              <tr>
+                <th>Act</th>
+                <th>Executed behavior</th>
+                <th>State that proves it</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>1. Seed main</td>
+                <td>
+                  Initialize all three identities through the binary; read DIDs
+                  with <code>whoami --json</code>. In owner-project, seed
+                  <code>src/greeting.ts</code> with
+                  <code>export const greeting = "hello";</code> and
+                  <code>src/auth/session.ts</code> with
+                  <code>export const requireLogin = true;</code>, both
+                  newline-terminated. Owner runs
+                  <code>init acme/web --server &lt;url&gt;</code> then
+                  <code>push -m "seed demo"</code>.
+                </td>
+                <td>
+                  Init preserves the bytes. A fresh explicit-destination owner
+                  clone reads both files and their verified human explanations.
+                </td>
+              </tr>
+              <tr>
+                <td>2. Delegate and protect</td>
+                <td>
+                  Owner grants the agent
+                  <code>--paths src/** --max-changes 2</code>. Set
+                  <code
+                    >policy set --protect src/auth/** --allow &lt;owner-did&gt;
+                    --require-provenance</code
+                  >. Read grants and policy as JSON.
+                </td>
+                <td>
+                  The actual grant has the correct DID, scope, and two-operation
+                  limit. Policy JSON confirms protection and provenance
+                  requirements.
+                </td>
+              </tr>
+              <tr>
+                <td>3. Agent upload and owner land</td>
+                <td>
+                  Agent saves the temporary server and runs
+                  <code>clone acme/web</code> with no destination from
+                  agent-allowed. Work from the resulting <code>web</code>.
+                  Change greeting to <code>welcome</code>, then
+                  <code
+                    >push -m "make greeting welcoming" --actor-kind
+                    &lt;agent-kind&gt;</code
+                  >. Owner runs <code>land</code> from this candidate checkout.
+                </td>
+                <td>
+                  Default clone creates <code>web</code>, not
+                  <code>acme/web</code>. Agent push uploads a signed why and
+                  returns 1 specifically for owner handoff. Owner land succeeds.
+                  Fresh owner clone reads the accepted bytes.
+                </td>
+              </tr>
+              <tr>
+                <td>4. Protected path rejection</td>
+                <td>
+                  Agent starts from a new clone of accepted main and changes
+                  <code>src/auth/session.ts</code> to disable login. Upload with
+                  <code>--no-land -m</code> and explicit agent kind. Owner
+                  attempts land.
+                </td>
+                <td>
+                  Upload reports no rejected bundle items. Land returns 1 with
+                  <code>not landed</code> and <code>protected paths</code>.
+                  Fresh main has the original auth bytes and exactly the
+                  previously accepted operation IDs.
+                </td>
+              </tr>
+              <tr>
+                <td>5. Query accepted agent work</td>
+                <td>
+                  In an accepted-main owner checkout, run
+                  <code>query by &lt;agent-did&gt; --json</code>, then
+                  <code>query why &lt;accepted-id&gt; --json</code>.
+                </td>
+                <td>
+                  Exactly the accepted greeting operation appears for the agent.
+                  Its why has the exact intent, signer DID, declared agent kind,
+                  and verified status. The protected candidate is absent from
+                  main.
+                </td>
+              </tr>
+              <tr>
+                <td>6. Exhaust an independent budget</td>
+                <td>
+                  Owner initializes <code>acme/budget-demo</code> with one
+                  ordinary source file and grants the same agent
+                  <code>src/**</code> with <code>--max-changes 1</code>. Agent
+                  uploads one file change; owner lands it. From a fresh clone,
+                  agent uploads a second one-file change; owner attempts land.
+                </td>
+                <td>
+                  First land succeeds. Second returns 1 with
+                  <code>not landed</code> and
+                  <code>over its change budget</code>. Fresh clone has only the
+                  first accepted change. This repo has no protected-path rule or
+                  reviewer veto to mask the reason.
+                </td>
+              </tr>
+              <tr>
+                <td>7. Independent reviewer veto</td>
+                <td>
+                  Return to <code>acme/web</code>. Agent starts from a fresh
+                  accepted-main clone and uploads an ordinary greeting candidate
+                  with an explicit signed why. Owner runs
+                  <code>reviewer grant &lt;reviewer-did&gt; --paths src/**</code
+                  >, reads the grant ID from <code>reviewer list --json</code>,
+                  then hands over the local candidate checkout. This is review
+                  authority; the separate <code>grant</code> command delegates
+                  writes. Reviewer uses its own identity to run
+                  <code
+                    >veto &lt;candidate-id&gt; --grant &lt;grant-id&gt; -m
+                    "needs a focused review"</code
+                  >. Owner attempts land.
+                </td>
+                <td>
+                  The candidate's why verifies before review. Veto JSON
+                  identifies the reviewer, exact reason, verified signature, and
+                  active lifecycle. Land returns 1 for veto; fresh main still
+                  has accepted greeting and auth bytes. The earlier exhaustion
+                  in another repository did not consume this repo's remaining
+                  operation allowance.
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        <p>
+          The same-machine handoff is explicit in narration: it supplies access
+          to the candidate checkout, while the reviewer grant supplies authority
+          to veto. Do not imply that the grant supplies decryption rights or
+          that a fresh reviewer clone can obtain the pending operation.
+        </p>
+        <p>
+          Each rejected proposal starts from a fresh accepted-main clone.
+          Deleting a dirty file from a previously rejected checkout does not
+          remove its committed ancestry. The protected rejection, budget
+          exhaustion, and reviewer veto must each fail for their own stated
+          reason.
+        </p>
+        <p>
+          For every upload, assert the expected nonzero accepted
+          operation/object/provenance counts for that fixture and reject any
+          <code>rejected N item(s)</code> line. Counts may include reachable
+          history, so derive expectations from the known candidate history
+          rather than assuming every push uploads exactly one total record. CLI
+          <code>push --no-land</code> can return 0 despite rejected bundle
+          items; exit zero alone is insufficient.
+        </p>
+        <p>
+          Read operation IDs and grants from actual JSON. Never hardcode
+          generated IDs, ports, signatures, or success messages. Verify remote
+          main through fresh clones after each land outcome; local ahead
+          operations are expected to remain in rejected candidate checkouts.
+        </p>
+      </section>
+      <section class="block" id="task-4">
+        <h2>
+          Task 4: Ship the executable demo, lifecycle tests, and entry points
+        </h2>
+        <section class="task">
+          <p class="files">
+            Create the new example script, its end-to-end tests, example README,
+            and root Makefile. Modify example Moon/TypeScript configuration,
+            regular CI, README, getting-started guide, and changelog.
+          </p>
+          <dl class="io">
+            <dt>Consumes</dt>
+            <dd>
+              Tasks 1 and 2, the checkout-compiled CLI, and the seven-act
+              contract above.
+            </dd>
+            <dt>Produces</dt>
+            <dd>
+              <code>make demo</code> and
+              <code>CI= moon run example-cli:agent-demo</code>. Success exits 0
+              after all assertions and cleanup; failure exits nonzero after
+              stopping children and retaining evidence.
+            </dd>
+          </dl>
+          <ol class="steps">
+            <li>
+              <input
+                type="checkbox"
+                id="t4s1"
+                aria-label="Write the end-to-end contract tests before the driver"
+              />
+              <div class="label">
+                <strong
+                  >Write the end-to-end contract tests before the driver</strong
+                >
+                <p>
+                  Use a real subprocess running
+                  <code>bun examples/cli/src/agent-governed-demo.ts</code>, with
+                  the checkout CLI compiled by the task graph. First require
+                  successful completion and cleanup twice; the initial test
+                  fails because the script is missing. Then add failure and
+                  interruption cases as the lifecycle is implemented.
+                </p>
+                <div class="table-scroll">
+                  <table>
+                    <thead>
+                      <tr>
+                        <th>Case</th>
+                        <th>Required observation</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      <tr>
+                        <td>Two complete runs</td>
+                        <td>
+                          Both child exit codes are 0. Each reaches
+                          accepted-history, protected-path, exhausted-budget,
+                          and reviewer-veto assertions. Roots differ; both roots
+                          are gone afterward; reported server PIDs and ports are
+                          no longer live.
+                        </td>
+                      </tr>
+                      <tr>
+                        <td>Server dies during a run</td>
+                        <td>
+                          Observe the real server PID/URL announced by the
+                          driver, kill that actual process, and require the
+                          driver to fail within its deadline. The transcript and
+                          temporary root remain; no child stays live. This is
+                          fault injection into a real server, not a mock policy
+                          response.
+                        </td>
+                      </tr>
+                      <tr>
+                        <td>User interruption</td>
+                        <td>
+                          After startup, send SIGINT to the driver. It stops and
+                          reaps the real server, exits nonzero, and retains the
+                          run directory. Exercise SIGTERM handling as well where
+                          supported.
+                        </td>
+                      </tr>
+                      <tr>
+                        <td>Cleanup ownership</td>
+                        <td>
+                          A sentinel outside the owned run root survives all
+                          cases. Tests remove only their own deliberately
+                          retained failure fixtures after inspecting them.
+                        </td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
+                <p>
+                  Tests consume live process output; they do not sleep for a
+                  guessed startup time. Give the two-successful-runs test a
+                  <code>300_000</code> ms Bun test timeout and each failure or
+                  interruption case <code>150_000</code> ms. These outer limits
+                  exceed the driver's 120-second deadline and bounded shutdown.
+                  Always reap children in test cleanup. Await process exit and
+                  check the serving URL refuses connections; a recycled PID or
+                  reassigned port alone does not identify a leaked child.
+                </p>
+              </div>
+            </li>
+            <li>
+              <input
+                type="checkbox"
+                id="t4s2"
+                aria-label="Implement subprocess execution with separate narration and captured output"
+              />
+              <div class="label">
+                <strong
+                  >Implement subprocess execution with separate narration and
+                  captured output</strong
+                >
+                <p>
+                  Use <code>Bun.spawn</code> with the absolute binary path,
+                  argument arrays, actor cwd, and child-specific home settings
+                  from the existing compiled test pattern. Track each child
+                  immediately. Drain stdout and stderr concurrently, tee both
+                  into narration/transcript, and keep raw stdout separately for
+                  JSON parsing. A command result has this shape:
+                </p>
+                <pre><code data-language="typescript">type CommandResult = {
+  code: number;
+  stdout: string;
+  stderr: string;
+};
+type Actor = { label: string; home: string };
+type CommandExpectation = { code: number; reason?: string };
+
+// Execute one actor command against the checkout binary and capture its real result.
+// The implementation owns timeout, stream draining, child registration, and reaping.
+type Invoke = (
+  actor: Actor,
+  cwd: string,
+  args: string[],
+  expected?: CommandExpectation,
+) =&gt; Promise&lt;CommandResult&gt;;</code></pre>
+                <p>
+                  CLI errors can be printed on stdout. Match an expected failure
+                  against the combined output and exact expected exit code,
+                  while checking the corresponding state separately. Output
+                  callbacks must never alter the raw JSON string. Log actor,
+                  cwd, arguments, PID, exit status, and the actual run
+                  directory; do not print identity seed contents.
+                </p>
+              </div>
+            </li>
+            <li>
+              <input
+                type="checkbox"
+                id="t4s3"
+                aria-label="Implement the seven acts and evidence assertions"
+              />
+              <div class="label">
+                <strong
+                  >Implement the seven acts and evidence assertions</strong
+                >
+                <p>
+                  Follow the demo contract with newline-terminated source
+                  fixtures. Obtain checkout version from
+                  <code>--version</code> and construct the agent-kind
+                  declaration. Seed and verify read access before claiming a
+                  delegation works. Capture accepted main's full operation-ID
+                  set and compare it after each rejected proposal.
+                </p>
+                <pre><code data-language="typescript">type QueryOp = { id: string; author: string; path: string };
+type WhyResult = {
+  op: QueryOp;
+  verified: boolean;
+  records: { actor: string; actor_kind: string; intent: string; status: string }[];
+};
+
+function assertAgentWhy(
+  answer: WhyResult, opId: string, agentDid: string,
+  agentKind: string, intent: string,
+): void {
+  assert.equal(answer.op.id, opId);
+  assert.equal(answer.op.author, agentDid);
+  assert.equal(answer.verified, true);
+  assert.ok(answer.records.some(record =&gt;
+    record.actor === agentDid &amp;&amp; record.actor_kind === agentKind &amp;&amp;
+    record.intent === intent &amp;&amp; record.status === &#x27;verified&#x27;));
+}</code></pre>
+                <p>
+                  Import <code>assert</code> from
+                  <code>node:assert/strict</code>. Print an act's
+                  verified-outcome line only after both command and state
+                  assertions. Keep the final main-repository veto active. Use
+                  the second repository to exhaust the same agent DID without
+                  altering the main story's grant.
+                </p>
+              </div>
+            </li>
+            <li>
+              <input
+                type="checkbox"
+                id="t4s4"
+                aria-label="Implement bounded shutdown and evidence retention"
+              />
+              <div class="label">
+                <strong
+                  >Implement bounded shutdown and evidence retention</strong
+                >
+                <p>
+                  Register SIGINT/SIGTERM handling in the driver. Start one
+                  shared shutdown path on normal completion, failure, timeout,
+                  or interruption. Mark shutdown before signaling children so
+                  the expected server exit cannot start a second cleanup or turn
+                  an otherwise successful run into a failure. Cancel command and
+                  startup timers and remove signal listeners. Send SIGINT to the
+                  CLI server because that is its current graceful-stop signal;
+                  wait up to 5 seconds, then escalate to forced termination and
+                  reap it. Stop any finite command still running. Keep stream
+                  readers draining until the children finish.
+                </p>
+                <p>
+                  Only after every child is reaped, delete a successful run's
+                  owned directory. Failure, interrupted execution, or failed
+                  shutdown retains the directory and transcript and prints
+                  <code>Demo evidence retained: &lt;actual-path&gt;</code>. Set
+                  failure exit code 1, SIGINT cancellation 130, and SIGTERM
+                  cancellation 143 on platforms supporting those signals. Never
+                  let a cleanup error convert failure into success, or delete an
+                  arbitrary user-supplied directory.
+                </p>
+              </div>
+            </li>
+            <li>
+              <input
+                type="checkbox"
+                id="t4s5"
+                aria-label="Wire compilation, tests, and Make through Moon"
+              />
+              <div class="label">
+                <strong>Wire compilation, tests, and Make through Moon</strong>
+                <p>
+                  Add the following example task, with the existing CLI compile
+                  task as a dependency. Keep existing <code>demo</code> and
+                  <code>grant-demo</code> tasks. The new demo itself is never
+                  cached.
+                </p>
+                <pre><code data-language="yaml">agent-demo:
+  command: &#x27;bun src/agent-governed-demo.ts&#x27;
+  deps:
+    - &#x27;cli:compile&#x27;
+  options:
+    cache: false
+    runInCI: &#x27;skip&#x27;</code></pre>
+                <p>
+                  Remove the obsolete no-tests override. Add
+                  <code>cli:compile</code> to the example test dependencies and
+                  disable caching for this live test task. Extend TypeScript
+                  includes to <code>src/**/*.ts</code> and
+                  <code>test/**/*.ts</code>. Use <code>CI=</code> when invoking
+                  the test dependency graph because the existing compile task is
+                  CI-skipped. If commands need focused lint beyond root's
+                  current project list, use a Moon lint task scoped to the
+                  example; do not broaden unrelated application checks.
+                </p>
+                <pre><code data-language="make">.PHONY: demo
+demo:
+	CI= moon run example-cli:agent-demo</code></pre>
+                <p>
+                  The recipe uses a real tab. It selects no installed Thaddeus
+                  executable and requires no package-script task wrapper.
+                </p>
+              </div>
+            </li>
+            <li>
+              <input
+                type="checkbox"
+                id="t4s6"
+                aria-label="Document and gate the actual user entry point"
+              />
+              <div class="label">
+                <strong>Document and gate the actual user entry point</strong>
+                <p>
+                  Add the source-checkout prerequisites from CONTRIBUTING, the
+                  Make command, and the equivalent Moon command to the new
+                  example README. Explain owner handoff, local reviewer access,
+                  operation-count budgets, explicit actor declarations, varying
+                  IDs/ports, expected rejection output, and success/failure
+                  cleanup. The live run is the cast; no checked-in recording is
+                  required.
+                </p>
+                <p>
+                  Link the example from README and getting-started. Preserve the
+                  corrected section 4, its <code>./web</code> explanation, and
+                  section 6's default clone command. In CHANGELOG Unreleased,
+                  record truthful attribution, version enforcement, and the
+                  executable demo; identify the clone correction as preserved
+                  THA-27 work.
+                </p>
+                <p>
+                  Add a focused step to regular CI that executes Make itself
+                  twice as well as the live tests:
+                </p>
+                <pre><code data-language="yaml">- name: Verify DX versions and the executable demo
+  run: |
+    export AGENT=1
+    moon run root:version-check root:version-test
+    moon run cli:typecheck example-cli:typecheck
+    moon run cli:test -- test/actor-kind.test.ts test/publish.test.ts test/rename.test.ts test/query.test.ts test/compile.test.ts
+    make demo
+    make demo
+    CI= moon run example-cli:test</code></pre>
+                <p>
+                  Regular CI already runs on every PR. An error in the Make
+                  recipe must fail this step even when invoking the driver
+                  directly would work. No release publication is part of this
+                  job.
+                </p>
+              </div>
+            </li>
+          </ol>
+        </section>
+      </section>
+      <section class="block" id="task-5">
+        <h2>Task 5: Verify the user paths and review the final scope</h2>
+        <section class="task">
+          <p class="files">
+            Review all touched source, tests, configuration, docs, ADRs, and the
+            glossary. Store local output under <code>.agents/ignore/</code>.
+          </p>
+          <dl class="io">
+            <dt>Consumes</dt>
+            <dd>
+              The completed implementation tasks and their focused test results.
+            </dd>
+            <dt>Produces</dt>
+            <dd>
+              Observed acceptance evidence with explicit limits. No release or
+              implementation success claim based solely on a plan, a parser, or
+              a typecheck.
+            </dd>
+          </dl>
+          <ol class="steps">
+            <li>
+              <input
+                type="checkbox"
+                id="t5s1"
+                aria-label="Run repository baseline and focused regressions"
+              />
+              <div class="label">
+                <strong>Run repository baseline and focused regressions</strong>
+                <pre><code data-language="shell">export AGENT=1
+moon run root:format root:lint
+moon run root:version-check root:version-test
+moon run cli:typecheck example-cli:typecheck
+moon run cli:test -- test/actor-kind.test.ts test/version.test.ts test/publish.test.ts test/rename.test.ts test/query.test.ts test/clone.test.ts test/grants.test.ts test/veto.test.ts test/policy.test.ts test/repo-init.test.ts test/init-compile.test.ts test/compile.test.ts
+CI= moon run example-cli:test
+moon run integration:test -- test/one-edit-end-to-end.test.ts</code></pre>
+                <p>
+                  Inspect every exit status and test summary. Root lint
+                  currently excludes examples from its type-aware tsconfig, so
+                  the example typecheck and live tests are mandatory. Keep
+                  unrelated formatter changes out of the final diff.
+                </p>
+              </div>
+            </li>
+            <li>
+              <input
+                type="checkbox"
+                id="t5s2"
+                aria-label="Run the compiled first-run and attribution paths"
+              />
+              <div class="label">
+                <strong
+                  >Run the compiled first-run and attribution paths</strong
+                >
+                <pre><code data-language="shell">CI= moon run cli:compile
+./packages/cli/release/thaddeus --version
+./packages/cli/release/thaddeus help push
+./packages/cli/release/thaddeus help rename
+make demo
+make demo</code></pre>
+                <p>
+                  Observe default and explicit clone destinations, init
+                  preserving files, agent-signed explanations, owner handoff,
+                  protected-path rejection, independent budget exhaustion, and
+                  reviewer veto. Also exercise a compiled rename with explicit
+                  attribution and invalid attribution on dirty source, using
+                  temporary homes/server as in
+                  <code>init-compile.test.ts</code>. Confirm invalid invocations
+                  leave files, local history, configuration, and remote main
+                  unchanged.
+                </p>
+              </div>
+            </li>
+            <li>
+              <input
+                type="checkbox"
+                id="t5s3"
+                aria-label="Exercise interruption and the preexisting paths"
+              />
+              <div class="label">
+                <strong>Exercise interruption and the preexisting paths</strong>
+                <pre><code data-language="shell">CI= moon run example-cli:demo
+CI= moon run example-cli:grant-demo</code></pre>
+                <p>
+                  Run the new demo and interrupt it after server startup.
+                  Confirm the process and port are gone, the run fails, and the
+                  evidence directory remains readable. Check a second run starts
+                  cleanly without using the retained identities or server data.
+                  The tests cover forced server death; inspect that evidence
+                  too. Remove only your own temporary verification directories
+                  after review.
+                </p>
+              </div>
+            </li>
+            <li>
+              <input
+                type="checkbox"
+                id="t5s4"
+                aria-label="Check release evidence without unauthorized publication"
+              />
+              <div class="label">
+                <strong
+                  >Check release evidence without unauthorized
+                  publication</strong
+                >
+                <p>
+                  Run the metadata guard with a matching tag, a mismatching tag,
+                  and no tag. Build native CLI/TUI executables available in the
+                  environment and check their actual version output. Review
+                  one-SHA dependencies, native artifact paths, executable
+                  permissions, and publication gates in the release workflow.
+                </p>
+                <p>
+                  The nine-artifact release matrix can only be called verified
+                  after its native jobs actually execute. Report which local
+                  paths ran, which CI jobs ran, and which release jobs did not
+                  run. Do not create or move a tag, launch a publishing
+                  workflow, or publish packages to manufacture that evidence.
+                </p>
+              </div>
+            </li>
+            <li>
+              <input
+                type="checkbox"
+                id="t5s5"
+                aria-label="Close the scope and terminology review"
+              />
+              <div class="label">
+                <strong>Close the scope and terminology review</strong>
+                <p>
+                  Answer explicitly: what did this touch that was never
+                  exercised? Cover retry provenance, both attribution commands,
+                  the second repository's budget, the second demo run, failure
+                  retention, original demos, default/explicit clone paths, and
+                  binary version checks. Confirm no dependency was added, no
+                  historical release was rewritten, and no authorization or
+                  operation-accounting rule changed.
+                </p>
+                <p>
+                  Keep the implementation as one coherent THA-29 change. Report
+                  failures verbatim and distinguish observed results from unrun
+                  platform or publication paths. The user's planning interview
+                  authorizes these design choices, not a commit, push, tag, or
+                  release.
+                </p>
+              </div>
+            </li>
+          </ol>
+        </section>
+      </section>
+      <section class="block">
+        <h2>Acceptance and review map</h2>
+        <div class="table-scroll">
+          <table>
+            <thead>
+              <tr>
+                <th>Requirement</th>
+                <th>Evidence required</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>Clone-path bug</td>
+                <td>
+                  The compiled default clone creates <code>web</code>; commands
+                  from that directory succeed. Explicit destination also
+                  materializes correctly. The corrected guide stays intact.
+                </td>
+              </tr>
+              <tr>
+                <td>Version drift</td>
+                <td>
+                  Full release metadata and matching lock entries agree; README
+                  is current; a mismatching supplied tag fails; release jobs use
+                  one verified SHA; downloaded binaries report the shared
+                  version.
+                </td>
+              </tr>
+              <tr>
+                <td>Agent-governed commits</td>
+                <td>
+                  Real scoped delegation, explicit verified actor declaration,
+                  successful owner land, protected-path rejection, query by
+                  agent DID, and a separately authorized reviewer veto.
+                </td>
+              </tr>
+              <tr>
+                <td>Budget enforcement</td>
+                <td>
+                  The first operation in the independent one-operation budget
+                  lands; a second fails specifically for budget exhaustion;
+                  accepted remote state is unchanged.
+                </td>
+              </tr>
+              <tr>
+                <td>Repeatable cast</td>
+                <td>
+                  Source-built binary and server, real Make entry point, live
+                  narration, two isolated successful runs, no external model or
+                  recording dependency.
+                </td>
+              </tr>
+              <tr>
+                <td>Failure behavior</td>
+                <td>
+                  Unexpected server death and interruption fail within
+                  deadlines, stop all children, and retain the transcript/state
+                  under the actual printed path.
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        <p>
+          Sequencing: attribution and version consistency can be reviewed
+          independently. Release enforcement depends on the version guard. The
+          demo depends on attribution and the checkout compile path. Finish with
+          the complete verification task.
+        </p>
+        <p>
+          The two ADRs record lasting domain boundaries; the glossary contains
+          domain terms only. Runner choice and temporary-directory handling
+          remain in this plan and example documentation rather than becoming
+          extra ADRs.
+        </p>
+        <p>
+          Current planning evidence: issue #82, the CLI handlers, compiled
+          tests, policy and provenance code, Moon configuration, and release
+          workflows were inspected at <code>6dda4eb</code>. A read-only metadata
+          audit found all 17 package manifests and Bun lock entries, both npm
+          launchers, and the Rust manifest and local lock entry at
+          <code>0.1.10-alpha</code>; the active README still says
+          <code>0.1.0-alpha</code>. No feature test, new demo, or release
+          workflow has been run in this planning refresh. Earlier draft test
+          counts are historical evidence, not current verification.
+        </p>
+        <p>
+          Self-review coverage: all three issue requirements and all nine
+          recorded decisions map to the contracts and tasks above. The five
+          review risks have assigned checks. Review this refreshed plan before
+          implementation. Native execution in this session is recommended
+          because the demo depends on the CLI changes and version checks; the
+          final change receives an independent review.
+        </p>
+      </section>
+      <p class="progress">
+        <b><span id="done">0</span></b> of <span id="total">0</span> steps
+        complete
+      </p>
+    </div>
+    <script>
+      // Progress counter. Inline only — external script src is rejected by postplan.
+      var boxes = document.querySelectorAll('ol.steps input[type=checkbox]');
+      var doneEl = document.getElementById('done');
+      document.getElementById('total').textContent = String(boxes.length);
+      function refresh() {
+        var n = 0;
+        boxes.forEach(function (b) {
+          if (b.checked) n++;
+        });
+        doneEl.textContent = String(n);
+      }
+      boxes.forEach(function (b) {
+        b.addEventListener('change', refresh);
+      });
+      refresh();
+    </script>
+  </body>
+</html>

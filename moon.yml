@@ -26,6 +26,34 @@ workspace:
     exclude: ['test', 'typecheck']
 
 tasks:
+  version-check:
+    command: 'bun packages/cli/scripts/check-release-version.ts'
+    inputs:
+      - 'packages/cli/scripts/check-release-version.ts'
+      - 'packages/*/package.json'
+      - 'npm/*/package.json'
+      - 'bun.lock'
+      - 'lazythad/Cargo.toml'
+      - 'lazythad/Cargo.lock'
+      - 'README'
+    options:
+      cache: false
+
+  version-test:
+    command: 'bun test packages/cli/test/version.test.ts'
+    inputs:
+      - 'packages/cli/test/version.test.ts'
+      - 'packages/cli/scripts/check-release-version.ts'
+      - 'packages/cli/src/version.ts'
+      - 'packages/*/package.json'
+      - 'npm/*/package.json'
+      - 'bun.lock'
+      - 'lazythad/Cargo.toml'
+      - 'lazythad/Cargo.lock'
+      - 'README'
+    options:
+      cache: false
+
   lint:
     command: 'oxlint --type-aware --tsconfig tsconfig.oxlint.json .'
     deps:
