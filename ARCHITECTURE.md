@@ -5,6 +5,24 @@ each as a standalone npm package, while this document keeps the separately-built
 pieces converging into one system. There is no "dumb primitive + smart platform"
 seam: the packages compose; Thaddeus is their composition.
 
+## Direction: agent-first, October 2026
+
+Thaddeus is now built first for large-scale parallel agent development, with a
+design target of 1,000 or more agents on one repository.
+[ADR 0004](docs/adr/0004-hosted-workspaces-and-external-agents-first.md) sets
+the delivery order. Thaddeus-hosted remote workspaces come first, then
+local-folder compatibility, then customer hosting, then first-party
+orchestration once external agents can connect.
+[ADR 0003](docs/adr/0003-trusted-code-processing-service.md) replaces the
+promise that the host cannot read code with a trusted code-processing service
+that keeps scoped authority, encrypted storage, audit records and tenant
+isolation. The sections below describe the shipped substrate. Where a shipped
+guarantee differs from the direction, the shipped one holds until the queue item
+that changes it lands. The
+[architecture contract](docs/agent-first-architecture.md) has the details, and
+its [build queue](docs/agent-first-architecture.md#6-build-queue) sets the order
+of work.
+
 ## Shared primitives (reused, not duplicated)
 
 | Primitive                             | Package                  | Reused by                                               |
@@ -24,6 +42,10 @@ seam: the packages compose; Thaddeus is their composition.
   (P09)
 - **Tier 4 — Meaning + governance:** semantic graph (P08), review (P10), live DB
   (P11)
+
+This is the package dependency order. The product build order is the Linear
+queue copied in
+[docs/agent-first-architecture.md](docs/agent-first-architecture.md) section 6.
 
 ## North-star flow (the continuous integration test)
 
@@ -63,22 +85,22 @@ compaction/GC, and a Git gateway are the next steps.
 
 ## Server (infrastructure, not a pillar)
 
-The durable `Platform` is reachable over HTTP via `@thaddeus.run/server` — a
-`Bun.serve` remote that is **untrusted** (no keys, verifies-don't-trust, serves
-ciphertext): reads are a public mirror, writes are signed, and shared-view
-authority is owner-signed and policy-gated. Every public view exposes a complete
-monotonic `HeadRecord` chain. The server cannot use raw view pointers as public
-authority, and it refuses to serve a pull unless its operation bundle is exactly
-the current signed head's reachable closure. Delegates may upload signed
-operations, but only the repository owner can create a shared branch or sign a
-landing. Signed mutations bind a random nonce into the request signature;
-single-node durable replay state rejects reuse throughout the five-minute
-timestamp window. The server is otherwise stateless over the shared `Backend`,
-so a node restart serves the same repos. It now carries **and persists the whole
-substrate** — not just code (P01 objects, P03 ops) but the meaning around it:
-the signed "why" (P04), the standing human veto (P10), server-wide reputation
-(P07), and semantic-graph ops (P08), each write-through under its own
-content-addressed key and rebuilt on load.
+The durable `Platform` is reachable over HTTP via `@thaddeus.run/server`, today
+a `Bun.serve` remote that is **untrusted** (no keys, verifies-don't-trust,
+serves ciphertext): reads are a public mirror, writes are signed, and
+shared-view authority is owner-signed and policy-gated. Every public view
+exposes a complete monotonic `HeadRecord` chain. The server cannot use raw view
+pointers as public authority, and it refuses to serve a pull unless its
+operation bundle is exactly the current signed head's reachable closure.
+Delegates may upload signed operations, but only the repository owner can create
+a shared branch or sign a landing. Signed mutations bind a random nonce into the
+request signature; single-node durable replay state rejects reuse throughout the
+five-minute timestamp window. The server is otherwise stateless over the shared
+`Backend`, so a node restart serves the same repos. It now carries **and
+persists the whole substrate** — not just code (P01 objects, P03 ops) but the
+meaning around it: the signed "why" (P04), the standing human veto (P10),
+server-wide reputation (P07), and semantic-graph ops (P08), each write-through
+under its own content-addressed key and rebuilt on load.
 
 The server may **optionally attest** successful merge and release events. Its
 trust set is an exact DID allowlist: configured foreign hosts plus the active
@@ -99,7 +121,10 @@ a private seed and is development-only. Ordinary content hosting still has no
 repository decryption keys. Timed reveal remains the deliberate exception
 described below: it temporarily handles a deliberately publishable content key
 using a world-known public seed. Multi-node concurrency, dynamic federation
-discovery, and the Git gateway are the next steps.
+discovery, and the Git gateway are the next steps. ADR 0003 replaces this
+keyless design with a trusted code-processing service for the hosted path. The
+change ships under THA-150 and THA-151, and this section will be updated when it
+does.
 
 Timed reveal is the deliberate exception to that normal trust boundary. An owner
 uploads a public-wrapped capability before its start time so the server can
