@@ -8,6 +8,11 @@ ops/objects/caps (`verifyOp`, content-address, `verifyCapability`), runs
 policy-gated `land`, and serves a public ciphertext mirror for clone. Writes are
 gated by a signed-request envelope checked against the per-repo owner.
 
+This package is the shipped keyless remote.
+[ADR 0003](../../docs/adr/0003-trusted-code-processing-service.md) adopts a
+trusted code-processing service for the hosted path. That work lands under
+THA-150, and this package behaves as before until it does.
+
 Public shared views are authorized by owner-signed, monotonic `HeadRecord`
 chains—not raw `OpLog` view pointers. Repository and branch creation require a
 signed version-0 record. A land must carry the owner's exact next record for the

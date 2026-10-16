@@ -1,10 +1,13 @@
 # Getting started with Thaddeus
 
-Thaddeus is a post-Git, agent-native source-control substrate: encrypted,
+Thaddeus is source control built for many agents editing one repository at once.
+It is a post-Git, agent-native source-control substrate: encrypted,
 content-addressed objects; a signed operation log; a signed "why" behind every
 change; merge as policy (proofs, reputation, a human veto) instead of a person
-reading a diff. This guide takes you from install to your first published,
-explained change in a few minutes.
+reading a diff. This guide covers the shipped CLI and the keyless open-source
+server, and takes you from install to your first published, explained change in
+a few minutes. The hosted direction is in
+[the architecture contract](agent-first-architecture.md).
 
 > **Pre-alpha.** Interfaces still move. Everything here is real and tested, but
 > not yet stable.
@@ -54,7 +57,8 @@ thaddeus help                     # command overview; `thaddeus help <cmd>` for 
 
 ## 2. Create your identity
 
-Every write is signed by a self-owned `did:key` — no account, no server trust.
+Every write is signed by a self-owned `did:key`. You need no account, and the
+shipped server checks signatures instead of holding keys.
 
 ```sh
 thaddeus identity init            # writes a seed to ~/.config/thaddeus/
@@ -63,10 +67,12 @@ thaddeus whoami                   # prints your did:key
 
 ## 3. Run a server (or point at one)
 
-A Thaddeus server normally holds no decryption keys: it verifies what it ingests
-and serves ciphertext. Timed reveals are the explicit exception—the chosen host
-is trusted to honor the embargo for scheduled files. Run one locally over a
-durable directory outside your project:
+The open-source server you run here holds no decryption keys: it verifies what
+it ingests and serves ciphertext. Timed reveals are the explicit exception—the
+chosen host is trusted to honor the embargo for scheduled files. The hosted
+trusted service in [ADR 0003](adr/0003-trusted-code-processing-service.md) will
+process plaintext under scoped authority. Nothing in this guide depends on it.
+Run one locally over a durable directory outside your project:
 
 ```sh
 thaddeus serve --port 4000 --data /tmp/thaddeus-demo-server
@@ -193,9 +199,9 @@ update files. Transient polling errors retry, and Ctrl-C exits cleanly.
 
 ## 6. Collaborate with someone else
 
-Reads are **decryption-bounded**: the server only ever holds ciphertext, and you
-can read exactly what your identity holds a capability for. So sharing a repo
-means sharing _keys_, not just permissions — `grant` does both:
+Reads are **decryption-bounded**: this server only holds ciphertext, and you can
+read exactly what your identity holds a capability for. So sharing a repo means
+sharing _keys_, not just permissions — `grant` does both:
 
 ```sh
 # owner, inside the working copy:
