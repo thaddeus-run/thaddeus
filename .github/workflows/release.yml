@@ -17,12 +17,56 @@ permissions:
   contents: write
 
 jobs:
+  preflight:
+    name: Verify the selected release
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.tag.outputs.tag }}
+      version: ${{ steps.metadata.outputs.version }}
+      sha: ${{ steps.metadata.outputs.sha }}
+    steps:
+      - name: Select release tag
+        id: tag
+        env:
+          TAG_INPUT: ${{ github.event.inputs.tag }}
+          REF_NAME: ${{ github.ref_name }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          tag="${TAG_INPUT:-$REF_NAME}"
+          if ! [[ "$tag" =~ ^v[0-9A-Za-z.+-]+$ ]]; then
+            echo "invalid release tag" >&2
+            exit 1
+          fi
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+      - uses: actions/checkout@v4
+        with:
+          ref: refs/tags/${{ steps.tag.outputs.tag }}
+          fetch-depth: 0
+      - name: Install proto toolchain
+        uses: moonrepo/setup-toolchain@261c62cb5b0f580c7be7c8cd0f023a2e96756095
+        with:
+          auto-install: true
+      - name: Verify release metadata
+        id: metadata
+        env:
+          THADDEUS_RELEASE_TAG: ${{ steps.tag.outputs.tag }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          moon run root:version-check
+          version=$(bun -p "require('./packages/cli/package.json').version")
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
   cli:
     name: Build CLI binaries
+    needs: [preflight]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
         with:
+          ref: ${{ needs.preflight.outputs.sha }}
           fetch-depth: 0
       - name: Install proto toolchain
         uses: moonrepo/setup-toolchain@261c62cb5b0f580c7be7c8cd0f023a2e96756095 # v0
@@ -55,6 +99,7 @@ jobs:
 
   tui:
     name: Build TUI (${{ matrix.name }})
+    needs: [preflight]
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -80,6 +125,8 @@ jobs:
             }
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.preflight.outputs.sha }}
       - name: Install Rust 1.95.0
         uses: dtolnay/rust-toolchain@fa04a1451ff1842e2626ccb99004d0195b455a88 # master
         with:
@@ -104,12 +151,83 @@ jobs:
           name: tui-${{ matrix.name }}
           path: dist-bins/*
 
+  verify-artifacts:
+    name: Verify binary versions (${{ matrix.os }})
+    needs: [preflight, cli, tui]
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - {
+              os: ubuntu-24.04,
+              cli: thaddeus-linux-x64,
+              tui: lazythad-linux-x64,
+              tuiArtifact: tui-linux-x64,
+            }
+          - {
+              os: ubuntu-24.04-arm,
+              cli: thaddeus-linux-arm64,
+              tui: '',
+              tuiArtifact: '',
+            }
+          - {
+              os: macos-14,
+              cli: thaddeus-darwin-arm64,
+              tui: lazythad-darwin-arm64,
+              tuiArtifact: tui-darwin-arm64,
+            }
+          - {
+              os: macos-15-intel,
+              cli: thaddeus-darwin-x64,
+              tui: lazythad-darwin-x64,
+              tuiArtifact: tui-darwin-x64,
+            }
+          - {
+              os: windows-latest,
+              cli: thaddeus-windows-x64.exe,
+              tui: lazythad-windows-x64.exe,
+              tuiArtifact: tui-windows-x64,
+            }
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: cli-binaries
+          path: artifacts/cli
+      - uses: actions/download-artifact@v4
+        if: matrix.tuiArtifact != ''
+        with:
+          name: ${{ matrix.tuiArtifact }}
+          path: artifacts/tui
+      - name: Run the downloaded binaries
+        env:
+          EXPECTED_VERSION: ${{ needs.preflight.outputs.version }}
+          CLI_BINARY: ${{ matrix.cli }}
+          TUI_BINARY: ${{ matrix.tui }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          check_binary() {
+            local binary_path="$1"
+            if [ "$RUNNER_OS" != "Windows" ]; then chmod +x "$binary_path"; fi
+            local actual_version
+            actual_version=$("$binary_path" --version)
+            if [ "$actual_version" != "$EXPECTED_VERSION" ]; then
+              echo "$binary_path reports $actual_version; expected $EXPECTED_VERSION" >&2
+              return 1
+            fi
+          }
+          check_binary "artifacts/cli/$CLI_BINARY"
+          if [ -n "$TUI_BINARY" ]; then check_binary "artifacts/tui/$TUI_BINARY"; fi
+
   release:
     name: Publish GitHub Release
-    needs: [cli, tui]
+    needs: [preflight, verify-artifacts]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.preflight.outputs.sha }}
       - uses: actions/download-artifact@v4
         with:
           path: artifacts
@@ -119,24 +237,10 @@ jobs:
           find artifacts -type f -exec cp {} release/ \;
           ( cd release && sha256sum * > SHA256SUMS )
           ls -la release
-      - name: Determine tag
-        id: tag
-        env:
-          TAG_INPUT: ${{ github.event.inputs.tag }}
-          REF_NAME: ${{ github.ref_name }}
-        run: |
-          tag="${TAG_INPUT:-$REF_NAME}"
-          # Validate before use — the tag reaches shell commands, so restrict it
-          # to tag-safe characters (defense-in-depth against injection).
-          if ! printf '%s' "$tag" | grep -Eq '^v[0-9A-Za-z.+-]+$'; then
-            echo "refusing to release an unexpected tag: $tag" >&2
-            exit 1
-          fi
-          echo "tag=$tag" >> "$GITHUB_OUTPUT"
       - name: Create or update the release
         env:
           GH_TOKEN: ${{ github.token }}
-          TAG: ${{ steps.tag.outputs.tag }}
+          TAG: ${{ needs.preflight.outputs.tag }}
         run: |
           NOTES="Prebuilt \`thaddeus\` (CLI) and \`lazythad\` (TUI) binaries.
 
@@ -156,7 +260,7 @@ jobs:
 
   npm:
     name: Publish npm launchers
-    needs: [release]
+    needs: [preflight, release]
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -167,6 +271,8 @@ jobs:
       id-token: write
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.preflight.outputs.sha }}
       - uses: actions/setup-node@v4
         with:
           node-version: '24'
@@ -185,15 +291,10 @@ jobs:
             || { echo "npm install is missing provenance support (sigstore)"; exit 1; }
       - name: Publish thaddeus + lazythad launchers
         env:
-          TAG_INPUT: ${{ github.event.inputs.tag }}
-          REF_NAME: ${{ github.ref_name }}
+          EXPECTED_VERSION: ${{ needs.preflight.outputs.version }}
         run: |
-          tag="${TAG_INPUT:-$REF_NAME}"
-          if ! printf '%s' "$tag" | grep -Eq '^v[0-9A-Za-z.+-]+$'; then
-            echo "refusing to publish an unexpected tag: $tag" >&2
-            exit 1
-          fi
-          version="${tag#v}"
+          set -euo pipefail
+          version="$EXPECTED_VERSION"
           # A prerelease version (e.g. 0.1.0-alpha) must not become the default
           # `latest` dist-tag; publish it under a channel tag derived from the
           # prerelease id (alpha/beta/rc/…), else `next`. A stable version
@@ -216,11 +317,15 @@ jobs:
             (
               cd "npm/$pkg"
               name="$(node -p "require('./package.json').name")"
+              actual_version=$(node -p "require('./package.json').version")
+              if [ "$actual_version" != "$version" ]; then
+                echo "launcher version $actual_version differs from $version" >&2
+                exit 1
+              fi
               if npm view "$name@$version" version >/dev/null 2>&1; then
                 echo "$name@$version already on the registry — skipping"
                 exit 0
               fi
-              npm version "$version" --no-git-tag-version --allow-same-version
               for attempt in 1 2 3; do
                 if npm publish --provenance --access public $dist; then
                   exit 0

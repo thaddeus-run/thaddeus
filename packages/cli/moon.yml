@@ -5,6 +5,21 @@ layer: 'library'
 tags: ['tsdown', 'publishable']
 
 tasks:
+  test:
+    deps:
+      - 'root:version-check'
+    inputs:
+      - 'src/**/*'
+      - 'test/**/*'
+      - 'scripts/**/*'
+      - 'package.json'
+      - '/packages/*/package.json'
+      - '/npm/*/package.json'
+      - '/bun.lock'
+      - '/lazythad/Cargo.toml'
+      - '/lazythad/Cargo.lock'
+      - '/README'
+
   # Produce a self-contained `thaddeus` executable (no Bun at runtime) for the
   # HOST platform, under release/ (gitignored, and NOT in package.json `files`,
   # so the ~50MB binary never ships in the npm tarball). Cross-compile release

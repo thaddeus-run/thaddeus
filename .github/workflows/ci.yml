@@ -39,6 +39,16 @@ jobs:
           moon run identity:typecheck store:typecheck integration:typecheck
           moon run identity:test store:test integration:test
 
+      - name: Verify DX versions and the executable demo
+        run: |
+          export AGENT=1
+          moon run root:version-check root:version-test
+          moon run cli:typecheck example-cli:typecheck
+          moon run cli:test -- test/actor-kind.test.ts test/publish.test.ts test/rename.test.ts test/query.test.ts test/compile.test.ts
+          make demo
+          make demo
+          CI= moon run example-cli:test
+
   # The lazythad TUI (lazythad/) is a standalone Rust crate outside the moon/bun
   # graph, so it gets its own job: format, lint, and test with the toolchain
   # pinned in .prototools.

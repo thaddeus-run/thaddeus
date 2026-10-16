@@ -7,6 +7,15 @@ All notable changes to Thaddeus. Format follows
 
 ### Added
 
+- Explicit `--actor-kind human|agent:<name>@<version>` declarations for signed
+  explanations from `push -m` and `rename -m`, validated before mutation.
+- A compiled CLI agent-governed demo through `make demo`, covering scoped
+  delegation, owner landing, protected paths, operation budgets, queries, and a
+  separately authorized reviewer veto.
+- Shared release-version checks across package manifests, lock entries,
+  launchers, the TUI, and the active README. Release builds use the verified
+  tag's commit and check downloaded binary versions before publication.
+
 - THA-6 / THA-24: owner-signed scoped reviewer capabilities, reviewer-only veto
   submission, durable revocation and withdrawal history, per-reviewer limits,
   and client/CLI management. Review authority grants no code upload or land
@@ -19,6 +28,10 @@ All notable changes to Thaddeus. Format follows
   non-owner v1 vetoes become audit-only; owner v1 vetoes remain effective.
 
 ### Changed
+
+- Updated the current README version and first-run sequence. Getting-started's
+  corrected `clone acme/web` destination remains `./web`; the demo exercises
+  both default and explicit clone destinations.
 
 - `blockOnVeto` requires an explicit reviewer allowlist. Empty means trust
   nobody. Hosts may supply a predicate for scope and lifecycle checks.

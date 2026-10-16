@@ -79,6 +79,25 @@ plus the focused tests for whatever you changed (`moonx <project>:test`). CI
 runs the affected portion of the graph, so a green local baseline usually means
 a green PR.
 
+## Release versions
+
+Each product release uses one version across every `packages/*/package.json`,
+both binary launchers under `npm/`, and `lazythad/Cargo.toml`. Matching entries
+in `bun.lock` and the local `lazythad` entry in `lazythad/Cargo.lock` must
+agree. Keep the active `README` status current. Examples and applications at
+`0.0.0` and historical changelog or plan entries retain their own versions.
+
+```bash
+moon run root:version-check root:version-test
+THADDEUS_RELEASE_TAG=v0.1.10-alpha moon run root:version-check
+```
+
+The checker reads the expected version from `packages/cli/package.json`. Release
+preflight checks the selected tag against that version, then all jobs build and
+publish from the same verified commit. Downloaded CLI and TUI binaries must
+report that exact version before publication. Launcher versions are checked, not
+rewritten by the publication job. A version bump remains a separate change.
+
 ## Repo conventions
 
 - Agent-facing rules and the verification baseline live in `AGENTS.md`; deeper

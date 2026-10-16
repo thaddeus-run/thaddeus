@@ -47,6 +47,21 @@ Set a default server with `thaddeus use <url>`, or select one for a command with
 
 ## Signed remote heads
 
+`push -m` and `rename -m` accept an explicit signer declaration:
+
+```sh
+thaddeus push -m "make greeting welcoming" --actor-kind agent:demo@0.1.10-alpha
+thaddeus rename refresh refreshToken -m "clarify the name" --actor-kind agent:demo@0.1.10-alpha
+```
+
+Use `human` or `agent:<name>@<version>`. An explicit `--actor-kind` requires a
+nonblank message and is validated before any source or metadata changes.
+Omitting it keeps the `human` default, including for delegated collaborators.
+This signed declaration describes the explanation's signer, who can differ from
+the operation's author. It neither proves agent execution nor grants write or
+review authority. Retrying an uploaded but unlanded operation with a new message
+appends another claim and preserves earlier claims and signatures.
+
 `create` signs an empty `main` genesis. `clone` verifies the complete signed
 chain and pins its owner; use `--owner did:key:...` when you have an owner DID
 through another trusted channel. Without it, the first valid owner is trusted on

@@ -9,6 +9,12 @@ explained change in a few minutes.
 > **Pre-alpha.** Interfaces still move. Everything here is real and tested, but
 > not yet stable.
 
+To watch scoped agent changes, signed explanations, policy rejections, and a
+reviewer veto from a source checkout, run `make demo` after the
+[contributor setup](../CONTRIBUTING.md). The
+[demo guide](../examples/cli/README.md) explains the actors and expected
+refusals.
+
 ## 1. Install the CLI
 
 The CLI ships as a self-contained binary (`thaddeus`, aliased `thad`) — no

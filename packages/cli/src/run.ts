@@ -68,6 +68,7 @@ import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { basename, dirname, isAbsolute, join, relative } from 'node:path';
 import { parseArgs } from 'node:util';
 
+import { parseCliActorKind } from './actor-kind';
 import { createAwsKmsAttestationSigner } from './aws-kms';
 import {
   HOSTED_SERVER,
@@ -1712,9 +1713,18 @@ export async function run(
           options: {
             'no-land': { type: 'boolean' },
             message: { type: 'string', short: 'm' },
+            'actor-kind': { type: 'string' },
           },
           allowPositionals: true,
         });
+        const actorKind = parseCliActorKind(
+          values['actor-kind'],
+          values.message
+        );
+        if ('error' in actorKind) {
+          out(actorKind.error);
+          return 2;
+        }
         const root = findRoot(env.cwd);
         if (root === undefined) {
           out(
@@ -1756,7 +1766,11 @@ export async function run(
             provenance.push(
               await provLog.record(
                 op,
-                { intent: message, reasoning: message, actorKind: 'human' },
+                {
+                  intent: message,
+                  reasoning: message,
+                  actorKind: actorKind.kind,
+                },
                 identity
               )
             );
@@ -1983,6 +1997,7 @@ export async function run(
           args: [...rest],
           options: {
             message: { type: 'string', short: 'm' },
+            'actor-kind': { type: 'string' },
             'no-land': { type: 'boolean' },
           },
           allowPositionals: true,
@@ -1990,6 +2005,14 @@ export async function run(
         const [oldName, newName] = positionals;
         if (oldName === undefined || newName === undefined) {
           out('usage: thaddeus rename <old> <new> [-m "<why>"]');
+          return 2;
+        }
+        const actorKind = parseCliActorKind(
+          values['actor-kind'],
+          values.message
+        );
+        if ('error' in actorKind) {
+          out(actorKind.error);
           return 2;
         }
         const root = findRoot(env.cwd);
@@ -2053,7 +2076,11 @@ export async function run(
             provenance.push(
               await provLog.record(
                 op,
-                { intent: message, reasoning: message, actorKind: 'human' },
+                {
+                  intent: message,
+                  reasoning: message,
+                  actorKind: actorKind.kind,
+                },
                 identity
               )
             );

@@ -5,7 +5,7 @@ OPEN SOURCE [TYPESCRIPT · RUST]
 
 PRODUCT: Thaddeus
 THE ARCHITECTURE FOR SOURCE CONTROL AFTER GIT
-STATUS: PRE-ALPHA (v0.1.0-alpha)
+STATUS: PRE-ALPHA (v0.1.10-alpha)
 
 ~~~
 
@@ -19,7 +19,11 @@ INSTALL: curl -fsSL https://raw.githubusercontent.com/thaddeus-run/thaddeus/main
   (or: npm i -g @thaddeus.run/cli@alpha @thaddeus.run/lazythad@alpha)
 
 QUICKSTART: see docs/getting-started.md
-  thaddeus init → serve → create → clone → edit → push -m → log / why
+  identity init → serve → use → init acme/web → edit → push -m → log / query why
+
+DEMO: make demo
+  Scoped agent edits, signed explanations, policy refusals, and reviewer veto.
+  Setup and expected output: examples/cli/README.md
 
 ~~~
 
