@@ -10,6 +10,8 @@ tasks:
       - 'cli:compile'
     options:
       cache: false
+      # Match cli:compile; the CI workflow clears CI explicitly to run both.
+      runInCI: 'skip'
   agent-demo:
     command: 'bun src/agent-governed-demo.ts'
     deps:
