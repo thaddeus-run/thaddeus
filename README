@@ -10,9 +10,9 @@ STATUS: PRE-ALPHA (v0.1.10-alpha)
 ~~~
 
 Source control built for many agents editing one repository at once.
-Isolated workspaces over shared code, durable checkpoints, structured edits,
-and merge as policy instead of a person reading a diff. Signed operations,
-a signed "why", scoped authority and a standing human veto.
+It ships copy-on-write workspaces over one shared object store, signed
+operations with a signed "why", scoped delegation, and merge as policy with a
+standing human veto instead of a person reading a diff.
 
 ~~~
 
