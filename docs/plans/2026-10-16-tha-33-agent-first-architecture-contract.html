@@ -1,0 +1,1724 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="color-scheme" content="dark" />
+    <title>THA-33 plan: agent-first architecture and migration contract</title>
+    <style>
+      :root {
+        --bg: #000000;
+        --surface: #0c0c0c;
+        --rule: #232323;
+        --fg: #ededed;
+        --fg-strong: #ffffff;
+        --muted: #8b8b8b;
+        --code-bg: #242424;
+        --block-bg: #0e0e0e;
+        --accent: #6fdc8c;
+        --warn: #e0c95e;
+        --bad: #e06f6f;
+      }
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        margin: 0;
+        background: var(--bg);
+        color: var(--fg);
+        font:
+          17px/1.7 system-ui,
+          -apple-system,
+          'Helvetica Neue',
+          'Segoe UI',
+          Arial,
+          sans-serif;
+        -webkit-font-smoothing: antialiased;
+      }
+      .wrap {
+        max-width: 920px;
+        margin: 0 auto;
+        padding: 4rem 1.5rem 8rem;
+      }
+      h1,
+      h2,
+      h3,
+      h4 {
+        color: var(--fg-strong);
+        font-weight: 700;
+        letter-spacing: -0.02em;
+      }
+      h1 {
+        font-size: 2.2rem;
+        line-height: 1.15;
+        margin: 0 0 1rem;
+      }
+      h2 {
+        font-size: 1.4rem;
+        margin: 0 0 1.25rem;
+      }
+      h3 {
+        font-size: 1.1rem;
+        margin: 2.2rem 0 0.5rem;
+      }
+      h4 {
+        font-size: 0.95rem;
+        margin: 1.5rem 0 0.4rem;
+        color: var(--muted);
+        text-transform: uppercase;
+        letter-spacing: 0.06em;
+      }
+      p {
+        margin: 0 0 1.1rem;
+      }
+      a {
+        color: var(--accent);
+        text-decoration: none;
+      }
+      a:hover {
+        text-decoration: underline;
+      }
+      .lede {
+        color: var(--muted);
+        font-size: 1.05rem;
+      }
+      .muted {
+        color: var(--muted);
+      }
+      section.block {
+        border-top: 1px solid var(--rule);
+        padding-top: 2.5rem;
+        margin-top: 2.5rem;
+      }
+      code {
+        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+        font-size: 0.85em;
+        background: var(--code-bg);
+        padding: 0.12em 0.4em;
+        border-radius: 4px;
+        white-space: nowrap;
+      }
+      pre {
+        background: var(--block-bg);
+        border: 1px solid var(--rule);
+        border-radius: 8px;
+        padding: 1rem 1.1rem;
+        overflow-x: auto;
+        font-size: 0.85rem;
+        line-height: 1.55;
+        margin: 0.6rem 0 1.4rem;
+      }
+      pre code {
+        background: none;
+        padding: 0;
+        white-space: pre;
+        font-size: inherit;
+      }
+      table {
+        width: 100%;
+        border-collapse: collapse;
+        margin: 0.5rem 0 1.5rem;
+        font-size: 0.93rem;
+      }
+      th,
+      td {
+        text-align: left;
+        vertical-align: top;
+        padding: 0.5rem 0.6rem;
+        border-bottom: 1px solid var(--rule);
+      }
+      th {
+        color: var(--muted);
+        font-weight: 600;
+      }
+      ul,
+      ol {
+        padding-left: 1.4rem;
+        margin: 0 0 1.2rem;
+      }
+      li {
+        margin-bottom: 0.35rem;
+      }
+      .callout {
+        background: var(--surface);
+        border: 1px solid var(--rule);
+        border-left: 3px solid var(--accent);
+        border-radius: 6px;
+        padding: 0.9rem 1.1rem;
+        margin: 1rem 0 1.5rem;
+      }
+      .callout.warn {
+        border-left-color: var(--warn);
+      }
+      .callout.bad {
+        border-left-color: var(--bad);
+      }
+      .step {
+        display: flex;
+        gap: 0.6rem;
+        align-items: flex-start;
+        margin: 0.5rem 0;
+      }
+      .step input {
+        margin-top: 0.45rem;
+        accent-color: var(--accent);
+      }
+      .step .body {
+        flex: 1;
+      }
+      .tag {
+        display: inline-block;
+        font-size: 0.72rem;
+        padding: 0.1em 0.5em;
+        border: 1px solid var(--rule);
+        border-radius: 999px;
+        color: var(--muted);
+        margin-left: 0.4rem;
+        vertical-align: middle;
+      }
+      nav ol {
+        columns: 2;
+        column-gap: 2rem;
+      }
+      .small {
+        font-size: 0.88rem;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="wrap">
+      <header>
+        <p class="muted small">
+          Thaddeus docs plan, 16 October 2026. Branch
+          <code
+            >feature/tha-33-002-product-establish-the-agent-first-architecture-and</code
+          >
+        </p>
+        <h1>
+          THA-33: establish the agent-first architecture and migration contract
+        </h1>
+        <p class="lede">
+          Thaddeus is now built first for many agents working on one repository
+          at once. This plan writes the October 16 architecture decisions into
+          the repository and brings the manifesto, README, architecture notes,
+          glossary and onboarding guide in line with them. It covers the public
+          core only and changes no runtime code.
+        </p>
+        <p class="small">
+          Sources:
+          <a href="https://linear.app/thaddeus-run/issue/THA-33">THA-33</a>,
+          <a href="https://github.com/thaddeus-run/thaddeus/issues/86"
+            >GitHub #86</a
+          >, and the
+          <a href="https://dk5l5qzsxoxv.postplan.dev"
+            >16 October architecture proposal draft</a
+          >. This issue blocks
+          <a href="https://linear.app/thaddeus-run/issue/THA-113">THA-113</a>,
+          <a href="https://linear.app/thaddeus-run/issue/THA-117">THA-117</a>
+          and
+          <a href="https://linear.app/thaddeus-run/issue/THA-150">THA-150</a>.
+        </p>
+        <nav>
+          <ol>
+            <li><a href="#outcome">Outcome and scope</a></li>
+            <li><a href="#decisions">Decisions made in this plan</a></li>
+            <li><a href="#evidence">Evidence from the checkout</a></li>
+            <li><a href="#verification">Verification standard</a></li>
+            <li><a href="#files">File map</a></li>
+            <li><a href="#task1">Task 1: ADRs</a></li>
+            <li><a href="#task2">Task 2: the contract document</a></li>
+            <li><a href="#task3">Task 3: README, ARCHITECTURE, CONTEXT</a></li>
+            <li><a href="#task4">Task 4: onboarding guide</a></li>
+            <li>
+              <a href="#task5">Task 5: manifesto amendment and changelog</a>
+            </li>
+            <li><a href="#task6">Task 6: final verification and PR</a></li>
+            <li><a href="#acceptance">Acceptance map</a></li>
+            <li><a href="#open">Open points for Moritz</a></li>
+          </ol>
+        </nav>
+      </header>
+
+      <section class="block" id="outcome">
+        <h2>Outcome and scope</h2>
+        <p>
+          A reader who opens the repository should find one document that says
+          what Thaddeus is building and in what order. Every top-level document
+          should agree with it. That means three deliverables.
+        </p>
+        <ul>
+          <li>
+            Two short ADRs record the two decisions that reverse earlier
+            commitments. A trusted code-processing service replaces mandatory
+            host-blind encryption. Hosted remote workspaces and external agents
+            come before local-folder parity, customer hosting and first-party
+            orchestration.
+          </li>
+          <li>
+            One contract document,
+            <code>docs/agent-first-architecture.md</code>, carries the rest. It
+            holds the product decisions, the trust model, the component
+            responsibilities and the semantic-editing requirement. Authority
+            over semantic editing stays with THA-113. It also holds a table of
+            targets against measurements, the single ordered build queue, the
+            superseded and parked work, and the migration contract for existing
+            encrypted repositories.
+          </li>
+          <li>
+            README, <code>ARCHITECTURE.md</code>, <code>CONTEXT.md</code>, the
+            getting-started guide, the server package README, the manifesto and
+            <code>CHANGELOG.md</code> stop presenting the keyless server as a
+            permanent promise. Each one links to the contract.
+          </li>
+        </ul>
+        <h3>Not in scope</h3>
+        <ul>
+          <li>
+            Runtime behaviour. The shipped server still holds no repository
+            keys. The docs describe that as the current state, not the
+            destination.
+          </li>
+          <li>ThadHub implementation and its private docs.</li>
+          <li>
+            Rewriting the manifesto body. It gets a dated amendment. Nobody
+            edits 4,000 lines of essay for this.
+          </li>
+          <li>
+            Package reference READMEs other than the server one. They describe
+            shipped behaviour accurately today.
+          </li>
+          <li>
+            The docs site and landing pages under <code>apps/</code>. The
+            landing deck already says "a million agents writing code in
+            parallel". The docs site explains the shipped permission model,
+            which does not change.
+          </li>
+          <li>Editing Linear issues. The PR body ticks THA-33's checkboxes.</li>
+        </ul>
+      </section>
+
+      <section class="block" id="decisions">
+        <h2>Decisions made in this plan</h2>
+        <p>
+          The issue fixes the content. The calls below are about form and
+          placement, and an implementer would otherwise have to make them. I
+          made all of them. Moritz did not. The last section lists the ones
+          worth a second look.
+        </p>
+        <table>
+          <tr>
+            <th style="width: 32%">Decision</th>
+            <th>Why</th>
+          </tr>
+          <tr>
+            <td>Two ADRs in <code>docs/adr/</code>, numbered 0003 and 0004</td>
+            <td>
+              The repo already uses short ADRs for decisions that bind future
+              work, see 0001 and 0002. Withdrawing "the host cannot read code"
+              is that kind of decision. The ADRs stay short and the contract
+              document holds the detail.
+            </td>
+          </tr>
+          <tr>
+            <td>
+              One contract document at
+              <code>docs/agent-first-architecture.md</code>
+            </td>
+            <td>
+              The issue title asks for an architecture and migration contract. A
+              markdown file next to the getting-started guide is easy to find,
+              diff and link from Linear. The postplan proposal stays the
+              discussion draft. The repo file is the ratified text.
+            </td>
+          </tr>
+          <tr>
+            <td>
+              Shipped behaviour goes in the present tense and direction in the
+              future tense, never both in one sentence
+            </td>
+            <td>
+              The strongest claims in today's docs are true of the shipped code,
+              for example "the server only ever holds ciphertext". The risk is a
+              reader who concludes the trusted service already exists, or that
+              the keyless server is permanent. Every edited passage says which
+              of the two it describes.
+            </td>
+          </tr>
+          <tr>
+            <td>
+              The manifesto gets a dated amendment block after the cover, before
+              <code>&lt;main&gt;</code>
+            </td>
+            <td>
+              The manifesto is a long essay, and ten specs cite it by section.
+              Editing the body would break those citations and bury the change.
+              An amendment at the top is visible, dated and easy to revert.
+            </td>
+          </tr>
+          <tr>
+            <td>
+              A pointer replaces the CHANGELOG roadmap section, and its
+              open-work status moves into the contract
+            </td>
+            <td>
+              The issue requires one ordered build queue. The P11 to P14 table
+              with GitHub milestones is a second queue. Moving its status into
+              the contract's appendix loses nothing. Afterwards one place
+              answers "what is next".
+            </td>
+          </tr>
+          <tr>
+            <td>
+              The contract copies the full 73-item Linear queue as a table
+            </td>
+            <td>
+              Linear stays the live source. A reader without Linear access still
+              needs the order. The table carries identifier, title and
+              visibility. It leaves status out so the file does not go stale
+              every week.
+            </td>
+          </tr>
+          <tr>
+            <td>
+              The targets table lists five numbers, all marked "not measured"
+            </td>
+            <td>
+              The manifesto calls its numbers "acceptance criteria, not
+              aspirations", yet nobody has benchmarked the server. THA-5 is
+              still open. The honest row says the value is a target, the
+              measurement is pending, and THA-117 and THA-5 own it.
+            </td>
+          </tr>
+          <tr>
+            <td>This work modifies no Linear or GitHub issue text</td>
+            <td>
+              The issue's scope is the public core repository. The PR body
+              closes #86 and lists each acceptance criterion with its evidence.
+            </td>
+          </tr>
+        </table>
+      </section>
+
+      <section class="block" id="evidence">
+        <h2>Evidence from the checkout at main 3ec100d</h2>
+        <p>
+          Each passage below does one of three things. It promises a host that
+          cannot read code, it presents performance targets as settled fact, or
+          it runs a second roadmap. Exactly one task touches each passage.
+        </p>
+        <table>
+          <tr>
+            <th style="width: 34%">Location</th>
+            <th>What it says today</th>
+            <th style="width: 10%">Task</th>
+          </tr>
+          <tr>
+            <td><code>README:12-15</code></td>
+            <td>
+              The tagline leads with "Encrypted, content-addressed objects". It
+              never states the agent-scale goal.
+            </td>
+            <td>3</td>
+          </tr>
+          <tr>
+            <td><code>ARCHITECTURE.md:65-70</code></td>
+            <td>
+              It calls the server a "<code>Bun.serve</code> remote that is
+              <strong>untrusted</strong>" and presents that as the design rather
+              than the current build.
+            </td>
+            <td>3</td>
+          </tr>
+          <tr>
+            <td><code>ARCHITECTURE.md:98-99</code></td>
+            <td>
+              "Ordinary content hosting still has no repository decryption
+              keys."
+            </td>
+            <td>3</td>
+          </tr>
+          <tr>
+            <td><code>ARCHITECTURE.md:17-24</code></td>
+            <td>
+              A tiered package build order that never links to the product build
+              queue.
+            </td>
+            <td>3</td>
+          </tr>
+          <tr>
+            <td><code>CONTEXT.md</code></td>
+            <td>
+              The glossary has no entry for workspace, checkpoint, trusted
+              service or performance target.
+            </td>
+            <td>3</td>
+          </tr>
+          <tr>
+            <td><code>docs/getting-started.md:3-5</code></td>
+            <td>The opening sentence defines Thaddeus by encryption first.</td>
+            <td>4</td>
+          </tr>
+          <tr>
+            <td><code>docs/getting-started.md:57</code></td>
+            <td>"no account, no server trust."</td>
+            <td>4</td>
+          </tr>
+          <tr>
+            <td><code>docs/getting-started.md:66-68</code></td>
+            <td>"A Thaddeus server normally holds no decryption keys".</td>
+            <td>4</td>
+          </tr>
+          <tr>
+            <td><code>docs/getting-started.md:196-198</code></td>
+            <td>
+              "Reads are <strong>decryption-bounded</strong>: the server only
+              ever holds ciphertext".
+            </td>
+            <td>4</td>
+          </tr>
+          <tr>
+            <td><code>packages/server/README.md:3-8</code></td>
+            <td>
+              It calls the package the "<strong
+                >untrusted API-first remote</strong
+              >" that "holds no decryption keys and serves ciphertext".
+            </td>
+            <td>4</td>
+          </tr>
+          <tr>
+            <td><code>the-new-age-of-source-control.html:1724-1760</code></td>
+            <td>
+              The floor table says "if it can't be measured, it can't be
+              claimed" and calls its numbers acceptance criteria. Then it lists
+              "zero plaintext" and the sub-second, millisecond and
+              15K-per-minute targets.
+            </td>
+            <td>5</td>
+          </tr>
+          <tr>
+            <td><code>the-new-age-of-source-control.html:3405-3470</code></td>
+            <td>
+              The key custody section covers per-device subkeys, Shamir recovery
+              and org escrow. It assumes browser and client key custody.
+            </td>
+            <td>5</td>
+          </tr>
+          <tr>
+            <td><code>CHANGELOG.md:39-108</code></td>
+            <td>
+              The "Roadmap — active pipeline (P11–P14)" section, with GitHub
+              milestones and a Part 2 exit gate. It is a second ordered queue.
+            </td>
+            <td>5</td>
+          </tr>
+        </table>
+      </section>
+
+      <section class="block" id="verification">
+        <h2>Verification standard for a docs-only change</h2>
+        <p>
+          The issue asks for the real user path, restart recovery and a second
+          identity. This change touches no code, so the user path is a newcomer
+          who reads the docs and runs the quickstart. These checks prove that
+          path still works.
+        </p>
+        <ol>
+          <li>
+            <strong>Format and lint.</strong>
+            <code>moon run root:format root:lint</code> exits 0. Prose wraps at
+            80 columns because <code>.oxfmtrc.json</code> sets
+            <code>proseWrap: always</code>.
+          </li>
+          <li>
+            <strong>Relative links resolve.</strong> This loop reports a missing
+            target in any changed markdown file.
+            <pre><code>git diff --name-only main -- '*.md' README | while read f; do
+  d=$(dirname "$f")
+  grep -o '](\.\{0,2\}/[^)#]*' "$f" | sed 's/](//' | while read l; do
+    [ -e "$d/$l" ] || [ -e "$l" ] || echo "MISSING $f -> $l"
+  done
+done</code></pre>
+            It should print nothing.
+          </li>
+          <li>
+            <strong>The manifesto still parses.</strong> The command below
+            prints <code>ok</code>. Opening the file in a browser shows the
+            amendment, and a screenshot goes in the PR.
+            <pre><code>python3 -I -c "import html.parser; p=html.parser.HTMLParser(); p.feed(open('the-new-age-of-source-control.html').read()); print('ok')"</code></pre>
+          </li>
+          <li>
+            <strong>Quickstart commands are unchanged.</strong> The command
+            below prints nothing, because this change edits prose and never
+            commands.
+            <pre><code>git diff main -- docs/getting-started.md | grep '^[-+]\s*thaddeus '</code></pre>
+          </li>
+          <li>
+            <strong>No code is touched.</strong> The command below prints
+            nothing.
+            <pre><code>git diff --name-only main -- packages apps examples integration lazythad | grep -v README.md</code></pre>
+          </li>
+          <li>
+            <strong>Reader check.</strong> A fresh reviewer reads only
+            <code>README</code>, then the contract, then the getting-started
+            guide. A subagent works, and so does a person. They answer three
+            questions without looking anywhere else. What is Thaddeus built for?
+            Can the hosted service read my code today, and will it later? Which
+            performance numbers has anyone measured? The right answers are
+            parallel agent work at 1,000 or more agents per repository. Today
+            the open-source server holds no keys, and the planned trusted
+            service will process plaintext under scoped authority. Nobody has
+            measured any of the numbers.
+          </li>
+        </ol>
+        <p>
+          A prose change has no second identity and no restart to recover from.
+          The PR says so plainly and does not claim those checks.
+        </p>
+      </section>
+
+      <section class="block" id="files">
+        <h2>File map</h2>
+        <table>
+          <tr>
+            <th style="width: 44%">File</th>
+            <th>Change</th>
+            <th style="width: 8%">Task</th>
+          </tr>
+          <tr>
+            <td>
+              <code>docs/adr/0003-trusted-code-processing-service.md</code>
+            </td>
+            <td>Create</td>
+            <td>1</td>
+          </tr>
+          <tr>
+            <td>
+              <code
+                >docs/adr/0004-hosted-workspaces-and-external-agents-first.md</code
+              >
+            </td>
+            <td>Create</td>
+            <td>1</td>
+          </tr>
+          <tr>
+            <td><code>docs/agent-first-architecture.md</code></td>
+            <td>Create</td>
+            <td>2</td>
+          </tr>
+          <tr>
+            <td><code>README</code></td>
+            <td>Rewrite lines 12 to 15 and add a DIRECTION line</td>
+            <td>3</td>
+          </tr>
+          <tr>
+            <td><code>ARCHITECTURE.md</code></td>
+            <td>
+              Add a Direction section at the top, relabel the server section,
+              and link the build queue
+            </td>
+            <td>3</td>
+          </tr>
+          <tr>
+            <td><code>CONTEXT.md</code></td>
+            <td>Add four glossary terms</td>
+            <td>3</td>
+          </tr>
+          <tr>
+            <td><code>docs/getting-started.md</code></td>
+            <td>Edit four passages</td>
+            <td>4</td>
+          </tr>
+          <tr>
+            <td><code>packages/server/README.md</code></td>
+            <td>Add one paragraph after the first</td>
+            <td>4</td>
+          </tr>
+          <tr>
+            <td><code>the-new-age-of-source-control.html</code></td>
+            <td>Insert an amendment block before <code>&lt;main&gt;</code></td>
+            <td>5</td>
+          </tr>
+          <tr>
+            <td><code>CHANGELOG.md</code></td>
+            <td>
+              Add an Unreleased entry and replace the roadmap section with a
+              pointer
+            </td>
+            <td>5</td>
+          </tr>
+        </table>
+      </section>
+
+      <!-- ============================ TASK 1 ============================ -->
+      <section class="block" id="task1">
+        <h2>Task 1: two ADRs <span class="tag">docs</span></h2>
+        <p>
+          Copy the voice of
+          <code>docs/adr/0001-actor-attribution-is-a-declaration.md</code>. Each
+          ADR has a title, a paragraph of decision and consequence, and a
+          paragraph of mechanism or boundary. The existing ADRs have no Status,
+          Context or Decision headers, so these don't either.
+        </p>
+
+        <h3>
+          Step 1: write
+          <code>docs/adr/0003-trusted-code-processing-service.md</code>
+        </h3>
+        <div class="step">
+          <input type="checkbox" />
+          <div class="body">
+            Title it <code># A trusted service processes code</code>.
+            <ul>
+              <li>
+                Paragraph one states the decision. A Thaddeus-hosted or
+                customer-hosted service may read repository plaintext to answer
+                authorized requests for browsing, diffs, search, semantic
+                queries and execution. Storage stays encrypted with
+                service-managed keys. The trusted-service path drops the promise
+                that the host cannot read code. Browsing, search and execution
+                all need plaintext, so the promise never covered them anyway.
+              </li>
+              <li>
+                Paragraph two lists what stays. Read, edit, execute, review and
+                integrate remain separate scopes with repository and path
+                restrictions and revocation. Storage stays encrypted. Every
+                plaintext access leaves an audit record. Untrusted execution
+                runs isolated per tenant. ADR 0001's rule still holds: a
+                service-recorded action is never labelled an agent signature.
+              </li>
+              <li>
+                Paragraph three names what this supersedes. That is mandatory
+                extension key custody in THA-77 and browser decryption in
+                THA-75. The shipped open-source server keeps its keyless
+                behaviour until THA-150 lands the authority contract and THA-151
+                the migration path. Link both issues and the contract document.
+              </li>
+            </ul>
+          </div>
+        </div>
+
+        <h3>
+          Step 2: write
+          <code
+            >docs/adr/0004-hosted-workspaces-and-external-agents-first.md</code
+          >
+        </h3>
+        <div class="step">
+          <input type="checkbox" />
+          <div class="body">
+            Title it
+            <code
+              ># Hosted remote workspaces and external agents come first</code
+            >.
+            <ul>
+              <li>
+                Paragraph one states the primary goal. Thaddeus is for
+                large-scale parallel agent development on one repository, and
+                the design target is 1,000 or more simultaneous agents.
+              </li>
+              <li>
+                Paragraph two gives the delivery order as a numbered list of
+                four. First, Thaddeus-hosted remote workspaces over shared code.
+                Second, local-folder compatibility for existing checkouts and
+                the current CLI, which keeps working but is not the design
+                centre. Third, customer hosting of the trusted service. Fourth,
+                first-party orchestration, once external agents such as Claude
+                Code and Codex can connect through the remote workspace API.
+              </li>
+              <li>
+                Paragraph three covers tracking. One ordered build queue in
+                Linear replaces milestones, cycles and due dates. The view is
+                called "Thaddeus build order" and sorts by title ascending. The
+                contract document holds the repository copy of that order.
+              </li>
+            </ul>
+          </div>
+        </div>
+
+        <h3>Step 3: verify and commit</h3>
+        <div class="step">
+          <input type="checkbox" />
+          <div class="body">
+            Run <code>moon run root:format root:lint</code>. It should exit 0
+            and may rewrap both files to 80 columns. Then commit.
+            <pre><code>git add docs/adr/0003-trusted-code-processing-service.md docs/adr/0004-hosted-workspaces-and-external-agents-first.md
+git commit -m "docs(adr): record trusted-service and hosted-first decisions"</code></pre>
+          </div>
+        </div>
+      </section>
+
+      <!-- ============================ TASK 2 ============================ -->
+      <section class="block" id="task2">
+        <h2>Task 2: the contract document <span class="tag">docs</span></h2>
+        <p>
+          Create <code>docs/agent-first-architecture.md</code>. It is the
+          ratified version of the 16 October proposal, kept in the repository.
+          Write it for a contributor who never read the proposal. The headings
+          below are fixed so Linear issues can link to them.
+        </p>
+
+        <h3>Step 1: header and "1. Product decisions"</h3>
+        <div class="step">
+          <input type="checkbox" />
+          <div class="body">
+            <p>
+              Title it
+              <code># Agent-first architecture and migration contract</code>.
+              Add a status line. THA-33 ratified it on 2026-10-16. It supersedes
+              the scope of issues rewritten under the October 16 redesign. The
+              proposal draft stays at its postplan URL.
+            </p>
+            <p>
+              Then write one paragraph on the goal. Parallel agent development
+              is the primary product goal, with 1,000 or more agents on one
+              repository.
+            </p>
+            <p>
+              Section 1 is a table. Use these rows and the proposal's values.
+            </p>
+            <ul>
+              <li>
+                <strong>Core model.</strong> Isolated lightweight workspaces
+                over shared code, with structured editing, durable checkpoints
+                and controlled integration.
+              </li>
+              <li>
+                <strong>Hosting.</strong> Thaddeus-hosted first, customer
+                hosting later.
+              </li>
+              <li>
+                <strong>Agents.</strong> External agents connect first.
+                First-party orchestration comes later.
+              </li>
+              <li>
+                <strong>Local folders.</strong> Compatibility stays, but local
+                folders are not the design centre.
+              </li>
+              <li>
+                <strong>Workspace sharing.</strong> Separate by default. Sharing
+                is explicit.
+              </li>
+              <li>
+                <strong>Saving.</strong> Automatic saves in small batches, plus
+                explicit named checkpoints.
+              </li>
+              <li>
+                <strong>Integration.</strong> Path and project rules govern it.
+                Integration agents resolve conflicts within those rules and
+                escalate exceptions.
+              </li>
+              <li>
+                <strong>Scale.</strong> 1,000 or more simultaneous agents on one
+                repository.
+              </li>
+              <li>
+                <strong>Work tracking.</strong> One ordered Linear queue with no
+                daily cycle.
+              </li>
+            </ul>
+            <p>End the section with "Decided in ADR 0004."</p>
+          </div>
+        </div>
+
+        <h3>Step 2: "2. Trust model"</h3>
+        <div class="step">
+          <input type="checkbox" />
+          <div class="body">
+            <p>Write two subsections.</p>
+            <p>
+              <strong>Today, as shipped.</strong> Three present-tense sentences
+              that link <code>ARCHITECTURE.md</code>. The open-source server
+              holds no repository keys and verifies signed uploads. It serves a
+              ciphertext mirror, and only the owner signs landings. Timed reveal
+              is the known exception.
+            </p>
+            <p>
+              <strong>Direction, per ADR 0003.</strong> A trusted service
+              processes plaintext for authorized requests. List the guarantees
+              that stay, in this order.
+            </p>
+            <ol>
+              <li>
+                Scoped authority. Read, edit, execute, review and integrate are
+                separate scopes. Authorization covers reads, queries, logs,
+                caches and subscriptions.
+              </li>
+              <li>Encrypted storage with service-managed keys.</li>
+              <li>
+                Short-lived scoped credentials for agents and revocable sessions
+                for humans.
+              </li>
+              <li>
+                Audit records for plaintext access and for history advancement.
+              </li>
+              <li>
+                Tenant isolation for untrusted execution. Secrets are scoped
+                execution inputs, never source files.
+              </li>
+              <li>
+                ADR 0001's attribution rule. Service-recorded activity is never
+                an agent signature.
+              </li>
+            </ol>
+            <p>
+              Close with the two rejected alternatives, one sentence each, and
+              why each lost. Encrypted storage with separately trusted compute
+              made key distribution too complex. A host that cannot decrypt
+              rules out browsing, search and execution.
+            </p>
+          </div>
+        </div>
+
+        <h3>Step 3: "3. Components and responsibilities"</h3>
+        <div class="step">
+          <input type="checkbox" />
+          <div class="body">
+            <p>
+              A table of five components, each with one sentence on what it is
+              responsible for. They are workspaces and storage, the semantic
+              engine, the integration service, isolated execution workers, and
+              the durable repository store.
+            </p>
+            <p>
+              Below the table, state the boundary rule. These are lines of
+              responsibility, and they need not be separate deployments. The
+              document makes no multi-node correctness claim while durable state
+              lives in process memory.
+            </p>
+            <p>Then four short paragraphs.</p>
+            <ul>
+              <li>
+                <strong>Workspaces.</strong> A workspace points at an immutable
+                base revision and stores only what changed. Each save carries a
+                retry identifier and a sequence number. The service acknowledges
+                a save only after it is durably committed. Named checkpoints
+                bind exact content to exact operation versions. Base updates
+                happen only at explicit safe boundaries. Shared workspaces need
+                version-checked writes, so the last writer never silently wins.
+              </li>
+              <li>
+                <strong>Execution.</strong> Workers attach on demand.
+                Concurrency has its own limit, separate from workspace count.
+                Suspension keeps files and environment definitions. Resuming the
+                exact process is deferred.
+              </li>
+              <li>
+                <strong>Integration.</strong> Integration agents work in
+                isolated workspaces under path authority, compute budgets and a
+                cap on attempts. Each candidate is tested at an exact revision,
+                and the shared head advances atomically. Independent
+                repositories never wait on a shared landing lock.
+              </li>
+              <li>
+                <strong>Development interface.</strong> List the five minimal
+                authenticated ThadHub views from the proposal and mark them as
+                private product work.
+              </li>
+            </ul>
+          </div>
+        </div>
+
+        <h3>Step 4: "4. Semantic editing is an early delivery requirement"</h3>
+        <div class="step">
+          <input type="checkbox" />
+          <div class="body">
+            <p>
+              Structured editing means rename, function edits and symbol-scoped
+              authority. It ships in the first useful release. It is not a later
+              layer, because agents need edits that a stale view of the code
+              cannot invalidate.
+            </p>
+            <p>Describe the proposed shape. Mark every sentence as proposed.</p>
+            <ul>
+              <li>
+                Immutable file content plus a versioned change journal is the
+                source of truth.
+              </li>
+              <li>
+                The symbol graph is a projection the system can rebuild, tied to
+                revisions.
+              </li>
+              <li>
+                File edits and structured edits go through one transaction path.
+              </li>
+              <li>A stale graph cannot authorize a destructive edit.</li>
+              <li>
+                TypeScript and JavaScript are the proposed first language
+                family.
+              </li>
+            </ul>
+            <p>
+              Then put the deferral in its own paragraph.
+              <a href="https://linear.app/thaddeus-run/issue/THA-113"
+                >THA-113</a
+              >
+              decides whether the graph or the journal is authoritative. It also
+              decides how comments, formatting, unsupported syntax and external
+              edits survive without loss, how symbols keep stable identity, what
+              preconditions guard a stale index, and how rollback works. This
+              document does not pre-empt any of it. Link
+              <code
+                >docs/specs/2026-07-07-thaddeus-pillar-08-semantic-graph-design.md</code
+              >
+              as prior art that THA-113 has to reconcile.
+            </p>
+          </div>
+        </div>
+
+        <h3>Step 5: "5. Performance: targets versus measurements"</h3>
+        <div class="step">
+          <input type="checkbox" />
+          <div class="body">
+            <p>
+              Open with one paragraph. A target is a number a build is held to.
+              A measurement is a number someone observed in a named benchmark
+              environment with a recorded method. Repository docs may cite a
+              target only with the word "target" next to it. They may cite a
+              measurement only with a link to the run that produced it.
+            </p>
+            <p>Then add the table with exactly these rows.</p>
+            <table>
+              <tr>
+                <th>Target</th>
+                <th>Value</th>
+                <th>Measured?</th>
+                <th>Owner</th>
+              </tr>
+              <tr>
+                <td>Warm workspace materialization</td>
+                <td>Sub-second</td>
+                <td>No</td>
+                <td>THA-117 defines it, THA-5 measures it</td>
+              </tr>
+              <tr>
+                <td>Branch or workspace creation</td>
+                <td>Single-digit milliseconds</td>
+                <td>No</td>
+                <td>THA-117, THA-5</td>
+              </tr>
+              <tr>
+                <td>Indexed repository query</td>
+                <td>Milliseconds</td>
+                <td>No</td>
+                <td>THA-117, THA-5</td>
+              </tr>
+              <tr>
+                <td>Repository creation throughput</td>
+                <td>About 15,000 per minute, sustained</td>
+                <td>No</td>
+                <td>THA-117, THA-5</td>
+              </tr>
+              <tr>
+                <td>Simultaneous agents on one repository</td>
+                <td>1,000 or more</td>
+                <td>No</td>
+                <td>THA-117 defines it, THA-130 qualifies it</td>
+              </tr>
+            </table>
+            <p>
+              Follow with the measurement plan in three sentences. Cold and warm
+              paths get separate reports. One hot repository and many
+              independent repositories are different workloads with separate
+              benchmarks. An architecture diagram supports no scale claim. Name
+              the manifesto floor table as the origin of these numbers.
+            </p>
+          </div>
+        </div>
+
+        <h3>Step 6: "6. Build queue"</h3>
+        <div class="step">
+          <input type="checkbox" />
+          <div class="body">
+            <p>
+              Open with one paragraph. The Linear view "Thaddeus build order",
+              sorted by title ascending, is the single source. Every title
+              starts with a three-digit number. There are no cycles, milestones
+              or due dates. This table is a copy for readers without Linear, and
+              whoever changes the order refreshes it.
+            </p>
+            <p>
+              Then add a three-column table of Order, Issue and Title with all
+              73 rows below, in number order. Link public-core issues to
+              <code>https://linear.app/thaddeus-run/issue/THA-n</code>. Mark
+              rows labelled <code>visibility: closed-source</code> by appending
+              "ThadHub, private" to the title.
+            </p>
+            <details>
+              <summary class="muted small">The 73 rows</summary>
+              <pre
+                class="small"
+              ><code>001 THA-29  DX: fix getting-started clone-path bug, version drift, and ship a runnable agent-governed demo [Done]
+002 THA-33  PRODUCT: establish the agent-first architecture and migration contract
+003 THA-113 DECISION: define semantic authority and mixed-edit transactions
+004 THA-117 PERF: define the 1,000-agent hot-repository workload and scale contract [private]
+005 THA-5   P11: Reproducible benchmark suite + FileBackend baseline
+006 THA-118 PERF: replayable agent workload and fault harness
+007 THA-150 CORE: trusted-service authority and scoped agent sessions
+008 THA-151 CORE: migrate encrypted repositories to trusted-service storage
+009 THA-54  THADHUB: normal sign-in and revocable web sessions [private]
+010 THA-89  THADHUB: authenticated browser access and mutation boundary [private]
+011 THA-91  SECURITY: tenant, credential and plaintext-handling conformance [private]
+012 THA-47  THADHUB: minimal development deployment and delivery pipeline [private]
+013 THA-46  H0: namespace routing for handle/repository URLs [private]
+014 THA-48  THADHUB: real repository file browser for development [private]
+015 THA-93  THADHUB: private repository access and permission-aware browsing [private]
+016 THA-50  H0: provenance why view [private]
+017 THA-90  H1: shared verified/unverified presentation contract across ThadHub [private]
+018 THA-15  P14: Define backend CAS / conditional-write semantics
+019 THA-16  P14: S3-compatible backend (behind flag)
+020 THA-18  P14: Backend conformance tests + migration/rollback + backup drills
+021 THA-67  CORE: atomic, policy-authorized shared-head advancement
+022 THA-70  CORE: shared object caches and versioned derived caches
+023 THA-69  CORE: refuse multi-node startup without a CAS-capable backend
+024 THA-68  CORE: multi-node repository and workspace coordination
+025 THA-152 CORE: remote workspace API for external agents
+026 THA-153 CORE: durable autosave batches and explicit checkpoints
+027 THA-154 THADHUB: live development workspace and semantic inspector [private]
+028 THA-21  PERF: fix OpLog O(n²) conflicts()/materialize() and graph/query full re-derivation
+029 THA-36  CORE: incremental semantic model with stable symbol identity
+030 THA-42  CORE: indexed repository and semantic queries with subscriptions
+031 THA-145 CORE: transactional symbol rename and function editing
+032 THA-37  CORE: revision-bound semantic diff and impact evidence
+033 THA-115 CORE: symbol-scoped agent authority
+034 THA-148 CORE: server-side repository and semantic query API
+035 THA-38  CLI: implement missing query one-liners for path, tag diff, and next
+036 THA-59  THADHUB: permission-aware repository metadata index [private]
+037 THA-60  THADHUB: code and symbol search over the core query API [private]
+038 THA-76  THADHUB: authorized private-code search [private]
+039 THA-136 RUNNERS: isolate untrusted workspace execution [private]
+040 THA-140 RUNNERS: scoped secrets and workload credentials [private]
+041 THA-132 CORE: portable checkpoint execution and check evidence
+042 THA-137 RUNNERS: on-demand checkpoint execution and persistent dev workers [private]
+043 THA-139 RUNNERS: logs, artifacts and scoped execution caches [private]
+044 THA-66  THADHUB: run checkpoint checks and display execution evidence [private]
+045 THA-58  CLI: verify repository integrity against independent checkpoints
+046 THA-11  CORE: safe-checkpoint workspace base updates
+047 THA-12  CORE: conflict inspection and three-way integration
+048 THA-85  CORE: workspace synchronization at explicit safe boundaries
+049 THA-97  CORE: path-sensitive integration policy and reviewer authority
+050 THA-98  CORE: review and integration queue contract
+051 THA-155 CORE: bounded integration-agent coordination
+052 THA-55  THADHUB: review, veto and integration decisions [private]
+053 THA-57  THADHUB: agent access and revocation console [private]
+054 THA-53  THADHUB: policy-authorized release creation [private]
+055 THA-52  H0: release pages and manifests [private]
+056 THA-156 CORE: suspend, resume and discard remote workspaces
+057 THA-157 CORE: bounded autosave retention and checkpoint garbage collection
+058 THA-41  CORE: define the named virtual-filesystem API and evaluate FUSE
+059 THA-114 CORE: lightweight workspace filesystem and selective materialization
+060 THA-119 SPEC: authorized immutable-object and revision-manifest delivery
+061 THA-120 CORE: implement selective revision and object delivery
+062 THA-121 EDGE: scoped private-object delivery authorization [private]
+063 THA-13  CORE: sparse resumable synchronization and local-folder access
+064 THA-25  SECURITY: meter delegation maxSpend, or remove the field
+065 THA-116 CORE: durable multi-node delegation expiry and budget accounting
+066 THA-142 RUNNERS: scale execution with fairness and bounded queues [private]
+067 THA-83  SECURITY: consistent revocation across sessions, agents and workers
+068 THA-149 CORE: auditable bisect and signed or attributed revert
+069 THA-130 PERF: qualify 1,000+ simultaneous agents on a populated repository
+070 THA-131 RELEASE GATE: qualify hosted agent scale and recovery [private]
+071 THA-32  CORE: Git gateway for importing and exporting Git history
+072 THA-74  CLI: portable repository export and migration between trusted hosts
+073 THA-82  THADHUB: customer-hosted deployment of the trusted service [private]</code></pre>
+            </details>
+            <p>
+              I pulled this list from Linear on 2026-10-16. If a day has passed,
+              pull it again before committing. Use <code>list_issues</code> with
+              label <code>queue: build</code> and team Thaddeus. It takes two
+              pages.
+            </p>
+          </div>
+        </div>
+
+        <h3>Step 7: "7. Superseded, rewritten and parked"</h3>
+        <div class="step">
+          <input type="checkbox" />
+          <div class="body">
+            <p>Write three short lists.</p>
+            <ul>
+              <li>
+                <strong>Superseded.</strong> Mandatory extension key custody in
+                THA-77 and browser decryption in THA-75.
+              </li>
+              <li>
+                <strong>Rewritten.</strong> Any constraint that assumed an
+                unreadable host or owner-only landing. These issue descriptions
+                say "This description replaces the prior scope under the October
+                16 architecture redesign", and their history keeps the old text.
+              </li>
+              <li>
+                <strong>Parked.</strong> Federation, reputation marketplaces,
+                trending, billing polish, broad workflow compatibility and
+                exact-process suspension.
+              </li>
+            </ul>
+            <p>
+              Add one line saying the Safe Agent Mode design in
+              <code
+                >docs/superpowers/specs/2026-07-23-safe-agent-mode-design.md</code
+              >
+              is still a design, and this contract leaves it alone.
+            </p>
+          </div>
+        </div>
+
+        <h3>
+          Step 8: "8. Migration contract for existing encrypted repositories"
+        </h3>
+        <div class="step">
+          <input type="checkbox" />
+          <div class="body">
+            <p>Write numbered obligations, one sentence each.</p>
+            <ol>
+              <li>
+                Each repository's owner must explicitly authorize its migration.
+              </li>
+              <li>
+                No key is uploaded without the owner knowing, and no existing
+                signature gets a new meaning.
+              </li>
+              <li>Content moves into a versioned trusted-service format.</li>
+              <li>
+                The migrated copy is compared with retained history before the
+                old copy counts as migrated.
+              </li>
+              <li>
+                An export and rollback path exists before the first production
+                migration.
+              </li>
+              <li>
+                Repositories that are not migrated keep working against the
+                keyless server.
+              </li>
+            </ol>
+            <p>
+              Name the owner.
+              <a href="https://linear.app/thaddeus-run/issue/THA-151"
+                >THA-151</a
+              >
+              owns migration, and THA-74 owns portable export.
+            </p>
+          </div>
+        </div>
+
+        <h3>
+          Step 9: "9. Verification standard" and "Appendix: carried-over work"
+        </h3>
+        <div class="step">
+          <input type="checkbox" />
+          <div class="body">
+            <p>
+              Section 9 repeats the rule from the issue template for every queue
+              item. Exercise the real user path, failure and restart recovery,
+              and a second identity or workspace. Record what you observed.
+              Performance targets do not describe current capability.
+            </p>
+            <p>
+              The appendix takes the status content from
+              <code>CHANGELOG.md:60-108</code>, which covers the remaining P11
+              to P14 items, the #63 tracking discrepancy and the Part 2 exit
+              gate. Put it under the heading "Open work carried over from the
+              P11 to P14 pipeline, snapshot of 2026-09-11" without changing its
+              substance. Its lead sentence says these items now live in the
+              build queue as THA-5, THA-15, THA-16, THA-18, THA-21 and THA-25.
+            </p>
+          </div>
+        </div>
+
+        <h3>Step 10: verify and commit</h3>
+        <div class="step">
+          <input type="checkbox" />
+          <div class="body">
+            <p>
+              Run <code>moon run root:format root:lint</code>, which should exit
+              0. Run the link check from the verification section, which should
+              print nothing. Check that the document has headings 1 through 9
+              plus the appendix. The command below should print <code>10</code>.
+            </p>
+            <pre><code>grep -c '^## ' docs/agent-first-architecture.md</code></pre>
+            <pre><code>git add docs/agent-first-architecture.md
+git commit -m "docs: add the agent-first architecture and migration contract"</code></pre>
+          </div>
+        </div>
+      </section>
+
+      <!-- ============================ TASK 3 ============================ -->
+      <section class="block" id="task3">
+        <h2>
+          Task 3: README, ARCHITECTURE.md, CONTEXT.md
+          <span class="tag">docs</span>
+        </h2>
+
+        <h3>Step 1: README</h3>
+        <div class="step">
+          <input type="checkbox" />
+          <div class="body">
+            <p>
+              Replace the four-line description on lines 12 to 15 with four
+              lines that lead with the goal and keep the mechanisms.
+            </p>
+            <pre><code>Source control built for many agents editing one repository at once.
+Isolated workspaces over shared code, durable checkpoints, structured edits,
+and merge as policy instead of a person reading a diff. Signed operations,
+a signed "why", scoped authority and a standing human veto.</code></pre>
+            <p>
+              Add a two-line entry after the QUICKSTART block and before DEMO.
+            </p>
+            <pre><code>DIRECTION: docs/agent-first-architecture.md
+  Hosted remote workspaces first, external agents before first-party
+  orchestration, and a trusted code-processing service per ADR 0003.</code></pre>
+            <p>
+              Leave the STATUS line alone.
+              <code>moon run root:version-check</code>
+              reads it.
+            </p>
+          </div>
+        </div>
+
+        <h3>Step 2: ARCHITECTURE.md</h3>
+        <div class="step">
+          <input type="checkbox" />
+          <div class="body">
+            <p>
+              Insert a section called
+              <code>## Direction: agent-first, October 2026</code> right after
+              the opening paragraph. It runs to six lines.
+            </p>
+            <ul>
+              <li>
+                The primary goal is 1,000 or more agents on one repository.
+              </li>
+              <li>The four-step delivery order from ADR 0004.</li>
+              <li>One sentence on the trust change from ADR 0003.</li>
+              <li>
+                This sentence, word for word. "The sections below describe the
+                shipped substrate. Where a shipped guarantee differs from the
+                direction, the shipped one holds until the queue item that
+                changes it lands."
+              </li>
+              <li>
+                Links to the contract document and its build queue section.
+              </li>
+            </ul>
+            <p>
+              At the end of the "Build order" section on lines 17 to 24, add one
+              line. "This is the package dependency order. The product build
+              order is the Linear queue copied in
+              <code>docs/agent-first-architecture.md</code> section 6."
+            </p>
+            <p>
+              In the "Server" section, add "today" so the first sentence reads
+              "…is reachable over HTTP via <code>@thaddeus.run/server</code>,
+              today a <code>Bun.serve</code> remote that is
+              <strong>untrusted</strong>…". Keep the rest of that sentence as it
+              is. At the end of the paragraph that ends on line 99, add one
+              sentence. "ADR 0003 replaces this keyless design with a trusted
+              code-processing service for the hosted path. The change ships
+              under THA-150 and THA-151, and this section will be updated when
+              it does."
+            </p>
+          </div>
+        </div>
+
+        <h3>Step 3: CONTEXT.md</h3>
+        <div class="step">
+          <input type="checkbox" />
+          <div class="body">
+            <p>
+              Append four terms in the existing format, which is a bold term, a
+              definition and an <em>Avoid</em> clause.
+            </p>
+            <ul>
+              <li>
+                <strong>Workspace</strong>: An isolated view over a shared
+                repository. It points at an immutable base revision and stores
+                only its changed content. Workspaces are separate by default and
+                shared only on request. <em>Avoid</em>: Branch, for the place an
+                agent edits files. Clone, which implies a second object store.
+              </li>
+              <li>
+                <strong>Checkpoint</strong>: A named, durable record that binds
+                exact workspace content to exact operation versions. Review,
+                execution and integration all work from checkpoints.
+                <em>Avoid</em>: Commit, when nobody has proposed the record for
+                landing. Autosave, which has no name.
+              </li>
+              <li>
+                <strong>Trusted service</strong>: A Thaddeus-hosted or
+                customer-hosted service authorized to process repository
+                plaintext for scoped requests. It keeps storage encrypted and
+                writes audit records. <em>Avoid</em>: Untrusted remote or
+                mirror, which describe the shipped keyless server. Host-blind,
+                which no longer describes the hosted path.
+              </li>
+              <li>
+                <strong>Performance target</strong>: A number a build is held
+                to. Nobody has necessarily observed it. A measurement names the
+                environment and the run that produced it. <em>Avoid</em>:
+                Capability, result or benchmark when no run is linked.
+              </li>
+            </ul>
+          </div>
+        </div>
+
+        <h3>Step 4: verify and commit</h3>
+        <div class="step">
+          <input type="checkbox" />
+          <div class="body">
+            <p>
+              Run <code>moon run root:format root:lint</code> and
+              <code>moon run root:version-check</code>. Both should exit 0. The
+              version check proves the README STATUS line survived. Then run the
+              link check, which should print nothing.
+            </p>
+            <pre><code>git add README ARCHITECTURE.md CONTEXT.md
+git commit -m "docs: state the agent-first direction in README, architecture and glossary"</code></pre>
+          </div>
+        </div>
+      </section>
+
+      <!-- ============================ TASK 4 ============================ -->
+      <section class="block" id="task4">
+        <h2>
+          Task 4: onboarding guide and server README
+          <span class="tag">docs</span>
+        </h2>
+        <p>
+          This task edits prose only. No command in a code block changes, and
+          the verification step checks that.
+        </p>
+
+        <h3>Step 1: <code>docs/getting-started.md</code>, four passages</h3>
+        <div class="step">
+          <input type="checkbox" />
+          <div class="body">
+            <ul>
+              <li>
+                <strong>Opening paragraph, lines 3 to 7.</strong> Start with
+                "Thaddeus is source control built for many agents editing one
+                repository at once." Keep the list of mechanisms as the second
+                sentence. Add a third sentence. "This guide covers the shipped
+                CLI and the keyless open-source server. The hosted direction is
+                in
+                <a href="agent-first-architecture.md"
+                  >the architecture contract</a
+                >."
+              </li>
+              <li>
+                <strong>Line 57.</strong> Change "no account, no server trust."
+                to "you need no account, and the shipped server checks
+                signatures instead of holding keys."
+              </li>
+              <li>
+                <strong>Lines 66 to 68.</strong> Change "A Thaddeus server
+                normally holds no decryption keys" to "The open-source server
+                you run here holds no decryption keys". After the timed-reveal
+                sentence, add "The hosted trusted service in ADR 0003 will
+                process plaintext under scoped authority. Nothing in this guide
+                depends on it."
+              </li>
+              <li>
+                <strong>Lines 196 to 198.</strong> Change "the server only ever
+                holds ciphertext" to "this server only holds ciphertext". Leave
+                the rest of the paragraph. It describes the grant mechanism,
+                which does not change.
+              </li>
+            </ul>
+          </div>
+        </div>
+
+        <h3>Step 2: <code>packages/server/README.md</code></h3>
+        <div class="step">
+          <input type="checkbox" />
+          <div class="body">
+            After the first paragraph, which ends on line 9, add one paragraph.
+            "This package is the shipped keyless remote. ADR 0003 adopts a
+            trusted code-processing service for the hosted path. That work lands
+            under THA-150, and this package behaves as before until it does."
+            Link the ADR at
+            <code>docs/adr/0003-trusted-code-processing-service.md</code>.
+          </div>
+        </div>
+
+        <h3>Step 3: verify and commit</h3>
+        <div class="step">
+          <input type="checkbox" />
+          <div class="body">
+            <p>
+              Run <code>moon run root:format root:lint</code>, which should exit
+              0. Run the quickstart check and the link check from the
+              verification section. Both should print nothing.
+            </p>
+            <pre><code>git add docs/getting-started.md packages/server/README.md
+git commit -m "docs: describe the keyless server as current state in onboarding"</code></pre>
+          </div>
+        </div>
+      </section>
+
+      <!-- ============================ TASK 5 ============================ -->
+      <section class="block" id="task5">
+        <h2>
+          Task 5: manifesto amendment and changelog
+          <span class="tag">docs</span>
+        </h2>
+
+        <h3>Step 1: the amendment block</h3>
+        <div class="step">
+          <input type="checkbox" />
+          <div class="body">
+            <p>
+              In <code>the-new-age-of-source-control.html</code>, insert an
+              <code>&lt;aside class="amendment"&gt;</code> right before
+              <code>&lt;main&gt;</code>, inside the file's existing
+              <code>.wrap</code> container. Add a matching rule to the inline
+              <code>&lt;style&gt;</code> block that uses only existing
+              variables.
+            </p>
+            <pre><code>.amendment {
+  border: 1px solid var(--faint);
+  border-left: 3px solid var(--accent);
+  background: var(--surface);
+  padding: 1.25rem 1.5rem;
+  margin: 2rem auto;
+}</code></pre>
+            <p>The block contains four things.</p>
+            <ul>
+              <li>The heading "Amendment, 16 October 2026".</li>
+              <li>
+                One sentence. The essay below stays as written, and the
+                repository records the decisions that changed. This block
+                summarizes them.
+              </li>
+              <li>
+                Five bullets, one sentence each.
+                <ol>
+                  <li>
+                    The primary goal is large-scale parallel agent development,
+                    with 1,000 or more agents on one repository, hosted remote
+                    workspaces first, and external agents before first-party
+                    orchestration.
+                  </li>
+                  <li>
+                    A trusted code-processing service replaces the promise that
+                    the host cannot read code, and scoped authority, encrypted
+                    storage, audit records and tenant isolation all stay, per
+                    ADR 0003.
+                  </li>
+                  <li>
+                    The browser key custody and org escrow lifecycle in the
+                    threat model section assume client-side custody, which the
+                    hosted path no longer needs.
+                  </li>
+                  <li>
+                    The numbers in "What everything is measured against" are
+                    targets to qualify, and nobody had measured any of them as
+                    of this date.
+                  </li>
+                  <li>
+                    Semantic editing ships early, and THA-113 still has to
+                    decide its source of truth.
+                  </li>
+                </ol>
+              </li>
+              <li>
+                A closing line with relative links to
+                <code>docs/agent-first-architecture.md</code> and both ADRs.
+              </li>
+            </ul>
+            <p>
+              The amendment must not use <code>&lt;link&gt;</code>, external
+              scripts or <code>on*=</code> attributes.
+            </p>
+          </div>
+        </div>
+
+        <h3>Step 2: CHANGELOG.md</h3>
+        <div class="step">
+          <input type="checkbox" />
+          <div class="body">
+            <p>
+              Under <code>## [Unreleased]</code>, add a
+              <code>### Documentation</code> entry, or extend that section if it
+              exists by then.
+            </p>
+            <pre><code>- Ratified the agent-first architecture and migration contract (THA-33 / #86):
+  ADR 0003 trusted code-processing service, ADR 0004 hosted workspaces and
+  external agents first, docs/agent-first-architecture.md, a manifesto
+  amendment, and aligned README, ARCHITECTURE, CONTEXT and getting-started.
+  The P11 to P14 roadmap table moved into the contract's appendix. The Linear
+  build order is the single queue.</code></pre>
+            <p>
+              Then replace lines 39 to 108. That is the whole "Roadmap — active
+              pipeline" section, through the "Correction" blockquote. Put this
+              in its place.
+            </p>
+            <pre><code>### Roadmap
+
+The single ordered queue is the Linear view **Thaddeus build order**, sorted
+by title ascending and copied into
+[docs/agent-first-architecture.md](docs/agent-first-architecture.md) §6. The
+P11 to P14 status snapshot that lived here is preserved in that document's
+appendix. The five-lens analysis remains at
+&lt;https://4xibq00df3aj.postplan.dev/&gt;.</code></pre>
+            <p>
+              Check that nothing was dropped. Every GitHub issue number in the
+              removed block must appear in the contract appendix. The loop below
+              should print nothing.
+            </p>
+            <pre><code>for n in 58 59 60 61 62 63 68 69 70 71 72 73 74 75 76 77 78 79 80 81 82 110; do
+  grep -q "#$n" docs/agent-first-architecture.md || echo "missing #$n"
+done</code></pre>
+          </div>
+        </div>
+
+        <h3>Step 3: verify and commit</h3>
+        <div class="step">
+          <input type="checkbox" />
+          <div class="body">
+            <p>
+              Run <code>moon run root:format root:lint</code>, which should exit
+              0. Run the HTML parse check, which should print <code>ok</code>.
+              Open the manifesto in a browser or with <code>html_preview</code>.
+              The amendment should sit under the cover and above "00 Why now".
+            </p>
+            <pre><code>git add the-new-age-of-source-control.html CHANGELOG.md
+git commit -m "docs: amend the manifesto and move the roadmap to the build queue"</code></pre>
+          </div>
+        </div>
+      </section>
+
+      <!-- ============================ TASK 6 ============================ -->
+      <section class="block" id="task6">
+        <h2>
+          Task 6: final verification and PR <span class="tag">review</span>
+        </h2>
+
+        <div class="step">
+          <input type="checkbox" />
+          <div class="body">
+            <strong>Step 1.</strong> Run every check in the verification
+            standard once more against the whole branch. Paste each command's
+            output into the PR body. Checks 1 through 5 are mechanical. For
+            check 6, give a fresh subagent only the three file paths and the
+            three questions, and paste its answers into the PR word for word.
+          </div>
+        </div>
+        <div class="step">
+          <input type="checkbox" />
+          <div class="body">
+            <strong>Step 2.</strong> Confirm scope with
+            <code>git diff --stat main</code>. It should list exactly the ten
+            files in the file map plus this plan. Revert anything else.
+          </div>
+        </div>
+        <div class="step">
+          <input type="checkbox" />
+          <div class="body">
+            <strong>Step 3.</strong> Open the PR against <code>main</code> with
+            the title
+            <code
+              >docs: establish the agent-first architecture and migration
+              contract</code
+            >. The body lists THA-33's four acceptance criteria as a checklist,
+            each with the file and heading that meets it. It carries the
+            verification output and the sentence "Second identity and restart
+            recovery do not apply to this prose-only change and were not
+            exercised." It ends with <code>Closes #86</code> and the attribution
+            line. Register the PR with <code>link_pull_request</code>.
+          </div>
+        </div>
+      </section>
+
+      <section class="block" id="acceptance">
+        <h2>Acceptance map</h2>
+        <table>
+          <tr>
+            <th style="width: 48%">THA-33 criterion</th>
+            <th>Where it is met</th>
+          </tr>
+          <tr>
+            <td>
+              Record hosted remote workspaces first, local-folder compatibility,
+              customer hosting later, and external agents before first-party
+              orchestration.
+            </td>
+            <td>
+              ADR 0004 in Task 1. Contract section 1 in Task 2. The README
+              DIRECTION line and the ARCHITECTURE Direction section in Task 3.
+              Amendment bullet 1 in Task 5.
+            </td>
+          </tr>
+          <tr>
+            <td>
+              Replace mandatory host-blind encryption with a trusted
+              code-processing service, and keep scoped authority, encrypted
+              storage, audit records and tenant isolation.
+            </td>
+            <td>
+              ADR 0003 in Task 1. Contract sections 2 and 7 in Task 2. The
+              ARCHITECTURE server section and the CONTEXT trusted service entry
+              in Task 3. Getting-started and the server README in Task 4.
+              Amendment bullets 2 and 3 in Task 5.
+            </td>
+          </tr>
+          <tr>
+            <td>
+              Make semantic editing an early delivery requirement and refer
+              source-of-truth decisions to THA-113.
+            </td>
+            <td>Contract section 4 in Task 2. Amendment bullet 5 in Task 5.</td>
+          </tr>
+          <tr>
+            <td>
+              Distinguish performance targets from measurements and use one
+              ordered build queue.
+            </td>
+            <td>
+              Contract sections 5 and 6 and the appendix in Task 2. The CONTEXT
+              performance target entry in Task 3. The CHANGELOG roadmap pointer
+              and amendment bullet 4 in Task 5.
+            </td>
+          </tr>
+        </table>
+      </section>
+
+      <section class="block" id="open">
+        <h2>Open points for Moritz</h2>
+        <p>
+          None of these blocks Task 1. Each changes one task's output if your
+          answer differs from my default.
+        </p>
+        <ol>
+          <li>
+            <strong>CHANGELOG roadmap.</strong> My default replaces the P11 to
+            P14 section with a pointer and moves its status into the contract
+            appendix. The alternative leaves CHANGELOG alone and lives with two
+            queues until the next release. This affects Task 5 step 2 and Task 2
+            step 9.
+          </li>
+          <li>
+            <strong>Where the manifesto amendment goes.</strong> My default puts
+            a block at the top of the essay. The alternative is a one-line
+            banner that links to the contract and leaves the essay looking
+            untouched. This affects Task 5 step 1.
+          </li>
+          <li>
+            <strong>How much of the queue the repo copies.</strong> My default
+            copies all 73 rows. The alternative copies the first 17, through
+            THA-90, and links Linear for the rest, so it goes stale more slowly.
+            This affects Task 2 step 6.
+          </li>
+          <li>
+            <strong>Docs site and landing.</strong> My default leaves them
+            alone. The docs site home page says a mirror can "verify them
+            without ever reading them". If that copy should also be marked as
+            current state, it is a one-paragraph edit in
+            <code>apps/docs/app/page.tsx</code> plus a
+            <code>moonx docs:build</code> run. Say the word and it becomes part
+            of Task 4.
+          </li>
+        </ol>
+      </section>
+    </div>
+  </body>
+</html>
