@@ -57,6 +57,7 @@ function line(text: string): void {
 function checkAbort(): void {
   if (abort.signal.aborted) throw abort.signal.reason;
 }
+// Cancel the shared story while retaining the shell's expected signal exit code.
 function interrupt(signal: 'SIGINT' | 'SIGTERM'): void {
   cancellationCode = signal === 'SIGINT' ? 130 : 143;
   abort.abort(new Error(`interrupted by ${signal}`));
@@ -226,6 +227,7 @@ function assertUpload(
   ]);
 }
 
+// Require the operation and verified explanation to agree on signer, declaration, and intent.
 function assertWhy(
   answer: Why,
   op: QueryOp,
@@ -278,6 +280,7 @@ async function unchanged(
   return cwd;
 }
 
+// Keep policy failures independent and check accepted history through fresh CLI clones.
 async function story(): Promise<void> {
   assert.ok(
     existsSync(binary),
