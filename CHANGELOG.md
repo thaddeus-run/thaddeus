@@ -36,76 +36,22 @@ All notable changes to Thaddeus. Format follows
 - `blockOnVeto` requires an explicit reviewer allowlist. Empty means trust
   nobody. Hosts may supply a predicate for scope and lifecycle checks.
 
-### Roadmap — active pipeline (P11–P14)
+### Documentation
 
-> The tracking pipeline lives **here** and on the GitHub milestones — not in a
-> separate roadmap file (the old `post-p3-roadmap.md` was retired). The full
-> five-lens analysis (security, product, code-quality/Rust-vs-Go, manifesto
-> conformance) and the ThadHub plan are the companion document:
-> <https://4xibq00df3aj.postplan.dev/>. Statuses below are current as of
-> **2026-09-11**, checked against merged `main` through `bba202f`; update the
-> table when implementation and verification evidence changes.
+- Ratified the agent-first architecture and migration contract for THA-33 / #86
+  in `docs/agent-first-architecture.md`, with ADR 0003 on the trusted
+  code-processing service and ADR 0004 on hosted workspaces and external agents
+  first. README, ARCHITECTURE, CONTEXT, getting-started, the server README and a
+  dated manifesto amendment now match it. The P11 to P14 roadmap table moved
+  into the contract's appendix, and the Linear build order is the single queue.
 
-| Phase   | What it is                                                                                                                                                  | Status                                             | Milestone / issues                                                                                     |
-| ------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------- | ------------------------------------------------------------------------------------------------------ |
-| P4–P10  | Policy, releases, query surface, timed reveal, watch, agent budgets + rate windows, rotate-and-recall, portable reputation (export/import + `--trust-host`) | **Shipped** — through v0.1.9-alpha                 | —                                                                                                      |
-| **P11** | **Hardening & Proof** — benchmarks, outside-reviewer veto, lazythad write actions                                                                           | **In progress** — #72, #73 verified                | [P11](https://github.com/thaddeus-run/thaddeus/milestone/1) — open: #58, #59, #60, #74                 |
-| P12     | Single-node security hardening                                                                                                                              | **In progress** — #61, #62, #75, #76, #79 verified | [P12](https://github.com/thaddeus-run/thaddeus/milestone/2) — open: #77, #78; #63 needs reconciliation |
-| P13     | Product & collaboration UX                                                                                                                                  | Queued                                             | [P13](https://github.com/thaddeus-run/thaddeus/milestone/3) — #64–#67, #80, #82                        |
-| P14     | Backend implementation (behind flags): CAS, S3/SQLite, conformance, migration                                                                               | Queued                                             | [P14](https://github.com/thaddeus-run/thaddeus/milestone/4) — #68–#71                                  |
+### Roadmap
 
-Everything through P14 is **Part 1** — it ships on the current single Fly node
-with `FileBackend`. The production infrastructure change (S3 / multi-node) is
-**Part 2**, gated by the exit criteria below.
-
-- **P11 — Hardening & Proof.** Capability/content integrity (#72,
-  [PR #156](https://github.com/thaddeus-run/thaddeus/pull/156)) and owner-signed
-  monotonic view heads (#73,
-  [PR #203](https://github.com/thaddeus-run/thaddeus/pull/203)) are merged and
-  verified. Remaining: outside-reviewer veto and its allowlist (#59/#77),
-  reproducible benchmarks and a FileBackend baseline (#58), op-log/graph
-  algorithm fixes and their measurements (#74), and lazythad signed land/veto
-  actions (#60). The cross-client head-transparency log remains separate in
-  #110. P11 is not complete.
-- **P12 — Single-node security hardening.** Body limits (#75,
-  [PR #202](https://github.com/thaddeus-run/thaddeus/pull/202)), durable replay
-  nonces (#61, [PR #204](https://github.com/thaddeus-run/thaddeus/pull/204)),
-  reputation trust/anti-farming/KMS controls (#79,
-  [PR #205](https://github.com/thaddeus-run/thaddeus/pull/205)), and defensive
-  limits/pagination (#62,
-  [PR #207](https://github.com/thaddeus-run/thaddeus/pull/207)) are merged.
-  Durable repository/object/byte quotas, creation windows, and FileBackend
-  sharding (#76) are also complete in
-  [PR #211](https://github.com/thaddeus-run/thaddeus/pull/211), with compiled
-  CLI/server verification in
-  [PR #212](https://github.com/thaddeus-run/thaddeus/pull/212) and the
-  [426-test evidence report](docs/tha-147-verification.md). Remaining: veto
-  authorization (#77), metering or removal of the no-op `maxSpend` (#78), and
-  general per-signer mutation/provenance/veto spam limiting (#63 / THA-10).
-  **Tracking discrepancy:** #63 is closed on GitHub, but no implementing merged
-  PR was found; PR #211 and its verification explicitly exclude THA-10. Keep
-  that item unverified until its status is reconciled. P12 is not complete.
-- **P13 — Product & collaboration UX.** `thaddeus init` in-place + offline
-  `commit` (#80), the getting-started clone-path fix + version drift + a
-  runnable agent-governed demo (#82), plus `track`, workspace base sync, 3-way
-  merge, incremental/resumable pull, multiple remotes, approval-required policy,
-  review queue, and prompt-cap wiring (#64–#67). _(The `query`/`watch`/`reveal`
-  CLI wiring that was #81 shipped in 0.1.6-alpha; #81 is closed.)_
-- **P14 — Backend implementation (behind flags).** Define the backend
-  CAS/conditional-write contract **first** (#68) — an S3 adapter alone does not
-  make Thaddeus multi-node safe — then the S3-compatible backend (#69), an
-  optional SQLite backend (#70), and conformance tests + migration/rollback +
-  backup drills (#71). No production infrastructure change.
-
-**Exit gate — before any Part 2 production infrastructure change:** P11 complete
-· performance measured (#58) · backend conformance passes (#71) · migration +
-rollback tested (#71) · atomic land and nonce semantics specified and
-implemented (#61, #68) · a local MinIO multi-node test passes (#69) · a backup
-restored successfully in a clean environment (#71).
-
-> **Correction:** the S3 backend was once cited as "#14," but PR #14 was
-> "Multi-writer collaboration: delegated push over P09," unrelated to storage.
-> The S3 backend is tracked as **#69** under milestone P14.
+The single ordered queue is the Linear view **Thaddeus build order**, sorted by
+title ascending and copied into
+[docs/agent-first-architecture.md](docs/agent-first-architecture.md) §6. The P11
+to P14 status snapshot that lived here is preserved in that document's appendix.
+The five-lens analysis remains at <https://4xibq00df3aj.postplan.dev/>.
 
 ## [0.1.10-alpha] - 2026-09-11
 
