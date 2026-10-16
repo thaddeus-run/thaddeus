@@ -47,3 +47,21 @@ permission to upload changes. _Avoid_: Write delegation, read access.
 binaries shipped together as one Thaddeus release. The release tag names that
 same version. _Avoid_: Independent package version for members of the shared
 release.
+
+**Workspace**: An isolated view over a shared repository that points at an
+immutable base revision and holds only its own changes. Workspaces are separate
+unless explicitly shared. _Avoid_: Branch, for the place an agent edits; clone,
+which implies a second object store.
+
+**Checkpoint**: A named, durable binding of exact workspace content to exact
+operation versions, used for review, execution and integration. _Avoid_: Commit,
+before the record is proposed for landing; autosave, which is unnamed.
+
+**Trusted service**: A Thaddeus-hosted or customer-hosted service authorized to
+read repository plaintext for scoped requests while keeping storage encrypted
+and access audited. _Avoid_: Untrusted remote or mirror, which name the shipped
+keyless server; host-blind, which no longer describes the hosted path.
+
+**Performance target**: A number a build is held to, as distinct from a
+measurement, which names the environment and the run that observed it. _Avoid_:
+Capability, result or benchmark when no run is linked.
