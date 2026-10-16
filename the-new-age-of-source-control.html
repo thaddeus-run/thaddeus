@@ -763,6 +763,24 @@
           font-size: 11px;
         }
       }
+      /* ---------- dated amendment ---------- */
+      .amendment {
+        border: 1px solid var(--faint);
+        border-left: 3px solid var(--accent);
+        background: var(--surface);
+        padding: 1.25rem 1.5rem;
+        margin: 2rem 0;
+        max-width: var(--col);
+        font-size: 16px;
+      }
+      .amendment .amendment-title {
+        color: var(--text);
+        font-weight: 600;
+        margin: 0 0 0.5rem;
+      }
+      .amendment ul {
+        margin: 0.5rem 0 0.75rem;
+      }
     </style>
   </head>
   <body>
@@ -827,6 +845,54 @@
         </div>
       </div>
     </header>
+
+    <div class="wrap">
+      <aside class="amendment" id="amendment">
+        <p class="amendment-title">Amendment, 16 October 2026</p>
+        <p>
+          The essay below stays as written. The repository now records the
+          decisions that changed, and this block summarizes them.
+        </p>
+        <ul>
+          <li>
+            The primary goal is large-scale parallel agent development, with
+            1,000 or more agents on one repository, hosted remote workspaces
+            first, and external agents before first-party orchestration.
+          </li>
+          <li>
+            A trusted code-processing service replaces the promise that the host
+            cannot read code, and scoped authority, encrypted storage, audit
+            records and tenant isolation all stay.
+          </li>
+          <li>
+            The key custody and org escrow lifecycle in the threat model
+            discussion assumes client-side custody, which the hosted path no
+            longer needs.
+          </li>
+          <li>
+            The numbers in "What everything is measured against" are targets to
+            qualify, and nobody had measured any of them as of this date.
+          </li>
+          <li>
+            Semantic editing ships early, and THA-113 still has to decide its
+            source of truth.
+          </li>
+        </ul>
+        <p>
+          The details are in the
+          <a href="docs/agent-first-architecture.md"
+            >agent-first architecture and migration contract</a
+          >,
+          <a href="docs/adr/0003-trusted-code-processing-service.md"
+            >ADR 0003</a
+          >
+          and
+          <a href="docs/adr/0004-hosted-workspaces-and-external-agents-first.md"
+            >ADR 0004</a
+          >.
+        </p>
+      </aside>
+    </div>
 
     <div class="wrap">
       <div class="layout">
