@@ -41,7 +41,9 @@ All notable changes to Thaddeus. Format follows
   `https://ams1.thaddeus.run/version` reports the release version. Fly's GitHub
   auto-deploy is off. `FLY_API_TOKEN` lives in the `production` environment,
   which only `v*` tags may use, so nightlies, dry runs and dispatched releases
-  do not deploy. `docs/deploy.md` keeps a manual `fly deploy` fallback.
+  do not deploy. A release run never rolls ams1 back: if ams1 already reports a
+  newer version, the deploy is skipped. `docs/deploy.md` keeps a manual
+  `fly deploy` fallback, which is also the way to roll back on purpose.
 
 - Alpha releases also move npm `latest` for `@thaddeus.run/cli` and
   `@thaddeus.run/lazythad` up to the new version, never backwards, so a bare

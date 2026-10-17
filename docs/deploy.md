@@ -118,8 +118,15 @@ It polls `https://ams1.thaddeus.run/version` every 10 seconds for up to three
 minutes until `version` equals the release version. If it never does, the job
 fails and prints the last response.
 
-To deploy by hand, for a dispatched release or after a failed deploy job, run
-`fly deploy` from a checkout of the tag:
+A release run only moves ams1 forward. Before deploying, the job reads
+`/version`. If ams1 already reports a newer version, the job skips the deploy
+and the smoke check and still succeeds, so re-running an older tag's workflow
+cannot roll ams1 back over its `/data` state. The same version deploys again,
+and so does a server whose `/version` cannot be reached or names no version.
+
+To deploy by hand, run `fly deploy` from a checkout of the tag. Use this for a
+dispatched release, after a failed deploy job, or for a deliberate rollback to
+an older tag, which only a manual deploy can do:
 
 ```sh
 git switch --detach v0.1.11-alpha
@@ -176,14 +183,17 @@ the trust policy claims to the exact Fly organization and the `thaddeus` app; do
 not grant another app or organization access. Do not create long-lived AWS
 access keys.
 
-Configure the role and exact key ARN as deploy-specific secrets, then deploy:
+Configure the role and exact key ARN as deploy-specific secrets, then deploy
+from a checkout of the current release tag, as in
+[How ams1 deploys](#how-ams1-deploys):
 
 ```sh
 fly secrets set \
   AWS_ROLE_ARN='arn:aws:iam::ACCOUNT:role/ROLE' \
   THADDEUS_ATTESTATION_AWS_KMS_KEY_ARN='arn:aws:kms:eu-west-1:ACCOUNT:key/KEY_ID'
 
-fly deploy
+git switch --detach v0.1.11-alpha
+fly deploy --remote-only --app thaddeus
 ```
 
 The AWS SDK consumes Fly's short-lived web-identity token. Startup calls
