@@ -1,0 +1,9 @@
+# Adapted from pingdotgg/t3code at 2fae0f9.
+blank_issues_enabled: false
+contact_links:
+  - name: Feature request
+    url: https://github.com/thaddeus-run/thaddeus/discussions/categories/ideas
+    about: Suggest an improvement or new capability in Discussions.
+  - name: Security vulnerability
+    url: https://github.com/thaddeus-run/thaddeus/security/advisories/new
+    about: Report a vulnerability privately. Do not open a public issue.
