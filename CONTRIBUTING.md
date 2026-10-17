@@ -1,3 +1,5 @@
+<!-- Policy sections adapted from pingdotgg/t3code at 2fae0f9. -->
+
 # Contributing
 
 ## Read this first
