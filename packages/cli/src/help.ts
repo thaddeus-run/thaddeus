@@ -385,7 +385,9 @@ thaddeus policy clear [--json]
   --agent picks claude or codex. Without it, the one found on PATH is used; with
   both and a terminal you are asked, and with both and no terminal the command
   exits 2. With neither on PATH, it prints both file paths so you can paste the
-  prompt into any agent, and exits 0. Otherwise it exits with the agent's code.`,
+  prompt into any agent, and exits 0. An explicit --agent that is not on PATH, or
+  an agent that fails to start, exits 1. Otherwise it exits with the agent's
+  code.`,
 
   serve: `thaddeus serve [--port N] [--data DIR] [--attestation-aws-kms-key-arn <exact-key-arn>] [--attestation-rate-limit <0..20>] [--host] [--min-merges N] [--trust-host <did> ...] [--max-request-body-bytes N] [--replay-nonce-capacity N] [--request-skew-ms N]
 

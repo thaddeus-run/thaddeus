@@ -96,9 +96,10 @@ Then work from evidence, not assumption. In rough order of value:
 - The server's answer to \`curl -i <server>/version\`. A request from a CLI that
   speaks a different wire protocol than the server is rejected with HTTP 426, so
   compare the protocol numbers before suspecting anything else.
-- The working copy's metadata in \`.thaddeus/\` (\`config.json\` names the server,
-  repository, branch and saved base). Read it freely. Only change it with the
-  user's explicit permission, and never edit \`.thaddeus/store\`.
+- The working copy's \`.thaddeus/config.json\`, which names the server,
+  repository, branch and saved base. Read it freely, and change it only with the
+  user's explicit permission. Do not read or edit \`.thaddeus/store\`, and do not
+  decrypt repository contents.
 - The CLI config in the config directory named in the context file
   (\`config.json\` holds the default server).
 - For a self-hosted server on this machine: its process output, its data

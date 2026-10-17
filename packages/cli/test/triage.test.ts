@@ -11,7 +11,7 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join, resolve } from 'node:path';
+import { join, relative as relativePath, resolve } from 'node:path';
 
 import { saveCliConfig } from '../src/config';
 import { HELP, USAGE } from '../src/help';
@@ -20,6 +20,7 @@ import { run } from '../src/run';
 import {
   buildTriageContext,
   findOnPath,
+  redactUrl,
   runTriage,
   type TriageDeps,
   triageDirFor,
@@ -294,6 +295,59 @@ describe('the triage context', () => {
     ]);
   });
 
+  test('redacts credentials embedded in a server URL everywhere the context shows it', async () => {
+    const h = harness({
+      agents: ['claude'],
+      // A credentialed URL makes real fetch throw an error that quotes the URL.
+      fetchImpl: (url) =>
+        Promise.reject(
+          new TypeError(
+            `Request cannot be constructed from a URL that includes credentials: ${url}`
+          )
+        ),
+    });
+    saveCliConfig(h.home, {
+      defaultServer: 'https://alice:s3cret@example.test',
+    });
+    const root = join(h.cwd, 'web');
+    mkdirSync(join(root, '.thaddeus'), { recursive: true });
+    writeFileSync(
+      join(root, '.thaddeus', 'config.json'),
+      JSON.stringify({
+        server: 'https://bob:hunter2@copy.example.test:8443/base/',
+        repo: 'acme/web',
+        base: [],
+      })
+    );
+
+    expect(await runTriage([], { ...h.deps, cwd: root })).toBe(0);
+
+    const dir = triageDir(h.home);
+    for (const name of ['context.md', 'prompt.md']) {
+      const text = readFileSync(join(dir, name), 'utf8');
+      for (const secret of ['s3cret', 'alice:', 'hunter2', 'bob:']) {
+        expect(text).not.toContain(secret);
+      }
+    }
+    const context = readFileSync(join(dir, 'context.md'), 'utf8');
+    expect(context).toContain('https://***@example.test');
+    expect(context).toContain('https://***@copy.example.test:8443/base');
+    expect(context).toMatch(/GET https:\/\/\*\*\*@example\.test\/version/);
+  });
+
+  test('the working copy metadata line points at config.json, not the object store', async () => {
+    const h = harness();
+    const root = join(h.cwd, 'web');
+    mkdirSync(join(root, '.thaddeus'), { recursive: true });
+    writeFileSync(
+      join(root, '.thaddeus', 'config.json'),
+      JSON.stringify({ server: 'http://copy.example.test', repo: 'acme/web' })
+    );
+    const context = await buildTriageContext({ ...h.deps, cwd: root });
+    expect(context).toContain(join(root, '.thaddeus', 'config.json'));
+    expect(context).not.toMatch(/store\//);
+  });
+
   test('an unreadable working copy config is recorded, not thrown', async () => {
     const h = harness();
     mkdirSync(join(h.cwd, '.thaddeus'), { recursive: true });
@@ -453,6 +507,32 @@ describe('findOnPath', () => {
     expect(findOnPath('codex', path, 'linux')).toBeUndefined();
     expect(findOnPath('nothing', path, 'linux')).toBeUndefined();
     expect(findOnPath('claude', undefined, 'linux')).toBeUndefined();
+  });
+
+  test('returns an absolute path even for a relative PATH entry', () => {
+    const bin = mkdtempSync(join(tmp, 'bin-rel-'));
+    writeFileSync(join(bin, 'claude'), '#!/bin/sh\n');
+    chmodSync(join(bin, 'claude'), 0o755);
+    const relative = relativePath(process.cwd(), bin);
+
+    expect(findOnPath('claude', relative, 'linux')).toBe(join(bin, 'claude'));
+  });
+});
+
+describe('redactUrl', () => {
+  test('blanks the username and password of a URL', () => {
+    expect(redactUrl('https://alice:s3cret@example.test')).toBe(
+      'https://***@example.test/'
+    );
+    expect(redactUrl('http://token@host:4000/base')).toBe(
+      'http://***@host:4000/base'
+    );
+  });
+
+  test('leaves URLs without credentials, and text that is not a URL, alone', () => {
+    expect(redactUrl('http://127.0.0.1:4000/')).toBe('http://127.0.0.1:4000/');
+    expect(redactUrl('https://example.test')).toBe('https://example.test');
+    expect(redactUrl('not a url')).toBe('not a url');
   });
 });
 

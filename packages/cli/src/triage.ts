@@ -15,7 +15,7 @@ import {
   statSync,
   writeFileSync,
 } from 'node:fs';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 import { createInterface } from 'node:readline/promises';
 import { parseArgs } from 'node:util';
 
@@ -109,8 +109,35 @@ function oneLine(text: string, max = 200): string {
   return flat.length > max ? `${flat.slice(0, max)}…` : flat;
 }
 
+// Matches the `scheme://userinfo@` start of any URL in free text. The userinfo
+// part is greedy up to the last `@` before the path, as URL parsers read it,
+// so a password containing `@` is covered too.
+const URL_USERINFO = /([a-z][a-z0-9+.-]*:\/\/)[^\s/?#]*@/gi;
+
+/** A URL with its username and password replaced by `***`, so a server URL
+ * like `https://alice:secret@host` can be shown to a support agent without
+ * the credentials. `https://***@host/` marks that credentials were configured.
+ * A URL without credentials is returned exactly as given. Text that does not
+ * parse as a URL still gets any `scheme://userinfo@` prefix masked, since a
+ * hand-edited config can hold anything. */
+export function redactUrl(url: string): string {
+  try {
+    const parsed = new URL(url);
+    if (parsed.username === '' && parsed.password === '') return url;
+    parsed.username = '***';
+    parsed.password = '';
+    return parsed.href;
+  } catch {
+    return url.replace(URL_USERINFO, '$1***@');
+  }
+}
+
+// An error's message as one safe line. Network errors often quote the URL they
+// failed on (real fetch refuses credentialed URLs and names the URL), so any
+// userinfo in the message is masked too.
 function errorText(error: unknown): string {
-  return oneLine(error instanceof Error ? error.message : String(error));
+  const message = error instanceof Error ? error.message : String(error);
+  return oneLine(message.replace(URL_USERINFO, '$1***@'));
 }
 
 // Ask a server what it is: `GET <server>/version`. Plain fetch with a short
@@ -120,10 +147,12 @@ function errorText(error: unknown): string {
 async function probeServer(env: TriageEnv, server: string): Promise<string[]> {
   if (!isServerUrl(server)) {
     return [
-      `${oneLine(server)}: not a valid http(s) URL, so it was not probed`,
+      `${oneLine(redactUrl(server))}: not a valid http(s) URL, so it was not probed`,
     ];
   }
   const url = `${server.replace(/\/+$/, '')}/version`;
+  // What goes into the context file: the probe URL without any credentials.
+  const shown = `${redactUrl(server).replace(/\/+$/, '')}/version`;
   const controller = new AbortController();
   const timer = setTimeout(
     () => controller.abort(new Error('timed out')),
@@ -137,12 +166,12 @@ async function probeServer(env: TriageEnv, server: string): Promise<string[]> {
     const body = await res.text();
     const lines: string[] = [];
     if (res.status === 200) {
-      lines.push(`GET ${url}: HTTP 200 ${describeVersionBody(body)}`);
+      lines.push(`GET ${shown}: HTTP 200 ${describeVersionBody(body)}`);
     } else {
       const reason =
         res.statusText === '' ? '' : ` ${oneLine(res.statusText, 60)}`;
       lines.push(
-        `GET ${url}: HTTP ${res.status}${reason}, body ${JSON.stringify(oneLine(body))}`
+        `GET ${shown}: HTTP ${res.status}${reason}, body ${JSON.stringify(oneLine(body))}`
       );
     }
     const headers = ['x-thaddeus-version', 'x-thaddeus-protocol']
@@ -156,7 +185,7 @@ async function probeServer(env: TriageEnv, server: string): Promise<string[]> {
     const why = controller.signal.aborted
       ? `timed out after ${env.probeTimeoutMs} ms`
       : errorText(error);
-    return [`GET ${url}: unreachable (${why})`];
+    return [`GET ${shown}: unreachable (${why})`];
   } finally {
     clearTimeout(timer);
   }
@@ -216,7 +245,7 @@ function describeWorkingCopy(cwd: string): {
       `Repository: ${configField(cfg.repo)}`,
       `Branch: ${oneLine(viewOf(cfg))}`,
       `Head (saved base): ${shown.length === 0 ? 'none (no commits synced yet)' : shown.join(', ') + more}`,
-      `Server: ${configField(cfg.server)}`,
+      `Server: ${typeof cfg.server === 'string' ? oneLine(redactUrl(cfg.server)) : '(missing)'}`,
     ];
     if (cfg.store !== undefined) {
       lines.push(
@@ -298,7 +327,9 @@ export async function buildTriageContext(env: TriageEnv): Promise<string> {
     );
   }
   targets.forEach((target, index) => {
-    serverLines.push(`- ${target.label}: ${oneLine(target.url, 300)}`);
+    serverLines.push(
+      `- ${target.label}: ${oneLine(redactUrl(target.url), 300)}`
+    );
     for (const line of probes[index]) serverLines.push(`  - ${line}`);
   });
 
@@ -333,7 +364,7 @@ export async function buildTriageContext(env: TriageEnv): Promise<string> {
   ];
   if (copy.root !== undefined) {
     lines.push(
-      `- Working copy metadata: ${join(copy.root, '.thaddeus')} (config.json names the server, repository, branch and saved base; store/ is the object store)`
+      `- Working copy config: ${join(copy.root, '.thaddeus', 'config.json')} (names the server, repository, branch and saved base)`
     );
   }
   return `${lines.join('\n')}\n`;
@@ -385,7 +416,7 @@ export function findOnPath(
   for (const dir of pathEnv.split(separator)) {
     if (dir === '') continue;
     for (const suffix of suffixes) {
-      const candidate = join(dir, command + suffix);
+      const candidate = resolve(dir, command + suffix);
       if (isExecutableFile(candidate, platform)) return candidate;
     }
   }
