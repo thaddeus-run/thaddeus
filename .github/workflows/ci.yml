@@ -10,12 +10,9 @@ on:
 jobs:
   check:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
-        with:
-          # moon's affected-detection needs full git history; a shallow
-          # checkout makes `moon ci` fall back to running everything.
-          fetch-depth: 0
 
       # proto installs the pinned bun/node/moon/gh from .prototools.
       - name: Install proto toolchain
