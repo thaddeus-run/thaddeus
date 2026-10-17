@@ -1,0 +1,105 @@
+# Adapted from pingdotgg/t3code at 2fae0f9.
+#
+# Keeps the issue and triage labels the issue forms and the contribution
+# triage skill rely on in sync with the definitions below. Runs when an issue
+# form changes, or by hand from the Actions tab.
+name: Issue Labels
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - .github/ISSUE_TEMPLATE/**
+      - .github/workflows/issue-labels.yml
+  workflow_dispatch:
+
+# Deny by default; the job asks for what it needs.
+permissions: {}
+
+jobs:
+  sync:
+    name: Sync issue labels
+    runs-on: ubuntu-24.04
+    permissions:
+      issues: write
+    steps:
+      - name: Ensure managed issue labels exist
+        uses: actions/github-script@v8
+        with:
+          script: |
+            const managedLabels = [
+              {
+                name: "bug",
+                color: "d73a4a",
+                description: "Something is broken or behaving incorrectly.",
+              },
+              {
+                name: "enhancement",
+                color: "a2eeef",
+                description: "Requested improvement or new capability.",
+              },
+              {
+                name: "needs-triage",
+                color: "fbca04",
+                description: "Issue needs maintainer review and initial categorization.",
+              },
+              {
+                name: "via-triage",
+                color: "5319e7",
+                description: "Issue filed by the triage command after an agent investigated.",
+              },
+              {
+                name: "triage:eligible",
+                color: "1f883d",
+                description: "PR passed contribution triage and is ready for deeper review.",
+              },
+              {
+                name: "triage:keep-open",
+                color: "0e8a16",
+                description: "Maintainer asked automated triage to leave this PR open.",
+              },
+            ];
+
+            // Creates the label when it is missing, or fixes its colour and
+            // description when they drifted, so a fresh repository needs no setup.
+            async function ensureLabel(label) {
+              const { name, color, description } = label;
+              let existing;
+              try {
+                ({ data: existing } = await github.rest.issues.getLabel({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  name,
+                }));
+              } catch (error) {
+                if (error.status !== 404) {
+                  throw error;
+                }
+              }
+
+              if (!existing) {
+                await github.rest.issues.createLabel({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  name,
+                  color,
+                  description,
+                });
+                return;
+              }
+
+              if (existing.color !== color || (existing.description ?? "") !== description) {
+                await github.rest.issues.updateLabel({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  name,
+                  color,
+                  description,
+                });
+              }
+            }
+
+            for (const label of managedLabels) {
+              await ensureLabel(label);
+            }

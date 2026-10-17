@@ -78,7 +78,8 @@ necessary to solve the same problem. A large diff alone does not establish that
 the PR contains unrelated work.
 
 This rule is for outside contributions. Maintainers, the logins in
-`.github/TRIAGE_EXEMPTIONS.td`, may batch related fixes in one PR.
+[`.github/TRIAGE_EXEMPTIONS.td`](.github/TRIAGE_EXEMPTIONS.td), may batch
+related fixes in one PR.
 
 <a id="verification"></a>
 
@@ -121,13 +122,14 @@ correctness, security, performance, or merging. Those need deeper review.
 Updates to the PR can change its eligibility and require reassessment.
 
 PRs receive `vouch:*` contributor-status labels and `size:*` diff-size labels.
-These are context, not eligibility rules. Vouching through `.github/VOUCHED.td`
-is separate from permission to bypass triage. Only the GitHub logins explicitly
-listed in `.github/TRIAGE_EXEMPTIONS.td` bypass triage. Organization membership,
-vouching, collaborator or bot status, repository write access, and previous
-successful PRs do not establish an exemption. Other contributors, including
-vouched contributors, go through triage. Passing once does not grant permanent
-trust.
+These are context, not eligibility rules. Vouching through
+[`.github/VOUCHED.td`](.github/VOUCHED.td) is separate from permission to bypass
+triage. Only the GitHub logins explicitly listed in
+[`.github/TRIAGE_EXEMPTIONS.td`](.github/TRIAGE_EXEMPTIONS.td) bypass triage.
+Organization membership, vouching, collaborator or bot status, repository write
+access, and previous successful PRs do not establish an exemption. Other
+contributors, including vouched contributors, go through triage. Passing once
+does not grant permanent trust.
 
 Every live run freshly resolves `thaddeus-run/thaddeus`'s `refs/heads/main` to a
 commit SHA and loads the contribution-triage skill, this guide, its policy
@@ -147,9 +149,10 @@ automation. Neither triage nor the `triage:eligible` label authorizes merging.
 ## Closure and reconsideration
 
 Automated triage leaves a PR open for maintainer decision if someone in the
-trusted `.github/TRIAGE_EXEMPTIONS.td` list has commented or submitted a review,
-including on an earlier head, or if `triage:keep-open` is present. This
-protection does not imply eligibility or review approval.
+trusted [`.github/TRIAGE_EXEMPTIONS.td`](.github/TRIAGE_EXEMPTIONS.td) list has
+commented or submitted a review, including on an earlier head, or if
+`triage:keep-open` is present. This protection does not imply eligibility or
+review approval.
 
 PRs that violate these requirements can be closed before deeper review. Multiple
 independent fixes require splitting. Missing approval requires maintainer
