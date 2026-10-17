@@ -50,3 +50,8 @@ export {
   encodeRelease,
   encodeReviewRecord,
 } from './dto';
+export {
+  PROTOCOL_HEADER,
+  PROTOCOL_VERSION,
+  SERVER_VERSION_HEADER,
+} from './wire-version';

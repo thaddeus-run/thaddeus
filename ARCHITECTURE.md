@@ -126,6 +126,19 @@ keyless design with a trusted code-processing service for the hosted path. The
 change ships under THA-150 and THA-151, and this section will be updated when it
 does.
 
+Client and server declare the wire format they speak. `PROTOCOL_VERSION`
+(exported from `@thaddeus.run/server/protocol`, currently 1) rides on every
+client request as `x-thaddeus-protocol`; every server response carries it again
+with the release version as `x-thaddeus-version`, and `GET /version` returns
+`{ version, protocol }`. A request whose header is present but not exactly the
+server's protocol is refused with 426 before authentication, body reads, or
+quotas, and the client turns that into a message naming which side to update.
+Requests with no header, such as pre-protocol clients and `lazythad`, are still
+served. Raise `PROTOCOL_VERSION` in the same change whenever request signing,
+routes, or DTOs change in a way that breaks an older client or an older server,
+and add a **Breaking:** note to the CHANGELOG. Additive changes that older peers
+ignore do not need a bump.
+
 Timed reveal is the deliberate exception to that normal trust boundary. An owner
 uploads a public-wrapped capability before its start time so the server can
 release it while the owner is offline. Since the public identity is well-known,

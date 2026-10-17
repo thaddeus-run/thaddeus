@@ -10,6 +10,8 @@ import {
   resolveLimits,
 } from '@thaddeus.run/server';
 
+import { VERSION } from './version';
+
 // Pin Bun's documented default so slow-body protection cannot drift across
 // runtime upgrades.
 const REQUEST_IDLE_TIMEOUT_SECONDS = 10;
@@ -62,6 +64,7 @@ export function startServer(opts: ServeOptions): RunningServer {
   const { maxRequestBodyBytes } = limits;
   const srv = createServer({
     backend: new FileBackend(opts.dataDir),
+    version: VERSION,
     ...limits,
     quotas: opts.quotas,
     policy: opts.policy,
