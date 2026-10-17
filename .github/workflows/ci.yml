@@ -13,6 +13,10 @@ jobs:
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
+        with:
+          # moon detects CI and compares against the pull request's base
+          # branch on every run, so the checkout needs full history and refs.
+          fetch-depth: 0
 
       # proto installs the pinned bun/node/moon/gh from .prototools.
       - name: Install proto toolchain
