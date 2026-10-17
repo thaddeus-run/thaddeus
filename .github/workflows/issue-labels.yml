@@ -17,6 +17,13 @@ on:
 # Deny by default; the job asks for what it needs.
 permissions: {}
 
+# One sync at a time, so a push run and a manual run never both create the same
+# label. A running sync is never cancelled. GitHub keeps at most one more run
+# pending, which is enough because every run applies the full list.
+concurrency:
+  group: issue-labels
+  cancel-in-progress: false
+
 jobs:
   sync:
     name: Sync issue labels
@@ -61,32 +68,51 @@ jobs:
               },
             ];
 
-            // Creates the label when it is missing, or fixes its colour and
-            // description when they drifted, so a fresh repository needs no setup.
-            async function ensureLabel(label) {
-              const { name, color, description } = label;
-              let existing;
+            // The label as it is on the repository, or undefined when missing.
+            async function findLabel(name) {
               try {
-                ({ data: existing } = await github.rest.issues.getLabel({
+                const { data } = await github.rest.issues.getLabel({
                   owner: context.repo.owner,
                   repo: context.repo.repo,
                   name,
-                }));
+                });
+                return data;
               } catch (error) {
                 if (error.status !== 404) {
                   throw error;
                 }
+                return undefined;
               }
+            }
+
+            // Creates the label when it is missing, or fixes its colour and
+            // description when they drifted, so a fresh repository needs no setup.
+            async function ensureLabel(label) {
+              const { name, color, description } = label;
+              let existing = await findLabel(name);
 
               if (!existing) {
-                await github.rest.issues.createLabel({
-                  owner: context.repo.owner,
-                  repo: context.repo.repo,
-                  name,
-                  color,
-                  description,
-                });
-                return;
+                try {
+                  await github.rest.issues.createLabel({
+                    owner: context.repo.owner,
+                    repo: context.repo.repo,
+                    name,
+                    color,
+                    description,
+                  });
+                  return;
+                } catch (createError) {
+                  // 422 means another run created the label first. Read it
+                  // back so the drift check below still applies. If it is
+                  // still missing, the 422 was a real validation error.
+                  if (createError.status !== 422) {
+                    throw createError;
+                  }
+                  existing = await findLabel(name);
+                  if (!existing) {
+                    throw createError;
+                  }
+                }
               }
 
               if (existing.color !== color || (existing.description ?? "") !== description) {
