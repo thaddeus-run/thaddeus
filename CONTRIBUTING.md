@@ -278,6 +278,10 @@ publish from the same verified commit. Downloaded CLI and TUI binaries must
 report that exact version before publication. Launcher versions are checked, not
 rewritten by the publication job. A version bump remains a separate change.
 
+Nightlies are the one exception. Each nightly job runs
+`bun packages/cli/scripts/set-release-version.ts <version>` on its own checkout
+and never commits the result, so the same checks hold for the nightly version.
+
 ### Repo conventions
 
 - Agent-facing rules and the verification baseline live in `AGENTS.md`; deeper

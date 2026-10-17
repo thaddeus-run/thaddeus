@@ -43,6 +43,7 @@ tasks:
     command: 'bun test packages/cli/test/version.test.ts'
     inputs:
       - 'packages/cli/test/version.test.ts'
+      - 'packages/cli/test/release-fixture.ts'
       - 'packages/cli/scripts/check-release-version.ts'
       - 'packages/cli/src/version.ts'
       - 'packages/*/package.json'

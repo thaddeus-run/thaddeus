@@ -1,17 +1,53 @@
 name: Release
 
+# The nightly channel is adapted from pingdotgg/t3code's release.yml and
+# .github/scripts/check-nightly-release.cjs at 2fae0f9.
+#
 # On a v* tag: cross-build the CLI (bun --compile, every OS/arch from one runner)
 # and the TUI (cargo, one native runner per target), publish a GitHub Release with
 # the binaries + checksums, then publish the npm launcher packages (if NPM_TOKEN
 # is set). Manual runs take the tag as an input.
+#
+# Nightly: every six hours, if main has commits after the newest release whose
+# tag contains -nightly., build main as <next patch>-nightly.<UTC date>.<run>.
+# set-release-version.ts rewrites the shared version in each job's checkout, so
+# the same version checks hold. A nightly is a GitHub prerelease that never
+# becomes "latest", and its npm launchers go to the `nightly` dist-tag. A
+# dispatched nightly skips the new-commits check and must run on main unless
+# dry_run is set. dry_run builds and verifies, then skips both publish jobs.
 on:
   push:
-    tags: ['v*']
+    # Nightly tags come from the release job below. Excluding them keeps a
+    # hand-pushed nightly tag from starting a release-channel run.
+    tags: ['v*', '!v*-nightly.*']
+  schedule:
+    # Minute 23 avoids the top of the hour, when GitHub's scheduler is busiest.
+    - cron: '23 */6 * * *'
   workflow_dispatch:
     inputs:
       tag:
-        description: 'Existing tag to release (e.g. v0.1.0-alpha)'
-        required: true
+        description:
+          'Existing tag to release (e.g. v0.1.0-alpha); release channel only'
+        required: false
+      channel:
+        description:
+          'release publishes the tag above; nightly builds the selected branch'
+        type: choice
+        options: [release, nightly]
+        default: release
+      dry_run:
+        description: 'Build and verify only; skip the GitHub release and npm'
+        type: boolean
+        default: false
+
+# Nightlies, scheduled or dispatched, wait for each other so two never build or
+# publish out of order. Tag releases have their own group, so a nightly never
+# holds one up. A running publish is never cancelled.
+concurrency:
+  group:
+    ${{ (github.event_name == 'schedule' || inputs.channel == 'nightly') &&
+    'release-nightly' || 'release' }}
+  cancel-in-progress: false
 
 permissions:
   contents: write
@@ -21,12 +57,110 @@ jobs:
     name: Verify the selected release
     runs-on: ubuntu-latest
     outputs:
-      tag: ${{ steps.tag.outputs.tag }}
+      channel: ${{ steps.channel.outputs.channel }}
+      dry_run: ${{ steps.channel.outputs.dry_run }}
+      # Set only by the nightly gate: 'true' for a scheduled nightly with
+      # nothing new on main, 'false' for a nightly that is due. Every later job
+      # is gated on it, so a skipped run publishes nothing and ends green.
+      skip: ${{ steps.gate.outputs.skip }}
+      previous_nightly: ${{ steps.gate.outputs.previous }}
+      tag: ${{ steps.tag.outputs.tag || steps.nightly.outputs.tag }}
       version: ${{ steps.metadata.outputs.version }}
       sha: ${{ steps.metadata.outputs.sha }}
+      release_flags: ${{ steps.plan.outputs.release_flags }}
+      npm_tag: ${{ steps.plan.outputs.npm_tag }}
+      # 'true' unless the run skipped or is a dry run; the release and npm jobs
+      # run only then.
+      publish: ${{ steps.plan.outputs.publish }}
     steps:
+      - name: Select the channel
+        id: channel
+        env:
+          EVENT: ${{ github.event_name }}
+          CHANNEL_INPUT: ${{ inputs.channel }}
+          TAG_INPUT: ${{ inputs.tag }}
+          DRY_RUN_INPUT: ${{ inputs.dry_run }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          channel=release
+          if [ "$EVENT" = schedule ]; then
+            channel=nightly
+          elif [ "$EVENT" = workflow_dispatch ]; then
+            channel="${CHANNEL_INPUT:-release}"
+          fi
+          dry_run=false
+          if [ "$EVENT" = workflow_dispatch ] && [ "$DRY_RUN_INPUT" = true ]; then
+            dry_run=true
+          fi
+          case "$channel" in
+            release)
+              if [ "$EVENT" = workflow_dispatch ] && [ -z "$TAG_INPUT" ]; then
+                echo "a release dispatch needs the tag input" >&2
+                exit 1
+              fi
+              ;;
+            nightly)
+              if [ -n "$TAG_INPUT" ]; then
+                echo "a nightly computes its own tag; leave the tag input empty" >&2
+                exit 1
+              fi
+              # Scheduled runs always build the default branch. A dispatched
+              # nightly that publishes must build main too; a dry run may
+              # build any branch.
+              if [ "$EVENT" = workflow_dispatch ] && [ "$dry_run" != true ] &&
+                [ "$GITHUB_REF" != refs/heads/main ]; then
+                echo "a publishing nightly must be dispatched from main, not $GITHUB_REF; set dry_run to build a branch" >&2
+                exit 1
+              fi
+              ;;
+            *)
+              echo "unknown channel: $channel" >&2
+              exit 1
+              ;;
+          esac
+          echo "channel=$channel" >> "$GITHUB_OUTPUT"
+          echo "dry_run=$dry_run" >> "$GITHUB_OUTPUT"
+      # t3code's shouldReleaseNightly without its six-hour gap: the cron already
+      # spaces scheduled runs six hours apart. The previous nightly's tag is also
+      # what the release notes compare against.
+      - name: Look for commits since the last nightly
+        id: gate
+        if: steps.channel.outputs.channel == 'nightly'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SHA: ${{ github.sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Newest published (non-draft) release whose tag contains -nightly.
+          # The API lists newest first, so the first 100 hold it unless 100
+          # releases followed it; then this run simply publishes again.
+          previous=$(gh api "repos/$GITHUB_REPOSITORY/releases?per_page=100" \
+            --jq '[.[] | select((.draft | not) and (.tag_name | contains("-nightly.")))]
+                  | max_by(.published_at) | .tag_name // ""')
+          echo "previous=$previous" >> "$GITHUB_OUTPUT"
+          skip=false
+          if [ -z "$previous" ]; then
+            echo "no earlier nightly release; this run publishes the first"
+          elif [ "$GITHUB_EVENT_NAME" = schedule ]; then
+            ahead=$(gh api "repos/$GITHUB_REPOSITORY/compare/$previous...$SHA" --jq .ahead_by)
+            if ! [[ "$ahead" =~ ^[0-9]+$ ]]; then
+              echo "could not compare $previous with $SHA" >&2
+              exit 1
+            elif [ "$ahead" -eq 0 ]; then
+              skip=true
+              echo "main has no commits after $previous; skipping this nightly"
+            else
+              echo "main has $ahead commit(s) after $previous"
+            fi
+          else
+            echo "dispatched nightly; not checking for commits after $previous"
+          fi
+          echo "skip=$skip" >> "$GITHUB_OUTPUT"
       - name: Select release tag
         id: tag
+        if: steps.channel.outputs.channel == 'release'
         env:
           TAG_INPUT: ${{ github.event.inputs.tag }}
           REF_NAME: ${{ github.ref_name }}
@@ -40,18 +174,41 @@ jobs:
           fi
           echo "tag=$tag" >> "$GITHUB_OUTPUT"
       - uses: actions/checkout@v4
+        if: steps.gate.outputs.skip != 'true'
         with:
           persist-credentials: false
-          ref: refs/tags/${{ steps.tag.outputs.tag }}
+          # A release builds its verified tag; a nightly builds the commit this
+          # run started on.
+          ref:
+            ${{ steps.channel.outputs.channel == 'nightly' && github.sha ||
+            format('refs/tags/{0}', steps.tag.outputs.tag) }}
           fetch-depth: 0
       - name: Install proto toolchain
+        if: steps.gate.outputs.skip != 'true'
         uses: moonrepo/setup-toolchain@261c62cb5b0f580c7be7c8cd0f023a2e96756095
         with:
           auto-install: true
+      # skip is 'false' only on a nightly that is due: the gate runs for
+      # nightlies alone.
+      - name: Compute and apply the nightly version
+        id: nightly
+        if: steps.gate.outputs.skip == 'false'
+        env:
+          RUN_NUMBER: ${{ github.run_number }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          base=$(bun -p "require('./packages/cli/package.json').version")
+          version=$(bun packages/cli/scripts/nightly-version.ts --base "$base" \
+            --date "$(date -u +%Y-%m-%dT%H:%M:%SZ)" --run "$RUN_NUMBER")
+          bun packages/cli/scripts/set-release-version.ts "$version"
+          echo "tag=v$version" >> "$GITHUB_OUTPUT"
       - name: Verify release metadata
         id: metadata
+        if: steps.gate.outputs.skip != 'true'
         env:
-          THADDEUS_RELEASE_TAG: ${{ steps.tag.outputs.tag }}
+          THADDEUS_RELEASE_TAG:
+            ${{ steps.tag.outputs.tag || steps.nightly.outputs.tag }}
         shell: bash
         run: |
           set -euo pipefail
@@ -59,10 +216,73 @@ jobs:
           version=$(bun -p "require('./packages/cli/package.json').version")
           echo "version=$version" >> "$GITHUB_OUTPUT"
           echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+      # The release and npm jobs publish with these outputs and nothing else,
+      # so the guard below checks exactly what they will do.
+      - name: Plan the publication
+        id: plan
+        if: steps.gate.outputs.skip != 'true'
+        env:
+          CHANNEL: ${{ steps.channel.outputs.channel }}
+          DRY_RUN: ${{ steps.channel.outputs.dry_run }}
+          VERSION: ${{ steps.metadata.outputs.version }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          # A prerelease version (e.g. 0.1.0-alpha) must not become npm's
+          # default `latest` dist-tag; it publishes under a tag named after its
+          # prerelease id (alpha/beta/rc/nightly/…), else `next`. A stable
+          # version (no `-`) publishes to `latest`.
+          case "$VERSION" in
+            *-*)
+              npm_tag="${VERSION#*-}"
+              npm_tag="${npm_tag%%.*}"
+              npm_tag="$(printf '%s' "$npm_tag" | tr -d '0-9')"
+              [ -n "$npm_tag" ] || npm_tag="next"
+              ;;
+            *) npm_tag=latest ;;
+          esac
+          # A nightly is a prerelease and never GitHub's "latest" release, so
+          # install.sh's default (releases/latest) keeps resolving to a release.
+          release_flags=""
+          if [ "$CHANNEL" = nightly ]; then
+            release_flags="--prerelease --latest=false"
+          fi
+          publish=true
+          if [ "$DRY_RUN" = true ]; then publish=false; fi
+          echo "npm_tag=$npm_tag" >> "$GITHUB_OUTPUT"
+          echo "release_flags=$release_flags" >> "$GITHUB_OUTPUT"
+          echo "publish=$publish" >> "$GITHUB_OUTPUT"
+      - name: Guard the nightly publication
+        if: steps.gate.outputs.skip == 'false'
+        env:
+          TAG: ${{ steps.nightly.outputs.tag }}
+          RELEASE_FLAGS: ${{ steps.plan.outputs.release_flags }}
+          NPM_TAG: ${{ steps.plan.outputs.npm_tag }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          refuse() {
+            echo "refusing nightly $TAG: $*" >&2
+            exit 1
+          }
+          case "$TAG" in v*-nightly.*) ;; *) refuse "its tag lacks -nightly." ;; esac
+          case " $RELEASE_FLAGS " in
+            *" --prerelease "*) ;;
+            *) refuse "the GitHub release would not be a prerelease" ;;
+          esac
+          case " $RELEASE_FLAGS " in
+            *" --latest=false "*) ;;
+            *) refuse "the GitHub release could become latest" ;;
+          esac
+          if [ "$NPM_TAG" != nightly ]; then
+            refuse "npm would publish to dist-tag '$NPM_TAG', not nightly"
+          fi
+          echo "$TAG publishes as a prerelease, never latest, to npm dist-tag nightly"
 
   cli:
     name: Build CLI binaries
     needs: [preflight]
+    if: needs.preflight.outputs.skip != 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -74,6 +294,12 @@ jobs:
         uses: moonrepo/setup-toolchain@261c62cb5b0f580c7be7c8cd0f023a2e96756095 # v0
         with:
           auto-install: true
+      # Before the install, so bun.lock and the manifests agree on the version.
+      - name: Apply the nightly version
+        if: needs.preflight.outputs.channel == 'nightly'
+        env:
+          VERSION: ${{ needs.preflight.outputs.version }}
+        run: bun packages/cli/scripts/set-release-version.ts "$VERSION"
       - name: Install dependencies
         run: |
           sed -i 's/^minimumReleaseAge = .*/minimumReleaseAge = 0/' bunfig.toml
@@ -102,6 +328,7 @@ jobs:
   tui:
     name: Build TUI (${{ matrix.name }})
     needs: [preflight]
+    if: needs.preflight.outputs.skip != 'true'
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -130,6 +357,23 @@ jobs:
         with:
           persist-credentials: false
           ref: ${{ needs.preflight.outputs.sha }}
+      # lazythad's --version comes from Cargo.toml, and --locked needs
+      # Cargo.lock to match it, so a nightly rewrites both with the same script
+      # as the CLI job. Only proto and its pinned bun are installed; Rust comes
+      # from the step below as for any release.
+      - name: Install proto
+        if: needs.preflight.outputs.channel == 'nightly'
+        uses: moonrepo/setup-toolchain@261c62cb5b0f580c7be7c8cd0f023a2e96756095 # v0
+        with:
+          cache: false
+      - name: Apply the nightly version
+        if: needs.preflight.outputs.channel == 'nightly'
+        env:
+          VERSION: ${{ needs.preflight.outputs.version }}
+        shell: bash
+        run: |
+          proto install bun
+          bun packages/cli/scripts/set-release-version.ts "$VERSION"
       - name: Install Rust 1.95.0
         uses: dtolnay/rust-toolchain@fa04a1451ff1842e2626ccb99004d0195b455a88 # master
         with:
@@ -157,6 +401,7 @@ jobs:
   verify-artifacts:
     name: Verify binary versions (${{ matrix.os }})
     needs: [preflight, cli, tui]
+    if: needs.preflight.outputs.skip != 'true'
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -226,6 +471,7 @@ jobs:
   release:
     name: Publish GitHub Release
     needs: [preflight, verify-artifacts]
+    if: needs.preflight.outputs.publish == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -245,6 +491,12 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ needs.preflight.outputs.tag }}
+          CHANNEL: ${{ needs.preflight.outputs.channel }}
+          VERSION: ${{ needs.preflight.outputs.version }}
+          SHA: ${{ needs.preflight.outputs.sha }}
+          PREVIOUS_NIGHTLY: ${{ needs.preflight.outputs.previous_nightly }}
+          RELEASE_FLAGS: ${{ needs.preflight.outputs.release_flags }}
+          NPM_TAG: ${{ needs.preflight.outputs.npm_tag }}
         run: |
           NOTES="Prebuilt \`thaddeus\` (CLI) and \`lazythad\` (TUI) binaries.
 
@@ -252,11 +504,27 @@ jobs:
           \`\`\`sh
           curl -fsSL https://raw.githubusercontent.com/${GITHUB_REPOSITORY}/main/install.sh | sh
           \`\`\`
-          Or via npm: \`npm i -g @thaddeus.run/cli @thaddeus.run/lazythad\`.
+          Or via npm: \`npm i -g @thaddeus.run/cli@${NPM_TAG} @thaddeus.run/lazythad@${NPM_TAG}\`.
 
           Point it at a server with \`thaddeus use\`: \`--hosted\` for the official https://ams1.thaddeus.run, or \`thaddeus use <your-server>\` for your own. See CHANGELOG.md for changes."
           if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
             gh release upload "$TAG" release/* --repo "$GITHUB_REPOSITORY" --clobber
+          elif [ "$CHANNEL" = nightly ]; then
+            short_sha="${SHA:0:7}"
+            NOTES="> [!WARNING]
+          > This nightly is an untested build of \`main\` at ${short_sha} and may be broken."
+            if [ -n "$PREVIOUS_NIGHTLY" ]; then
+              NOTES="$NOTES
+
+          Changes since ${PREVIOUS_NIGHTLY}: https://github.com/${GITHUB_REPOSITORY}/compare/${PREVIOUS_NIGHTLY}...${TAG}"
+            fi
+            # The tag does not exist yet; --target creates it at the built
+            # commit. RELEASE_FLAGS is split on purpose: the preflight guard
+            # checked it holds --prerelease and --latest=false.
+            # shellcheck disable=SC2086
+            gh release create "$TAG" release/* --repo "$GITHUB_REPOSITORY" \
+              --target "$SHA" $RELEASE_FLAGS \
+              --title "Thaddeus nightly $VERSION ($short_sha)" --notes "$NOTES"
           else
             gh release create "$TAG" release/* --repo "$GITHUB_REPOSITORY" \
               --title "Thaddeus $TAG" --notes "$NOTES" --verify-tag
@@ -265,6 +533,7 @@ jobs:
   npm:
     name: Publish npm launchers
     needs: [preflight, release]
+    if: needs.preflight.outputs.publish == 'true'
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -278,6 +547,21 @@ jobs:
         with:
           persist-credentials: false
           ref: ${{ needs.preflight.outputs.sha }}
+      # The launchers must carry the nightly version they download. proto
+      # (without a cache, so no proto-managed node or npm lands on PATH) only
+      # supplies bun here, before setup-node.
+      - name: Install proto
+        if: needs.preflight.outputs.channel == 'nightly'
+        uses: moonrepo/setup-toolchain@261c62cb5b0f580c7be7c8cd0f023a2e96756095 # v0
+        with:
+          cache: false
+      - name: Apply the nightly version
+        if: needs.preflight.outputs.channel == 'nightly'
+        env:
+          VERSION: ${{ needs.preflight.outputs.version }}
+        run: |
+          proto install bun
+          bun packages/cli/scripts/set-release-version.ts "$VERSION"
       - uses: actions/setup-node@v4
         with:
           node-version: '24'
@@ -297,23 +581,12 @@ jobs:
       - name: Publish thaddeus + lazythad launchers
         env:
           EXPECTED_VERSION: ${{ needs.preflight.outputs.version }}
+          # Derived from the version in preflight (alpha, nightly, latest, …)
+          # and checked there by the nightly guard.
+          NPM_TAG: ${{ needs.preflight.outputs.npm_tag }}
         run: |
           set -euo pipefail
           version="$EXPECTED_VERSION"
-          # A prerelease version (e.g. 0.1.0-alpha) must not become the default
-          # `latest` dist-tag; publish it under a channel tag derived from the
-          # prerelease id (alpha/beta/rc/…), else `next`. A stable version
-          # (no `-`) publishes to `latest` normally.
-          case "$version" in
-            *-*)
-              channel="${version#*-}"
-              channel="${channel%%.*}"
-              channel="$(printf '%s' "$channel" | tr -d '0-9')"
-              [ -n "$channel" ] || channel="next"
-              dist="--tag $channel"
-              ;;
-            *) dist="" ;;
-          esac
           # Idempotent per package: a re-run after a partial failure must skip
           # what already published (npm forbids publishing over a version), and
           # the OIDC identity-token exchange is occasionally flaky on the 2nd
@@ -332,7 +605,7 @@ jobs:
                 exit 0
               fi
               for attempt in 1 2 3; do
-                if npm publish --provenance --access public $dist; then
+                if npm publish --provenance --access public --tag "$NPM_TAG"; then
                   exit 0
                 fi
                 if [ "$attempt" -lt 3 ]; then
