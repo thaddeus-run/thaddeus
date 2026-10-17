@@ -57,6 +57,16 @@ starting any task:
 
 Do not load skills that are not relevant to the task.
 
+Project skills:
+
+- `contribution-triage` moderates PRs against `CONTRIBUTING.md`: it closes
+  ineligible ones and labels eligible ones `triage:eligible`.
+- `verify-thaddeus` exercises a CLI, server or client change through the real
+  CLI against an isolated local server.
+
+`.claude/skills` is a symlink to `.agents/skills`, so Claude Code and Codex read
+the same files. Keep skills in `.agents/skills/`.
+
 ## Agent Artifacts
 
 Write agent-only planning and scratch artifacts under `.agents/ignore/` by

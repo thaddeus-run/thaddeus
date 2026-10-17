@@ -34,6 +34,7 @@ tsconfig.tsbuildinfo
 *.sw?
 .vercel
 .claude/*
+!.claude/skills
 .agents/ignore/
 .worktrees/
 
