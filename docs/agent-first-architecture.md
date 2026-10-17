@@ -69,13 +69,27 @@ rules out browsing, search and execution.
 | Isolated execution workers | Builds and tests for checkpoints, isolated from other tenants and from service credentials. |
 | Durable repository store   | Immutable objects, history and the records the other components rebuild from.               |
 
-These are lines of responsibility. They need not be separate deployments. The
-shipped server already writes durable state through to its storage backend.
-Per-node caches and counters live in process memory, and the backend has no
-conditional-write contract yet, so this document makes no multi-node correctness
-claim. [THA-15](https://linear.app/thaddeus-run/issue/THA-15),
+These are lines of responsibility. They need not be separate deployments.
+
+### Today, as shipped
+
+`thaddeus workspace` opens a branch as a local copy-on-write working copy over
+one shared object store. The shipped server writes durable state through to its
+storage backend. Per-node caches and counters live in process memory, and the
+backend has no conditional-write contract yet, so this document makes no
+multi-node correctness claim.
+[THA-15](https://linear.app/thaddeus-run/issue/THA-15),
 [THA-69](https://linear.app/thaddeus-run/issue/THA-69) and
 [THA-68](https://linear.app/thaddeus-run/issue/THA-68) own that work.
+
+### Direction
+
+Nothing below has shipped.
+[THA-152](https://linear.app/thaddeus-run/issue/THA-152) owns remote workspaces,
+[THA-153](https://linear.app/thaddeus-run/issue/THA-153) owns saves and
+checkpoints, and [THA-155](https://linear.app/thaddeus-run/issue/THA-155) owns
+integration agents. Execution workers and the development interface are private
+ThadHub work.
 
 **Workspaces.** A workspace points at an immutable base revision and stores only
 what changed. Each save carries a retry identifier and a sequence number, and
