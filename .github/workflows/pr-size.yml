@@ -1,0 +1,191 @@
+# Adapted from pingdotgg/t3code at 2fae0f9.
+#
+# Labels each PR size:XS to size:XXL from the lines it changes.
+#
+# Runs on pull_request_target so fork PRs get a token that can write labels.
+# That is only safe because this job never checks out, installs or runs PR
+# code: it reads changed-file stats from the GitHub API and nothing else. Keep
+# it that way. A workflow that needs the PR's files should use pull_request
+# plus workflow_run instead.
+name: PR Size
+
+on:
+  pull_request_target:
+    types: [opened, reopened, synchronize, ready_for_review, converted_to_draft]
+
+# Deny by default; the job asks for what it needs.
+permissions: {}
+
+jobs:
+  label:
+    name: Label PR size
+    runs-on: ubuntu-24.04
+    permissions:
+      issues: write
+      pull-requests: write
+    concurrency:
+      group: pr-size-${{ github.event.pull_request.number }}
+      cancel-in-progress: true
+    steps:
+      - name: Sync PR size label
+        uses: actions/github-script@v8
+        with:
+          script: |
+            const issueNumber = context.payload.pull_request.number;
+
+            // Size tiers in ascending order. A PR gets the last tier whose
+            // `min` it reaches, so each tier runs up to the next one's `min`.
+            const sizeLabels = [
+              {
+                name: "size:XS",
+                min: 0,
+                color: "0e8a16",
+                description: "0-9 effective changed lines (test files excluded in mixed PRs).",
+              },
+              {
+                name: "size:S",
+                min: 10,
+                color: "5ebd3e",
+                description: "10-29 effective changed lines (test files excluded in mixed PRs).",
+              },
+              {
+                name: "size:M",
+                min: 30,
+                color: "fbca04",
+                description: "30-99 effective changed lines (test files excluded in mixed PRs).",
+              },
+              {
+                name: "size:L",
+                min: 100,
+                color: "fe7d37",
+                description: "100-499 effective changed lines (test files excluded in mixed PRs).",
+              },
+              {
+                name: "size:XL",
+                min: 500,
+                color: "d93f0b",
+                description: "500-999 effective changed lines (test files excluded in mixed PRs).",
+              },
+              {
+                name: "size:XXL",
+                min: 1000,
+                color: "b60205",
+                description: "1,000+ effective changed lines (test files excluded in mixed PRs).",
+              },
+            ];
+            const sizeLabelNames = new Set(sizeLabels.map((label) => label.name));
+
+            // A test file lives under test/, tests/ or __tests__/, or is named
+            // *.test.<js|jsx|ts|tsx|mjs|cjs|mts|cts>.
+            const testFilePatterns = [/(^|\/)(test|tests|__tests__)\//, /\.test\.[cm]?[jt]sx?$/];
+            const isTestFile = (path) => testFilePatterns.some((pattern) => pattern.test(path));
+
+            // Counts the changed lines that decide the size label. Test files are
+            // left out so a PR is not sized up for adding tests, unless every file
+            // in the PR is a test file; then the test lines are all there is.
+            function effectiveChangedLines(files) {
+              const sumLines = (list) =>
+                list.reduce((total, file) => total + file.additions + file.deletions, 0);
+              const nonTestFiles = files.filter((file) => !isTestFile(file.filename));
+              return sumLines(nonTestFiles.length > 0 ? nonTestFiles : files);
+            }
+
+            // Creates the label when it is missing, or fixes its colour and
+            // description when they drifted, so a fresh repository needs no setup.
+            async function ensureLabel(label) {
+              const { name, color, description } = label;
+              let existing;
+              try {
+                ({ data: existing } = await github.rest.issues.getLabel({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  name,
+                }));
+              } catch (error) {
+                if (error.status !== 404) {
+                  throw error;
+                }
+              }
+
+              if (!existing) {
+                try {
+                  await github.rest.issues.createLabel({
+                    owner: context.repo.owner,
+                    repo: context.repo.repo,
+                    name,
+                    color,
+                    description,
+                  });
+                } catch (createError) {
+                  // 422 means a parallel run created the label first.
+                  if (createError.status !== 422) {
+                    throw createError;
+                  }
+                }
+                return;
+              }
+
+              if (existing.color !== color || (existing.description ?? "") !== description) {
+                await github.rest.issues.updateLabel({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  name,
+                  color,
+                  description,
+                });
+              }
+            }
+
+            const files = await github.paginate(github.rest.pulls.listFiles, {
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: issueNumber,
+              per_page: 100,
+            });
+
+            const changedLines = effectiveChangedLines(files);
+            const nextLabel = sizeLabels.findLast((label) => changedLines >= label.min);
+
+            for (const label of sizeLabels) {
+              await ensureLabel(label);
+            }
+
+            const currentLabels = await github.paginate(github.rest.issues.listLabelsOnIssue, {
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: issueNumber,
+              per_page: 100,
+            });
+
+            for (const label of currentLabels) {
+              if (!sizeLabelNames.has(label.name) || label.name === nextLabel.name) {
+                continue;
+              }
+
+              try {
+                await github.rest.issues.removeLabel({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  issue_number: issueNumber,
+                  name: label.name,
+                });
+              } catch (removeError) {
+                if (removeError.status !== 404) {
+                  throw removeError;
+                }
+              }
+            }
+
+            if (!currentLabels.some((label) => label.name === nextLabel.name)) {
+              await github.rest.issues.addLabels({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: issueNumber,
+                labels: [nextLabel.name],
+              });
+            }
+
+            const testFileCount = files.filter((file) => isTestFile(file.filename)).length;
+            core.info(
+              `PR #${issueNumber}: ${files.length} files (${testFileCount} test), ${changedLines} effective lines -> ${nextLabel.name}`,
+            );
