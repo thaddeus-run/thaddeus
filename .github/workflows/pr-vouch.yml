@@ -29,6 +29,14 @@ permissions: {}
 jobs:
   collect-targets:
     name: Collect PR targets
+    # A pull_request_target or push run always collects. A comment only counts
+    # when it is on a PR and asks for `/recheck-vouch`; every other issue or PR
+    # comment skips this job, and so the label job below, without starting a
+    # runner.
+    if: >-
+      ${{ github.event_name != 'issue_comment' ||
+      (github.event.issue.pull_request && contains(github.event.comment.body,
+      '/recheck-vouch')) }}
     runs-on: ubuntu-24.04
     # Only the push path lists pull requests through the API.
     permissions:
@@ -77,7 +85,11 @@ jobs:
   label:
     name: Label PR ${{ matrix.target.number }}
     needs: collect-targets
-    if: ${{ needs.collect-targets.outputs.targets != '[]' }}
+    # Stated explicitly so a skipped collect-targets skips this job too instead
+    # of reading its empty output as a matrix.
+    if:
+      ${{ needs.collect-targets.result == 'success' &&
+      needs.collect-targets.outputs.targets != '[]' }}
     runs-on: ubuntu-24.04
     # contents: read lets the vouch action read .github/VOUCHED.td through the
     # contents API; the label calls need issues and pull-requests write.
