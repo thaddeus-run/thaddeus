@@ -23,7 +23,7 @@ import {
   cliConfigDir,
   cliConfigPath,
   isServerUrl,
-  loadCliConfig,
+  readCliConfig,
 } from './config';
 import { IdentityMissingError, identityPath, loadIdentity } from './identity';
 import { TRIAGE_PLAYBOOK } from './triage-playbook';
@@ -295,7 +295,7 @@ async function describeIdentity(home: string): Promise<string> {
 /** Build the text of `context.md`: the facts a support agent needs, with the
  * identity seed deliberately absent (only its path, marked never-read). */
 export async function buildTriageContext(env: TriageEnv): Promise<string> {
-  const cli = loadCliConfig(env.home);
+  const { config: cli, ignored } = readCliConfig(env.home);
   const defaultServer =
     typeof cli.defaultServer === 'string' ? cli.defaultServer : undefined;
   const copy = describeWorkingCopy(env.cwd);
@@ -321,6 +321,11 @@ export async function buildTriageContext(env: TriageEnv): Promise<string> {
   );
 
   const serverLines: string[] = [];
+  if (ignored !== undefined) {
+    serverLines.push(
+      `- CLI config ignored: ${cliConfigPath(env.home)} is ${ignored}, so no default server was read from it`
+    );
+  }
   if (defaultServer === undefined) {
     serverLines.push(
       "- Default server ('thaddeus use'): no default server is set"

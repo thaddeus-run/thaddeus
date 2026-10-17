@@ -25,14 +25,53 @@ export function cliConfigPath(home: string): string {
   return join(cliConfigDir(home), 'config.json');
 }
 
-// Read the global config, treating any absent/unreadable file as empty so a
-// fresh install (or a cleared default) just yields `{}`.
-export function loadCliConfig(home: string): CliConfig {
+/** The global config as loaded. `ignored` says why an existing `config.json`
+ * was not used, phrased to follow "the file is" (e.g. `not valid JSON`). It
+ * never quotes the file, and is absent when the file loaded or does not exist. */
+export interface CliConfigRead {
+  config: CliConfig;
+  ignored?: string;
+}
+
+// The JSON type of a parsed value that is not an object, for `ignored`.
+function jsonKind(value: unknown): string {
+  if (value === null) return 'null';
+  if (Array.isArray(value)) return 'an array';
+  return `a ${typeof value}`;
+}
+
+// Read the global config. Anything that is not a JSON object (a missing or
+// unreadable file, bad JSON, or a hand-edited `null`, array, string or number)
+// yields `{}`, so every caller can read `defaultServer` without checking; the
+// reason is kept for `thaddeus triage`, which reports it.
+export function readCliConfig(home: string): CliConfigRead {
+  let text: string;
   try {
-    return JSON.parse(readFileSync(cliConfigPath(home), 'utf8')) as CliConfig;
-  } catch {
-    return {};
+    text = readFileSync(cliConfigPath(home), 'utf8');
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code;
+    if (code === 'ENOENT' || code === 'ENOTDIR') return { config: {} };
+    return { config: {}, ignored: `unreadable (${code ?? 'unknown error'})` };
   }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(text);
+  } catch {
+    return { config: {}, ignored: 'not valid JSON' };
+  }
+  if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
+    return {
+      config: {},
+      ignored: `not a JSON object (found ${jsonKind(parsed)})`,
+    };
+  }
+  return { config: parsed as CliConfig };
+}
+
+// The global config, or `{}` when there is none usable, so a fresh install (or
+// a cleared default) just yields `{}`.
+export function loadCliConfig(home: string): CliConfig {
+  return readCliConfig(home).config;
 }
 
 // Persist the global config, writing only defined keys so a cleared value
