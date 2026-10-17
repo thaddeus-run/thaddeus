@@ -138,11 +138,13 @@ jobs:
       #
       # Resume rule: a nightly tag ends in .<run_number>, which every attempt
       # of a run shares. A later attempt (run_attempt > 1) that finds a
-      # published nightly ending in its own .<run_number> resumes it, with
-      # resume=<that tag>: it skips the new-commits check, which would see the
-      # nightly at this very commit and skip, and reuses the tag's version,
-      # because the UTC date in it may have changed since. With no such tag,
-      # the attempt runs like the first.
+      # published nightly ending in its own .<run_number>, whose tag is at this
+      # run's commit, resumes it, with resume=<that tag>: it skips the
+      # new-commits check, which would see the nightly at this very commit and
+      # skip, and reuses the tag's version, because the UTC date in it may have
+      # changed since. A suffix match at another commit is a leftover from
+      # before a run-number reset and is ignored. With no match, the attempt
+      # runs like the first.
       - name: Look for commits since the last nightly
         id: gate
         if: steps.channel.outputs.channel == 'nightly'
@@ -161,10 +163,17 @@ jobs:
           echo "previous=$previous" >> "$GITHUB_OUTPUT"
           resume=""
           if [ "$GITHUB_RUN_ATTEMPT" -gt 1 ]; then
-            resume=$(gh api "repos/$GITHUB_REPOSITORY/releases?per_page=100" \
-              --jq '[.[] | select((.draft | not) and (.tag_name | contains("-nightly."))
-                        and (.tag_name | endswith(".\(env.GITHUB_RUN_NUMBER)")))]
-                    | first | .tag_name // ""')
+            candidates=$(gh api "repos/$GITHUB_REPOSITORY/releases?per_page=100" \
+              --jq '.[] | select((.draft | not) and (.tag_name | contains("-nightly."))
+                      and (.tag_name | endswith(".\(env.GITHUB_RUN_NUMBER)"))) | .tag_name')
+            for candidate in $candidates; do
+              tagged=$(gh api "repos/$GITHUB_REPOSITORY/commits/$candidate" --jq .sha)
+              if [ "$tagged" = "$SHA" ]; then
+                resume=$candidate
+                break
+              fi
+              echo "not resuming $candidate: its tag is at $tagged, not this run's commit $SHA"
+            done
           fi
           echo "resume=$resume" >> "$GITHUB_OUTPUT"
           skip=false
