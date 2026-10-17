@@ -2,6 +2,8 @@
 
 # Contributing
 
+Setting up a checkout? See [Developer setup](#developer-setup).
+
 ## Read this first
 
 We are not actively seeking outside contributions and have limited review
@@ -256,8 +258,9 @@ runs more than your change touches: it typechecks and tests every project (only
 checks formatting and lint, verifies the release versions, runs the executable
 demo and tests the `lazythad` Rust crate. A green local baseline usually means a
 green PR, but a change can still break another project's tests. Watch the
-`CI passed` check on your PR. It is the one required check and turns green only
-when both the `check` and `lazythad` jobs pass.
+`CI passed` check on your PR. It is the check to watch, and the one a branch
+ruleset should require. It turns green only when both the `check` and `lazythad`
+jobs pass.
 
 ### Release versions
 
