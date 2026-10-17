@@ -108,7 +108,7 @@ jobs:
       sha: ${{ steps.metadata.outputs.sha }}
       release_flags: ${{ steps.plan.outputs.release_flags }}
       npm_tag: ${{ steps.plan.outputs.npm_tag }}
-      # 'true' on the release channel alone: the npm job then moves npm
+      # 'true' on the release channel alone: the npm-latest job then moves npm
       # `latest` up to this version.
       move_latest: ${{ steps.plan.outputs.move_latest }}
       # 'true' unless the run skipped or is a dry run; the release, npm and
@@ -290,8 +290,8 @@ jobs:
           version=$(bun -p "require('./packages/cli/package.json').version")
           echo "version=$version" >> "$GITHUB_OUTPUT"
           echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
-      # The release and npm jobs publish with these outputs and nothing else,
-      # so the guard below checks exactly what they will do.
+      # The release, npm and npm-latest jobs publish with these outputs and
+      # nothing else, so the guard below checks exactly what they will do.
       - name: Plan the publication
         id: plan
         if: steps.gate.outputs.skip != 'true'
@@ -359,7 +359,7 @@ jobs:
             refuse "npm would publish to dist-tag '$NPM_TAG', not nightly"
           fi
           if [ "$MOVE_LATEST" != false ]; then
-            refuse "the npm job would move dist-tag latest"
+            refuse "the npm-latest job would move dist-tag latest"
           fi
           echo "$TAG publishes as a prerelease, never latest, to npm dist-tag nightly, and leaves npm latest alone"
 
@@ -656,8 +656,8 @@ jobs:
       # --provenance` died with MODULE_NOT_FOUND (v0.1.2-alpha's first publish
       # run). Verify the install is the pin and can actually load provenance
       # support, and the semver module that orders versions for `latest`,
-      # before publishing, so a broken npm fails THIS step, loudly. npm-promote
-      # repeats this step.
+      # before publishing, so a broken npm fails THIS step, loudly. npm-latest
+      # and npm-promote repeat this step.
       - name: Update npm (pinned)
         run: |
           npm install -g npm@11.21.1
@@ -708,61 +708,60 @@ jobs:
               exit 1
             )
           done
-      # Runs once both launchers are on the registry, whether the step above
-      # published them or found them there. It only moves `latest` forward, so
-      # re-running an older tag leaves a newer `latest` alone. bun is installed
-      # here for nightlies only, so the pinned npm's own semver package orders
-      # the versions, as Bun.semver.order would. Moving a dist-tag over OIDC
-      # needs "Allow npm dist-tag" in each package's trusted-publisher settings
-      # on npmjs.com; without it this step fails after the publish, and what
-      # was published stays published.
+
+  # Moves npm `latest` up to a release once both launchers are published, in
+  # a job of its own so the publish is never queued behind it or cancelled.
+  # It shares the npm-latest group with npm-promote, so two release runs, or
+  # a release and a promote, never read `latest` at the same time and then
+  # overwrite each other: the script reads it only once this job holds the
+  # group. GitHub keeps one pending job per group and cancels the older one,
+  # so a newer pending move can replace a pending one. Nothing goes
+  # backwards, since the replacement reads `latest` fresh. If the replaced
+  # move was for a newer version, or a promote replaced it, re-running this
+  # job (it shows as cancelled) restores the forward move.
+  npm-latest:
+    name: Move npm latest
+    needs: [preflight, npm]
+    if:
+      needs.preflight.outputs.move_latest == 'true' &&
+      needs.preflight.outputs.publish == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      # OIDC identity for moving the dist-tags, as in the npm job.
+      id-token: write
+    concurrency:
+      group: npm-latest
+      cancel-in-progress: false
+    steps:
+      # This workflow's own commit, so the script matches the workflow even
+      # when a dispatched release names an older tag.
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          registry-url: 'https://registry.npmjs.org'
+      # The npm job's step: OIDC dist-tag moves need npm >= 11.21.0.
+      - name: Update npm (pinned)
+        run: |
+          npm install -g npm@11.21.1
+          actual=$(npm --version)
+          echo "npm $actual"
+          [ "$actual" = 11.21.1 ] || { echo "npm on PATH is $actual, not the pinned 11.21.1"; exit 1; }
+          node -e "require(process.argv[1])" \
+            "$(npm root -g)/npm/node_modules/libnpmpublish/lib/provenance.js" \
+            || { echo "npm install is missing provenance support (sigstore)"; exit 1; }
+          node -e "require(process.argv[1])" "$(npm root -g)/npm/node_modules/semver" \
+            || { echo "npm install is missing its semver module"; exit 1; }
+      # Only ever moves `latest` up, so re-running an older tag leaves a newer
+      # `latest` alone. Without "Allow npm dist-tag" this fails after the
+      # publish, and what was published stays published.
       - name: Move npm latest up to this release
-        if: needs.preflight.outputs.move_latest == 'true'
         env:
           VERSION: ${{ needs.preflight.outputs.version }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          semver="$(npm root -g)/npm/node_modules/semver"
-          # Prints 1, 0 or -1 as $1 sorts after, with or before $2.
-          order() {
-            node -p 'require(process.argv[1]).compare(process.argv[2], process.argv[3])' \
-              "$semver" "$1" "$2"
-          }
-          failed=false
-          for pkg in thaddeus lazythad; do
-            name="$(node -p "require('./npm/$pkg/package.json').name")"
-            current="$(npm view "$name" dist-tags.latest)"
-            if [ -n "$current" ]; then
-              cmp=$(order "$VERSION" "$current")
-              if [ "$cmp" -lt 0 ]; then
-                echo "$name: latest is $current, newer than $VERSION; leaving it"
-                continue
-              elif [ "$cmp" -eq 0 ]; then
-                echo "$name: latest is already $VERSION"
-                continue
-              fi
-            fi
-            # Retried for the same flaky OIDC token exchange as publish.
-            moved=false
-            for attempt in 1 2 3; do
-              if npm dist-tag add "$name@$VERSION" latest; then
-                moved=true
-                break
-              fi
-              if [ "$attempt" -lt 3 ]; then
-                echo "dist-tag attempt $attempt for $name failed; retrying in 15s" >&2
-                sleep 15
-              fi
-            done
-            if [ "$moved" = true ]; then
-              echo "$name: latest moved from ${current:-nothing} to $VERSION"
-            else
-              echo "npm refused to move latest; enable \"Allow npm dist-tag\" in the trusted publisher settings of $name on npmjs.com, then run the promote dispatch" >&2
-              failed=true
-            fi
-          done
-          [ "$failed" = false ]
+        run: .github/scripts/npm-latest.sh forward "$VERSION"
 
   # channel=promote points npm `latest` at an existing release without
   # building anything, for example once "Allow npm dist-tag" is enabled or to
@@ -776,12 +775,8 @@ jobs:
       contents: read
       # OIDC identity for moving the dist-tags, as in the npm job.
       id-token: write
-    # Promotes serialise with each other here. The npm job stays out of this
-    # group: GitHub keeps one pending job per group and cancels the older one,
-    # which could cancel a pending publish. A promote racing a release of
-    # another tag on `latest` is rare. If it happens, re-run the promote once
-    # that release is done: the release path only ever moves `latest`
-    # forward, and a promote sets it explicitly.
+    # Shared with npm-latest, so promotes and release moves of `latest` take
+    # turns; see there.
     concurrency:
       group: npm-latest
       cancel-in-progress: false
@@ -817,6 +812,10 @@ jobs:
             *) refuse "unexpected GitHub release state: $state" ;;
           esac
           echo "version=${TAG#v}" >> "$GITHUB_OUTPUT"
+      # This workflow's commit, for the script and the launcher names.
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
       - uses: actions/setup-node@v4
         with:
           node-version: '24'
@@ -833,68 +832,17 @@ jobs:
             || { echo "npm install is missing provenance support (sigstore)"; exit 1; }
           node -e "require(process.argv[1])" "$(npm root -g)/npm/node_modules/semver" \
             || { echo "npm install is missing its semver module"; exit 1; }
-      # Both launchers must have the version before either tag moves, so a
-      # promote never leaves them on different releases. This explicit request
-      # may move `latest` backwards, and says so when it does.
+      # This explicit request may move `latest` backwards, and says so.
       - name: Point npm latest at the release
         env:
           VERSION: ${{ steps.target.outputs.version }}
           DRY_RUN: ${{ inputs.dry_run }}
-          # The names in npm/thaddeus and npm/lazythad package.json.
-          LAUNCHERS: '@thaddeus.run/cli @thaddeus.run/lazythad'
         shell: bash
         run: |
           set -euo pipefail
-          for name in $LAUNCHERS; do
-            published=$(npm view "$name@$VERSION" version 2>/dev/null) || published=""
-            if [ "$published" != "$VERSION" ]; then
-              echo "refusing to promote $VERSION: $name@$VERSION is not on npm" >&2
-              exit 1
-            fi
-          done
-          semver="$(npm root -g)/npm/node_modules/semver"
-          # Prints 1, 0 or -1 as $1 sorts after, with or before $2.
-          order() {
-            node -p 'require(process.argv[1]).compare(process.argv[2], process.argv[3])' \
-              "$semver" "$1" "$2"
-          }
-          failed=false
-          for name in $LAUNCHERS; do
-            current="$(npm view "$name" dist-tags.latest)"
-            cmp=1
-            if [ -n "$current" ]; then cmp=$(order "$VERSION" "$current"); fi
-            if [ "$cmp" -eq 0 ]; then
-              echo "$name: latest is already $VERSION"
-              continue
-            fi
-            direction=""
-            if [ "$cmp" -lt 0 ]; then direction=" backwards"; fi
-            if [ "$DRY_RUN" = true ]; then
-              echo "$name: dry run; would move latest$direction from ${current:-nothing} to $VERSION"
-              continue
-            fi
-            if [ "$cmp" -lt 0 ]; then
-              echo "$name: moving latest backwards from $current to $VERSION, as requested"
-            fi
-            moved=false
-            for attempt in 1 2 3; do
-              if npm dist-tag add "$name@$VERSION" latest; then
-                moved=true
-                break
-              fi
-              if [ "$attempt" -lt 3 ]; then
-                echo "dist-tag attempt $attempt for $name failed; retrying in 15s" >&2
-                sleep 15
-              fi
-            done
-            if [ "$moved" = true ]; then
-              echo "$name: latest moved from ${current:-nothing} to $VERSION"
-            else
-              echo "npm refused to move latest; enable \"Allow npm dist-tag\" in the trusted publisher settings of $name on npmjs.com, then re-run this job" >&2
-              failed=true
-            fi
-          done
-          [ "$failed" = false ]
+          args=(promote "$VERSION")
+          if [ "$DRY_RUN" = true ]; then args+=(--dry-run); fi
+          .github/scripts/npm-latest.sh "${args[@]}"
 
   # Deploys ams1 (https://ams1.thaddeus.run) from the commit every other job
   # built. Fly's GitHub auto-deploy is off, so this is the only automatic
