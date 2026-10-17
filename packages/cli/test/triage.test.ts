@@ -11,7 +11,7 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join, relative as relativePath, resolve } from 'node:path';
+import { dirname, join, relative as relativePath, resolve } from 'node:path';
 
 import { saveCliConfig } from '../src/config';
 import { HELP, USAGE } from '../src/help';
@@ -175,6 +175,42 @@ describe('the triage context', () => {
     expect(context).toMatch(/no identity/i);
     expect(context).toMatch(/no default server/i);
     expect(context).toMatch(/not inside a working copy/i);
+    expect(context).not.toContain('CLI config ignored');
+  });
+
+  test('a config.json holding null is recorded as ignored, and both files are still written', async () => {
+    const h = harness();
+    const configFile = join(h.home, '.config', 'thaddeus', 'config.json');
+    mkdirSync(dirname(configFile), { recursive: true });
+    writeFileSync(configFile, 'null');
+
+    expect(await runTriage([], h.deps)).toBe(0);
+
+    const dir = triageDir(h.home);
+    expect(existsSync(join(dir, 'prompt.md'))).toBe(true);
+    const context = readFileSync(join(dir, 'context.md'), 'utf8');
+    expect(context).toContain(
+      `- CLI config ignored: ${configFile} is not a JSON object (found null), so no default server was read from it`
+    );
+    expect(context).toMatch(/no default server is set/);
+  });
+
+  test('a config.json that is not valid JSON is recorded as ignored without quoting it', async () => {
+    const h = harness();
+    const configFile = join(h.home, '.config', 'thaddeus', 'config.json');
+    mkdirSync(dirname(configFile), { recursive: true });
+    writeFileSync(
+      configFile,
+      '{"defaultServer": "https://alice:s3cret@example.test" oops'
+    );
+
+    const context = await buildTriageContext(h.deps);
+
+    expect(context).toContain(
+      `- CLI config ignored: ${configFile} is not valid JSON, so no default server was read from it`
+    );
+    expect(context).not.toContain('s3cret');
+    expect(context).not.toContain('oops');
   });
 
   test('context records an unreachable server instead of throwing', async () => {

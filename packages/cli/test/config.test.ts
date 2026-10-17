@@ -2,11 +2,18 @@ import { ready } from '@thaddeus.run/identity';
 import { MemoryBackend } from '@thaddeus.run/persist';
 import { createServer } from '@thaddeus.run/server';
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
-import { mkdtempSync, readFileSync, rmSync, statSync } from 'node:fs';
+import {
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 
-import { HOSTED_SERVER } from '../src/config';
+import { HOSTED_SERVER, loadCliConfig } from '../src/config';
 import { run } from '../src/run';
 
 beforeAll(async () => {
@@ -40,6 +47,19 @@ const savedServer = (home: string): string | undefined =>
       defaultServer?: string;
     }
   ).defaultServer;
+
+describe('loadCliConfig', () => {
+  test('a config.json that is valid JSON but not an object loads as empty', () => {
+    const { home } = harness();
+    mkdirSync(dirname(cfgPath(home)), { recursive: true });
+    for (const text of ['null', '[]', '"x"']) {
+      writeFileSync(cfgPath(home), text);
+      expect(loadCliConfig(home)).toEqual({});
+    }
+    writeFileSync(cfgPath(home), '{"defaultServer":"https://my-host"}');
+    expect(loadCliConfig(home)).toEqual({ defaultServer: 'https://my-host' });
+  });
+});
 
 describe('thaddeus use (default server)', () => {
   test('set, show, --json, --hosted, --clear; file is 0600', async () => {
