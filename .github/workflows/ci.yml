@@ -1,3 +1,5 @@
+# The `CI passed` job at the end is adapted from the `Check` job in
+# pingdotgg/t3code at 2fae0f9.
 name: CI
 
 on:
@@ -30,21 +32,32 @@ jobs:
           sed -i 's/^minimumReleaseAge = .*/minimumReleaseAge = 0/' bunfig.toml
           bun install --frozen-lockfile
 
-      # Gate the substrate packages only: build, typecheck, test. The scaffold
-      # apps (docs, landing) and whole-repo lint are not gated yet — those
-      # scaffolds are unfinished and tracked separately.
-      - name: Build, typecheck, and test the substrate
+      # Typecheck and test every project. Each task builds the workspace
+      # packages it imports first, so this also builds them all.
+      #
+      # landing:typecheck is left out on purpose. It fails on a clean checkout
+      # with `Cannot find module './routeTree.gen'` because that file is
+      # gitignored and only `vite dev` or `vite build` generates it, and the
+      # typecheck task does not depend on either. Drop the --query once
+      # landing:typecheck can run from a clean checkout.
+      - name: Typecheck and test every project
         run: |
-          moon run identity:build store:build theme:build
-          moon run identity:typecheck store:typecheck integration:typecheck
-          moon run identity:test store:test integration:test
+          export AGENT=1
+          moon run :test
+          moon run :typecheck --query 'projectSource!=apps/landing'
 
+      # Runs after the builds above on purpose: type-aware lint resolves
+      # @thaddeus.run/* imports through each package's built dist, and on a
+      # clean checkout it reports false errors if the dist folders are missing.
+      - name: Check formatting and lint
+        run: moon run root:format-check root:lint
+
+      # The release-version checks, then the executable demo. example-cli:test
+      # is runInCI: skip, so the CI= prefix clears the marker for that one task.
       - name: Verify DX versions and the executable demo
         run: |
           export AGENT=1
           moon run root:version-check root:version-test
-          moon run cli:typecheck example-cli:typecheck
-          moon run cli:test -- test/actor-kind.test.ts test/publish.test.ts test/rename.test.ts test/query.test.ts test/compile.test.ts
           make demo
           make demo
           CI= moon run example-cli:test
@@ -74,3 +87,22 @@ jobs:
           warnings
       - name: Test
         run: cargo test --manifest-path lazythad/Cargo.toml
+
+  # Branch protection requires this job by its name, `CI passed`. It fails when
+  # any job it needs fails, is cancelled or is skipped, so splitting or
+  # renaming jobs needs no ruleset change. Add every new job to `needs`.
+  # `always()` rather than `!cancelled()`: a skipped job reports success to
+  # branch protection, so a cancelled run must still produce a failing check.
+  ci-passed:
+    name: CI passed
+    if: ${{ always() }}
+    needs: [check, lazythad]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Require every job to pass
+        env:
+          RESULTS: ${{ toJSON(needs) }}
+        run: |
+          echo "$RESULTS" | jq -r 'to_entries[] | "\(.key): \(.value.result)"'
+          echo "$RESULTS" | jq -e 'all(.[]; .result == "success")' > /dev/null
