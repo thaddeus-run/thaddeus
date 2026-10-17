@@ -83,6 +83,7 @@ import { IdentityMissingError, initIdentity, loadIdentity } from './identity';
 import { runQuery } from './query';
 import { InitConflictError, initRepository } from './repo-init';
 import { startServer } from './serve';
+import { runTriage, systemTriageDeps } from './triage';
 import { VERSION } from './version';
 import {
   formatSemanticEvent,
@@ -847,6 +848,17 @@ export async function run(
         );
         return 0;
       }
+      case 'triage':
+        return await runTriage(
+          rest,
+          systemTriageDeps({
+            home: env.home,
+            cwd: env.cwd,
+            out,
+            err,
+            fetchImpl: env.fetchImpl,
+          })
+        );
       case 'use': {
         const { values, positionals } = parseArgs({
           args: [...rest],

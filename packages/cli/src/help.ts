@@ -45,6 +45,9 @@ Access & trust
   schedule-reveal <path> --at <ISO>             make committed content public later
   reveal <path>                                 trigger a due public reveal now
 
+Support
+  triage [--agent claude|codex]   hand a broken setup to your own coding agent
+
 Server
   serve  [--port N] [--data DIR] [--attestation-aws-kms-key-arn ARN]  run a server
 
@@ -367,6 +370,22 @@ thaddeus policy clear [--json]
   Only an attesting server co-signs eligible events. Production uses
   --attestation-aws-kms-key-arn; --host loads a local private seed and is for
   development only. A non-attesting server reports attested: 0.`,
+
+  triage: `thaddeus triage [--agent claude|codex]
+
+  Diagnose a broken setup with your own coding agent. Writes context.md (this
+  CLI's version, OS, runtime, your configured servers and what their /version
+  answered, your public DID, and the working copy's repository, branch and head)
+  and prompt.md (a short seed plus the triage playbook) into
+  ~/.config/thaddeus/triage/<timestamp>/, then starts claude or codex there.
+  The agent asks what went wrong, investigates, and files a GitHub issue only
+  after you say yes. Your identity seed is never written into either file, and
+  the playbook tells the agent not to read it.
+
+  --agent picks claude or codex. Without it, the one found on PATH is used; with
+  both and a terminal you are asked, and with both and no terminal the command
+  exits 2. With neither on PATH, it prints both file paths so you can paste the
+  prompt into any agent, and exits 0. Otherwise it exits with the agent's code.`,
 
   serve: `thaddeus serve [--port N] [--data DIR] [--attestation-aws-kms-key-arn <exact-key-arn>] [--attestation-rate-limit <0..20>] [--host] [--min-merges N] [--trust-host <did> ...] [--max-request-body-bytes N] [--replay-nonce-capacity N] [--request-skew-ms N]
 
