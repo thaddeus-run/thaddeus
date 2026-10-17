@@ -596,11 +596,17 @@ jobs:
           elif [ "$CHANNEL" = nightly ]; then
             short_sha="${SHA:0:7}"
             NOTES="> [!WARNING]
-          > This nightly is an untested build of \`main\` at ${short_sha} and may be broken."
+          > This nightly is an untested build of \`main\` at ${short_sha} and may be broken.
+          "
+            # GitHub generates the changelog below the warning, as t3code does:
+            # one line per pull request merged since the previous nightly,
+            # under its Conventional Commits title. Commits pushed to main
+            # without a pull request are left out of the list, but the "Full
+            # Changelog" compare link at the end covers them. With no earlier
+            # nightly, GitHub compares against the latest release.
+            notes_start=()
             if [ -n "$PREVIOUS_NIGHTLY" ]; then
-              NOTES="$NOTES
-
-          Changes since ${PREVIOUS_NIGHTLY}: https://github.com/${GITHUB_REPOSITORY}/compare/${PREVIOUS_NIGHTLY}...${TAG}"
+              notes_start=(--notes-start-tag "$PREVIOUS_NIGHTLY")
             fi
             # The tag does not exist yet; --target creates it at the built
             # commit. RELEASE_FLAGS is split on purpose: the preflight guard
@@ -608,7 +614,8 @@ jobs:
             # shellcheck disable=SC2086
             gh release create "$TAG" release/* --repo "$GITHUB_REPOSITORY" \
               --target "$SHA" $RELEASE_FLAGS \
-              --title "Thaddeus nightly $VERSION ($short_sha)" --notes "$NOTES"
+              --title "Thaddeus nightly $VERSION ($short_sha)" --notes "$NOTES" \
+              --generate-notes "${notes_start[@]}"
           else
             gh release create "$TAG" release/* --repo "$GITHUB_REPOSITORY" \
               --title "Thaddeus $TAG" --notes "$NOTES" --verify-tag
