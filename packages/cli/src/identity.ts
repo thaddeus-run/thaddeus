@@ -3,7 +3,7 @@ import { chmodSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 // Where the self-owned identity seed lives under a config home.
-function identityPath(home: string): string {
+export function identityPath(home: string): string {
   return join(home, '.config', 'thaddeus', 'identity.json');
 }
 

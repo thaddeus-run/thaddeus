@@ -19,6 +19,8 @@ tasks:
       - '/lazythad/Cargo.toml'
       - '/lazythad/Cargo.lock'
       - '/README'
+      # The byte-identical playbook test reads this file.
+      - '/.github/triage/PLAYBOOK.md'
 
   # Produce a self-contained `thaddeus` executable (no Bun at runtime) for the
   # HOST platform, under release/ (gitignored, and NOT in package.json `files`,

@@ -16,15 +16,20 @@ export interface CliConfig {
   defaultServer?: string;
 }
 
-function configPath(home: string): string {
-  return join(home, '.config', 'thaddeus', 'config.json');
+// The per-user config directory: holds `config.json` and the identity seed.
+export function cliConfigDir(home: string): string {
+  return join(home, '.config', 'thaddeus');
+}
+
+export function cliConfigPath(home: string): string {
+  return join(cliConfigDir(home), 'config.json');
 }
 
 // Read the global config, treating any absent/unreadable file as empty so a
 // fresh install (or a cleared default) just yields `{}`.
 export function loadCliConfig(home: string): CliConfig {
   try {
-    return JSON.parse(readFileSync(configPath(home), 'utf8')) as CliConfig;
+    return JSON.parse(readFileSync(cliConfigPath(home), 'utf8')) as CliConfig;
   } catch {
     return {};
   }
@@ -33,13 +38,13 @@ export function loadCliConfig(home: string): CliConfig {
 // Persist the global config, writing only defined keys so a cleared value
 // disappears rather than serializing as noise.
 export function saveCliConfig(home: string, cfg: CliConfig): void {
-  mkdirSync(join(home, '.config', 'thaddeus'), {
+  mkdirSync(cliConfigDir(home), {
     recursive: true,
     mode: 0o700,
   });
   const clean: CliConfig = {};
   if (cfg.defaultServer !== undefined) clean.defaultServer = cfg.defaultServer;
-  writeFileSync(configPath(home), `${JSON.stringify(clean, null, 2)}\n`, {
+  writeFileSync(cliConfigPath(home), `${JSON.stringify(clean, null, 2)}\n`, {
     mode: 0o600,
   });
 }
