@@ -121,8 +121,12 @@ fails and prints the last response.
 A release run only moves ams1 forward. Before deploying, the job reads
 `/version`. If ams1 already reports a newer version, the job skips the deploy
 and the smoke check and still succeeds, so re-running an older tag's workflow
-cannot roll ams1 back over its `/data` state. The same version deploys again,
-and so does a server whose `/version` cannot be reached or names no version.
+cannot roll ams1 back over its `/data` state. The same version deploys again. A
+404, or a successful answer without a semver `version`, means a server older
+than the endpoint, and that deploys too. If `/version` cannot be read at all (a
+connection error, a timeout, a 5xx or any other status), the job fails rather
+than deploy blind over what may be a newer server. Re-run the job, or deploy by
+hand as below.
 
 To deploy by hand, run `fly deploy` from a checkout of the tag. Use this for a
 dispatched release, after a failed deploy job, or for a deliberate rollback to
