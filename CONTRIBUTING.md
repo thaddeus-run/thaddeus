@@ -251,8 +251,13 @@ moon exec :typecheck --affected
 ```
 
 plus the focused tests for whatever you changed (`moonx <project>:test`). CI
-runs the affected portion of the graph, so a green local baseline usually means
-a green PR.
+runs more than your change touches: it typechecks and tests every project (only
+`landing:typecheck` is excluded, with the reason in `.github/workflows/ci.yml`),
+checks formatting and lint, verifies the release versions, runs the executable
+demo and tests the `lazythad` Rust crate. A green local baseline usually means a
+green PR, but a change can still break another project's tests. Watch the
+`CI passed` check on your PR. It is the one required check and turns green only
+when both the `check` and `lazythad` jobs pass.
 
 ### Release versions
 
