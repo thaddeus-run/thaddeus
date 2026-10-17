@@ -626,19 +626,6 @@ jobs:
       # Requires each package to have a Trusted Publisher configured on
       # npmjs.com pointing at this repo + workflow (release.yml).
       id-token: write
-    # A release moves npm `latest`, and so does npm-promote, so they share
-    # npm-latest: a promote and a release of another tag take turns instead
-    # of racing on `latest`. A nightly never moves `latest`, so it gets a group
-    # of its own tag; it never waits for a release or promote, and a newer
-    # pending job can never cancel it. (GitHub keeps one pending job per
-    # group and cancels the older one. That can only hit a release npm job
-    # queued behind another; its publish is idempotent, so re-running the
-    # run finishes it.)
-    concurrency:
-      group:
-        ${{ needs.preflight.outputs.move_latest == 'true' && 'npm-latest' ||
-        format('npm-{0}', needs.preflight.outputs.tag) }}
-      cancel-in-progress: false
     steps:
       - uses: actions/checkout@v4
         with:
@@ -789,7 +776,12 @@ jobs:
       contents: read
       # OIDC identity for moving the dist-tags, as in the npm job.
       id-token: write
-    # Shared with a release's npm job, which also moves `latest`; see there.
+    # Promotes serialise with each other here. The npm job stays out of this
+    # group: GitHub keeps one pending job per group and cancels the older one,
+    # which could cancel a pending publish. A promote racing a release of
+    # another tag on `latest` is rare. If it happens, re-run the promote once
+    # that release is done: the release path only ever moves `latest`
+    # forward, and a promote sets it explicitly.
     concurrency:
       group: npm-latest
       cancel-in-progress: false
