@@ -881,10 +881,12 @@ jobs:
       # finish out of order, would otherwise deploy an older server over the
       # newer state on /data. So a release run never rolls ams1 back: if ams1
       # reports a version newer by semver, the deploy and smoke check are
-      # skipped and the job succeeds. The same version deploys again. If
-      # /version is unreachable or names no version (a server older than the
-      # endpoint), this deploys. deploy-production above serialises deploys,
-      # so the answer is not from a deploy still in progress.
+      # skipped and the job succeeds. The same version deploys again. A 404,
+      # or a 2xx without a semver version, is a server older than the
+      # endpoint, so this deploys. Any other answer (a connection error, a
+      # timeout, a 5xx or a proxy's error page) fails the job rather than
+      # deploy blind over what may be a newer ams1. deploy-production above
+      # serialises deploys, so the answer is not from a deploy in progress.
       - name: Check ams1 is not newer than this release
         id: direction
         env:
@@ -902,12 +904,30 @@ jobs:
             echo "cannot load npm's semver module from $semver" >&2
             exit 1
           fi
-          response=$(curl -sS --max-time 10 "$VERSION_URL" 2>&1) || true
-          current=$(jq -r 'objects | .version // empty | strings' <<<"$response" 2>/dev/null) || current=""
+          blind() {
+            echo "cannot read $VERSION_URL ($1); refusing to deploy blind over a possibly newer ams1; re-run this job or deploy by hand from the tag (docs/deploy.md)" >&2
+            exit 1
+          }
+          body=$(mktemp)
+          errors=$(mktemp)
+          status=0
+          code=$(curl -sS --max-time 10 -o "$body" -w '%{http_code}' "$VERSION_URL" 2>"$errors") || status=$?
+          if [ "$status" -ne 0 ]; then
+            blind "$(tr '\n' ' ' <"$errors" | sed 's/ *$//')"
+          fi
+          current=""
+          case "$code" in
+            404) echo "ams1 answers 404, so it predates /version; deploying $EXPECTED_VERSION" ;;
+            2??)
+              current=$(jq -r 'objects | .version // empty | strings' <"$body" 2>/dev/null) || current=""
+              if [ -z "$current" ]; then
+                echo "ams1 answers HTTP $code without a version, so it predates /version; deploying $EXPECTED_VERSION"
+              fi
+              ;;
+            *) blind "HTTP $code" ;;
+          esac
           deploy=true
-          if [ -z "$current" ]; then
-            echo "ams1 named no version (answer: $response); deploying $EXPECTED_VERSION"
-          else
+          if [ -n "$current" ]; then
             # Prints 1, 0 or -1 as this release sorts after, with or before
             # ams1's version, or "invalid" if ams1's is not semver.
             cmp=$(node -p 'const s = require(process.argv[1]);
