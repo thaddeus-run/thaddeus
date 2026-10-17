@@ -98,6 +98,35 @@ The checked-in [`fly.toml`](../fly.toml) targets the existing Amsterdam `ams`
 deployment and `/data` volume. Its closest current AWS region is `eu-west-1`,
 which is the required KMS region for this deployment.
 
+### How ams1 deploys
+
+The hosted server, ams1 (Fly app `thaddeus`, <https://ams1.thaddeus.run>),
+deploys from alpha release tags. Pushing a `v*` tag runs
+[`release.yml`](../.github/workflows/release.yml). Once the GitHub release is
+published, its `deploy` job ("Deploy ams1") checks out the commit the release
+was built from and checks the Fly token with `flyctl status`. It then runs
+`flyctl deploy --remote-only --app thaddeus`. Fly's GitHub auto-deploy is off,
+so a push to `main` deploys nothing.
+
+`FLY_API_TOKEN`, a Fly deploy token for the `thaddeus` app, lives in the GitHub
+environment `production`, which only `v*` tags may deploy to. A dispatched
+release runs on a branch such as `main`, which the environment would refuse, so
+the job runs for tag pushes only. Nightlies and dry runs never deploy.
+
+The job ends with a smoke check, "Wait for ams1 to report the release version".
+It polls `https://ams1.thaddeus.run/version` every 10 seconds for up to three
+minutes until `version` equals the release version. If it never does, the job
+fails and prints the last response.
+
+To deploy by hand, for a dispatched release or after a failed deploy job, run
+`fly deploy` from a checkout of the tag:
+
+```sh
+git switch --detach v0.1.11-alpha
+fly deploy --remote-only --app thaddeus
+curl https://ams1.thaddeus.run/version
+```
+
 ### Provision the signing key
 
 Create a customer-managed `ECC_NIST_EDWARDS25519` `SIGN_VERIFY` key in
