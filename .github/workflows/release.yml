@@ -11,13 +11,16 @@ name: Release
 # native runner per target), publish a GitHub Release with the binaries +
 # checksums, then publish the npm launchers over OIDC trusted publishing to the
 # version's dist-tag (alpha for 0.1.11-alpha) and move npm `latest` up to that
-# version, never down.
+# version. The release path never moves `latest` down; only promote does, on
+# purpose.
 #
 # Deploy rule: only a tag push deploys ams1 (Fly app `thaddeus`), after its
 # GitHub release. FLY_API_TOKEN lives in the `production` environment, which
 # admits v* tag refs only, so a dispatched release (whose ref is a branch such as
 # main) would be refused; the deploy job skips it, as it skips every nightly and
-# dry run. Fly's own GitHub auto-deploy is off.
+# dry run. A release run only moves ams1 forward: if ams1 already reports a
+# newer version, the deploy is skipped. A rollback is a manual `fly deploy`.
+# Fly's own GitHub auto-deploy is off.
 #
 # nightly: every six hours, if main has commits after the newest release whose
 # tag contains -nightly., build main as <next patch>-nightly.<UTC date>.<run>.
@@ -623,6 +626,19 @@ jobs:
       # Requires each package to have a Trusted Publisher configured on
       # npmjs.com pointing at this repo + workflow (release.yml).
       id-token: write
+    # A release moves npm `latest`, and so does npm-promote, so they share
+    # npm-latest: a promote and a release of another tag take turns instead
+    # of racing on `latest`. A nightly never moves `latest`, so it gets a group
+    # of its own tag; it never waits for a release or promote, and a newer
+    # pending job can never cancel it. (GitHub keeps one pending job per
+    # group and cancels the older one. That can only hit a release npm job
+    # queued behind another; its publish is idempotent, so re-running the
+    # run finishes it.)
+    concurrency:
+      group:
+        ${{ needs.preflight.outputs.move_latest == 'true' && 'npm-latest' ||
+        format('npm-{0}', needs.preflight.outputs.tag) }}
+      cancel-in-progress: false
     steps:
       - uses: actions/checkout@v4
         with:
@@ -773,6 +789,10 @@ jobs:
       contents: read
       # OIDC identity for moving the dist-tags, as in the npm job.
       id-token: write
+    # Shared with a release's npm job, which also moves `latest`; see there.
+    concurrency:
+      group: npm-latest
+      cancel-in-progress: false
     steps:
       - name: Check the tag and its GitHub release
         id: target
@@ -854,12 +874,15 @@ jobs:
             if [ "$cmp" -eq 0 ]; then
               echo "$name: latest is already $VERSION"
               continue
-            elif [ "$cmp" -lt 0 ]; then
-              echo "$name: moving latest backwards from $current to $VERSION, as requested"
             fi
+            direction=""
+            if [ "$cmp" -lt 0 ]; then direction=" backwards"; fi
             if [ "$DRY_RUN" = true ]; then
-              echo "$name: dry run; would move latest from ${current:-nothing} to $VERSION"
+              echo "$name: dry run; would move latest$direction from ${current:-nothing} to $VERSION"
               continue
+            fi
+            if [ "$cmp" -lt 0 ]; then
+              echo "$name: moving latest backwards from $current to $VERSION, as requested"
             fi
             moved=false
             for attempt in 1 2 3; do
@@ -875,7 +898,7 @@ jobs:
             if [ "$moved" = true ]; then
               echo "$name: latest moved from ${current:-nothing} to $VERSION"
             else
-              echo "npm refused to move latest; enable \"Allow npm dist-tag\" in the trusted publisher settings of $name on npmjs.com, then run the promote dispatch" >&2
+              echo "npm refused to move latest; enable \"Allow npm dist-tag\" in the trusted publisher settings of $name on npmjs.com, then re-run this job" >&2
               failed=true
             fi
           done
@@ -886,7 +909,9 @@ jobs:
   # deploy. It runs for a publishing release-channel tag push alone: the
   # production environment that holds FLY_API_TOKEN admits only v* tag refs,
   # and a dispatched release runs on a branch ref (usually main), which the
-  # environment would refuse. Nightlies and dry runs never deploy.
+  # environment would refuse. Nightlies and dry runs never deploy. A release
+  # run only moves ams1 forward; a rollback is a manual `fly deploy` from the
+  # older tag (docs/deploy.md).
   deploy:
     name: Deploy ams1
     needs: [preflight, release]
@@ -908,10 +933,63 @@ jobs:
         with:
           persist-credentials: false
           ref: ${{ needs.preflight.outputs.sha }}
+      # Supplies node and npm's bundled semver package for the check below.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      # "Re-run all jobs" on an older tag's run, or two tags whose builds
+      # finish out of order, would otherwise deploy an older server over the
+      # newer state on /data. So a release run never rolls ams1 back: if ams1
+      # reports a version newer by semver, the deploy and smoke check are
+      # skipped and the job succeeds. The same version deploys again. If
+      # /version is unreachable or names no version (a server older than the
+      # endpoint), this deploys. deploy-production above serialises deploys,
+      # so the answer is not from a deploy still in progress.
+      - name: Check ams1 is not newer than this release
+        id: direction
+        env:
+          EXPECTED_VERSION: ${{ needs.preflight.outputs.version }}
+          VERSION_URL: https://ams1.thaddeus.run/version
+        shell: bash
+        run: |
+          set -euo pipefail
+          if ! command -v jq >/dev/null; then
+            echo "jq is not installed on this runner, so the answer from $VERSION_URL cannot be read" >&2
+            exit 1
+          fi
+          semver="$(npm root -g)/npm/node_modules/semver"
+          if ! node -e "require(process.argv[1])" "$semver"; then
+            echo "cannot load npm's semver module from $semver" >&2
+            exit 1
+          fi
+          response=$(curl -sS --max-time 10 "$VERSION_URL" 2>&1) || true
+          current=$(jq -r 'objects | .version // empty | strings' <<<"$response" 2>/dev/null) || current=""
+          deploy=true
+          if [ -z "$current" ]; then
+            echo "ams1 named no version (answer: $response); deploying $EXPECTED_VERSION"
+          else
+            # Prints 1, 0 or -1 as this release sorts after, with or before
+            # ams1's version, or "invalid" if ams1's is not semver.
+            cmp=$(node -p 'const s = require(process.argv[1]);
+              s.valid(process.argv[3]) ? s.compare(process.argv[2], process.argv[3]) : "invalid"' \
+              "$semver" "$EXPECTED_VERSION" "$current")
+            case "$cmp" in
+              -1)
+                deploy=false
+                echo "ams1 already runs $current, newer than $EXPECTED_VERSION; skipping the deploy so a release run never rolls ams1 back"
+                ;;
+              0) echo "ams1 already runs $EXPECTED_VERSION; deploying it again" ;;
+              1) echo "ams1 runs $current; deploying $EXPECTED_VERSION" ;;
+              *) echo "ams1 reports '$current', which is not semver; deploying $EXPECTED_VERSION" ;;
+            esac
+          fi
+          echo "deploy=$deploy" >> "$GITHUB_OUTPUT"
       - uses: superfly/flyctl-actions/setup-flyctl@ed8efb33836e8b2096c7fd3ba1c8afe303ebbff1 # 1.6
+        if: steps.direction.outputs.deploy == 'true'
       # A missing or rejected token fails here, before anything deploys, with a
       # message that says where the token lives.
       - name: Check the Fly deploy token
+        if: steps.direction.outputs.deploy == 'true'
         env:
           FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
         shell: bash
@@ -927,6 +1005,7 @@ jobs:
           fi
       # fly.toml at the repo root names the app, volume and health check.
       - name: Deploy to Fly
+        if: steps.direction.outputs.deploy == 'true'
         env:
           FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
         run: flyctl deploy --remote-only --app thaddeus
@@ -934,12 +1013,17 @@ jobs:
       # answers. The new machine is serving once /version reports this
       # release. 19 tries 10 s apart span three minutes.
       - name: Wait for ams1 to report the release version
+        if: steps.direction.outputs.deploy == 'true'
         env:
           EXPECTED_VERSION: ${{ needs.preflight.outputs.version }}
           VERSION_URL: https://ams1.thaddeus.run/version
         shell: bash
         run: |
           set -euo pipefail
+          if ! command -v jq >/dev/null; then
+            echo "jq is not installed on this runner, so the answer from $VERSION_URL cannot be read" >&2
+            exit 1
+          fi
           last=""
           for attempt in $(seq 1 19); do
             last=$(curl -sS --max-time 10 "$VERSION_URL" 2>&1) || true
