@@ -36,10 +36,15 @@ curl -fsSL https://raw.githubusercontent.com/thaddeus-run/thaddeus/main/install.
 npm i -g @thaddeus.run/cli@alpha @thaddeus.run/lazythad@alpha
 ```
 
+**Manual:** download the binary for your platform from the
+[releases page](https://github.com/thaddeus-run/thaddeus/releases) and put it on
+your `PATH`.
+
 **Nightly builds:** every six hours, if `main` has new commits, the release
 workflow publishes it as a nightly with a version like
-`0.1.11-nightly.20261017.42`. Nobody tries a nightly by hand before it ships, so
-expect breakage. Install the newest one with either:
+`0.1.11-nightly.20261017.42`. A nightly exists only once the first scheduled
+build has published. Nobody tries a nightly by hand before it ships, so expect
+breakage. Install the newest one with either:
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/thaddeus-run/thaddeus/main/install.sh | THADDEUS_CHANNEL=nightly sh
@@ -50,10 +55,6 @@ A nightly talks to the same servers as an alpha build, including the official
 hosted one. If the CLI and a server speak different wire protocols, the server
 refuses the request with HTTP 426 and the CLI stops with a message that names
 both protocol versions and says whether to update the CLI or the server.
-
-**Manual:** download the binary for your platform from the
-[releases page](https://github.com/thaddeus-run/thaddeus/releases) and put it on
-your `PATH`.
 
 **From source** (needs [Bun](https://bun.sh)):
 

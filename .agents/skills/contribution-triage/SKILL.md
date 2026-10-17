@@ -52,7 +52,7 @@ settings, or creating scheduled automations.
 
 For every live run, freshly resolve `refs/heads/main` in the trusted upstream
 `thaddeus-run/thaddeus` repository to a commit SHA. Use read-only GitHub tools
-or `gh` to load this skill, `CONTRIBUTING.md`, the documentation rules in
+or `gh` to load this skill, `CONTRIBUTING.md`, the "Pull requests" section of
 `AGENTS.md`,
 [.github/TRIAGE_EXEMPTIONS.td](../../../.github/TRIAGE_EXEMPTIONS.td), and any
 other policy dependencies from that same SHA; record it as the policy revision.
@@ -181,10 +181,10 @@ Apply `triage:eligible` either after successful triage or immediately for a
 verified exemption, as
 [triage and deeper review](../../../CONTRIBUTING.md#triage-and-review)
 describes. The label marks the PR as ready for deeper review and nothing more.
-It does not request a review: CodeRabbit, Greptile, and Codex review every PR
-automatically, whether or not the label is present. Passing triage once does not
-grant future bypass. Never treat `vouch:trusted` or a `size:*` label as the
-handoff.
+It does not request a review: review bots installed on the repository may review
+PRs on their own, with or without the label, and triage does not depend on them.
+Passing triage once does not grant future bypass. Never treat `vouch:trusted` or
+a `size:*` label as the handoff.
 
 A missing `triage:eligible` label blocks only the handoff, not an authorized
 closure or clarification comment after bypass routing is resolved. Unavailable
