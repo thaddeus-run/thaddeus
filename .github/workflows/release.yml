@@ -15,6 +15,8 @@ name: Release
 # becomes "latest", and its npm launchers go to the `nightly` dist-tag. A
 # dispatched nightly skips the new-commits check and must run on main unless
 # dry_run is set. dry_run builds and verifies, then skips both publish jobs.
+# "Re-run all jobs" and "Re-run failed jobs" both resume the same nightly: its
+# tag and version stay, and the release and npm jobs finish what is missing.
 on:
   push:
     # Nightly tags come from the release job below. Excluding them keeps a
@@ -68,8 +70,9 @@ jobs:
       channel: ${{ steps.channel.outputs.channel }}
       dry_run: ${{ steps.channel.outputs.dry_run }}
       # Set only by the nightly gate: 'true' for a scheduled nightly with
-      # nothing new on main, 'false' for a nightly that is due. Every later job
-      # is gated on it, so a skipped run publishes nothing and ends green.
+      # nothing new on main, 'false' for a nightly that is due or resumed.
+      # Every later job is gated on it, so a skipped run publishes nothing and
+      # ends green.
       skip: ${{ steps.gate.outputs.skip }}
       previous_nightly: ${{ steps.gate.outputs.previous }}
       tag: ${{ steps.tag.outputs.tag || steps.nightly.outputs.tag }}
@@ -132,6 +135,14 @@ jobs:
       # t3code's shouldReleaseNightly without its six-hour gap: the cron already
       # spaces scheduled runs six hours apart. The previous nightly's tag is also
       # what the release notes compare against.
+      #
+      # Resume rule: a nightly tag ends in .<run_number>, which every attempt
+      # of a run shares. A later attempt (run_attempt > 1) that finds a
+      # published nightly ending in its own .<run_number> resumes it, with
+      # resume=<that tag>: it skips the new-commits check, which would see the
+      # nightly at this very commit and skip, and reuses the tag's version,
+      # because the UTC date in it may have changed since. With no such tag,
+      # the attempt runs like the first.
       - name: Look for commits since the last nightly
         id: gate
         if: steps.channel.outputs.channel == 'nightly'
@@ -148,8 +159,18 @@ jobs:
             --jq '[.[] | select((.draft | not) and (.tag_name | contains("-nightly.")))]
                   | max_by(.published_at) | .tag_name // ""')
           echo "previous=$previous" >> "$GITHUB_OUTPUT"
+          resume=""
+          if [ "$GITHUB_RUN_ATTEMPT" -gt 1 ]; then
+            resume=$(gh api "repos/$GITHUB_REPOSITORY/releases?per_page=100" \
+              --jq '[.[] | select((.draft | not) and (.tag_name | contains("-nightly."))
+                        and (.tag_name | endswith(".\(env.GITHUB_RUN_NUMBER)")))]
+                    | first | .tag_name // ""')
+          fi
+          echo "resume=$resume" >> "$GITHUB_OUTPUT"
           skip=false
-          if [ -z "$previous" ]; then
+          if [ -n "$resume" ]; then
+            echo "attempt $GITHUB_RUN_ATTEMPT resumes $resume from an earlier attempt of run $GITHUB_RUN_NUMBER"
+          elif [ -z "$previous" ]; then
             echo "no earlier nightly release; this run publishes the first"
           elif [ "$GITHUB_EVENT_NAME" = schedule ]; then
             ahead=$(gh api "repos/$GITHUB_REPOSITORY/compare/$previous...$SHA" --jq .ahead_by)
@@ -197,18 +218,23 @@ jobs:
         with:
           auto-install: true
       # skip is 'false' only on a nightly that is due: the gate runs for
-      # nightlies alone.
+      # nightlies alone. A resumed nightly keeps its tag's version.
       - name: Compute and apply the nightly version
         id: nightly
         if: steps.gate.outputs.skip == 'false'
         env:
           RUN_NUMBER: ${{ github.run_number }}
+          RESUME: ${{ steps.gate.outputs.resume }}
         shell: bash
         run: |
           set -euo pipefail
-          base=$(bun -p "require('./packages/cli/package.json').version")
-          version=$(bun packages/cli/scripts/nightly-version.ts --base "$base" \
-            --date "$(date -u +%Y-%m-%dT%H:%M:%SZ)" --run "$RUN_NUMBER")
+          if [ -n "$RESUME" ]; then
+            version="${RESUME#v}"
+          else
+            base=$(bun -p "require('./packages/cli/package.json').version")
+            version=$(bun packages/cli/scripts/nightly-version.ts --base "$base" \
+              --date "$(date -u +%Y-%m-%dT%H:%M:%SZ)" --run "$RUN_NUMBER")
+          fi
           bun packages/cli/scripts/set-release-version.ts "$version"
           echo "tag=v$version" >> "$GITHUB_OUTPUT"
       - name: Verify release metadata
