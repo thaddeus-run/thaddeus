@@ -1,0 +1,1600 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="color-scheme" content="dark" />
+    <title>Contribution triage and nightly builds: implementation plan</title>
+    <style>
+      :root {
+        /* Near-black editorial palette. Dark-only by design — do not add a light theme. */
+        --bg: #000000;
+        --surface: #0c0c0c; /* cards */
+        --rule: #232323; /* hairlines, card borders */
+        --fg: #ededed; /* body text */
+        --fg-strong: #ffffff; /* headings */
+        --muted: #8b8b8b; /* secondary text, table heads */
+        --code-bg: #242424; /* inline code chip */
+        --block-bg: #0e0e0e; /* pre blocks */
+        --accent: #6fdc8c; /* links, skill names, checked state */
+        --s: #5ee08a;
+        --a: #a8e05f;
+        --b: #e0c95e;
+        --c: #e0a35e;
+        --d: #e06f6f;
+        --x: #7a7a7a;
+      }
+      * {
+        box-sizing: border-box;
+      }
+      html {
+        -webkit-text-size-adjust: 100%;
+      }
+      body {
+        margin: 0;
+        background: var(--bg);
+        color: var(--fg);
+        font:
+          17px/1.7 system-ui,
+          -apple-system,
+          'Helvetica Neue',
+          'Segoe UI',
+          Arial,
+          sans-serif;
+        font-synthesis-weight: none;
+        -webkit-font-smoothing: antialiased;
+      }
+      .wrap {
+        max-width: 900px;
+        margin: 0 auto;
+        padding: 4rem 1.5rem 8rem;
+      }
+
+      /* ---------- Type ---------- */
+      h1,
+      h2,
+      h3 {
+        color: var(--fg-strong);
+        font-weight: 700;
+        letter-spacing: -0.021em;
+      }
+      h1 {
+        font-size: 2.25rem;
+        line-height: 1.15;
+        margin: 0 0 1rem;
+      }
+      h2 {
+        font-size: 1.4rem;
+        line-height: 1.25;
+        margin: 0 0 1.25rem;
+      }
+      h3 {
+        font-size: 1.05rem;
+        line-height: 1.4;
+        margin: 2rem 0 0.5rem;
+      }
+      p {
+        margin: 0 0 1.1rem;
+      }
+      a {
+        color: var(--accent);
+        text-decoration: none;
+      }
+      a:hover {
+        text-decoration: underline;
+      }
+      .lede {
+        color: var(--muted);
+        font-size: 1.05rem;
+        margin: 0;
+      }
+      .muted {
+        color: var(--muted);
+      }
+
+      /* Sections are separated by a hairline and a lot of air — no boxes around prose. */
+      section.block {
+        border-top: 1px solid var(--rule);
+        padding-top: 2.5rem;
+        margin-top: 2.5rem;
+      }
+      header {
+        padding-bottom: 1.75rem;
+      }
+
+      /* ---------- Code ---------- */
+      code {
+        font-family: ui-monospace, SFMono-Regular, 'SF Mono', Menlo, monospace;
+        font-size: 0.855em;
+        background: var(--code-bg);
+        color: #e8e8e8;
+        padding: 0.12em 0.42em;
+        border-radius: 4px;
+        white-space: nowrap;
+      }
+      pre {
+        background: var(--block-bg);
+        border: 1px solid var(--rule);
+        border-radius: 8px;
+        padding: 1rem 1.1rem;
+        overflow-x: auto;
+        font-size: 0.875rem;
+        line-height: 1.6;
+        margin: 0.9rem 0;
+      }
+      pre code {
+        background: none;
+        padding: 0;
+        font-size: inherit;
+        white-space: pre;
+        color: var(--fg);
+      }
+
+      /* ---------- Stat cards ---------- */
+      .stats {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
+        gap: 0.9rem;
+        margin: 1.75rem 0;
+      }
+      .stat {
+        background: var(--surface);
+        border: 1px solid var(--rule);
+        border-radius: 10px;
+        padding: 1.2rem 1.3rem 1.35rem;
+      }
+      .stat b {
+        display: block;
+        color: var(--fg-strong);
+        font-size: 2rem;
+        font-weight: 500;
+        letter-spacing: -0.02em;
+        line-height: 1.1;
+        margin-bottom: 0.5rem;
+      }
+      .stat span {
+        color: var(--muted);
+        font-size: 0.95rem;
+        line-height: 1.45;
+      }
+
+      /* ---------- Tables: uppercase muted heads, hairline rows, no vertical rules ---------- */
+      .table-scroll {
+        overflow-x: auto;
+        margin: 1.5rem 0;
+      }
+      table {
+        border-collapse: collapse;
+        width: 100%;
+      }
+      th {
+        text-align: left;
+        vertical-align: bottom;
+        color: var(--muted);
+        font-size: 0.74rem;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.1em;
+        padding: 0 1.5rem 0.8rem 0;
+        border-bottom: 1px solid var(--rule);
+        white-space: nowrap;
+      }
+      td {
+        text-align: left;
+        vertical-align: top;
+        padding: 0.95rem 1.5rem 0.95rem 0;
+        border-bottom: 1px solid var(--rule);
+      }
+      th:last-child,
+      td:last-child {
+        padding-right: 0;
+      }
+      tbody tr:last-child td {
+        border-bottom: 0;
+      }
+      td.num {
+        color: var(--muted);
+        font-variant-numeric: tabular-nums;
+      }
+
+      /* ---------- Tier / status legend ---------- */
+      .legend {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 1.25rem;
+        color: var(--muted);
+        font-size: 0.95rem;
+        margin: 0 0 0.75rem;
+      }
+      .tier {
+        font-weight: 700;
+      }
+      .tier-s {
+        color: var(--s);
+      }
+      .tier-a {
+        color: var(--a);
+      }
+      .tier-b {
+        color: var(--b);
+      }
+      .tier-c {
+        color: var(--c);
+      }
+      .tier-d {
+        color: var(--d);
+      }
+      .tier-x {
+        color: var(--x);
+      }
+      .name {
+        color: var(--accent);
+        font-weight: 600;
+      }
+
+      /* ---------- Callout ---------- */
+      .callout {
+        background: var(--surface);
+        border: 1px solid var(--rule);
+        border-radius: 10px;
+        padding: 1.15rem 1.35rem;
+        margin: 1.5rem 0;
+      }
+      .callout > :last-child {
+        margin-bottom: 0;
+      }
+      .callout strong {
+        color: var(--fg-strong);
+      }
+      .callout ul {
+        margin: 0.6rem 0 0;
+        padding-left: 1.15rem;
+      }
+      .callout li {
+        margin: 0.3rem 0;
+      }
+
+      /* ---------- Tasks ---------- */
+      section.task {
+        background: var(--surface);
+        border: 1px solid var(--rule);
+        border-radius: 10px;
+        padding: 1.4rem 1.6rem;
+        margin: 1.25rem 0;
+      }
+      .files {
+        font-size: 0.92rem;
+        color: var(--muted);
+        margin: 0 0 1rem;
+      }
+      .files code {
+        color: var(--fg);
+        white-space: normal;
+      }
+      .io {
+        margin: 0 0 1.25rem;
+        font-size: 0.95rem;
+      }
+      .io dt {
+        color: var(--muted);
+        font-size: 0.74rem;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.1em;
+      }
+      .io dd {
+        margin: 0.2rem 0 0.75rem;
+      }
+      ol.steps {
+        list-style: none;
+        padding: 0;
+        margin: 0;
+      }
+      ol.steps > li {
+        display: flex;
+        gap: 0.7rem;
+        align-items: flex-start;
+        padding: 0.7rem 0;
+        border-top: 1px solid var(--rule);
+      }
+      ol.steps > li:first-child {
+        border-top: 0;
+        padding-top: 0;
+      }
+      ol.steps input {
+        margin: 0.42rem 0 0;
+        flex: none;
+        width: 1rem;
+        height: 1rem;
+        accent-color: var(--accent);
+      }
+      ol.steps input:checked + .label {
+        color: var(--muted);
+      }
+      ol.steps input:checked + .label strong {
+        color: var(--muted);
+        text-decoration: line-through;
+      }
+      .label {
+        flex: 1;
+        min-width: 0;
+      }
+      .label strong {
+        color: var(--fg-strong);
+        font-weight: 600;
+      }
+
+      .progress {
+        color: var(--muted);
+        font-size: 0.95rem;
+        margin-top: 3rem;
+        border-top: 1px solid var(--rule);
+        padding-top: 1.5rem;
+      }
+      .progress b {
+        color: var(--accent);
+      }
+
+      @media (max-width: 620px) {
+        body {
+          font-size: 16px;
+        }
+        h1 {
+          font-size: 1.8rem;
+        }
+        .wrap {
+          padding: 2.5rem 1.1rem 5rem;
+        }
+        section.task {
+          padding: 1.1rem 1.15rem;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="wrap">
+      <header>
+        <h1>Contribution triage and nightly builds: implementation plan</h1>
+        <p class="lede">
+          Bring the contribution, triage, CI and release-channel setup of
+          <a
+            href="https://github.com/pingdotgg/t3code/tree/2fae0f9841448e6edb93d0ebe4cbaf2d546bb38c"
+            >pingdotgg/t3code</a
+          >
+          to Thaddeus, minus the parts that only fit an Electron, mobile or
+          Vercel product. Stacked on the THA-33 branch at <code>e590463</code>.
+        </p>
+      </header>
+
+      <section class="block">
+        <h2>Goal and shape</h2>
+        <p>
+          <strong>Goal:</strong> outside people and agents get a clear
+          contribution policy, PR and issue forms, vouch and size labels, and a
+          triage skill. CI gates every suite that passes. Users can opt into
+          nightly CLI builds, and a mismatched CLI and server say so plainly
+          instead of failing with a generic 401 or 404.
+        </p>
+        <p>
+          <strong>Architecture:</strong> repository files and GitHub workflows
+          copy t3code's shapes with Thaddeus names. One wire-protocol constant
+          shared through <code>@thaddeus.run/server/protocol</code> lets the
+          server refuse a mismatched client with a 426, and a public
+          <code>GET /version</code> reports both versions. The existing
+          tag-driven <code>release.yml</code> gains a scheduled nightly channel
+          that rewrites the shared release version in the runner before
+          building, so <code>root:version-check</code> stays the single guard.
+          Nightly and alpha CLIs talk to the same servers, as t3code's channels
+          share one backend.
+        </p>
+        <p>
+          <strong>Tech stack:</strong> GitHub Actions with
+          <code>actions/github-script@v8</code> and
+          <code>mitchellh/vouch</code> v1.5.0, Bun and moon, TypeScript in
+          <code>packages/server</code>, <code>packages/client</code> and
+          <code>packages/cli</code>.
+        </p>
+
+        <div class="stats">
+          <div class="stat">
+            <b>7</b><span>tasks, each independently committable</span>
+          </div>
+          <div class="stat"><b>0</b><span>new runtime dependencies</span></div>
+          <div class="stat">
+            <b>5</b><span>settings only the repository owner can change</span>
+          </div>
+        </div>
+
+        <div class="callout">
+          <strong>Global constraints</strong>
+          <ul>
+            <li>
+              Use <code>bun</code> and moon only. No new dependency without a
+              root catalog entry; this plan adds none.
+            </li>
+            <li>
+              Commits follow Conventional Commits 1.0.0 and end with the
+              attribution line.
+            </li>
+            <li>
+              Prose wraps at 80 columns (<code>oxfmt</code>
+              <code>proseWrap: always</code>). Run
+              <code>moon run root:format root:lint</code> before every commit.
+            </li>
+            <li>
+              Pin third-party actions that run with write tokens to a commit
+              SHA.
+            </li>
+            <li>
+              A <code>pull_request_target</code> job never checks out, installs
+              or runs PR code.
+            </li>
+            <li>
+              Copy t3code text only where it fits. Name the source commit
+              <code>2fae0f9</code> in each adapted file's first comment.
+            </li>
+          </ul>
+        </div>
+
+        <p class="muted">
+          <strong>For agentic workers:</strong> use
+          <code>superpowers:subagent-driven-development</code> (recommended) or
+          <code>superpowers:executing-plans</code> to implement this plan
+          task-by-task.
+        </p>
+      </section>
+
+      <section class="block">
+        <h2>What the code says today</h2>
+        <div class="table-scroll">
+          <table>
+            <thead>
+              <tr>
+                <th>Signal</th>
+                <th>Evidence</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>No contribution scaffolding</td>
+                <td>
+                  <code>.github/</code> holds only <code>ci.yml</code> and
+                  <code>release.yml</code>. No PR or issue templates, no
+                  <code>SECURITY.md</code>, no CODEOWNERS.
+                </td>
+              </tr>
+              <tr>
+                <td>Skills directory is empty</td>
+                <td>
+                  <code>.agents/skills/</code> has only <code>.gitkeep</code>,
+                  and <code>.gitignore:36</code> ignores <code>.claude/*</code>,
+                  so Claude Code would not find skills even if they existed.
+                </td>
+              </tr>
+              <tr>
+                <td>CI skips most suites</td>
+                <td>
+                  <code>ci.yml:38-50</code> runs fixed lists.
+                  <code>server:test</code>, <code>client:test</code>, the full
+                  <code>cli:test</code>, <code>persist:test</code>,
+                  <code>root:format-check</code> and
+                  <code>root:lint</code> never run in CI. All six passed locally
+                  on 2026-10-17.
+                </td>
+              </tr>
+              <tr>
+                <td>No version negotiation</td>
+                <td>
+                  The client sends only the four
+                  <code>x-thaddeus-*</code> signature headers
+                  (<code>client.ts:1583-1586</code>). <code>/version</code> and
+                  <code>/health</code> return 404 on
+                  <code>ams1.thaddeus.run</code>. CHANGELOG records client
+                  breaks in 0.1.8 and 0.1.9.
+                </td>
+              </tr>
+              <tr>
+                <td>Hosted server tracks <code>main</code></td>
+                <td>
+                  Fly's GitHub integration deploys every push to
+                  <code>main</code> within seconds, without waiting for CI,
+                  while users run the last tagged CLI.
+                </td>
+              </tr>
+              <tr>
+                <td>One release channel</td>
+                <td>
+                  <code>release.yml</code> runs on <code>v*</code> tags only.
+                  npm <code>alpha</code> is <code>0.1.10-alpha</code>,
+                  <code>latest</code> is stuck at <code>0.1.0-alpha</code>, and
+                  the release notes print the install command without
+                  <code>@alpha</code> (<code>release.yml:255</code>).
+                </td>
+              </tr>
+              <tr>
+                <td>No outside contributors yet</td>
+                <td>
+                  72 PRs and 97 issues, all by <code>mtkl6</code> apart from two
+                  Fly bot PRs.
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section class="block">
+        <h2>Review focus</h2>
+        <p>
+          Failure modes no single task's happy path exercises. Each one has a
+          test or check in the task that owns the code.
+        </p>
+        <ol>
+          <li>
+            A 0.1.10-alpha CLI, which sends no protocol header, keeps working
+            against the new server. Task 4, test
+            <em>request without the header succeeds</em>.
+          </li>
+          <li>
+            A <code>pull_request_target</code> workflow never runs code from the
+            PR. Task 2, verification step.
+          </li>
+          <li>
+            A nightly never becomes the GitHub "latest" release and never moves
+            npm <code>alpha</code> or <code>latest</code>. Task 5, guard step in
+            <code>release.yml</code>.
+          </li>
+          <li>
+            A scheduled run with no new commits on <code>main</code> publishes
+            nothing and ends green. Task 5, skip output.
+          </li>
+          <li>
+            <code>thaddeus triage</code> never copies the identity seed into a
+            file the agent reads. Task 7, test
+            <em>context never contains the seed</em>.
+          </li>
+        </ol>
+      </section>
+
+      <section class="block">
+        <h2>Task 1: Contribution policy, forms and security policy</h2>
+        <section class="task">
+          <p class="files">
+            Create <code>.github/pull_request_template.md</code>,
+            <code>.github/ISSUE_TEMPLATE/config.yml</code>,
+            <code>.github/ISSUE_TEMPLATE/bug_report.yml</code>,
+            <code>.github/SECURITY.md</code> · Modify
+            <code>CONTRIBUTING.md</code>, <code>AGENTS.md</code>
+          </p>
+          <dl class="io">
+            <dt>Produces</dt>
+            <dd>
+              Anchors <code>#prior-approval</code>, <code>#one-problem</code>,
+              <code>#verification</code>, <code>#triage-and-review</code> and
+              <code>#closure-and-reconsideration</code> in
+              <code>CONTRIBUTING.md</code>, which Task 6's triage skill links
+              to. Labels <code>bug</code> and <code>needs-triage</code>, which
+              Task 2 creates.
+            </dd>
+          </dl>
+          <ol class="steps">
+            <li>
+              <input type="checkbox" id="t1s1" /><span class="label">
+                <strong>Restructure <code>CONTRIBUTING.md</code>.</strong> Keep
+                today's setup, moon, version and convention sections under
+                <code>## Developer setup</code>. Add the policy sections from
+                t3code's <code>CONTRIBUTING.md</code> at
+                <code>2fae0f9</code> with the five anchors above. Thaddeus
+                changes: feature requests go to
+                <code
+                  >https://github.com/thaddeus-run/thaddeus/discussions/categories/ideas</code
+                >; the verification section asks for the checks in section 9 of
+                <code>docs/agent-first-architecture.md</code> (real user path,
+                failure and restart recovery, a second identity or workspace)
+                when a change has runtime behaviour; the eligible-for-review
+                label is <code>triage:eligible</code>; drop "Models we do not
+                accept", the Macroscope paragraphs and the t3 PR examples.
+              </span>
+            </li>
+            <li>
+              <input type="checkbox" id="t1s2" /><span class="label">
+                <strong>Write the PR template.</strong> Same four sections as
+                t3code (Problem, Change, Scope and approval, Verification) and
+                the closing model-and-harness line. Add a line asking for
+                <code>Closes #N</code> for the GitHub issue and the Linear ID if
+                there is one. The Verification comment names the three section 9
+                checks.
+              </span>
+            </li>
+            <li>
+              <input type="checkbox" id="t1s3" /><span class="label">
+                <strong>Write the issue forms.</strong> <code>config.yml</code>:
+                <code>blank_issues_enabled: false</code>, contact links "Feature
+                request" to Discussions Ideas and "Security vulnerability" to
+                <code
+                  >https://github.com/thaddeus-run/thaddeus/security/advisories/new</code
+                >. <code>bug_report.yml</code> follows t3code's form with labels
+                <code>bug</code>, <code>needs-triage</code> and these Area
+                options: CLI (<code>thaddeus</code> / <code>thad</code>),
+                Self-hosted server (<code>thaddeus serve</code>), Hosted server
+                (<code>ams1.thaddeus.run</code>), lazythad TUI, Client or SDK
+                packages, Install, release or npm, Docs, Not sure. The required
+                Version field asks for <code>thaddeus --version</code>; an
+                optional Server field asks for the server URL and the output of
+                <code>curl &lt;server&gt;/version</code>.
+              </span>
+            </li>
+            <li>
+              <input type="checkbox" id="t1s4" /><span class="label">
+                <strong>Write <code>.github/SECURITY.md</code>.</strong> Report
+                through GitHub private vulnerability reporting at the advisories
+                link above, covering the CLI, the server, the hosted server and
+                the install path. No public disclosure before a fix.
+              </span>
+            </li>
+            <li>
+              <input type="checkbox" id="t1s5" /><span class="label">
+                <strong
+                  >Add a "Pull requests" section to
+                  <code>AGENTS.md</code>.</strong
+                >
+                Conventional title in plain language; body states the problem,
+                then the change, then the observed verification; follow
+                <code>.github/pull_request_template.md</code>; end with the
+                model and harness.
+              </span>
+            </li>
+            <li>
+              <input type="checkbox" id="t1s6" /><span class="label">
+                <strong>Verify.</strong> Each form parses:
+                <code
+                  >bun -e 'for (const f of process.argv.slice(1))
+                  Bun.YAML.parse(await Bun.file(f).text())'
+                  .github/ISSUE_TEMPLATE/*.yml</code
+                >
+                exits 0. <code>moon run root:format root:lint</code> exits 0.
+                Every relative link in the changed markdown resolves (the loop
+                from the THA-33 plan prints nothing).
+              </span>
+            </li>
+            <li>
+              <input type="checkbox" id="t1s7" /><span class="label">
+                <strong>Commit</strong>
+                <code
+                  >docs: add contribution policy, PR and issue forms, and a
+                  security policy</code
+                >.
+              </span>
+            </li>
+          </ol>
+        </section>
+      </section>
+
+      <section class="block">
+        <h2>Task 2: Vouch, triage lists and PR labels</h2>
+        <section class="task">
+          <p class="files">
+            Create <code>.github/VOUCHED.td</code>,
+            <code>.github/TRIAGE_EXEMPTIONS.td</code>,
+            <code>.github/workflows/pr-vouch.yml</code>,
+            <code>.github/workflows/pr-size.yml</code>,
+            <code>.github/workflows/issue-labels.yml</code>
+          </p>
+          <dl class="io">
+            <dt>Produces</dt>
+            <dd>
+              Labels <code>vouch:trusted</code>, <code>vouch:unvouched</code>,
+              <code>vouch:denounced</code>, <code>size:XS</code> to
+              <code>size:XXL</code>, <code>bug</code>, <code>enhancement</code>,
+              <code>needs-triage</code>, <code>via-triage</code>,
+              <code>triage:eligible</code>, <code>triage:keep-open</code>. The
+              exemption list Task 6's skill reads.
+            </dd>
+          </dl>
+          <ol class="steps">
+            <li>
+              <input type="checkbox" id="t2s1" /><span class="label">
+                <strong>Write the two trust lists.</strong>
+                <code>VOUCHED.td</code> uses t3code's header comment and no
+                entries, because collaborators and bots are trusted
+                automatically. <code>TRIAGE_EXEMPTIONS.td</code> uses t3code's
+                header and one entry, <code>github:mtkl6</code>.
+              </span>
+            </li>
+            <li>
+              <input type="checkbox" id="t2s2" /><span class="label">
+                <strong>Port <code>pr-vouch.yml</code></strong> from t3code at
+                <code>2fae0f9</code> unchanged in shape:
+                <code>pull_request_target</code>,
+                <code>/recheck-vouch</code> comments, and a push to
+                <code>main</code> touching <code>VOUCHED.td</code>. Pin
+                <code
+                  >mitchellh/vouch/action/check-user@d66fa29a64600490892131ad87597c30c91fcac4
+                  # v1.5.0</code
+                >.
+              </span>
+            </li>
+            <li>
+              <input type="checkbox" id="t2s3" /><span class="label">
+                <strong>Write a simpler <code>pr-size.yml</code>.</strong> One
+                job on <code>pull_request_target</code> with
+                <code>issues: write</code> and
+                <code>pull-requests: write</code>, no checkout. Sum
+                <code>additions + deletions</code> from
+                <code>github.paginate(github.rest.pulls.listFiles)</code>,
+                excluding test files unless every file is a test file. A test
+                file matches <code>/(^|\/)(test|tests|__tests__)\//</code> or
+                <code>/\.test\.[cm]?[jt]sx?$/</code>. Thresholds and colours
+                copy t3code: XS 0-9, S 10-29, M 30-99, L 100-499, XL 500-999,
+                XXL 1000+. The same job creates missing label definitions, which
+                fixes t3code's dead <code>sync-label-definitions</code> job, and
+                removes stale <code>size:*</code> labels.
+              </span>
+            </li>
+            <li>
+              <input type="checkbox" id="t2s4" /><span class="label">
+                <strong>Write <code>issue-labels.yml</code></strong> on pushes
+                to <code>main</code> that touch
+                <code>.github/ISSUE_TEMPLATE/**</code> or the workflow, plus
+                <code>workflow_dispatch</code>. It creates or updates
+                <code>bug</code> (<code>d73a4a</code>),
+                <code>enhancement</code> (<code>a2eeef</code>),
+                <code>needs-triage</code> (<code>fbca04</code>),
+                <code>via-triage</code> (<code>5319e7</code>),
+                <code>triage:eligible</code> (<code>1f883d</code>) and
+                <code>triage:keep-open</code> (<code>0e8a16</code>).
+              </span>
+            </li>
+            <li>
+              <input type="checkbox" id="t2s5" /><span class="label">
+                <strong>Verify.</strong> All three workflows parse with
+                <code>Bun.YAML.parse</code>.
+                <code
+                  >grep -n -E 'checkout|ref:|bun install|run: bun'
+                  .github/workflows/pr-*.yml</code
+                >
+                prints nothing. Note in the PR that
+                <code>pull_request_target</code> workflows run from the base
+                branch, so they first fire on PRs opened after this merges.
+              </span>
+            </li>
+            <li>
+              <input type="checkbox" id="t2s6" /><span class="label">
+                <strong>Commit</strong>
+                <code>ci: label PRs by vouch status and size</code>.
+              </span>
+            </li>
+          </ol>
+        </section>
+      </section>
+
+      <section class="block">
+        <h2>Task 3: CI gates every suite that passes</h2>
+        <section class="task">
+          <p class="files">
+            Modify <code>.github/workflows/ci.yml</code>,
+            <code>CONTRIBUTING.md</code>
+          </p>
+          <dl class="io">
+            <dt>Produces</dt>
+            <dd>
+              One required-check name, <code>CI passed</code>, for the branch
+              ruleset in the owner settings list.
+            </dd>
+          </dl>
+          <ol class="steps">
+            <li>
+              <input type="checkbox" id="t3s1" /><span class="label">
+                <strong>Find what passes.</strong> Run
+                <code
+                  >AGENT=1 moon run :typecheck :test root:format-check
+                  root:lint</code
+                >
+                and record any failing target with its first error.
+              </span>
+            </li>
+            <li>
+              <input type="checkbox" id="t3s2" /><span class="label">
+                <strong>Replace the fixed lists</strong> in the
+                <code>check</code> job with
+                <code>moon run root:format-check root:lint</code> and
+                <code>moon run :typecheck :test</code>. Keep the version checks,
+                both <code>make demo</code> runs and
+                <code>CI= moon run example-cli:test</code>. A target that failed
+                in step 1 goes in an explicit exclusion with a comment naming
+                the failure, or is fixed in this task if the fix is one line.
+              </span>
+            </li>
+            <li>
+              <input type="checkbox" id="t3s3" /><span class="label">
+                <strong>Add the aggregator</strong> from t3code's
+                <code>Check</code> job: a job named <code>CI passed</code> with
+                <code>needs: [check, lazythad]</code> and
+                <code>if: always()</code> that fails unless both results are
+                <code>success</code>.
+              </span>
+            </li>
+            <li>
+              <input type="checkbox" id="t3s4" /><span class="label">
+                <strong>Correct <code>CONTRIBUTING.md</code>.</strong> Replace
+                the claim that CI runs "the affected portion of the graph" with
+                what it now runs, and name <code>CI passed</code> as the check
+                to watch.
+              </span>
+            </li>
+            <li>
+              <input type="checkbox" id="t3s5" /><span class="label">
+                <strong>Verify on GitHub.</strong> Push the branch. The
+                <code>CI</code> run on the PR shows <code>check</code>,
+                <code>lazythad</code> and <code>CI passed</code> green. Record
+                the <code>check</code> job's duration in the PR.
+              </span>
+            </li>
+            <li>
+              <input type="checkbox" id="t3s6" /><span class="label">
+                <strong>Commit</strong>
+                <code>ci: run format, lint, typecheck and every test suite</code
+                >.
+              </span>
+            </li>
+          </ol>
+        </section>
+      </section>
+
+      <section class="block">
+        <h2>Task 4: Wire protocol version and <code>/version</code></h2>
+        <section class="task">
+          <p class="files">
+            Create <code>packages/server/src/wire-version.ts</code>,
+            <code>packages/server/test/wire-version.test.ts</code>,
+            <code>packages/client/test/wire-version.test.ts</code> · Modify
+            <code>packages/server/src/protocol.ts</code>,
+            <code>packages/server/src/server.ts:228</code> and
+            <code>:3850</code>,
+            <code>packages/client/src/client.ts:285-295</code>,
+            <code>packages/cli/src/serve.ts:63</code>,
+            <code>ARCHITECTURE.md</code>, <code>CHANGELOG.md</code>
+          </p>
+          <dl class="io">
+            <dt>Produces</dt>
+            <dd>
+              <code>PROTOCOL_VERSION = 1</code>,
+              <code>PROTOCOL_HEADER = 'x-thaddeus-protocol'</code> and
+              <code>SERVER_VERSION_HEADER = 'x-thaddeus-version'</code>,
+              exported from <code>@thaddeus.run/server/protocol</code>.
+              <code>ServerConfig.version?: string</code>, default
+              <code>'unknown'</code>. <code>GET /version</code> returns
+              <code>{ version: string; protocol: number }</code>, which Task 7
+              reads.
+            </dd>
+          </dl>
+          <ol class="steps">
+            <li>
+              <input type="checkbox" id="t4s1" /><span class="label">
+                <strong>Write the failing server tests</strong> in
+                <code>packages/server/test/wire-version.test.ts</code>, using
+                the in-process <code>createServer</code> setup the other server
+                tests use:
+                <pre><code>test('GET /version returns the server version and protocol', ...)
+  // status 200, body { version: '9.9.9-test', protocol: PROTOCOL_VERSION }
+test('every response carries the protocol and version headers', ...)
+  // GET /repos and a 404 path both have x-thaddeus-protocol: '1'
+  // and x-thaddeus-version: '9.9.9-test'
+test('request without the header succeeds', ...)
+  // pre-protocol clients and lazythad: GET /repos is 200
+test('mismatched header returns 426 before authentication', ...)
+  // x-thaddeus-protocol: '2' on a signed POST is 426 with
+  // { serverProtocol: 1, clientProtocol: '2' } and an error naming both;
+  // an unsigned POST gets the same 426, not a 401</code></pre>
+              </span>
+            </li>
+            <li>
+              <input type="checkbox" id="t4s2" /><span class="label">
+                <strong>Run them and watch them fail</strong>:
+                <code>moon run server:test -- wire-version</code>.
+              </span>
+            </li>
+            <li>
+              <input type="checkbox" id="t4s3" /><span class="label">
+                <strong>Implement.</strong> Constants in
+                <code>wire-version.ts</code>, re-exported from
+                <code>protocol.ts</code>. In <code>fetch</code>, check the
+                header first, before <code>/metrics</code>, quotas, body reads
+                and authentication; serve <code>GET /version</code> next to
+                <code>/metrics</code>. Add both headers to every response,
+                including errors and the 426. <code>serve.ts</code> passes
+                <code>version: VERSION</code>. Any header value other than
+                exactly <code>String(PROTOCOL_VERSION)</code> is a mismatch.
+              </span>
+            </li>
+            <li>
+              <input type="checkbox" id="t4s4" /><span class="label">
+                <strong>Write the failing client tests</strong> in
+                <code>packages/client/test/wire-version.test.ts</code> with an
+                injected fetch:
+                <pre><code>test('sends x-thaddeus-protocol on every request', ...)
+test('a 426 names both protocols and which side to update', ...)
+  // serverProtocol 2 -&gt; message says to update the CLI;
+  // serverProtocol 0 -&gt; message says the server is older
+test('a server without the header is accepted', ...)</code></pre>
+              </span>
+            </li>
+            <li>
+              <input type="checkbox" id="t4s5" /><span class="label">
+                <strong>Implement the client side</strong> by wrapping
+                <code>fetchImpl</code> once where <code>#fetch</code> is
+                assigned: send the header on a copy of each request, and turn a
+                426 carrying <code>serverProtocol</code> into a
+                <code>ClientResponseError</code> with status 426 and the
+                side-aware message.
+              </span>
+            </li>
+            <li>
+              <input type="checkbox" id="t4s6" /><span class="label">
+                <strong>Run both packages</strong>:
+                <code>moon run server:test client:test cli:test</code> all pass,
+                then
+                <code
+                  >moon run server:typecheck client:typecheck
+                  cli:typecheck</code
+                >.
+              </span>
+            </li>
+            <li>
+              <input type="checkbox" id="t4s7" /><span class="label">
+                <strong>Document the bump rule</strong> in
+                <code>ARCHITECTURE.md</code>: raise
+                <code>PROTOCOL_VERSION</code> when a change to request signing,
+                routes or DTOs breaks an older client or server, and add a
+                <strong>Breaking:</strong> CHANGELOG note. Add an Unreleased
+                CHANGELOG entry for <code>/version</code> and the header.
+              </span>
+            </li>
+            <li>
+              <input type="checkbox" id="t4s8" /><span class="label">
+                <strong>Exercise the real path.</strong> Start
+                <code>bun packages/cli/src/bin.ts serve</code> on a temporary
+                data directory, <code>curl -i</code> <code>/version</code> and
+                <code>/repos</code>, and send one request with
+                <code>x-thaddeus-protocol: 2</code>. Record the three responses
+                in the PR.
+              </span>
+            </li>
+            <li>
+              <input type="checkbox" id="t4s9" /><span class="label">
+                <strong>Commit</strong>
+                <code
+                  >feat(server): add a wire protocol version and GET
+                  /version</code
+                >.
+              </span>
+            </li>
+          </ol>
+        </section>
+      </section>
+
+      <section class="block">
+        <h2>Task 5: Nightly release channel</h2>
+        <section class="task">
+          <p class="files">
+            Create <code>packages/cli/scripts/nightly-version.ts</code>,
+            <code>packages/cli/scripts/set-release-version.ts</code>,
+            <code>packages/cli/test/nightly-version.test.ts</code> · Modify
+            <code>packages/cli/scripts/check-release-version.ts</code>,
+            <code>.github/workflows/release.yml</code>, <code>install.sh</code>,
+            <code>docs/getting-started.md</code>, <code>CHANGELOG.md</code>
+          </p>
+          <dl class="io">
+            <dt>Consumes</dt>
+            <dd>
+              The file list <code>check-release-version.ts</code> already
+              validates.
+            </dd>
+            <dt>Produces</dt>
+            <dd>
+              <code
+                >nightlyVersion(base: string, date: Date, run: number):
+                string</code
+              >
+              and
+              <code
+                >setReleaseVersion(root: string, version: string):
+                Promise&lt;string[]&gt;</code
+              >, both also runnable as scripts.
+            </dd>
+          </dl>
+          <ol class="steps">
+            <li>
+              <input type="checkbox" id="t5s1" /><span class="label">
+                <strong>Write the failing tests</strong>:
+                <pre><code>test('bumps the patch and stamps the UTC date and run', () =&gt;
+  expect(nightlyVersion('0.1.10-alpha', new Date('2026-10-17T23:30:00Z'), 42))
+    .toBe('0.1.11-nightly.20261017.42'));
+test('accepts a plain base', () =&gt;
+  expect(nightlyVersion('1.2.3', new Date('2026-01-02T00:00:00Z'), 7))
+    .toBe('1.2.4-nightly.20260102.7'));
+test('rejects a malformed base', () =&gt;
+  expect(() =&gt; nightlyVersion('v1.2', new Date(), 1)).toThrow());
+test('setReleaseVersion makes the version check pass for the new tag', ...)
+  // build the fixture repo the existing version.test.ts uses, set
+  // '0.1.11-nightly.20261017.42', then the checker passes with
+  // THADDEUS_RELEASE_TAG=v0.1.11-nightly.20261017.42
+test('setReleaseVersion touches only the local lazythad entry in Cargo.lock', ...)</code></pre>
+              </span>
+            </li>
+            <li>
+              <input type="checkbox" id="t5s2" /><span class="label">
+                <strong>Run them and watch them fail</strong>:
+                <code>bun test packages/cli/test/nightly-version.test.ts</code>.
+              </span>
+            </li>
+            <li>
+              <input type="checkbox" id="t5s3" /><span class="label">
+                <strong>Implement both scripts.</strong> Export the
+                version-bearing file list from
+                <code>check-release-version.ts</code> so the checker and the
+                setter cannot drift. CLI forms:
+                <code
+                  >bun packages/cli/scripts/nightly-version.ts --base &lt;v&gt;
+                  --date &lt;iso&gt; --run &lt;n&gt;</code
+                >
+                prints the version;
+                <code
+                  >bun packages/cli/scripts/set-release-version.ts
+                  &lt;version&gt;</code
+                >
+                rewrites the files and lists them.
+              </span>
+            </li>
+            <li>
+              <input type="checkbox" id="t5s4" /><span class="label">
+                <strong>Extend <code>release.yml</code>.</strong>
+                <ul>
+                  <li>
+                    Triggers: add <code>schedule: cron '23 */6 * * *'</code>.
+                    Dispatch inputs: <code>tag</code> becomes optional; add
+                    <code>channel</code> (<code>release</code> or
+                    <code>nightly</code>, default <code>release</code>) and
+                    <code>dry_run</code> (boolean, default <code>false</code>).
+                  </li>
+                  <li>
+                    Concurrency: group <code>release-nightly</code> or
+                    <code>release</code>,
+                    <code>cancel-in-progress: false</code>.
+                  </li>
+                  <li>
+                    Preflight for nightly: a scheduled run skips, with output
+                    <code>skip=true</code> and every later job gated on it,
+                    unless <code>main</code> has commits after the newest
+                    <code>-nightly.</code> release tag. A dispatched nightly
+                    skips that gate. Compute the version from
+                    <code>packages/cli/package.json</code>, the run's UTC date
+                    and <code>github.run_number</code>.
+                  </li>
+                  <li>
+                    Every building job runs
+                    <code>set-release-version.ts "$VERSION"</code> after
+                    checkout when the channel is nightly, so
+                    <code>root:version-check</code> and the binary
+                    <code>--version</code> checks hold unchanged.
+                  </li>
+                  <li>
+                    Publish nightly with
+                    <code
+                      >gh release create "$TAG" --target "$SHA" --prerelease
+                      --latest=false</code
+                    >, title
+                    <code
+                      >Thaddeus nightly &lt;version&gt; (&lt;short
+                      sha&gt;)</code
+                    >
+                    and a body that says it is untested and links the compare
+                    view from the previous nightly.
+                  </li>
+                  <li>
+                    A guard step fails the run if a nightly would publish
+                    without <code>--prerelease</code> or to any npm dist-tag
+                    other than <code>nightly</code>.
+                  </li>
+                  <li>
+                    <code>dry_run</code> builds and verifies, then skips the
+                    release and npm jobs.
+                  </li>
+                  <li>
+                    Fix the alpha release notes to install
+                    <code>@thaddeus.run/cli@alpha</code> and
+                    <code>@thaddeus.run/lazythad@alpha</code>.
+                  </li>
+                </ul>
+              </span>
+            </li>
+            <li>
+              <input type="checkbox" id="t5s5" /><span class="label">
+                <strong>Teach <code>install.sh</code> the channel.</strong>
+                <code>THADDEUS_CHANNEL=nightly</code> resolves the newest
+                release whose tag contains <code>-nightly.</code> from
+                <code>/releases?per_page=30</code>.
+                <code>THADDEUS_VERSION</code> still wins, and the default path
+                is unchanged. Check it with
+                <code
+                  >THADDEUS_CHANNEL=nightly THADDEUS_INSTALL=$(mktemp -d) sh
+                  install.sh</code
+                >
+                once a nightly exists, and with the default channel now.
+              </span>
+            </li>
+            <li>
+              <input type="checkbox" id="t5s6" /><span class="label">
+                <strong>Document nightlies</strong> in
+                <code>docs/getting-started.md</code>: the two ways to install
+                one, that nightlies talk to the same servers as alpha builds,
+                and that a protocol mismatch now fails with a message naming
+                both versions. Add a CHANGELOG entry.
+              </span>
+            </li>
+            <li>
+              <input type="checkbox" id="t5s7" /><span class="label">
+                <strong>Verify.</strong>
+                <code
+                  >moon run cli:test root:version-check root:version-test</code
+                >
+                passes. After pushing,
+                <code
+                  >gh workflow run release.yml --ref
+                  feature/contribution-triage-and-nightly -f channel=nightly -f
+                  dry_run=true</code
+                >
+                builds every artifact and reports the nightly version from each
+                binary. A real nightly publish waits for the owner's go-ahead.
+              </span>
+            </li>
+            <li>
+              <input type="checkbox" id="t5s8" /><span class="label">
+                <strong>Commit</strong>
+                <code>ci(release): add a scheduled nightly channel</code>.
+              </span>
+            </li>
+          </ol>
+        </section>
+      </section>
+
+      <section class="block">
+        <h2>Task 6: Project skills</h2>
+        <section class="task">
+          <p class="files">
+            Create <code>.agents/skills/contribution-triage/SKILL.md</code>,
+            <code>.agents/skills/verify-thaddeus/SKILL.md</code>, symlink
+            <code>.claude/skills</code> → <code>../.agents/skills</code> ·
+            Modify <code>.gitignore</code>, <code>AGENTS.md</code> · Delete
+            <code>.agents/skills/.gitkeep</code>
+          </p>
+          <dl class="io">
+            <dt>Consumes</dt>
+            <dd>
+              Task 1's <code>CONTRIBUTING.md</code> anchors and Task 2's
+              <code>TRIAGE_EXEMPTIONS.td</code> and
+              <code>triage:*</code> labels.
+            </dd>
+          </dl>
+          <ol class="steps">
+            <li>
+              <input type="checkbox" id="t6s1" /><span class="label">
+                <strong>Adapt <code>contribution-triage</code></strong> from
+                t3code's skill at <code>2fae0f9</code>. Trusted repository
+                <code>thaddeus-run/thaddeus</code>. The review handoff applies
+                <code>triage:eligible</code> instead of
+                <code>macroscope-review</code>. Drop the Macroscope section and
+                the two t3 PR examples. Keep the fail-closed policy load, dry
+                run versus enforcement, recheck-before-mutation and
+                closure-comment rules intact.
+              </span>
+            </li>
+            <li>
+              <input type="checkbox" id="t6s2" /><span class="label">
+                <strong>Write <code>verify-thaddeus</code></strong
+                >, the counterpart of <code>test-t3-app</code>. Description:
+                exercise a CLI, server or client change through the real CLI
+                against an isolated local server, covering the user path,
+                restart recovery and a second identity. The body gives exact
+                commands:
+                <ul>
+                  <li>
+                    Run each identity with its own
+                    <code>HOME=$(mktemp -d)</code>; the CLI reads
+                    <code>homedir()</code>
+                    (<code>packages/cli/src/bin.ts:16</code>).
+                  </li>
+                  <li>
+                    Run
+                    <code
+                      >thaddeus serve --port &lt;free port&gt; --data &lt;temp
+                      dir&gt;</code
+                    >. Never use the real <code>~/.config/thaddeus</code> or
+                    <code>ams1.thaddeus.run</code>.
+                  </li>
+                  <li>
+                    Follow the getting-started flow, then section 6's grant for
+                    the second identity.
+                  </li>
+                  <li>
+                    Restart: stop only the server PID you started, start it
+                    again on the same <code>--data</code>, and repeat the read.
+                  </li>
+                  <li>
+                    Record observed output and tear down only your own
+                    processes.
+                  </li>
+                </ul>
+                Run every command in the skill once and correct the skill
+                wherever reality differs.
+              </span>
+            </li>
+            <li>
+              <input type="checkbox" id="t6s3" /><span class="label">
+                <strong>Wire them up.</strong>
+                <code>ln -s ../.agents/skills .claude/skills</code>; add
+                <code>!.claude/skills</code> after <code>.claude/*</code> in
+                <code>.gitignore</code>; name both skills in the
+                <code>AGENTS.md</code> Skills section.
+              </span>
+            </li>
+            <li>
+              <input type="checkbox" id="t6s4" /><span class="label">
+                <strong>Verify.</strong>
+                <code>git check-ignore .claude/skills</code> prints nothing,
+                <code>git ls-files -s .claude/skills</code> shows mode
+                <code>120000</code>, and
+                <code>ls .claude/skills/*/SKILL.md</code> lists both files.
+              </span>
+            </li>
+            <li>
+              <input type="checkbox" id="t6s5" /><span class="label">
+                <strong>Commit</strong>
+                <code
+                  >docs(skills): add contribution-triage and verify-thaddeus
+                  skills</code
+                >.
+              </span>
+            </li>
+          </ol>
+        </section>
+      </section>
+
+      <section class="block">
+        <h2>Task 7: <code>thaddeus triage</code></h2>
+        <section class="task">
+          <p class="files">
+            Create <code>packages/cli/src/triage.ts</code>,
+            <code>packages/cli/src/triage-playbook.ts</code>,
+            <code>.github/triage/PLAYBOOK.md</code>,
+            <code>.github/ISSUE_TEMPLATE/via-triage.yml</code>,
+            <code>packages/cli/test/triage.test.ts</code> · Modify
+            <code>packages/cli/src/run.ts</code>,
+            <code>packages/cli/src/help.ts</code>
+          </p>
+          <dl class="io">
+            <dt>Consumes</dt>
+            <dd>Task 4's <code>GET /version</code>.</dd>
+            <dt>Produces</dt>
+            <dd>
+              <code
+                >buildTriageContext(env: TriageEnv): Promise&lt;string&gt;</code
+              >
+              and
+              <code
+                >runTriage(argv: string[], deps: TriageDeps):
+                Promise&lt;number&gt;</code
+              >.
+            </dd>
+          </dl>
+          <ol class="steps">
+            <li>
+              <input type="checkbox" id="t7s1" /><span class="label">
+                <strong>Write the failing tests</strong>:
+                <pre><code>test('the bundled playbook matches .github/triage/PLAYBOOK.md byte for byte', ...)
+test('context never contains the seed', ...)
+  // fixture HOME with an identity; context.md and prompt.md never
+  // contain the seed bytes or the seed file's contents
+test('context records an unreachable server instead of throwing', ...)
+test('with no agent on PATH it prints both file paths and exits 0', ...)
+test('with both agents and no TTY it asks for --agent and exits 2', ...)</code></pre>
+              </span>
+            </li>
+            <li>
+              <input type="checkbox" id="t7s2" /><span class="label">
+                <strong>Run them and watch them fail</strong>:
+                <code>bun test packages/cli/test/triage.test.ts</code>.
+              </span>
+            </li>
+            <li>
+              <input type="checkbox" id="t7s3" /><span class="label">
+                <strong>Write the playbook</strong> adapted from t3code's
+                <code>.github/triage/PLAYBOOK.md</code> at <code>2fae0f9</code>.
+                Ask the user what went wrong; read <code>context.md</code>; ask
+                which version and which server the problem happened on; check
+                out that release tag into a scratch directory; investigate;
+                search <code>thaddeus-run/thaddeus</code> issues; offer outcomes
+                without patching Thaddeus source; file a
+                <code>via-triage</code> issue only after an explicit yes; redact
+                secrets and home paths; prefer commenting on a duplicate.
+              </span>
+            </li>
+            <li>
+              <input type="checkbox" id="t7s4" /><span class="label">
+                <strong
+                  >Implement
+                  <code>thaddeus triage [--agent claude|codex]</code>.</strong
+                >
+                <ul>
+                  <li>
+                    Write
+                    <code
+                      >&lt;home&gt;/.config/thaddeus/triage/&lt;ISO
+                      timestamp&gt;/context.md</code
+                    >
+                    and <code>prompt.md</code>, a seed paragraph plus the
+                    playbook.
+                  </li>
+                  <li>
+                    The context records:
+                    <ul>
+                      <li>
+                        the triage CLI version, labelled "the thaddeus that ran
+                        this command; the bug may have happened on another
+                        build"
+                      </li>
+                      <li>OS, arch, runtime and executable path</li>
+                      <li>
+                        the configured server URL and its
+                        <code>/version</code> result or error
+                      </li>
+                      <li>the identity's public DID</li>
+                      <li>
+                        the working copy's repository, branch and head when run
+                        inside one
+                      </li>
+                      <li>
+                        config paths, with the seed path marked "never read this
+                        file"
+                      </li>
+                    </ul>
+                  </li>
+                  <li>
+                    Agent choice:
+                    <ul>
+                      <li><code>--agent</code> wins.</li>
+                      <li>
+                        Otherwise detect <code>claude</code> and
+                        <code>codex</code> on PATH.
+                      </li>
+                      <li>
+                        With both and a TTY, ask; with both and no TTY, exit 2.
+                      </li>
+                      <li>With none, print both paths and exit 0.</li>
+                    </ul>
+                  </li>
+                  <li>
+                    Launch the agent interactively in the scratch directory with
+                    the single argument
+                    <code
+                      >Read the file prompt.md in this directory and follow its
+                      instructions.</code
+                    >
+                  </li>
+                  <li>Add the command to <code>help.ts</code>.</li>
+                </ul>
+              </span>
+            </li>
+            <li>
+              <input type="checkbox" id="t7s5" /><span class="label">
+                <strong>Add <code>via-triage.yml</code></strong> adapted from
+                t3code's form, with label <code>via-triage</code>. Its Version
+                field asks for the build the problem happened on, not the triage
+                CLI.
+              </span>
+            </li>
+            <li>
+              <input type="checkbox" id="t7s6" /><span class="label">
+                <strong>Verify.</strong>
+                <code>moon run cli:test cli:typecheck</code> passes. Run
+                <code
+                  >HOME=$(mktemp -d) bun packages/cli/src/bin.ts triage</code
+                >
+                with no agent on PATH and read the two files it wrote.
+              </span>
+            </li>
+            <li>
+              <input type="checkbox" id="t7s7" /><span class="label">
+                <strong>Commit</strong>
+                <code
+                  >feat(cli): add thaddeus triage to hand a broken setup to your
+                  own agent</code
+                >.
+              </span>
+            </li>
+          </ol>
+        </section>
+      </section>
+
+      <section class="block">
+        <h2>Settings only the owner can change</h2>
+        <p>
+          None of these are files. Each needs the owner's go-ahead because it
+          changes how the public repository or a hosted service behaves. The
+          <code>gh</code> commands can run from here on request.
+        </p>
+        <div class="table-scroll">
+          <table>
+            <thead>
+              <tr>
+                <th>Setting</th>
+                <th>Why</th>
+                <th>How</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>Enable Discussions with an Ideas category</td>
+                <td>
+                  The issue chooser and <code>CONTRIBUTING.md</code> send
+                  feature requests there.
+                </td>
+                <td>
+                  <code>gh repo edit --enable-discussions</code>, then add the
+                  category in the UI
+                </td>
+              </tr>
+              <tr>
+                <td>Enable private vulnerability reporting</td>
+                <td><code>SECURITY.md</code> points at it; it is off today.</td>
+                <td>
+                  <code
+                    >gh api -X PUT
+                    repos/thaddeus-run/thaddeus/private-vulnerability-reporting</code
+                  >
+                </td>
+              </tr>
+              <tr>
+                <td>
+                  Ruleset on <code>main</code> requiring <code>CI passed</code>
+                </td>
+                <td>
+                  <code>main</code> has no protection, so a red PR can merge.
+                </td>
+                <td>
+                  Settings, Rules, with 0 required approvals as t3code uses
+                </td>
+              </tr>
+              <tr>
+                <td>Deploy <code>ams1</code> from releases, not every push</td>
+                <td>
+                  Today a merge reaches users before CI finishes and ahead of
+                  any CLI.
+                </td>
+                <td>
+                  Fly dashboard, or a deploy job gated on <code>CI passed</code>
+                </td>
+              </tr>
+              <tr>
+                <td>Point npm <code>latest</code> at the newest alpha</td>
+                <td>
+                  <code>latest</code> is <code>0.1.0-alpha</code>, so a bare
+                  install gets a build that cannot talk to today's server.
+                </td>
+                <td>
+                  <code
+                    >npm dist-tag add @thaddeus.run/cli@0.1.10-alpha
+                    latest</code
+                  >, same for lazythad
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section class="block">
+        <h2>Left out on purpose</h2>
+        <p>
+          Desktop signing and notarized preview builds, mobile EAS and APK
+          mirroring, Vercel web previews and the channel-routing proxy, the AUR
+          packages, Discord announcements, Blacksmith runners, Macroscope, and
+          t3code's model ban. Thaddeus ships none of the products these serve. A
+          separate nightly server is also out: two servers on one storage
+          directory is the multi-node case the architecture contract says is
+          unsafe until THA-15, THA-68 and THA-69 land.
+        </p>
+      </section>
+
+      <section class="block">
+        <h2>Sequencing</h2>
+        <p class="legend">
+          <span><span class="tier tier-s">S</span> do first</span>
+          <span><span class="tier tier-a">A</span> do after S lands</span>
+          <span><span class="tier tier-b">B</span> nice to have</span>
+        </p>
+        <div class="table-scroll">
+          <table>
+            <thead>
+              <tr>
+                <th>#</th>
+                <th>Task</th>
+                <th>Tier</th>
+                <th>Why it lands here</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td class="num">1</td>
+                <td><span class="name">contribution-policy</span></td>
+                <td><span class="tier tier-s">S</span></td>
+                <td>Every later file links its anchors.</td>
+              </tr>
+              <tr>
+                <td class="num">2</td>
+                <td><span class="name">vouch-and-labels</span></td>
+                <td><span class="tier tier-s">S</span></td>
+                <td>Creates the labels the forms and skill use.</td>
+              </tr>
+              <tr>
+                <td class="num">3</td>
+                <td><span class="name">ci-gates</span></td>
+                <td><span class="tier tier-s">S</span></td>
+                <td>Tasks 4, 5 and 7 should land under full CI.</td>
+              </tr>
+              <tr>
+                <td class="num">4</td>
+                <td><span class="name">wire-version</span></td>
+                <td><span class="tier tier-a">A</span></td>
+                <td>Nightlies are only safe once mismatches fail clearly.</td>
+              </tr>
+              <tr>
+                <td class="num">5</td>
+                <td><span class="name">nightly-channel</span></td>
+                <td><span class="tier tier-a">A</span></td>
+                <td>Depends on Task 4.</td>
+              </tr>
+              <tr>
+                <td class="num">6</td>
+                <td><span class="name">project-skills</span></td>
+                <td><span class="tier tier-a">A</span></td>
+                <td>Reads Task 1's anchors and Task 2's lists.</td>
+              </tr>
+              <tr>
+                <td class="num">7</td>
+                <td><span class="name">thaddeus-triage</span></td>
+                <td><span class="tier tier-b">B</span></td>
+                <td>
+                  Reads Task 4's <code>/version</code>; useful once outside
+                  users exist.
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <p class="progress">
+        <b><span id="done">0</span></b> of <span id="total">0</span> steps
+        complete
+      </p>
+    </div>
+    <script>
+      // Progress counter. Inline only — external script src is rejected by postplan.
+      var boxes = document.querySelectorAll('ol.steps input[type=checkbox]');
+      var doneEl = document.getElementById('done');
+      document.getElementById('total').textContent = String(boxes.length);
+      function refresh() {
+        var n = 0;
+        boxes.forEach(function (b) {
+          if (b.checked) n++;
+        });
+        doneEl.textContent = String(n);
+      }
+      boxes.forEach(function (b) {
+        b.addEventListener('change', refresh);
+      });
+      refresh();
+    </script>
+  </body>
+</html>
