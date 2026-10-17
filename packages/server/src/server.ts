@@ -114,6 +114,11 @@ import {
   type SignedHeaders,
   verifyRequest as verifySignedEnvelope,
 } from './sign';
+import {
+  PROTOCOL_HEADER,
+  PROTOCOL_VERSION,
+  SERVER_VERSION_HEADER,
+} from './wire-version';
 
 export { DEFAULT_MAX_REQUEST_BODY_BYTES } from './limits';
 
@@ -227,6 +232,9 @@ function attestationRateLimit(value: number | undefined): number {
 
 export interface ServerConfig extends LimitConfig {
   quotas?: QuotaConfig;
+  // Release version reported by GET /version and the x-thaddeus-version
+  // response header. Defaults to 'unknown' for embedders that do not set it.
+  version?: string;
   backend: Backend & ReplayNonceBackend;
   // Largest request body accepted by application routes. Bun hosts use one
   // additional sentinel byte so the streamed guard can observe the boundary.
@@ -453,6 +461,12 @@ export function createServer(config: ServerConfig): Server {
   };
   const limits = resolveLimits(config);
   const { maxRequestBodyBytes } = limits;
+  const serverVersion = config.version ?? 'unknown';
+  if (typeof serverVersion !== 'string' || serverVersion.length === 0)
+    throw new TypeError('invalid server version');
+  // Fail at construction, not on every response, if the version cannot be
+  // carried in an HTTP header.
+  new Headers({ [SERVER_VERSION_HEADER]: serverVersion });
   if (
     config.reviewLimits !== undefined &&
     (config.reviewLimits === null ||
@@ -3908,6 +3922,13 @@ export function createServer(config: ServerConfig): Server {
           await cancelBody(req.body);
           // Process-local observability remains available during recovery faults.
           if (path === '/metrics' && req.method === 'GET') return metrics();
+          // The version probe also stays up while recovery faults block quotas.
+          if (path === '/version' && req.method === 'GET') {
+            return json(200, {
+              version: serverVersion,
+              protocol: PROTOCOL_VERSION,
+            });
+          }
           await quotas.ready();
         }
 
@@ -4141,40 +4162,72 @@ export function createServer(config: ServerConfig): Server {
       }
     },
   };
+  /** Adds the protocol and server version headers to every outgoing response. */
+  const withWireHeaders = (response: Response): Response => {
+    response.headers.set(PROTOCOL_HEADER, String(PROTOCOL_VERSION));
+    response.headers.set(SERVER_VERSION_HEADER, serverVersion);
+    return response;
+  };
+  /**
+   * Builds the 426 for a request whose x-thaddeus-protocol header is present
+   * but not the exact protocol this server speaks. It is sent before routing so
+   * a mismatched client gets a clear upgrade message instead of a signature or
+   * body error.
+   */
+  const protocolMismatch = (clientProtocol: string): Response =>
+    json(426, {
+      error: `protocol mismatch: this server speaks protocol ${PROTOCOL_VERSION} (thaddeus ${serverVersion}) and the client sent ${clientProtocol}. Install a thaddeus CLI that speaks protocol ${PROTOCOL_VERSION}.`,
+      serverProtocol: PROTOCOL_VERSION,
+      clientProtocol,
+    });
+  /** Routes one request and turns quota failures into their stable responses. */
+  const handleRequest = async (req: Request): Promise<Response> => {
+    try {
+      return await server.fetch(req);
+    } catch (error) {
+      if (!(error instanceof QuotaError)) throw error;
+      quotas.outcomes[error.code]++;
+      const status =
+        error.code === 'repository_exists'
+          ? 409
+          : error.code === 'repository_not_found'
+            ? 404
+            : error.code === 'quota_storage_unavailable'
+              ? 503
+              : error.code.endsWith('rate_limited')
+                ? 429
+                : error.code === 'quota_batch_too_large'
+                  ? 413
+                  : 403;
+      return new Response(
+        JSON.stringify({ error: error.code, code: error.code }),
+        {
+          status,
+          headers: {
+            'content-type': 'application/json',
+            'cache-control': 'no-store',
+            ...(error.retryAfter === undefined
+              ? {}
+              : { 'retry-after': String(error.retryAfter) }),
+          },
+        }
+      );
+    }
+  };
   return {
     ...server,
     async fetch(req: Request): Promise<Response> {
-      try {
-        return await server.fetch(req);
-      } catch (error) {
-        if (!(error instanceof QuotaError)) throw error;
-        quotas.outcomes[error.code]++;
-        const status =
-          error.code === 'repository_exists'
-            ? 409
-            : error.code === 'repository_not_found'
-              ? 404
-              : error.code === 'quota_storage_unavailable'
-                ? 503
-                : error.code.endsWith('rate_limited')
-                  ? 429
-                  : error.code === 'quota_batch_too_large'
-                    ? 413
-                    : 403;
-        return new Response(
-          JSON.stringify({ error: error.code, code: error.code }),
-          {
-            status,
-            headers: {
-              'content-type': 'application/json',
-              'cache-control': 'no-store',
-              ...(error.retryAfter === undefined
-                ? {}
-                : { 'retry-after': String(error.retryAfter) }),
-            },
-          }
-        );
+      // Compare synchronously: awaiting before routing would let a streamed
+      // body start flowing before the handlers decide whether to read it.
+      const clientProtocol = req.headers.get(PROTOCOL_HEADER);
+      if (
+        clientProtocol !== null &&
+        clientProtocol !== String(PROTOCOL_VERSION)
+      ) {
+        await cancelBody(req.body);
+        return withWireHeaders(protocolMismatch(clientProtocol));
       }
+      return withWireHeaders(await handleRequest(req));
     },
   };
 }

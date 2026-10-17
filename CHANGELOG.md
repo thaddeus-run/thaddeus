@@ -16,6 +16,14 @@ All notable changes to Thaddeus. Format follows
   launchers, the TUI, and the active README. Release builds use the verified
   tag's commit and check downloaded binary versions before publication.
 
+- A wire protocol version. Servers answer `GET /version` with
+  `{ version, protocol }` and stamp every response with `x-thaddeus-protocol`
+  and `x-thaddeus-version`. The client sends `x-thaddeus-protocol` on every
+  request; a mismatch gets a 426 before authentication and a message that says
+  whether to update the CLI or the server. Requests without the header, such as
+  `lazythad`, still work. `ARCHITECTURE.md` states when to raise
+  `PROTOCOL_VERSION`.
+
 - THA-6 / THA-24: owner-signed scoped reviewer capabilities, reviewer-only veto
   submission, durable revocation and withdrawal history, per-reviewer limits,
   and client/CLI management. Review authority grants no code upload or land

@@ -50,6 +50,8 @@ import {
   encodeDelegation,
   encodeRelease,
   encodeReviewRecord,
+  PROTOCOL_HEADER,
+  PROTOCOL_VERSION,
   type RepoPolicyRecord,
   signRequest,
 } from '@thaddeus.run/server/protocol';
@@ -212,6 +214,44 @@ export interface ReputationImportOutcome {
 // compatible with both the injected server handler and the global fetch.
 type FetchLike = (req: Request) => Promise<Response>;
 
+/**
+ * Wraps a fetch so every request declares the wire protocol this client speaks
+ * and a 426 protocol mismatch becomes a ClientResponseError that says which
+ * side to update. The header goes on a copy, so callers' requests stay intact;
+ * servers that predate the header simply ignore it.
+ */
+function withWireProtocol(inner: FetchLike): FetchLike {
+  return async (req: Request): Promise<Response> => {
+    const headers = new Headers(req.headers);
+    headers.set(PROTOCOL_HEADER, String(PROTOCOL_VERSION));
+    const res = await inner(new Request(req, { headers }));
+    if (res.status !== 426) return res;
+    // Read a clone so a 426 that is not ours still flows to the caller intact.
+    const details = await res
+      .clone()
+      .json()
+      .catch(() => undefined);
+    const serverProtocol = (details as { serverProtocol?: unknown } | undefined)
+      ?.serverProtocol;
+    if (
+      typeof serverProtocol !== 'number' ||
+      !Number.isSafeInteger(serverProtocol) ||
+      serverProtocol === PROTOCOL_VERSION
+    ) {
+      return res;
+    }
+    const remedy =
+      serverProtocol > PROTOCOL_VERSION
+        ? 'update the CLI'
+        : 'the server is older than this CLI, so update the server or install an older CLI';
+    throw new ClientResponseError(
+      `the server speaks thaddeus protocol ${serverProtocol} and this CLI speaks ${PROTOCOL_VERSION}; ${remedy}`,
+      426,
+      details as Record<string, unknown>
+    );
+  };
+}
+
 interface HeadResponse {
   readonly view: string;
   readonly head: HeadRecordWire;
@@ -292,7 +332,7 @@ export class Client {
   ) {
     this.#server = server.replace(/\/+$/, '');
     this.#identity = identity;
-    this.#fetch = fetchImpl;
+    this.#fetch = withWireProtocol(fetchImpl);
   }
 
   async createRepo(name: string): Promise<{ name: string; owner: string }> {

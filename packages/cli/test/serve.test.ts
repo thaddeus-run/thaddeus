@@ -10,6 +10,7 @@ import {
   REQUEST_SKEW_MS,
   signRequest,
 } from '@thaddeus.run/server';
+import { PROTOCOL_VERSION } from '@thaddeus.run/server/protocol';
 import { publicDid } from '@thaddeus.run/store';
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
@@ -18,6 +19,7 @@ import { join } from 'node:path';
 
 import { run } from '../src/run';
 import { startServer } from '../src/serve';
+import { VERSION } from '../src/version';
 
 beforeAll(async () => {
   await ready();
@@ -88,6 +90,24 @@ describe('startServer', () => {
         repos: [],
         owners: {},
         nextCursor: null,
+      });
+    } finally {
+      await s.stop();
+    }
+  });
+
+  test('reports the CLI version and wire protocol on GET /version', async () => {
+    const s = startServer({
+      dataDir: mkdtempSync(join(tmp, 'data-version-')),
+      port: 0,
+    });
+    try {
+      const res = await fetch(`${s.url}/version`);
+      expect(res.status).toBe(200);
+      expect(res.headers.get('x-thaddeus-version')).toBe(VERSION);
+      expect(await res.json()).toEqual({
+        version: VERSION,
+        protocol: PROTOCOL_VERSION,
       });
     } finally {
       await s.stop();
