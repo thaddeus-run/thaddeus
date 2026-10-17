@@ -35,6 +35,22 @@ All notable changes to Thaddeus. Format follows
   `packages/cli/scripts/set-release-version.ts` rewrites every file the
   release-version check validates, from the list that check exports.
 
+- Alpha release tags deploy the hosted server. After the GitHub release of a
+  pushed `v*` tag, the `deploy` job in `release.yml` deploys ams1 (Fly app
+  `thaddeus`) from the release commit. It then waits until
+  `https://ams1.thaddeus.run/version` reports the release version. Fly's GitHub
+  auto-deploy is off. `FLY_API_TOKEN` lives in the `production` environment,
+  which only `v*` tags may use, so nightlies, dry runs and dispatched releases
+  do not deploy. `docs/deploy.md` keeps a manual `fly deploy` fallback.
+
+- Alpha releases also move npm `latest` for `@thaddeus.run/cli` and
+  `@thaddeus.run/lazythad` up to the new version, never backwards, so a bare
+  `npm i -g @thaddeus.run/cli` installs the newest alpha. Nightlies never touch
+  `latest`. `gh workflow run release.yml -f channel=promote -f tag=<tag>` points
+  `latest` at an existing release without rebuilding and may move it back. The
+  workflow now pins npm 11.21.1, which can move dist-tags over trusted
+  publishing. Each package needs "Allow npm dist-tag" enabled once on npmjs.com.
+
 - THA-6 / THA-24: owner-signed scoped reviewer capabilities, reviewer-only veto
   submission, durable revocation and withdrawal history, per-reviewer limits,
   and client/CLI management. Review authority grants no code upload or land
