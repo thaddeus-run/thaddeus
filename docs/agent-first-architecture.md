@@ -133,8 +133,9 @@ The proposed shape follows. Every point is still a proposal.
 - A stale graph cannot authorize a destructive edit.
 - TypeScript and JavaScript are the proposed first language family.
 
-[THA-113](https://linear.app/thaddeus-run/issue/THA-113) decides the rest, and
-nothing here pre-empts it. It decides whether the graph or the journal is
+[THA-113](https://linear.app/thaddeus-run/issue/THA-113), mirrored on GitHub as
+[#169](https://github.com/thaddeus-run/thaddeus/issues/169), decides the rest,
+and nothing here pre-empts it. It decides whether the graph or the journal is
 authoritative. It decides how comments, formatting, unsupported syntax,
 generated code and external edits survive without loss. It defines stable symbol
 identity, the preconditions that guard a stale index, and rollback. The existing
