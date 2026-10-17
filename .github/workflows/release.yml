@@ -40,13 +40,21 @@ on:
         type: boolean
         default: false
 
-# Nightlies, scheduled or dispatched, wait for each other so two never build or
-# publish out of order. Tag releases have their own group, so a nightly never
-# holds one up. A running publish is never cancelled.
+# GitHub keeps one running and one pending run per group, so the groups are as
+# narrow as each case allows. A running publish is never cancelled.
+#   1. Nightly dry run: release-nightly-dry-<branch>, so a branch build never
+#      queues behind or cancels a scheduled nightly.
+#   2. Scheduled or publishing nightly: release-nightly, so two nightlies never
+#      build or publish out of order.
+#   3. Release channel: release-<tag> (the tag input, or the pushed tag), so
+#      different tags run in parallel and two runs of one tag take turns.
+# On a schedule every inputs.* is empty, so case 1 is false and case 2 matches.
 concurrency:
   group:
-    ${{ (github.event_name == 'schedule' || inputs.channel == 'nightly') &&
-    'release-nightly' || 'release' }}
+    ${{ inputs.channel == 'nightly' && inputs.dry_run == true &&
+    format('release-nightly-dry-{0}', github.ref_name) || (github.event_name ==
+    'schedule' || inputs.channel == 'nightly') && 'release-nightly' ||
+    format('release-{0}', inputs.tag || github.ref_name) }}
   cancel-in-progress: false
 
 permissions:
