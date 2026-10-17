@@ -14,21 +14,66 @@ interface CargoLock {
   package?: { name?: string; version?: unknown; source?: string }[];
 }
 
+/**
+ * One place that carries the shared release version. `kind` says how to read
+ * and rewrite it, `path` is relative to the repository root.
+ */
+export type ReleaseVersionSite =
+  | { readonly kind: 'manifest'; readonly path: string }
+  | {
+      readonly kind: 'bun-lock';
+      readonly path: 'bun.lock';
+      readonly workspace: string;
+    }
+  | { readonly kind: 'cargo-toml'; readonly path: 'lazythad/Cargo.toml' }
+  | { readonly kind: 'cargo-lock'; readonly path: 'lazythad/Cargo.lock' }
+  | { readonly kind: 'readme'; readonly path: 'README' };
+
+/** The active README status line; group 1 is the version. */
+export const README_STATUS: RegExp = /^STATUS: PRE-ALPHA \(v([^\r\n)]+)\)$/m;
+
+// List every version-bearing site of the shared release. This checker reads
+// the list and set-release-version.ts rewrites it, so the two cannot disagree
+// about which files belong to a release. packages/* is discovered, so a new
+// package joins the release (and its bun.lock entry) automatically.
+export function releaseVersionSites(root: string): ReleaseVersionSite[] {
+  const packages = readdirSync(join(root, 'packages'), { withFileTypes: true })
+    .filter((entry) => entry.isDirectory())
+    .map((entry) => `packages/${entry.name}`);
+  return [
+    ...packages.flatMap((dir): ReleaseVersionSite[] => [
+      { kind: 'manifest', path: `${dir}/package.json` },
+      { kind: 'bun-lock', path: 'bun.lock', workspace: dir },
+    ]),
+    { kind: 'manifest', path: 'npm/thaddeus/package.json' },
+    { kind: 'manifest', path: 'npm/lazythad/package.json' },
+    { kind: 'cargo-toml', path: 'lazythad/Cargo.toml' },
+    { kind: 'cargo-lock', path: 'lazythad/Cargo.lock' },
+    { kind: 'readme', path: 'README' },
+  ];
+}
+
 // Check every member of the shared release before a build or publication can drift.
 export function checkReleaseVersions(
   root: string,
   expectedTag?: string
 ): string {
   const errors: string[] = [];
+  // Parse each file once, so a malformed file reports one error however many
+  // sites it holds.
+  const parsed = new Map<string, unknown>();
   const read = <T>(path: string, parse: (text: string) => T): T | undefined => {
+    if (parsed.has(path)) return parsed.get(path) as T | undefined;
+    let value: T | undefined;
     try {
-      return parse(readFileSync(join(root, path), 'utf8'));
+      value = parse(readFileSync(join(root, path), 'utf8'));
     } catch (error) {
       errors.push(
         `${path}: ${error instanceof Error ? error.message : String(error)}`
       );
-      return undefined;
     }
+    parsed.set(path, value);
+    return value;
   };
   const expected = read<Manifest>(
     'packages/cli/package.json',
@@ -39,48 +84,54 @@ export function checkReleaseVersions(
       [...errors, 'packages/cli/package.json: missing version'].join('\n')
     );
   }
-  const compare = (path: string, actual: unknown): void => {
+  const compare = (label: string, actual: unknown): void => {
     if (actual !== expected)
       errors.push(
-        `${path}: expected ${expected}, got ${JSON.stringify(actual)}`
+        `${label}: expected ${expected}, got ${JSON.stringify(actual)}`
       );
   };
-  const lock = read('bun.lock', (text) => Bun.JSONC.parse(text) as BunLock);
-  for (const entry of readdirSync(join(root, 'packages'), {
-    withFileTypes: true,
-  })) {
-    if (!entry.isDirectory()) continue;
-    const path = `packages/${entry.name}/package.json`;
-    compare(path, read<Manifest>(path, JSON.parse)?.version);
-    compare(
-      `bun.lock workspaces[packages/${entry.name}]`,
-      lock?.workspaces?.[`packages/${entry.name}`]?.version
-    );
+  for (const site of releaseVersionSites(root)) {
+    switch (site.kind) {
+      case 'manifest':
+        compare(site.path, read<Manifest>(site.path, JSON.parse)?.version);
+        break;
+      case 'bun-lock':
+        compare(
+          `bun.lock workspaces[${site.workspace}]`,
+          read(site.path, (text) => Bun.JSONC.parse(text) as BunLock)
+            ?.workspaces?.[site.workspace]?.version
+        );
+        break;
+      case 'cargo-toml':
+        compare(
+          `${site.path} package.version`,
+          read<CargoManifest>(site.path, Bun.TOML.parse)?.package?.version
+        );
+        break;
+      case 'cargo-lock': {
+        const lock = read<CargoLock>(site.path, Bun.TOML.parse);
+        const local = Array.isArray(lock?.package)
+          ? lock.package.filter(
+              (entry) => entry.name === 'lazythad' && entry.source === undefined
+            )
+          : [];
+        if (local.length !== 1) {
+          errors.push(
+            `${site.path}: expected one local lazythad, got ${local.length}`
+          );
+        } else {
+          compare(`${site.path} local lazythad`, local[0]?.version);
+        }
+        break;
+      }
+      case 'readme':
+        compare(
+          'README active STATUS',
+          read(site.path, (text) => text)?.match(README_STATUS)?.[1]
+        );
+        break;
+    }
   }
-  for (const name of ['thaddeus', 'lazythad']) {
-    const path = `npm/${name}/package.json`;
-    compare(path, read<Manifest>(path, JSON.parse)?.version);
-  }
-  const cargo = read<CargoManifest>('lazythad/Cargo.toml', Bun.TOML.parse);
-  compare('lazythad/Cargo.toml package.version', cargo?.package?.version);
-  const cargoLock = read<CargoLock>('lazythad/Cargo.lock', Bun.TOML.parse);
-  const local = Array.isArray(cargoLock?.package)
-    ? cargoLock.package.filter(
-        (entry) => entry.name === 'lazythad' && entry.source === undefined
-      )
-    : [];
-  if (local.length !== 1) {
-    errors.push(
-      `lazythad/Cargo.lock: expected one local lazythad, got ${local.length}`
-    );
-  } else {
-    compare('lazythad/Cargo.lock local lazythad', local[0]?.version);
-  }
-  const readme = read('README', (text) => text);
-  compare(
-    'README active STATUS',
-    readme?.match(/^STATUS: PRE-ALPHA \(v([^\r\n)]+)\)$/m)?.[1]
-  );
   if (expectedTag !== undefined && expectedTag !== `v${expected}`) {
     errors.push(
       `release tag ${JSON.stringify(expectedTag)} does not match v${expected}`

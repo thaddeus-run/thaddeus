@@ -6,6 +6,8 @@
 #
 # Env:
 #   THADDEUS_VERSION   release tag to install (default: latest)
+#   THADDEUS_CHANNEL   `nightly` installs the newest nightly build of main
+#                      instead (THADDEUS_VERSION still wins)
 #   THADDEUS_INSTALL   install prefix (default: ~/.thaddeus; binaries go in bin/)
 set -eu
 
@@ -63,7 +65,21 @@ ext=""
 
 # --- resolve the release tag ---
 version="${THADDEUS_VERSION:-}"
-if [ -z "$version" ]; then
+channel="${THADDEUS_CHANNEL:-}"
+case "$channel" in
+  "" | nightly) ;;
+  *) err "unknown THADDEUS_CHANNEL '$channel'; use nightly or leave it unset" ;;
+esac
+if [ -z "$version" ] && [ "$channel" = nightly ]; then
+  # Nightlies are prereleases, so releases/latest never returns one. The API
+  # lists releases newest first; take the first tag containing -nightly.
+  body=$(fetch "https://api.github.com/repos/$REPO/releases?per_page=30") ||
+    err "could not reach the GitHub releases API"
+  version=$(printf '%s' "$body" | grep -o '"tag_name":[[:space:]]*"[^"]*"' |
+    sed -E 's/.*"([^"]+)"$/\1/' | grep -e '-nightly\.' | head -n 1)
+  [ -n "$version" ] ||
+    err "no nightly release among the 30 newest releases; unset THADDEUS_CHANNEL to install the latest release"
+elif [ -z "$version" ]; then
   body=$(fetch "https://api.github.com/repos/$REPO/releases/latest") ||
     err "could not reach the GitHub releases API"
   version=$(printf '%s' "$body" | grep -m1 '"tag_name"' |

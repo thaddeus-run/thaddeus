@@ -24,6 +24,17 @@ All notable changes to Thaddeus. Format follows
   `lazythad`, still work. `ARCHITECTURE.md` states when to raise
   `PROTOCOL_VERSION`.
 
+- A nightly release channel. Every six hours, if `main` has commits after the
+  last nightly, `release.yml` builds it as
+  `<next patch>-nightly.<UTC date>.<run>`, for example
+  `0.1.11-nightly.20261017.42`. It publishes a GitHub prerelease that never
+  becomes the latest release and npm launchers under the `nightly` dist-tag; a
+  guard step fails the run if either would publish any other way. Dispatches
+  take `channel` and `dry_run` inputs. `THADDEUS_CHANNEL=nightly` makes
+  `install.sh` install the newest nightly. The new
+  `packages/cli/scripts/set-release-version.ts` rewrites every file the
+  release-version check validates, from the list that check exports.
+
 - THA-6 / THA-24: owner-signed scoped reviewer capabilities, reviewer-only veto
   submission, durable revocation and withdrawal history, per-reviewer limits,
   and client/CLI management. Review authority grants no code upload or land
@@ -43,6 +54,12 @@ All notable changes to Thaddeus. Format follows
 
 - `blockOnVeto` requires an explicit reviewer allowlist. Empty means trust
   nobody. Hosts may supply a predicate for scope and lifecycle checks.
+
+### Fixed
+
+- GitHub release notes now install the npm launchers with the release's
+  dist-tag, such as `@thaddeus.run/cli@alpha`. The bare package names resolve to
+  npm's `latest` tag, which still points at 0.1.0-alpha.
 
 ### Documentation
 
