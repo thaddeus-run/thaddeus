@@ -77,6 +77,17 @@ Also run the affected typecheck and focused tests for the changed area, e.g.
 AGENTS/skill-only changes, formatting and linting are sufficient unless the edit
 touches executable code or package config.
 
+## Pull requests
+
+- Title: a Conventional Commits title in plain language, such as
+  `fix(cli): report a clear error when the server is unreachable`.
+- Body: the problem in a sentence or two, then the change, then the verification
+  you observed. Record what you saw, not what should happen (see
+  [section 9 of the architecture contract](docs/agent-first-architecture.md#9-verification-standard)).
+- Follow `.github/pull_request_template.md`, including `Closes #N` for the
+  GitHub issue and the Linear ID if there is one.
+- End with the model and harness that did the work.
+
 ## Code Readability
 
 - When adding non-trivial helpers, prefer a short comment directly above the
