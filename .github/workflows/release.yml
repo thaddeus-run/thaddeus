@@ -3,20 +3,41 @@ name: Release
 # The nightly channel is adapted from pingdotgg/t3code's release.yml and
 # .github/scripts/check-nightly-release.cjs at 2fae0f9.
 #
-# On a v* tag: cross-build the CLI (bun --compile, every OS/arch from one runner)
-# and the TUI (cargo, one native runner per target), publish a GitHub Release with
-# the binaries + checksums, then publish the npm launcher packages (if NPM_TOKEN
-# is set). Manual runs take the tag as an input.
+# Three channels. A tag push is release, a schedule is nightly, and a dispatch
+# picks one with the channel input.
 #
-# Nightly: every six hours, if main has commits after the newest release whose
+# release: a pushed v* tag, or a dispatch with the tag input. Cross-build the
+# CLI (bun --compile, every OS/arch from one runner) and the TUI (cargo, one
+# native runner per target), publish a GitHub Release with the binaries +
+# checksums, then publish the npm launchers over OIDC trusted publishing to the
+# version's dist-tag (alpha for 0.1.11-alpha) and move npm `latest` up to that
+# version. The release path never moves `latest` down; only promote does, on
+# purpose.
+#
+# Deploy rule: only a tag push deploys ams1 (Fly app `thaddeus`), after its
+# GitHub release. FLY_API_TOKEN lives in the `production` environment, which
+# admits v* tag refs only, so a dispatched release (whose ref is a branch such as
+# main) would be refused; the deploy job skips it, as it skips every nightly and
+# dry run. A release run only moves ams1 forward: if ams1 already reports a
+# newer version, the deploy is skipped. A rollback is a manual `fly deploy`.
+# Fly's own GitHub auto-deploy is off.
+#
+# nightly: every six hours, if main has commits after the newest release whose
 # tag contains -nightly., build main as <next patch>-nightly.<UTC date>.<run>.
 # set-release-version.ts rewrites the shared version in each job's checkout, so
 # the same version checks hold. A nightly is a GitHub prerelease that never
-# becomes "latest", and its npm launchers go to the `nightly` dist-tag. A
-# dispatched nightly skips the new-commits check and must run on main unless
-# dry_run is set. dry_run builds and verifies, then skips both publish jobs.
-# "Re-run all jobs" and "Re-run failed jobs" both resume the same nightly: its
-# tag and version stay, and the release and npm jobs finish what is missing.
+# becomes "latest", and its npm launchers go to the `nightly` dist-tag; it never
+# touches npm `latest`. A dispatched nightly skips the new-commits check and
+# must run on main unless dry_run is set. "Re-run all jobs" and "Re-run failed
+# jobs" both resume the same nightly: its tag and version stay, and the release
+# and npm jobs finish what is missing.
+#
+# promote: a dispatch with the tag input (e.g. v0.1.10-alpha) points npm
+# `latest` for both launchers at that existing release without building
+# anything, and may move `latest` backwards. Only the npm-promote job runs.
+#
+# dry_run builds and verifies, then skips the GitHub release, npm and the
+# deploy. A promote dry run checks the release and npm, then moves nothing.
 on:
   push:
     # Nightly tags come from the release job below. Excluding them keeps a
@@ -29,16 +50,18 @@ on:
     inputs:
       tag:
         description:
-          'Existing tag to release (e.g. v0.1.0-alpha); release channel only'
+          'Existing tag (e.g. v0.1.10-alpha); release and promote channels only'
         required: false
       channel:
         description:
-          'release publishes the tag above; nightly builds the selected branch'
+          'release publishes the tag above; nightly builds the selected branch;
+          promote points npm latest at the tag above'
         type: choice
-        options: [release, nightly]
+        options: [release, nightly, promote]
         default: release
       dry_run:
-        description: 'Build and verify only; skip the GitHub release and npm'
+        description:
+          'Verify only; skip the GitHub release and npm (promote moves no tag)'
         type: boolean
         default: false
 
@@ -48,8 +71,9 @@ on:
 #      queues behind or cancels a scheduled nightly.
 #   2. Scheduled or publishing nightly: release-nightly, so two nightlies never
 #      build or publish out of order.
-#   3. Release channel: release-<tag> (the tag input, or the pushed tag), so
-#      different tags run in parallel and two runs of one tag take turns.
+#   3. Release or promote channel: release-<tag> (the tag input, or the pushed
+#      tag), so different tags run in parallel and two runs of one tag, such
+#      as its release and a promote of it, take turns.
 # On a schedule every inputs.* is empty, so case 1 is false and case 2 matches.
 concurrency:
   group:
@@ -65,6 +89,10 @@ permissions:
 jobs:
   preflight:
     name: Verify the selected release
+    # A promote builds nothing. A job whose needs were skipped is skipped too,
+    # so every job below except npm-promote, which needs nothing, stays off.
+    # On a push or schedule inputs.channel is empty, so preflight runs.
+    if: inputs.channel != 'promote'
     runs-on: ubuntu-latest
     outputs:
       channel: ${{ steps.channel.outputs.channel }}
@@ -80,8 +108,11 @@ jobs:
       sha: ${{ steps.metadata.outputs.sha }}
       release_flags: ${{ steps.plan.outputs.release_flags }}
       npm_tag: ${{ steps.plan.outputs.npm_tag }}
-      # 'true' unless the run skipped or is a dry run; the release and npm jobs
-      # run only then.
+      # 'true' on the release channel alone: the npm-latest job then moves npm
+      # `latest` up to this version.
+      move_latest: ${{ steps.plan.outputs.move_latest }}
+      # 'true' unless the run skipped or is a dry run; the release, npm and
+      # deploy jobs run only then.
       publish: ${{ steps.plan.outputs.publish }}
     steps:
       - name: Select the channel
@@ -259,8 +290,8 @@ jobs:
           version=$(bun -p "require('./packages/cli/package.json').version")
           echo "version=$version" >> "$GITHUB_OUTPUT"
           echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
-      # The release and npm jobs publish with these outputs and nothing else,
-      # so the guard below checks exactly what they will do.
+      # The release, npm and npm-latest jobs publish with these outputs and
+      # nothing else, so the guard below checks exactly what they will do.
       - name: Plan the publication
         id: plan
         if: steps.gate.outputs.skip != 'true'
@@ -290,10 +321,16 @@ jobs:
           if [ "$CHANNEL" = nightly ]; then
             release_flags="--prerelease --latest=false"
           fi
+          # An alpha publishes to `alpha`, so a bare `npm i @thaddeus.run/cli`
+          # would keep resolving to an old `latest`. Releases move it up;
+          # nightlies never touch it.
+          move_latest=false
+          if [ "$CHANNEL" = release ]; then move_latest=true; fi
           publish=true
           if [ "$DRY_RUN" = true ]; then publish=false; fi
           echo "npm_tag=$npm_tag" >> "$GITHUB_OUTPUT"
           echo "release_flags=$release_flags" >> "$GITHUB_OUTPUT"
+          echo "move_latest=$move_latest" >> "$GITHUB_OUTPUT"
           echo "publish=$publish" >> "$GITHUB_OUTPUT"
       - name: Guard the nightly publication
         if: steps.gate.outputs.skip == 'false'
@@ -301,6 +338,7 @@ jobs:
           TAG: ${{ steps.nightly.outputs.tag }}
           RELEASE_FLAGS: ${{ steps.plan.outputs.release_flags }}
           NPM_TAG: ${{ steps.plan.outputs.npm_tag }}
+          MOVE_LATEST: ${{ steps.plan.outputs.move_latest }}
         shell: bash
         run: |
           set -euo pipefail
@@ -320,7 +358,10 @@ jobs:
           if [ "$NPM_TAG" != nightly ]; then
             refuse "npm would publish to dist-tag '$NPM_TAG', not nightly"
           fi
-          echo "$TAG publishes as a prerelease, never latest, to npm dist-tag nightly"
+          if [ "$MOVE_LATEST" != false ]; then
+            refuse "the npm-latest job would move dist-tag latest"
+          fi
+          echo "$TAG publishes as a prerelease, never latest, to npm dist-tag nightly, and leaves npm latest alone"
 
   cli:
     name: Build CLI binaries
@@ -609,18 +650,25 @@ jobs:
         with:
           node-version: '24'
           registry-url: 'https://registry.npmjs.org'
-      # Trusted publishing (OIDC) needs npm >= 11.5.1. PINNED, not @latest: an
-      # npm@latest install on the runner shipped without its `sigstore` module,
-      # so `npm publish --provenance` died with MODULE_NOT_FOUND (v0.1.2-alpha's
-      # first publish run). Verify the install can actually load provenance
-      # support before publishing, so a broken npm fails THIS step, loudly.
+      # Trusted publishing (OIDC) needs npm >= 11.5.1, and moving a dist-tag
+      # over OIDC needs >= 11.21.0. PINNED, not @latest: an npm@latest install
+      # on the runner shipped without its `sigstore` module, so `npm publish
+      # --provenance` died with MODULE_NOT_FOUND (v0.1.2-alpha's first publish
+      # run). Verify the install is the pin and can actually load provenance
+      # support, and the semver module that orders versions for `latest`,
+      # before publishing, so a broken npm fails THIS step, loudly. npm-latest
+      # and npm-promote repeat this step.
       - name: Update npm (pinned)
         run: |
-          npm install -g npm@11.5.1
-          npm --version
+          npm install -g npm@11.21.1
+          actual=$(npm --version)
+          echo "npm $actual"
+          [ "$actual" = 11.21.1 ] || { echo "npm on PATH is $actual, not the pinned 11.21.1"; exit 1; }
           node -e "require(process.argv[1])" \
             "$(npm root -g)/npm/node_modules/libnpmpublish/lib/provenance.js" \
             || { echo "npm install is missing provenance support (sigstore)"; exit 1; }
+          node -e "require(process.argv[1])" "$(npm root -g)/npm/node_modules/semver" \
+            || { echo "npm install is missing its semver module"; exit 1; }
       - name: Publish thaddeus + lazythad launchers
         env:
           EXPECTED_VERSION: ${{ needs.preflight.outputs.version }}
@@ -660,3 +708,291 @@ jobs:
               exit 1
             )
           done
+
+  # Moves npm `latest` up to a release once both launchers are published, in
+  # a job of its own so the publish is never queued behind it or cancelled.
+  # It shares the npm-latest group with npm-promote, so two release runs, or
+  # a release and a promote, never read `latest` at the same time and then
+  # overwrite each other: the script reads it only once this job holds the
+  # group. GitHub keeps one pending job per group and cancels the older one,
+  # so a newer pending move can replace a pending one. Nothing goes
+  # backwards, since the replacement reads `latest` fresh. If the replaced
+  # move was for a newer version, or a promote replaced it, re-running this
+  # job (it shows as cancelled) restores the forward move.
+  npm-latest:
+    name: Move npm latest
+    needs: [preflight, npm]
+    if:
+      needs.preflight.outputs.move_latest == 'true' &&
+      needs.preflight.outputs.publish == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      # OIDC identity for moving the dist-tags, as in the npm job.
+      id-token: write
+    concurrency:
+      group: npm-latest
+      cancel-in-progress: false
+    steps:
+      # This workflow's own commit, so the script matches the workflow even
+      # when a dispatched release names an older tag.
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          registry-url: 'https://registry.npmjs.org'
+      # The npm job's step: OIDC dist-tag moves need npm >= 11.21.0.
+      - name: Update npm (pinned)
+        run: |
+          npm install -g npm@11.21.1
+          actual=$(npm --version)
+          echo "npm $actual"
+          [ "$actual" = 11.21.1 ] || { echo "npm on PATH is $actual, not the pinned 11.21.1"; exit 1; }
+          node -e "require(process.argv[1])" \
+            "$(npm root -g)/npm/node_modules/libnpmpublish/lib/provenance.js" \
+            || { echo "npm install is missing provenance support (sigstore)"; exit 1; }
+          node -e "require(process.argv[1])" "$(npm root -g)/npm/node_modules/semver" \
+            || { echo "npm install is missing its semver module"; exit 1; }
+      # Only ever moves `latest` up, so re-running an older tag leaves a newer
+      # `latest` alone. Without "Allow npm dist-tag" this fails after the
+      # publish, and what was published stays published.
+      - name: Move npm latest up to this release
+        env:
+          VERSION: ${{ needs.preflight.outputs.version }}
+        run: .github/scripts/npm-latest.sh forward "$VERSION"
+
+  # channel=promote points npm `latest` at an existing release without
+  # building anything, for example once "Allow npm dist-tag" is enabled or to
+  # roll `latest` back. It needs no other job and preflight skips itself on a
+  # promote, so this is the only job that runs.
+  npm-promote:
+    name: Point npm latest at an existing release
+    if: inputs.channel == 'promote'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      # OIDC identity for moving the dist-tags, as in the npm job.
+      id-token: write
+    # Shared with npm-latest, so promotes and release moves of `latest` take
+    # turns; see there.
+    concurrency:
+      group: npm-latest
+      cancel-in-progress: false
+    steps:
+      - name: Check the tag and its GitHub release
+        id: target
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ inputs.tag }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          refuse() {
+            echo "refusing to promote '$TAG': $*" >&2
+            exit 1
+          }
+          [ -n "$TAG" ] || refuse "a promote dispatch needs the tag input"
+          # v<semver> as semver.org defines it, minus build metadata, which an
+          # npm version never carries.
+          num='(0|[1-9][0-9]*)'
+          id='(0|[1-9][0-9]*|[0-9]*[A-Za-z-][0-9A-Za-z-]*)'
+          re="^v$num\\.$num\\.$num(-$id(\\.$id)*)?\$"
+          [[ "$TAG" =~ $re ]] || refuse "it is not v<semver>"
+          case "$TAG" in *-nightly*) refuse "a nightly never becomes npm latest" ;; esac
+          if ! state=$(gh release view "$TAG" --repo "$GITHUB_REPOSITORY" \
+            --json isDraft,isPrerelease --jq '"\(.isDraft) \(.isPrerelease)"'); then
+            refuse "it has no GitHub release"
+          fi
+          case "$state" in
+            "false false") ;;
+            "true "*) refuse "its GitHub release is a draft" ;;
+            "false true") refuse "its GitHub release is a prerelease" ;;
+            *) refuse "unexpected GitHub release state: $state" ;;
+          esac
+          echo "version=${TAG#v}" >> "$GITHUB_OUTPUT"
+      # This workflow's commit, for the script and the launcher names.
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          registry-url: 'https://registry.npmjs.org'
+      # The npm job's step: OIDC dist-tag moves need npm >= 11.21.0.
+      - name: Update npm (pinned)
+        run: |
+          npm install -g npm@11.21.1
+          actual=$(npm --version)
+          echo "npm $actual"
+          [ "$actual" = 11.21.1 ] || { echo "npm on PATH is $actual, not the pinned 11.21.1"; exit 1; }
+          node -e "require(process.argv[1])" \
+            "$(npm root -g)/npm/node_modules/libnpmpublish/lib/provenance.js" \
+            || { echo "npm install is missing provenance support (sigstore)"; exit 1; }
+          node -e "require(process.argv[1])" "$(npm root -g)/npm/node_modules/semver" \
+            || { echo "npm install is missing its semver module"; exit 1; }
+      # This explicit request may move `latest` backwards, and says so.
+      - name: Point npm latest at the release
+        env:
+          VERSION: ${{ steps.target.outputs.version }}
+          DRY_RUN: ${{ inputs.dry_run }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          args=(promote "$VERSION")
+          if [ "$DRY_RUN" = true ]; then args+=(--dry-run); fi
+          .github/scripts/npm-latest.sh "${args[@]}"
+
+  # Deploys ams1 (https://ams1.thaddeus.run) from the commit every other job
+  # built. Fly's GitHub auto-deploy is off, so this is the only automatic
+  # deploy. It runs for a publishing release-channel tag push alone: the
+  # production environment that holds FLY_API_TOKEN admits only v* tag refs,
+  # and a dispatched release runs on a branch ref (usually main), which the
+  # environment would refuse. Nightlies and dry runs never deploy. A release
+  # run only moves ams1 forward; a rollback is a manual `fly deploy` from the
+  # older tag (docs/deploy.md).
+  deploy:
+    name: Deploy ams1
+    needs: [preflight, release]
+    if:
+      needs.preflight.outputs.channel == 'release' &&
+      needs.preflight.outputs.publish == 'true' && github.event_name == 'push'
+    runs-on: ubuntu-latest
+    environment: production
+    permissions:
+      contents: read
+    # Deploys run one at a time and a running one is never cancelled. GitHub
+    # keeps only the newest pending deploy, so a burst of tags deploys the last.
+    concurrency:
+      group: deploy-production
+      cancel-in-progress: false
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          ref: ${{ needs.preflight.outputs.sha }}
+      # Supplies node and npm's bundled semver package for the check below.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      # "Re-run all jobs" on an older tag's run, or two tags whose builds
+      # finish out of order, would otherwise deploy an older server over the
+      # newer state on /data. So a release run never rolls ams1 back: if ams1
+      # reports a version newer by semver, the deploy and smoke check are
+      # skipped and the job succeeds. The same version deploys again. A 404,
+      # or a 2xx without a semver version, is a server older than the
+      # endpoint, so this deploys. Any other answer (a connection error, a
+      # timeout, a 5xx or a proxy's error page) fails the job rather than
+      # deploy blind over what may be a newer ams1. deploy-production above
+      # serialises deploys, so the answer is not from a deploy in progress.
+      - name: Check ams1 is not newer than this release
+        id: direction
+        env:
+          EXPECTED_VERSION: ${{ needs.preflight.outputs.version }}
+          VERSION_URL: https://ams1.thaddeus.run/version
+        shell: bash
+        run: |
+          set -euo pipefail
+          if ! command -v jq >/dev/null; then
+            echo "jq is not installed on this runner, so the answer from $VERSION_URL cannot be read" >&2
+            exit 1
+          fi
+          semver="$(npm root -g)/npm/node_modules/semver"
+          if ! node -e "require(process.argv[1])" "$semver"; then
+            echo "cannot load npm's semver module from $semver" >&2
+            exit 1
+          fi
+          blind() {
+            echo "cannot read $VERSION_URL ($1); refusing to deploy blind over a possibly newer ams1; re-run this job or deploy by hand from the tag (docs/deploy.md)" >&2
+            exit 1
+          }
+          body=$(mktemp)
+          errors=$(mktemp)
+          status=0
+          code=$(curl -sS --max-time 10 -o "$body" -w '%{http_code}' "$VERSION_URL" 2>"$errors") || status=$?
+          if [ "$status" -ne 0 ]; then
+            blind "$(tr '\n' ' ' <"$errors" | sed 's/ *$//')"
+          fi
+          current=""
+          case "$code" in
+            404) echo "ams1 answers 404, so it predates /version; deploying $EXPECTED_VERSION" ;;
+            2??)
+              current=$(jq -r 'objects | .version // empty | strings' <"$body" 2>/dev/null) || current=""
+              if [ -z "$current" ]; then
+                echo "ams1 answers HTTP $code without a version, so it predates /version; deploying $EXPECTED_VERSION"
+              fi
+              ;;
+            *) blind "HTTP $code" ;;
+          esac
+          deploy=true
+          if [ -n "$current" ]; then
+            # Prints 1, 0 or -1 as this release sorts after, with or before
+            # ams1's version, or "invalid" if ams1's is not semver.
+            cmp=$(node -p 'const s = require(process.argv[1]);
+              s.valid(process.argv[3]) ? s.compare(process.argv[2], process.argv[3]) : "invalid"' \
+              "$semver" "$EXPECTED_VERSION" "$current")
+            case "$cmp" in
+              -1)
+                deploy=false
+                echo "ams1 already runs $current, newer than $EXPECTED_VERSION; skipping the deploy so a release run never rolls ams1 back"
+                ;;
+              0) echo "ams1 already runs $EXPECTED_VERSION; deploying it again" ;;
+              1) echo "ams1 runs $current; deploying $EXPECTED_VERSION" ;;
+              *) echo "ams1 reports '$current', which is not semver; deploying $EXPECTED_VERSION" ;;
+            esac
+          fi
+          echo "deploy=$deploy" >> "$GITHUB_OUTPUT"
+      - uses: superfly/flyctl-actions/setup-flyctl@ed8efb33836e8b2096c7fd3ba1c8afe303ebbff1 # 1.6
+        if: steps.direction.outputs.deploy == 'true'
+      # A missing or rejected token fails here, before anything deploys, with a
+      # message that says where the token lives.
+      - name: Check the Fly deploy token
+        if: steps.direction.outputs.deploy == 'true'
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ -z "$FLY_API_TOKEN" ]; then
+            echo "FLY_API_TOKEN is not set in the production environment" >&2
+            exit 1
+          fi
+          if ! flyctl status --app thaddeus; then
+            echo "FLY_API_TOKEN in the production environment was rejected by Fly" >&2
+            exit 1
+          fi
+      # fly.toml at the repo root names the app, volume and health check.
+      - name: Deploy to Fly
+        if: steps.direction.outputs.deploy == 'true'
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+        run: flyctl deploy --remote-only --app thaddeus
+      # flyctl waits for the health check, which only proves the server
+      # answers. The new machine is serving once /version reports this
+      # release. 19 tries 10 s apart span three minutes.
+      - name: Wait for ams1 to report the release version
+        if: steps.direction.outputs.deploy == 'true'
+        env:
+          EXPECTED_VERSION: ${{ needs.preflight.outputs.version }}
+          VERSION_URL: https://ams1.thaddeus.run/version
+        shell: bash
+        run: |
+          set -euo pipefail
+          if ! command -v jq >/dev/null; then
+            echo "jq is not installed on this runner, so the answer from $VERSION_URL cannot be read" >&2
+            exit 1
+          fi
+          last=""
+          for attempt in $(seq 1 19); do
+            last=$(curl -sS --max-time 10 "$VERSION_URL" 2>&1) || true
+            actual=$(jq -r '.version // empty' <<<"$last" 2>/dev/null) || actual=""
+            if [ "$actual" = "$EXPECTED_VERSION" ]; then
+              echo "ams1 reports $actual after $attempt attempt(s)"
+              exit 0
+            fi
+            if [ "$attempt" -lt 19 ]; then sleep 10; fi
+          done
+          echo "ams1 did not report $EXPECTED_VERSION within 3 minutes; last response from $VERSION_URL: $last" >&2
+          exit 1

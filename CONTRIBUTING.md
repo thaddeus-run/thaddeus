@@ -285,6 +285,29 @@ Nightlies are the one exception. Each nightly job runs
 `bun packages/cli/scripts/set-release-version.ts <version>` on its own checkout
 and never commits the result, so the same checks hold for the nightly version.
 
+### Publishing a release
+
+Pushing a `v*` tag runs `.github/workflows/release.yml`. It builds and checks
+the binaries, publishes the GitHub release and the npm launchers, and deploys
+the hosted server (see [docs/deploy.md](docs/deploy.md#how-ams1-deploys)). An
+alpha release publishes `@thaddeus.run/cli` and `@thaddeus.run/lazythad` under
+the `alpha` dist-tag and also moves npm `latest` up to the new version, so a
+bare `npm i -g @thaddeus.run/cli` installs it. The workflow never moves `latest`
+backwards, and nightlies never touch it.
+
+To point `latest` at an existing release, for example to roll it back, run the
+promote dispatch. It rebuilds nothing and may move `latest` backwards:
+
+```bash
+gh workflow run release.yml -f channel=promote -f tag=v0.1.10-alpha
+```
+
+npm moves a dist-tag over trusted publishing only if the package allows it. A
+package owner must enable "Allow npm dist-tag" once in the trusted publisher
+settings of each package on npmjs.com. Until then the release run publishes and
+then fails with a message that says so. Enable the setting, then run the promote
+dispatch for that tag.
+
 ### Repo conventions
 
 - Agent-facing rules and the verification baseline live in `AGENTS.md`; deeper
