@@ -5,8 +5,14 @@ name: Release
 #
 # On a v* tag: cross-build the CLI (bun --compile, every OS/arch from one runner)
 # and the TUI (cargo, one native runner per target), publish a GitHub Release with
-# the binaries + checksums, then publish the npm launcher packages (if NPM_TOKEN
-# is set). Manual runs take the tag as an input.
+# the binaries + checksums, then publish the npm launcher packages over OIDC
+# trusted publishing. Manual runs take the tag as an input.
+#
+# Deploy rule: only a tag push deploys ams1 (Fly app `thaddeus`), after its
+# GitHub release. FLY_API_TOKEN lives in the `production` environment, which
+# admits v* tag refs only, so a dispatched release (whose ref is a branch such as
+# main) would be refused; the deploy job skips it, as it skips every nightly and
+# dry run. Fly's own GitHub auto-deploy is off.
 #
 # Nightly: every six hours, if main has commits after the newest release whose
 # tag contains -nightly., build main as <next patch>-nightly.<UTC date>.<run>.
@@ -80,8 +86,8 @@ jobs:
       sha: ${{ steps.metadata.outputs.sha }}
       release_flags: ${{ steps.plan.outputs.release_flags }}
       npm_tag: ${{ steps.plan.outputs.npm_tag }}
-      # 'true' unless the run skipped or is a dry run; the release and npm jobs
-      # run only then.
+      # 'true' unless the run skipped or is a dry run; the release, npm and
+      # deploy jobs run only then.
       publish: ${{ steps.plan.outputs.publish }}
     steps:
       - name: Select the channel
@@ -660,3 +666,75 @@ jobs:
               exit 1
             )
           done
+
+  # Deploys ams1 (https://ams1.thaddeus.run) from the commit every other job
+  # built. Fly's GitHub auto-deploy is off, so this is the only automatic
+  # deploy. It runs for a publishing release-channel tag push alone: the
+  # production environment that holds FLY_API_TOKEN admits only v* tag refs,
+  # and a dispatched release runs on a branch ref (usually main), which the
+  # environment would refuse. Nightlies and dry runs never deploy.
+  deploy:
+    name: Deploy ams1
+    needs: [preflight, release]
+    if:
+      needs.preflight.outputs.channel == 'release' &&
+      needs.preflight.outputs.publish == 'true' && github.event_name == 'push'
+    runs-on: ubuntu-latest
+    environment: production
+    permissions:
+      contents: read
+    # Deploys run one at a time and a running one is never cancelled. GitHub
+    # keeps only the newest pending deploy, so a burst of tags deploys the last.
+    concurrency:
+      group: deploy-production
+      cancel-in-progress: false
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          ref: ${{ needs.preflight.outputs.sha }}
+      - uses: superfly/flyctl-actions/setup-flyctl@ed8efb33836e8b2096c7fd3ba1c8afe303ebbff1 # 1.6
+      # A missing or rejected token fails here, before anything deploys, with a
+      # message that says where the token lives.
+      - name: Check the Fly deploy token
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ -z "$FLY_API_TOKEN" ]; then
+            echo "FLY_API_TOKEN is not set in the production environment" >&2
+            exit 1
+          fi
+          if ! flyctl status --app thaddeus; then
+            echo "FLY_API_TOKEN in the production environment was rejected by Fly" >&2
+            exit 1
+          fi
+      # fly.toml at the repo root names the app, volume and health check.
+      - name: Deploy to Fly
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+        run: flyctl deploy --remote-only --app thaddeus
+      # flyctl waits for the health check, which only proves the server
+      # answers. The new machine is serving once /version reports this
+      # release. 19 tries 10 s apart span three minutes.
+      - name: Wait for ams1 to report the release version
+        env:
+          EXPECTED_VERSION: ${{ needs.preflight.outputs.version }}
+          VERSION_URL: https://ams1.thaddeus.run/version
+        shell: bash
+        run: |
+          set -euo pipefail
+          last=""
+          for attempt in $(seq 1 19); do
+            last=$(curl -sS --max-time 10 "$VERSION_URL" 2>&1) || true
+            actual=$(jq -r '.version // empty' <<<"$last" 2>/dev/null) || actual=""
+            if [ "$actual" = "$EXPECTED_VERSION" ]; then
+              echo "ams1 reports $actual after $attempt attempt(s)"
+              exit 0
+            fi
+            if [ "$attempt" -lt 19 ]; then sleep 10; fi
+          done
+          echo "ams1 did not report $EXPECTED_VERSION within 3 minutes; last response from $VERSION_URL: $last" >&2
+          exit 1
