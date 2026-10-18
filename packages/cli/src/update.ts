@@ -135,8 +135,8 @@ export function replaceFile(
   rename: (from: string, to: string) => void = renameSync
 ): void {
   const tmp = `${dest}.update-${process.pid}-${randomBytes(4).toString('hex')}`;
-  writeFileSync(tmp, bytes, { mode: 0o755 });
   try {
+    writeFileSync(tmp, bytes, { mode: 0o755 });
     if (!windows) {
       rename(tmp, dest);
       return;
