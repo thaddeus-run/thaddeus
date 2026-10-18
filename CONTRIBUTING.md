@@ -21,6 +21,11 @@ Focused bug fixes, reliability fixes, performance improvements, and maintenance
 work are the most likely to be accepted. Unsolicited features, opinionated
 rewrites, and unrelated cleanup are not.
 
+Pull requests that touch `ee/` are not accepted from outside the team at the
+moment. That directory is ThadHub, licensed under the Functional Source License
+rather than Apache-2.0 (see `ee/README.md`), and accepting contributions to it
+needs a contributor agreement we do not have yet. Open an issue instead.
+
 Report bugs in issues. Feature requests and proposals belong in
 [Ideas discussions](https://github.com/thaddeus-run/thaddeus/discussions/categories/ideas).
 Report security vulnerabilities privately, as described in the
@@ -317,3 +322,6 @@ dispatch for that tag.
   Naming.
 - Published packages use plain `bun publish`, which runs their moon `prepublish`
   guard chain automatically.
+- Licensing: everything is Apache-2.0 except `ee/`, which is ThadHub under the
+  Functional Source License (`FSL-1.1-ALv2`). The root `LICENSE` states the
+  carve-out; `ee/README.md` says what belongs there.

@@ -45,6 +45,12 @@ APPS:
  - apps/docs     — documentation site (Next.js)
  - apps/landing  — marketing site (TanStack Start)
 
+EE:
+ - ee/           — ThadHub, the hosted product. Source-available under
+                   FSL-1.1-ALv2, not Apache-2.0. See ee/README.md
+
+LICENSE: Apache-2.0 for everything outside ee/ (see LICENSE)
+
 ~~~
 
 SETUP: see CONTRIBUTING.md

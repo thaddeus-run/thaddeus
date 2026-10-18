@@ -88,8 +88,9 @@ Nothing below has shipped.
 [THA-152](https://linear.app/thaddeus-run/issue/THA-152) owns remote workspaces,
 [THA-153](https://linear.app/thaddeus-run/issue/THA-153) owns saves and
 checkpoints, and [THA-155](https://linear.app/thaddeus-run/issue/THA-155) owns
-integration agents. Execution workers and the development interface are private
-ThadHub work.
+integration agents. Execution workers and the development interface are ThadHub
+work, which lives under `ee/` and is source-available under the Functional
+Source License (`ee/LICENSE`) rather than Apache-2.0.
 
 **Workspaces.** A workspace points at an immutable base revision and stores only
 what changed. Each save carries a retry identifier and a sequence number, and
@@ -108,8 +109,8 @@ exact revision, and the shared head advances atomically. Independent
 repositories never wait on a shared landing lock.
 
 **Development interface.** A minimal authenticated ThadHub interface, limited to
-development users, shows five views. This is private product work outside the
-public core.
+development users, shows five views. This is ThadHub product work: it lives
+under `ee/` and is licensed under the Functional Source License, not Apache-2.0.
 
 1. Repository file browsing.
 2. Agents, workspace bases, pending saves and checkpoints.
@@ -169,7 +170,9 @@ The Linear view **Thaddeus build order**, sorted by title ascending, is the
 single source of order. Every title starts with a three-digit number. There are
 no cycles, milestones or due dates. The table copies the order as of 2026-10-16
 for readers without Linear access, and whoever changes the order refreshes it.
-Rows marked "ThadHub, private" are closed-source product work.
+Rows marked "ThadHub, private" are product work that lives under `ee/` and is
+source-available under the Functional Source License (`ee/LICENSE`), not
+Apache-2.0.
 
 | Order | Issue                                                    | Title                                                                                          |
 | ----- | -------------------------------------------------------- | ---------------------------------------------------------------------------------------------- |

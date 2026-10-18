@@ -8,6 +8,11 @@ projects:
   globs:
     - 'packages/*'
     - 'apps/*'
+    # ee/ holds ThadHub projects plus its own LICENSE and README at the top
+    # level; exclude those two files so moon only sees project directories.
+    - 'ee/*'
+    - '!ee/LICENSE'
+    - '!ee/README.md'
     - 'examples/*'
     - 'integration'
   sources:
