@@ -11,6 +11,18 @@ All notable changes to Thaddeus. Format follows
   doing nothing, and its version now follows `packages/cli/package.json` instead
   of a hand-edited copy.
 
+### Documentation
+
+- Decided semantic authority and mixed-edit transactions for THA-113 / #169 in
+  ADR 0005 and `docs/specs/2026-10-18-thaddeus-semantic-authority-design.md`.
+  File content plus a per-workspace change journal is authoritative, and the
+  symbol graph is a projection that can be rebuilt. The design defines lossless
+  handling, symbol identity, stale-graph preconditions, checkpoint binding and
+  rollback, records an observed baseline of the shipped `rename`, and proposes
+  TypeScript and JavaScript as the first language family. Nothing in it is
+  implemented yet. CONTEXT, ARCHITECTURE, section 4 of the architecture contract
+  and the pillar 08 design point to it.
+
 ## [0.1.11-alpha] - 2026-10-18
 
 ### Added

@@ -16,9 +16,12 @@ orchestration once external agents can connect.
 [ADR 0003](docs/adr/0003-trusted-code-processing-service.md) replaces the
 promise that the host cannot read code with a trusted code-processing service
 that keeps scoped authority, encrypted storage, audit records and tenant
-isolation. The sections below describe the shipped substrate. Where a shipped
-guarantee differs from the direction, the shipped one holds until the queue item
-that changes it lands. The
+isolation.
+[ADR 0005](docs/adr/0005-content-journal-is-the-semantic-authority.md) makes
+file content plus a per-workspace change journal the authority for semantic
+editing, with the symbol graph as a projection that can be rebuilt. The sections
+below describe the shipped substrate. Where a shipped guarantee differs from the
+direction, the shipped one holds until the queue item that changes it lands. The
 [architecture contract](docs/agent-first-architecture.md) has the details, and
 its [build queue](docs/agent-first-architecture.md#6-build-queue) sets the order
 of work.
