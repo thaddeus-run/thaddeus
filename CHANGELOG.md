@@ -5,6 +5,8 @@ All notable changes to Thaddeus. Format follows
 
 ## [Unreleased]
 
+## [0.1.11-alpha] - 2026-10-18
+
 ### Added
 
 - Explicit `--actor-kind human|agent:<name>@<version>` declarations for signed
@@ -88,6 +90,10 @@ All notable changes to Thaddeus. Format follows
   missing.
 
 ### Security
+
+- The landing page moved `@tanstack/react-start` from 1.168.25 to 1.168.61, past
+  the cross-site scripting fix for CVE-2026-102989, after Vercel refused to
+  deploy the vulnerable version.
 
 - Require explicit reviewer authority for veto ingestion and recheck grant scope
   and lifecycle during land. Write delegation alone cannot veto. Existing

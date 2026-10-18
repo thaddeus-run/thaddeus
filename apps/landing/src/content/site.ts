@@ -3,7 +3,7 @@
 
 export const site = {
   // TODO: wire to the release version once the landing build reads it.
-  version: 'v0.1.10-alpha',
+  version: 'v0.1.11-alpha',
   // thaddeus.run/install.sh redirects to the raw install script on main; the
   // rule lives in vercel.json.
   installCommand: 'curl -fsSL https://thaddeus.run/install.sh | sh',
