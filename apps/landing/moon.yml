@@ -19,12 +19,16 @@ tasks:
       - '**/*'
       - '!node_modules/**'
       - '!.output/**'
-      - '!.vinxi/**'
+      - '!.vercel/**'
+    # Nitro writes the server and public bundles under .output/ (on Vercel it
+    # writes .vercel/output/ instead, which Vercel picks up on its own).
     outputs:
       - '.output'
 
+  # HOST=0.0.0.0 exposes the dev server beyond loopback, e.g. to review it from
+  # another device over Tailscale. The default stays local-only.
   dev:
-    script: 'vite dev --port "${PORT:-3001}"'
+    script: 'vite dev --port "${PORT:-3001}" --host "${HOST:-localhost}"'
     deps:
       - '^:build'
       - '^:dev'

@@ -1,23 +1,34 @@
 import { createFileRoute } from '@tanstack/react-router';
 import type { ReactNode } from 'react';
 
+import { About } from '@/components/site/about';
+import { Features } from '@/components/site/features';
+import { Footer } from '@/components/site/footer';
+import { Glossary } from '@/components/site/glossary';
+import { Hero } from '@/components/site/hero';
+import { HowItWorks } from '@/components/site/how-it-works';
+import { Ledger } from '@/components/site/ledger';
+import { Nav } from '@/components/site/nav';
+import { Security } from '@/components/site/security';
+
 export const Route = createFileRoute('/')({
   component: LandingPage,
 });
 
 function LandingPage(): ReactNode {
   return (
-    <main className="landing">
-      <h1 className="wordmark">Thaddeus</h1>
-      <p className="deck">
-        Source control is the wrong category. Thaddeus is the one that replaces
-        it — a live, permissioned, agent-native code substrate for an age of
-        secrets, coordinated security, private-by-default work, and a million
-        agents writing code in parallel.
-      </p>
-      <p className="by">
-        A <strong>Thaddeus</strong> project.
-      </p>
-    </main>
+    <div className="mx-auto max-w-[1120px]">
+      <Nav />
+      <main>
+        <Hero />
+        <Ledger />
+        <HowItWorks />
+        <Features />
+        <Security />
+        <Glossary />
+        <About />
+      </main>
+      <Footer />
+    </div>
   );
 }
