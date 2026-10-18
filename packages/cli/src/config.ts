@@ -7,6 +7,16 @@ import { join } from 'node:path';
 // always stays the user's.
 export const HOSTED_SERVER = 'https://ams1.thaddeus.run';
 
+// Which builds `thaddeus update` installs: `release` is the newest tagged
+// release, `nightly` the newest prerelease built from main.
+export type ReleaseChannel = 'release' | 'nightly';
+
+// Whether `s` names a release channel. Guards `--channel` and a hand-edited
+// `channel` in config.json alike.
+export function isReleaseChannel(s: unknown): s is ReleaseChannel {
+  return s === 'release' || s === 'nightly';
+}
+
 // Global, per-user CLI settings — distinct from the per-working-copy config in
 // `.thaddeus/config.json` (workcopy.ts). Lives beside the identity seed so all
 // user-scoped state is under one `~/.config/thaddeus/` dir.
@@ -14,6 +24,9 @@ export interface CliConfig {
   // The default server for `init`/`create`/`clone` when none is passed. Absent until
   // the user runs `thaddeus use`.
   defaultServer?: string;
+  // The channel `thaddeus update` follows. Absent until the user passes
+  // `update --channel`; a binary then stays on the channel it was built from.
+  channel?: ReleaseChannel;
 }
 
 // The per-user config directory: holds `config.json` and the identity seed.
@@ -83,6 +96,7 @@ export function saveCliConfig(home: string, cfg: CliConfig): void {
   });
   const clean: CliConfig = {};
   if (cfg.defaultServer !== undefined) clean.defaultServer = cfg.defaultServer;
+  if (cfg.channel !== undefined) clean.channel = cfg.channel;
   writeFileSync(cliConfigPath(home), `${JSON.stringify(clean, null, 2)}\n`, {
     mode: 0o600,
   });

@@ -72,6 +72,7 @@ import { parseCliActorKind } from './actor-kind';
 import { createAwsKmsAttestationSigner } from './aws-kms';
 import {
   HOSTED_SERVER,
+  isReleaseChannel,
   isServerUrl,
   loadCliConfig,
   noServerHint,
@@ -84,6 +85,7 @@ import { runQuery } from './query';
 import { InitConflictError, initRepository } from './repo-init';
 import { startServer } from './serve';
 import { runTriage, systemTriageDeps } from './triage';
+import { channelOf, runUpdate } from './update';
 import { VERSION } from './version';
 import {
   formatSemanticEvent,
@@ -119,6 +121,9 @@ export interface CliEnv {
   signal?: AbortSignal;
   sleep?: WatchSleep;
   stdin?: () => Promise<string>;
+  // The running executable `thaddeus update` replaces; tests point it at a
+  // throwaway file. Defaults to process.execPath.
+  execPath?: string;
 }
 
 // Detect the `--json` flag a read verb offers for scripting/TUI. Kept simple so
@@ -901,6 +906,42 @@ export async function run(
         saveCliConfig(env.home, { ...cfg, defaultServer: url });
         out(`default server set to ${url}`);
         return 0;
+      }
+      case 'update': {
+        const { values, positionals } = parseArgs({
+          args: [...rest],
+          options: { channel: { type: 'string' }, check: { type: 'boolean' } },
+          allowPositionals: true,
+        });
+        const requested = values.channel;
+        if (
+          positionals.length !== 0 ||
+          (requested !== undefined && !isReleaseChannel(requested))
+        ) {
+          out('usage: thaddeus update [--channel release|nightly] [--check]');
+          return 2;
+        }
+        const cfg = loadCliConfig(env.home);
+        // --channel is remembered, so a later bare `update` stays on it. With
+        // no saved channel, a binary follows the channel it was built from.
+        if (requested !== undefined && requested !== cfg.channel) {
+          saveCliConfig(env.home, { ...cfg, channel: requested });
+          out(`update channel set to ${requested}`);
+        }
+        const channel =
+          requested ??
+          (isReleaseChannel(cfg.channel) ? cfg.channel : channelOf(VERSION));
+        return await runUpdate(
+          {
+            fetchImpl: env.fetchImpl ?? ((req: Request) => fetch(req)),
+            execPath: env.execPath ?? process.execPath,
+            platform: process.platform,
+            arch: process.arch,
+            version: VERSION,
+            out,
+          },
+          { channel, check: values.check === true }
+        );
       }
       case 'repos': {
         const { values } = parseArgs({
