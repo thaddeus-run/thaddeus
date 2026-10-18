@@ -1,0 +1,165 @@
+# Labels each PR type:<prefix> from its Conventional Commits title, so
+# .github/release.yml can group generated release notes. A "!" after the type
+# or scope, or a "BREAKING CHANGE:" footer in the body, also adds type:breaking.
+# A title that does not parse gets no type label and a notice in the log; the
+# contribution policy, not this workflow, decides what to do about it.
+#
+# Runs on pull_request_target so fork PRs get a token that can write labels.
+# That is only safe because this job never checks out, installs or runs PR
+# code: it reads the title and body from the event payload and nothing else.
+# Keep it that way.
+name: PR Type
+
+on:
+  pull_request_target:
+    types: [opened, edited, reopened, synchronize]
+
+# Deny by default; the job asks for what it needs.
+permissions: {}
+
+jobs:
+  label:
+    name: Label PR type
+    runs-on: ubuntu-24.04
+    permissions:
+      issues: write
+      pull-requests: write
+    concurrency:
+      group: pr-type-${{ github.event.pull_request.number }}
+      cancel-in-progress: true
+    steps:
+      - name: Sync PR type label
+        uses: actions/github-script@v8
+        with:
+          script: |
+            const pr = context.payload.pull_request;
+            const issueNumber = pr.number;
+
+            // One label per Conventional Commits type, plus one for breaking
+            // changes. Warm colours for what a reader should look at first.
+            const typeLabels = {
+              feat: { color: "0e8a16", description: "Conventional Commits type: feat (a new capability)." },
+              fix: { color: "d93f0b", description: "Conventional Commits type: fix (a bug fix)." },
+              perf: { color: "fe7d37", description: "Conventional Commits type: perf (a performance change)." },
+              docs: { color: "0075ca", description: "Conventional Commits type: docs (documentation only)." },
+              ci: { color: "5319e7", description: "Conventional Commits type: ci (workflows and automation)." },
+              build: { color: "5319e7", description: "Conventional Commits type: build (build system or dependencies)." },
+              chore: { color: "c5def5", description: "Conventional Commits type: chore (maintenance)." },
+              refactor: { color: "c5def5", description: "Conventional Commits type: refactor (no behaviour change)." },
+              test: { color: "c5def5", description: "Conventional Commits type: test (tests only)." },
+              style: { color: "c5def5", description: "Conventional Commits type: style (formatting only)." },
+              revert: { color: "e4e669", description: "Conventional Commits type: revert." },
+            };
+            const breakingLabel = {
+              name: "type:breaking",
+              color: "b60205",
+              description: "Marked breaking: a ! in the title or a BREAKING CHANGE footer.",
+            };
+            const isTypeLabel = (name) => name.startsWith("type:");
+
+            // "feat(landing)!: ..." -> type feat, breaking. The scope is optional.
+            const match = /^(?<type>[a-z]+)(\([^)]*\))?(?<bang>!)?:\s/.exec(pr.title ?? "");
+            const type = match?.groups?.type;
+            const breaking =
+              match?.groups?.bang === "!" || /^BREAKING[ -]CHANGE:/m.test(pr.body ?? "");
+
+            const wanted = [];
+            if (type !== undefined && typeLabels[type] !== undefined) {
+              wanted.push({ name: `type:${type}`, ...typeLabels[type] });
+            } else {
+              core.notice(
+                `PR #${issueNumber}: title "${pr.title}" has no known Conventional Commits type; no type label applied`,
+              );
+            }
+            if (breaking) {
+              wanted.push(breakingLabel);
+            }
+
+            // Creates the label when it is missing, or fixes its colour and
+            // description when they drifted, so a fresh repository needs no setup.
+            async function ensureLabel(label) {
+              const { name, color, description } = label;
+              let existing;
+              try {
+                ({ data: existing } = await github.rest.issues.getLabel({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  name,
+                }));
+              } catch (error) {
+                if (error.status !== 404) {
+                  throw error;
+                }
+              }
+
+              if (!existing) {
+                try {
+                  await github.rest.issues.createLabel({
+                    owner: context.repo.owner,
+                    repo: context.repo.repo,
+                    name,
+                    color,
+                    description,
+                  });
+                } catch (createError) {
+                  // 422 means a parallel run created the label first.
+                  if (createError.status !== 422) {
+                    throw createError;
+                  }
+                }
+                return;
+              }
+
+              if (existing.color !== color || (existing.description ?? "") !== description) {
+                await github.rest.issues.updateLabel({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  name,
+                  color,
+                  description,
+                });
+              }
+            }
+
+            for (const label of wanted) {
+              await ensureLabel(label);
+            }
+
+            const wantedNames = new Set(wanted.map((label) => label.name));
+            const currentLabels = await github.paginate(github.rest.issues.listLabelsOnIssue, {
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: issueNumber,
+              per_page: 100,
+            });
+
+            for (const label of currentLabels) {
+              if (!isTypeLabel(label.name) || wantedNames.has(label.name)) {
+                continue;
+              }
+              try {
+                await github.rest.issues.removeLabel({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  issue_number: issueNumber,
+                  name: label.name,
+                });
+              } catch (removeError) {
+                if (removeError.status !== 404) {
+                  throw removeError;
+                }
+              }
+            }
+
+            const currentNames = new Set(currentLabels.map((label) => label.name));
+            const missing = [...wantedNames].filter((name) => !currentNames.has(name));
+            if (missing.length > 0) {
+              await github.rest.issues.addLabels({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: issueNumber,
+                labels: missing,
+              });
+            }
+
+            core.info(`PR #${issueNumber}: "${pr.title}" -> ${[...wantedNames].join(", ") || "no type label"}`);

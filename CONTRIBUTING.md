@@ -292,12 +292,17 @@ and never commits the result, so the same checks hold for the nightly version.
 
 ### Publishing a release
 
-Pushing a `v*` tag runs `.github/workflows/release.yml`. It builds and checks
-the binaries, publishes the GitHub release and the npm launchers, and deploys
-the hosted server (see [docs/deploy.md](docs/deploy.md#how-ams1-deploys)). An
-alpha release publishes `@thaddeus.run/cli` and `@thaddeus.run/lazythad` under
-the `alpha` dist-tag and also moves npm `latest` up to the new version, so a
-bare `npm i -g @thaddeus.run/cli` installs it. The workflow never moves `latest`
+Pushing a `v*` tag runs `.github/workflows/release.yml`. Preflight fails unless
+`CHANGELOG.md` has a `## [<version>]` section for the tag, because the release
+page opens with that section; move the `[Unreleased]` entries under a dated
+heading in the version-bump PR. The workflow then builds and checks the
+binaries, publishes the GitHub release (the changelog section, the install
+commands, and GitHub's generated pull-request list grouped by
+`.github/release.yml`) and the npm launchers, and deploys the hosted server (see
+[docs/deploy.md](docs/deploy.md#how-ams1-deploys)). An alpha release publishes
+`@thaddeus.run/cli` and `@thaddeus.run/lazythad` under the `alpha` dist-tag and
+also moves npm `latest` up to the new version, so a bare
+`npm i -g @thaddeus.run/cli` installs it. The workflow never moves `latest`
 backwards, and nightlies never touch it.
 
 To point `latest` at an existing release, for example to roll it back, run the
