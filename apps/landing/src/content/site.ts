@@ -6,7 +6,7 @@ export const site = {
   version: 'v0.1.10-alpha',
   // thaddeus.run/install.sh redirects to the raw install script on main; the
   // rule lives in vercel.json.
-  installCommand: 'curl -fsSL thaddeus.run/install.sh | sh',
+  installCommand: 'curl -fsSL https://thaddeus.run/install.sh | sh',
   contactEmail: 'moritz@thaddeus.run',
   links: {
     docs: 'https://github.com/thaddeus-run/thaddeus/blob/main/docs/getting-started.md',

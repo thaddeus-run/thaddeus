@@ -165,11 +165,23 @@ export function DotLattice({
 
     resize();
     readInk();
+    // Redraw a still frame with fresh ink after a resize or a theme switch.
+    // The animated path reads ink on its own every 30 frames, but the
+    // reduced-motion path draws once and would otherwise keep the old colour.
+    const still = (): void => {
+      readInk();
+      draw(reduced ? 400 : frame);
+    };
     const ro = new ResizeObserver(() => {
       resize();
-      draw(frame);
+      still();
     });
     ro.observe(canvas);
+    const mo = new MutationObserver(still);
+    mo.observe(document.documentElement, {
+      attributes: true,
+      attributeFilter: ['class'],
+    });
     const io = new IntersectionObserver(([entry]) => {
       visible = entry?.isIntersecting ?? true;
     });
@@ -185,6 +197,7 @@ export function DotLattice({
       cancelAnimationFrame(raf);
       ro.disconnect();
       io.disconnect();
+      mo.disconnect();
     };
   }, [shape, reduced]);
 

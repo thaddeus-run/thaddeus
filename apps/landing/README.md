@@ -26,7 +26,7 @@ pauses or holds a single frame when the reader prefers reduced motion.
 ```bash
 CI= moon run landing:dev              # vite dev on PORT (default 3001), loopback only
 CI= HOST=0.0.0.0 moon run landing:dev  # also reachable from other devices (Tailscale)
-moon run landing:build      # production build into dist/
+moon run landing:build      # production build into .output/
 CI= moon run landing:start  # preview the build
 moon run landing:typecheck
 ```

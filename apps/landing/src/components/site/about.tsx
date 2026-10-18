@@ -25,7 +25,9 @@ function Tagline(): ReactNode {
     if (reduced) return undefined;
     let ending = 0;
     let pos = (endings[0] ?? '').length;
-    let deleting = false;
+    // The first ending is already on screen in full, so the cycle starts by
+    // erasing it after the initial hold.
+    let deleting = true;
     let timer = 0;
     const step = (): void => {
       const current = endings[ending] ?? '';
@@ -44,9 +46,7 @@ function Tagline(): ReactNode {
           delay = HOLD_MS;
         }
       }
-      setText(
-        (deleting || pos > 0 ? current : (endings[ending] ?? '')).slice(0, pos)
-      );
+      setText(current.slice(0, pos));
       timer = window.setTimeout(step, delay);
     };
     timer = window.setTimeout(step, HOLD_MS);
