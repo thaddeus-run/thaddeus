@@ -5,6 +5,12 @@ All notable changes to Thaddeus. Format follows
 
 ## [Unreleased]
 
+### Fixed
+
+- The landing page's status link opens https://status.thaddeus.run instead of
+  doing nothing, and its version now follows `packages/cli/package.json` instead
+  of a hand-edited copy.
+
 ## [0.1.11-alpha] - 2026-10-18
 
 ### Added
