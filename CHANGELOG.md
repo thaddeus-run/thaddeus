@@ -58,6 +58,35 @@ All notable changes to Thaddeus. Format follows
   and client/CLI management. Review authority grants no code upload or land
   rights.
 
+- Durable per-owner storage quotas on the server: limits on repositories,
+  retained encrypted objects and object bytes, plus creation-rate windows.
+  Delegated uploads count against the owner. `docs/repository-quotas.md`
+  describes the limits and their metrics.
+
+- `thaddeus init` initializes a repository in place, with identity setup as a
+  separate step (THA-27).
+
+- `thaddeus triage` hands a broken setup to your own Claude or Codex, which
+  files an issue only if you agree. Server credentials are redacted from the
+  context it sends.
+
+- A landing page for thaddeus.run in `apps/landing`, built on TanStack Start: a
+  hero, a live operation log, how-it-works sketches, a features grid that marks
+  planned items, a security panel, a glossary and About, in light and dark
+  themes with reduced-motion support. It deploys to Vercel through Nitro.
+
+- Every scheduled nightly reports to the status page heartbeat, including the
+  runs the gate skips, so a quiet day is not an outage. A nightly with a failed
+  job reports a failure instead.
+
+- Release notes. Pull requests get a `type:*` label from their Conventional
+  Commits title (`pr-type.yml`), and `.github/release.yml` groups the notes
+  GitHub generates by those labels. Nightly release pages list the pull requests
+  merged since the previous nightly. An alpha release page opens with the
+  version's `CHANGELOG.md` section, followed by the install commands and the
+  grouped pull-request list; release preflight fails when the section is
+  missing.
+
 ### Security
 
 - Require explicit reviewer authority for veto ingestion and recheck grant scope
@@ -73,11 +102,29 @@ All notable changes to Thaddeus. Format follows
 - `blockOnVeto` requires an explicit reviewer allowlist. Empty means trust
   nobody. Hosts may supply a predicate for scope and lifecycle checks.
 
+- Licensing. The root `LICENSE` keeps everything under Apache-2.0 except `ee/`,
+  which holds ThadHub, the hosted product, under the Functional Source License
+  (`FSL-1.1-ALv2`, converting to Apache-2.0 two years after each release).
+  `ee/README.md` says what belongs there; external pull requests to `ee/` are
+  closed until a contributor agreement exists.
+
 ### Fixed
 
 - GitHub release notes now install the npm launchers with the release's
   dist-tag, such as `@thaddeus.run/cli@alpha`. The bare package names resolve to
   npm's `latest` tag, which still points at 0.1.0-alpha.
+
+- The CLI ignores a `config.json` that is not an object instead of failing on
+  it.
+
+- Ignore rules are refreshed after an `init` recovery rollback.
+
+### Removed
+
+- The shipped implementation plans under `docs/plans` and
+  `docs/superpowers/plans`, the June research notes at the repository root, and
+  the backup copy of the manifesto. The design specs, ADRs and verification
+  reports stay.
 
 ### Documentation
 
@@ -87,6 +134,11 @@ All notable changes to Thaddeus. Format follows
   first. README, ARCHITECTURE, CONTEXT, getting-started, the server README and a
   dated manifesto amendment now match it. The P11 to P14 roadmap table moved
   into the contract's appendix, and the Linear build order is the single queue.
+
+- A contribution policy in `CONTRIBUTING.md` with pull request and issue forms
+  and a security policy, enforced by the `contribution-triage` skill; the
+  `verify-thaddeus` skill exercises a change through the real CLI. Pull requests
+  are labelled by size and vouch status.
 
 ### Roadmap
 
