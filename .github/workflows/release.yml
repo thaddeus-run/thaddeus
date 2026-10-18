@@ -1003,3 +1003,45 @@ jobs:
           done
           echo "ams1 did not report $EXPECTED_VERSION within 3 minutes; last response from $VERSION_URL: $last" >&2
           exit 1
+
+  # The status page's "Releases" row is a Better Stack heartbeat. Every
+  # scheduled nightly reports in, including the ones the gate skips because
+  # main did not change, so a quiet day is not an outage. A nightly with a
+  # failed or cancelled job pings /fail instead, which turns the row red at
+  # once rather than after the grace period. Without the secret the job logs
+  # and exits 0, so forks and dry runs are unaffected.
+  #
+  # GitHub runs cron schedules late under load: the first two nightlies fired
+  # 2h21m and 4h22m after their slots, eight hours apart. Size the heartbeat
+  # for that drift (expect every 6 hours, grace 6 hours) or the row goes red on
+  # a healthy pipeline.
+  heartbeat:
+    name: Report the nightly to the status page
+    needs: [preflight, cli, tui, verify-artifacts, release, npm]
+    if: always() && github.event_name == 'schedule'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    timeout-minutes: 5
+    steps:
+      - name: Ping the Releases heartbeat
+        env:
+          HEARTBEAT_URL: ${{ secrets.RELEASES_HEARTBEAT_URL }}
+          RESULTS: ${{ join(needs.*.result, ' ') }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ -z "$HEARTBEAT_URL" ]; then
+            echo "RELEASES_HEARTBEAT_URL is not set; not reporting to the status page"
+            exit 0
+          fi
+          case "$RESULTS" in
+            *failure*|*cancelled*)
+              echo "nightly jobs ended with: $RESULTS; reporting a failed heartbeat"
+              curl -fsS --max-time 10 -d "nightly run $GITHUB_RUN_NUMBER: $RESULTS" "$HEARTBEAT_URL/fail"
+              ;;
+            *)
+              echo "nightly jobs ended with: $RESULTS; reporting a healthy heartbeat"
+              curl -fsS --max-time 10 "$HEARTBEAT_URL"
+              ;;
+          esac
