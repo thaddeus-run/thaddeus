@@ -286,7 +286,7 @@
     },
     "packages/agent": {
       "name": "@thaddeus.run/agent",
-      "version": "0.1.10-alpha",
+      "version": "0.1.11-alpha",
       "dependencies": {
         "@thaddeus.run/identity": "workspace:*",
       },
@@ -302,7 +302,7 @@
     },
     "packages/cli": {
       "name": "@thaddeus.run/cli",
-      "version": "0.1.10-alpha",
+      "version": "0.1.11-alpha",
       "bin": {
         "thad": "./dist/bin.js",
         "thaddeus": "./dist/bin.js",
@@ -334,7 +334,7 @@
     },
     "packages/client": {
       "name": "@thaddeus.run/client",
-      "version": "0.1.10-alpha",
+      "version": "0.1.11-alpha",
       "dependencies": {
         "@thaddeus.run/agent": "workspace:*",
         "@thaddeus.run/graph": "workspace:*",
@@ -358,7 +358,7 @@
     },
     "packages/fs": {
       "name": "@thaddeus.run/fs",
-      "version": "0.1.10-alpha",
+      "version": "0.1.11-alpha",
       "dependencies": {
         "@thaddeus.run/store": "workspace:*",
       },
@@ -373,7 +373,7 @@
     },
     "packages/graph": {
       "name": "@thaddeus.run/graph",
-      "version": "0.1.10-alpha",
+      "version": "0.1.11-alpha",
       "dependencies": {
         "@noble/hashes": "catalog:",
         "@thaddeus.run/identity": "workspace:*",
@@ -391,7 +391,7 @@
     },
     "packages/identity": {
       "name": "@thaddeus.run/identity",
-      "version": "0.1.10-alpha",
+      "version": "0.1.11-alpha",
       "dependencies": {
         "@scure/base": "catalog:",
         "libsodium-wrappers-sumo": "catalog:",
@@ -406,7 +406,7 @@
     },
     "packages/log": {
       "name": "@thaddeus.run/log",
-      "version": "0.1.10-alpha",
+      "version": "0.1.11-alpha",
       "dependencies": {
         "@noble/hashes": "catalog:",
         "@thaddeus.run/identity": "workspace:*",
@@ -421,7 +421,7 @@
     },
     "packages/persist": {
       "name": "@thaddeus.run/persist",
-      "version": "0.1.10-alpha",
+      "version": "0.1.11-alpha",
       "devDependencies": {
         "@thaddeus.run/identity": "workspace:*",
         "@thaddeus.run/log": "workspace:*",
@@ -434,7 +434,7 @@
     },
     "packages/platform": {
       "name": "@thaddeus.run/platform",
-      "version": "0.1.10-alpha",
+      "version": "0.1.11-alpha",
       "dependencies": {
         "@noble/hashes": "catalog:",
         "@thaddeus.run/identity": "workspace:*",
@@ -454,7 +454,7 @@
     },
     "packages/provenance": {
       "name": "@thaddeus.run/provenance",
-      "version": "0.1.10-alpha",
+      "version": "0.1.11-alpha",
       "dependencies": {
         "@noble/hashes": "catalog:",
         "@thaddeus.run/identity": "workspace:*",
@@ -471,7 +471,7 @@
     },
     "packages/query": {
       "name": "@thaddeus.run/query",
-      "version": "0.1.10-alpha",
+      "version": "0.1.11-alpha",
       "dependencies": {
         "@thaddeus.run/graph": "workspace:*",
         "@thaddeus.run/log": "workspace:*",
@@ -489,7 +489,7 @@
     },
     "packages/reputation": {
       "name": "@thaddeus.run/reputation",
-      "version": "0.1.10-alpha",
+      "version": "0.1.11-alpha",
       "dependencies": {
         "@noble/hashes": "catalog:",
         "@thaddeus.run/identity": "workspace:*",
@@ -505,7 +505,7 @@
     },
     "packages/review": {
       "name": "@thaddeus.run/review",
-      "version": "0.1.10-alpha",
+      "version": "0.1.11-alpha",
       "dependencies": {
         "@noble/hashes": "catalog:",
         "@thaddeus.run/identity": "workspace:*",
@@ -522,7 +522,7 @@
     },
     "packages/server": {
       "name": "@thaddeus.run/server",
-      "version": "0.1.10-alpha",
+      "version": "0.1.11-alpha",
       "dependencies": {
         "@noble/hashes": "catalog:",
         "@thaddeus.run/agent": "workspace:*",
@@ -546,7 +546,7 @@
     },
     "packages/store": {
       "name": "@thaddeus.run/store",
-      "version": "0.1.10-alpha",
+      "version": "0.1.11-alpha",
       "dependencies": {
         "@noble/hashes": "catalog:",
         "@thaddeus.run/identity": "workspace:*",
@@ -562,7 +562,7 @@
     },
     "packages/theme": {
       "name": "@thaddeus.run/theme",
-      "version": "0.1.10-alpha",
+      "version": "0.1.11-alpha",
       "devDependencies": {
         "@typescript/native-preview": "catalog:",
         "tsdown": "catalog:",
@@ -571,7 +571,7 @@
     },
     "packages/watch": {
       "name": "@thaddeus.run/watch",
-      "version": "0.1.10-alpha",
+      "version": "0.1.11-alpha",
       "dependencies": {
         "@thaddeus.run/graph": "workspace:*",
       },
