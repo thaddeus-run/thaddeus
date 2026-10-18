@@ -180,7 +180,7 @@ JournalEntry {
   reverts     entry id, when this entry reverts another
   restores    checkpoint, when this entry resets the workspace to one
   analyzer    { family, version } when any step is structured, otherwise null
-  retry       the client's retry id
+  retry       the client's retry id and a digest of the request it came with
   actor       the submitting session and its declared actor kind (ADR 0001)
   signature   the actor's signature over the canonical entry, when the actor signs
   id          hash of the canonical entry
@@ -193,12 +193,13 @@ FileEdit =
 
 StructuredEdit {
   kind       'rename-symbol' | 'edit-function'   (first release)
-  target     symbol id, or a locator for a symbol born earlier in this transaction
+  target     symbol id, or the birth locator of a symbol born earlier in this transaction
   expect     { locator, declaration?: hash of the whole declaration, body included }
-  args       rename:   { to: name, generated?: [{ path, content hash }] }
+  args       rename:   { to: name, generated?: [{ path, expect: content hash, content hash }] }
              function: { part: 'body' | 'declaration', text }
   edits      [{ path, start, end, text }]        byte edits this step produced
-  identity   [{ symbol, from: locator, to: locator }]   changes it declares
+  identity   [{ symbol, from: locator, to: locator }]   changes it declares, where
+             `symbol` is an id or a birth locator, as for `target`
 }
 ```
 
@@ -235,9 +236,11 @@ replaces the body of `login` is one entry. Readers see all of it or none of it.
 A structured step targets a symbol that exists before the transaction by its
 symbol id, and earlier steps that declare identity changes keep that id pointing
 at the right locator. A symbol born earlier in the same transaction has no id
-until the entry exists, so a step targets it by locator. A step's expectations
-describe the state immediately before that step. When any step cannot apply, the
-whole transaction fails.
+until the entry exists, because its id is derived from the entry's hash. A step
+and its declared identity changes name such a symbol by its birth locator, the
+locator it had when an earlier step first wrote it, so the entry can be hashed
+before the id exists. A step's expectations describe the state immediately
+before that step. When any step cannot apply, the whole transaction fails.
 
 ### 4.4 Commit, failure and rollback
 
@@ -250,8 +253,11 @@ computed. If the head moved during preparation, the service re-checks, and after
 a bounded number of failed attempts it holds the workspace's turn for one final
 attempt, so a rename cannot be starved. Each transaction commits in this order:
 
-1. Look up the retry id. If an entry already carries it, return that entry. The
-   transaction committed earlier, whether or not the client heard back.
+1. Look up the retry id. If an entry already carries it with the same request
+   digest, return that entry. The transaction committed earlier, whether or not
+   the client heard back. If the digest differs, the client reused a retry id
+   for a different request, and the transaction fails with `RetryIdReused`
+   without applying anything.
 2. Read the workspace's current journal head.
 3. Check every step's preconditions (section 7) and compute the resulting
    content.
@@ -365,9 +371,12 @@ the generator's input. The service writes those bytes unchanged, renames
 everything else, and accepts the step only if every former reference, generated
 or not, then resolves to the renamed symbol. Those bytes are a file write in all
 but name. The byte-preservation check does not cover them, and the caller needs
-path authority to write each of those files, as for any file edit. Without that
-content the rename fails with `GeneratedReference` and names the files. Running
-a generator inside the service needs execution workers and is out of scope here.
+path authority to write each of those files, as for any file edit. Each one also
+carries the content hash the caller expects to replace, checked like a file
+write's expectation, so generator output prepared earlier cannot overwrite a
+newer save. Without that content the rename fails with `GeneratedReference` and
+names the files. Running a generator inside the service needs execution workers
+and is out of scope here.
 
 **External file edits.** Agents writing through the remote workspace API, local
 folders folded in by the CLI, Git imports, and formatters or generators run by
@@ -414,9 +423,13 @@ order:
 2. Apply the identity changes the entry declares, in step order. Structured
    steps declare them, a file `move` carries every symbol in the moved file, and
    revert and reset entries declare theirs as section 4.4 describes. A rename of
-   a container carries its members. A locator or id involved in a declared
-   change is settled by it, and rules 3 to 6 leave it alone for this entry.
-   Swapping two names is two declared renames and works.
+   a container carries its members. Declared changes decide which id a locator
+   carries, and rules 3 and 6 never override them, so swapping two names is two
+   declared renames and works. Whether the symbol still exists is judged against
+   the entry's result. If a later step in the same entry removes its
+   declarations, rule 4 ends it. A symbol born in this entry is named in a
+   declared change by its birth locator, the locator it had when a step first
+   wrote it.
 3. A locator present both before and after the entry keeps its id. When a merged
    symbol splits into separate symbols, for example because one of two interface
    declarations gains an `export`, the merged id ends and each part gets a new
@@ -426,10 +439,14 @@ order:
    ends its identity and starts another. Doing both in one transaction keeps it.
 5. An ended id is never given to a different symbol. Only a revert or a reset
    that restores an earlier state brings one back (section 4.4).
-6. Any other new locator gets a new id, `hash(domain tag, entry id, locator)`.
-   Because the entry id is part of it, a symbol that ended and was later written
-   again under the same name is a new symbol. The shipped
-   `blake3(path, name, kind)` cannot make that distinction.
+6. Any other new locator gets a new id,
+   `hash(domain tag, entry id, birth locator)`. A new declaration that the
+   analyzer merges into an existing symbol joins that symbol's id instead. When
+   several declarations of one new merged symbol appear in the same entry, the
+   id comes from the first of their birth locators in sorted order. Because the
+   entry id is part of the hash, a symbol that ended and was later written again
+   under the same name is a new symbol. The shipped `blake3(path, name, kind)`
+   cannot make that distinction.
 7. While a file is unanalyzed, its symbols keep their last known locators and
    ids, flagged as unverified. When the file analyzes again, rules 3 to 6 run
    against its last analyzed state. Autosaving a half-typed file therefore does

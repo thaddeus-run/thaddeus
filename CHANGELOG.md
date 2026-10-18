@@ -20,8 +20,8 @@ All notable changes to Thaddeus. Format follows
   handling, symbol identity, stale-graph preconditions, checkpoint binding and
   rollback, records an observed baseline of the shipped `rename`, and proposes
   TypeScript and JavaScript as the first language family. Nothing in it is
-  implemented yet. CONTEXT, ARCHITECTURE, section 4 of the architecture contract
-  and the pillar 08 design point to it.
+  implemented yet. CONTEXT gains the terms it uses, and ARCHITECTURE, section 4
+  of the architecture contract and the pillar 08 design point to it.
 
 ## [0.1.11-alpha] - 2026-10-18
 
