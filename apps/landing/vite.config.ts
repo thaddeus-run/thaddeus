@@ -2,6 +2,7 @@ import tailwindcss from '@tailwindcss/vite';
 import { tanstackStart } from '@tanstack/react-start/plugin/vite';
 import react from '@vitejs/plugin-react';
 import { nitro } from 'nitro/vite';
+import { fileURLToPath } from 'node:url';
 import { defineConfig } from 'vite';
 
 // TanStack Start runs as a Vite plugin. The router plugin generates
@@ -15,7 +16,7 @@ export default defineConfig({
   resolve: {
     // Mirrors the `@/*` path in tsconfig.json so imports read the same in
     // the editor and the bundle.
-    alias: { '@': new URL('./src', import.meta.url).pathname },
+    alias: { '@': fileURLToPath(new URL('./src', import.meta.url)) },
   },
   server: {
     // Vite blocks requests whose Host header is not localhost or an IP. Allow

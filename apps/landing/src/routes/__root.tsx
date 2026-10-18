@@ -4,6 +4,7 @@ import {
   Outlet,
   Scripts,
 } from '@tanstack/react-router';
+import { MotionConfig } from 'motion/react';
 import type { ReactNode } from 'react';
 
 import appCss from '@/styles.css?url';
@@ -38,7 +39,11 @@ function RootComponent(): ReactNode {
         <HeadContent />
       </head>
       <body>
-        <Outlet />
+        {/* reducedMotion="user" drops transform and layout animations for
+            visitors who prefer reduced motion and keeps opacity fades. */}
+        <MotionConfig reducedMotion="user">
+          <Outlet />
+        </MotionConfig>
         <Scripts />
       </body>
     </html>
