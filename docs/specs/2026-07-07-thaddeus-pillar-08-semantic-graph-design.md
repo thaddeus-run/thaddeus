@@ -9,6 +9,12 @@ Thaddeus (`@thaddeus.run/*`) **Source of truth (vision):**
 `docs/specs/2026-06-23-thaddeus-pillar-04-provenance-design.md`,
 `docs/specs/2026-06-22-thaddeus-pillar-01-encrypted-capability-store-design.md`
 
+**Superseded in part on 2026-10-18:**
+[ADR 0005](../adr/0005-content-journal-is-the-semantic-authority.md) and the
+[semantic authority design](2026-10-18-thaddeus-semantic-authority-design.md)
+replace decisions 3, 4 and 6 below for new work. Section 10 of that design says
+what still stands. This document still describes the shipped spike.
+
 ---
 
 ## 1. Context — why this primitive, why now

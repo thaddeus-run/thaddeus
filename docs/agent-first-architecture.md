@@ -95,9 +95,9 @@ Source License (`ee/LICENSE`) rather than Apache-2.0.
 **Workspaces.** A workspace points at an immutable base revision and stores only
 what changed. Each save carries a retry identifier and a sequence number, and
 the service acknowledges a save only after it is durably committed. Named
-checkpoints bind exact content to exact operation versions. Base updates happen
-only at explicit safe boundaries. Shared workspaces need version-checked writes,
-so the last writer never silently wins.
+checkpoints bind an exact revision to the journal entry that produced it. Base
+updates happen only at explicit safe boundaries. Shared workspaces need
+version-checked writes, so the last writer never silently wins.
 
 **Execution.** Build and test workers attach on demand. Their concurrency has
 its own limit, separate from the number of workspaces. Suspension keeps files
@@ -125,23 +125,34 @@ function edits and symbol-scoped authority. Agents working in parallel need
 edits that a stale view of the code cannot invalidate, so this cannot wait for a
 later layer.
 
-The proposed shape follows. Every point is still a proposal.
-
-- Immutable file content plus a versioned change journal is the source of truth.
-- The symbol graph is a projection tied to revisions, and the system can rebuild
-  it.
-- File edits and structured edits go through one transaction path.
-- A stale graph cannot authorize a destructive edit.
-- TypeScript and JavaScript are the proposed first language family.
-
 [THA-113](https://linear.app/thaddeus-run/issue/THA-113), mirrored on GitHub as
-[#169](https://github.com/thaddeus-run/thaddeus/issues/169), decides the rest,
-and nothing here pre-empts it. It decides whether the graph or the journal is
-authoritative. It decides how comments, formatting, unsupported syntax,
-generated code and external edits survive without loss. It defines stable symbol
-identity, the preconditions that guard a stale index, and rollback. The existing
+[#169](https://github.com/thaddeus-run/thaddeus/issues/169), decided the model
+on 2026-10-18 in
+[ADR 0005](adr/0005-content-journal-is-the-semantic-authority.md). The
+[semantic authority design](specs/2026-10-18-thaddeus-semantic-authority-design.md)
+holds the rules, the comparison with a graph-authoritative model and the
+observed baseline. None of it is implemented yet.
+
+- Immutable file content plus a change journal per workspace is the source of
+  truth.
+- The symbol graph is a projection tied to a journal entry, a revision and an
+  analyzer version, and the system can rebuild it.
+- File edits and structured edits go through one transaction path. Each
+  transaction commits as one journal entry that records the intent, the byte
+  edits it produced and the resulting content.
+- Bytes nobody asked to change stay byte-identical. That holds for comments,
+  formatting, files no analyzer reads, files that do not parse and generated
+  files.
+- A symbol keeps its identity only through renames and moves that an edit
+  declares.
+- A stale or partial graph cannot authorize a structured edit.
+- TypeScript and JavaScript are the proposed first language family, pending
+  [THA-36](https://linear.app/thaddeus-run/issue/THA-36).
+
+The
 [semantic graph design](specs/2026-07-07-thaddeus-pillar-08-semantic-graph-design.md)
-is prior art that THA-113 has to reconcile.
+describes the shipped spike. Section 10 of the new design says which of its
+decisions still stand.
 
 ## 5. Performance: targets versus measurements
 

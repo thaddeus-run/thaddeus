@@ -53,9 +53,45 @@ immutable base revision and holds only its own changes. Workspaces are separate
 unless explicitly shared. _Avoid_: Branch, for the place an agent edits; clone,
 which implies a second object store.
 
-**Checkpoint**: A named, durable binding of exact workspace content to exact
-operation versions, used for review, execution and integration. _Avoid_: Commit,
-before the record is proposed for landing; autosave, which is unnamed.
+**Checkpoint**: A named, durable binding of a workspace's exact revision to the
+change journal entry that produced it, used for review, execution and
+integration. _Avoid_: Commit, before the record is proposed for landing;
+autosave, which is unnamed.
+
+**Revision**: The exact content of every path in a workspace at one point,
+identified by that content alone. _Avoid_: Snapshot, commit, version.
+
+**Change journal**: A workspace's append-only record of committed transactions.
+Each entry names the revision it started from and the revision it produced.
+_Avoid_: Operation log, which names the shipped signed operation history.
+
+**Transaction**: One all-or-nothing change to a workspace that may mix file
+edits and structured edits. It commits as one change journal entry together with
+the content it produced. _Avoid_: Commit, operation.
+
+**File edit**: A change that writes, deletes or moves a path using exact bytes
+the caller supplies. _Avoid_: Text operation.
+
+**Structured edit**: A change that targets a symbol rather than a path, such as
+a rename or a function edit. The content it produced, not its intent, is what
+the workspace holds. _Avoid_: SymbolOp, which names the shipped rename record;
+refactor.
+
+**Symbol graph**: The symbols, references and imports that one analyzer version
+derives from one revision, with symbol ids taken from the change journal. It can
+always be rebuilt and never decides what the content is. _Avoid_: Semantic index
+or semantic model, when either suggests a separate authority.
+
+**Analyzer**: The versioned parser and name resolver for one language family
+that builds the symbol graph. _Avoid_: Extractor, which names the shipped
+regular-expression spike.
+
+**Symbol id**: The identifier that stays with a symbol across renames and moves
+that edits declare. It is minted once and never derived from the symbol's
+current name. _Avoid_: Symbol name, locator.
+
+**Locator**: A symbol's address at one revision: its file, enclosing
+declarations, name and kind. _Avoid_: Symbol id, which survives renames.
 
 **Trusted service**: A Thaddeus-hosted or customer-hosted service authorized to
 read repository plaintext for scoped requests while keeping storage encrypted
