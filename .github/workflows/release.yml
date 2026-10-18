@@ -290,6 +290,15 @@ jobs:
           version=$(bun -p "require('./packages/cli/package.json').version")
           echo "version=$version" >> "$GITHUB_OUTPUT"
           echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+      # An alpha release page shows this version's CHANGELOG section, so a tag
+      # without one stops here, before anything is built.
+      - name: Check the changelog has this release's section
+        if:
+          steps.channel.outputs.channel == 'release' && steps.gate.outputs.skip
+          != 'true'
+        env:
+          VERSION: ${{ steps.metadata.outputs.version }}
+        run: .github/scripts/changelog-section.sh "$VERSION" > /dev/null
       # The release, npm and npm-latest jobs publish with these outputs and
       # nothing else, so the guard below checks exactly what they will do.
       - name: Plan the publication
@@ -617,8 +626,23 @@ jobs:
               --title "Thaddeus nightly $VERSION ($short_sha)" --notes "$NOTES" \
               --generate-notes "${notes_start[@]}"
           else
+            # An alpha release page opens with this version's CHANGELOG
+            # section (preflight checked it exists), then the install block,
+            # then GitHub's generated list of pull requests since the previous
+            # alpha, grouped by .github/release.yml.
+            section=$(.github/scripts/changelog-section.sh "$VERSION")
+            NOTES="${section}
+
+          ${NOTES}"
+            previous=$(gh release list --repo "$GITHUB_REPOSITORY" --exclude-drafts --limit 100 \
+              --json tagName --jq "[.[] | .tagName | select(contains(\"-nightly.\") | not) | select(. != \"$TAG\")] | first // empty")
+            notes_start=()
+            if [ -n "$previous" ]; then
+              notes_start=(--notes-start-tag "$previous")
+            fi
             gh release create "$TAG" release/* --repo "$GITHUB_REPOSITORY" \
-              --title "Thaddeus $TAG" --notes "$NOTES" --verify-tag
+              --title "Thaddeus $TAG" --notes "$NOTES" --verify-tag \
+              --generate-notes "${notes_start[@]}"
           fi
 
   npm:

@@ -1,0 +1,30 @@
+# Groups the release notes GitHub generates (the nightly list, and the pull
+# request list under an alpha release's changelog section) by the type:* label
+# that .github/workflows/pr-type.yml derives from each pull request's
+# Conventional Commits title. A PR without a type label lands under "Other".
+changelog:
+  exclude:
+    labels:
+      - skip-changelog
+  categories:
+    - title: Breaking changes
+      labels: ['type:breaking']
+    - title: Features
+      labels: ['type:feat']
+    - title: Fixes
+      labels: ['type:fix', 'type:perf']
+    - title: Documentation
+      labels: ['type:docs']
+    - title: CI and build
+      labels: ['type:ci', 'type:build']
+    - title: Maintenance
+      labels:
+        [
+          'type:chore',
+          'type:refactor',
+          'type:test',
+          'type:style',
+          'type:revert',
+        ]
+    - title: Other
+      labels: ['*']
