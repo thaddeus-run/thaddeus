@@ -1,0 +1,18 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "framework": "tanstack-start",
+  "installCommand": "bun install --frozen-lockfile",
+  "buildCommand": "bunx vite build",
+  "redirects": [
+    {
+      "source": "/install.sh",
+      "destination": "https://raw.githubusercontent.com/thaddeus-run/thaddeus/main/install.sh",
+      "permanent": false
+    },
+    {
+      "source": "/docs",
+      "destination": "https://github.com/thaddeus-run/thaddeus/blob/main/docs/getting-started.md",
+      "permanent": false
+    }
+  ]
+}

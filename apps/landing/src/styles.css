@@ -1,38 +1,241 @@
-@import '@thaddeus.run/theme/style.css';
+@import 'tailwindcss';
+@import '@fontsource/fragment-mono/400.css';
+@import '@fontsource/fragment-mono/400-italic.css';
 
-body {
-  margin: 0;
-  background: var(--thaddeus-background);
-  color: var(--thaddeus-foreground);
-  font-family:
-    ui-sans-serif,
-    system-ui,
-    -apple-system,
-    'Segoe UI',
-    Roboto,
-    sans-serif;
+/* Dark mode is a class on <html>, set before paint by the inline script in
+ * the root route and toggled by the nav button. */
+@custom-variant dark (&:where(.dark, .dark *));
+
+/* The page palette: cream paper and near-black ink, with one ink-blue accent
+ * for anything that landed or verified, and one brick for anything refused.
+ * These are the raw values; Tailwind reads them through @theme below. */
+:root {
+  --paper: #f6f3ec;
+  --ink: #17171a;
+  --muted: #6f6b63;
+  --rule: rgb(23 23 26 / 14%);
+  --rule-soft: rgb(23 23 26 / 7%);
+  --surface: #fdfbf6;
+  --accent: #2b3fb5;
+  --refuse: #9a3b2e;
+  --tint: rgb(43 63 181 / 8%);
 }
 
-.landing {
-  max-width: 42rem;
-  margin: 0 auto;
-  padding: 8rem 1.5rem;
+.dark {
+  --paper: #141412;
+  --ink: #ece8df;
+  --muted: #8f8a80;
+  --rule: rgb(236 232 223 / 16%);
+  --rule-soft: rgb(236 232 223 / 7%);
+  --surface: #1a1a18;
+  --accent: #9dadff;
+  --refuse: #e08b7b;
+  --tint: rgb(157 173 255 / 12%);
 }
 
-.wordmark {
-  font-size: 3rem;
-  font-weight: 800;
-  letter-spacing: -0.03em;
-  margin: 0;
+@theme inline {
+  --color-paper: var(--paper);
+  --color-ink: var(--ink);
+  --color-muted: var(--muted);
+  --color-rule: var(--rule);
+  --color-rule-soft: var(--rule-soft);
+  --color-surface: var(--surface);
+  --color-accent: var(--accent);
+  --color-refuse: var(--refuse);
+  --color-tint: var(--tint);
+
+  --font-mono: 'Fragment Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+
+  --animate-blink: blink 1.1s steps(1) infinite;
+  --animate-pulse-dot: pulse-dot 2.4s ease-in-out infinite;
+
+  @keyframes blink {
+    50% {
+      opacity: 0;
+    }
+  }
+
+  @keyframes pulse-dot {
+    0%,
+    100% {
+      opacity: 1;
+    }
+
+    50% {
+      opacity: 0.3;
+    }
+  }
 }
 
-.deck {
-  font-size: 1.25rem;
-  line-height: 1.5;
-  color: var(--thaddeus-muted);
+html {
+  background: var(--paper);
+  color: var(--ink);
+  font-family: var(--font-mono);
+  -webkit-font-smoothing: antialiased;
 }
 
-.by {
-  margin-top: 2rem;
-  color: var(--thaddeus-accent);
+/* Colour transitions switch on after first paint (see useTheme), so a dark
+ * reload never flashes light before settling. */
+html.theme-ready,
+html.theme-ready * {
+  transition-property: background-color, border-color, color;
+  transition-duration: 0.4s;
+  transition-timing-function: ease;
+}
+
+@layer components {
+  /* Faint dot grid behind the hero, fading out towards the bottom. */
+  .dot-grid::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background-image: radial-gradient(var(--rule) 1px, transparent 1px);
+    background-size: 22px 22px;
+    mask-image: linear-gradient(to bottom, rgb(0 0 0 / 95%), transparent 96%);
+    pointer-events: none;
+  }
+
+  /* Ambient loops for the how-it-works tiles. These run forever and start
+   * mid-cycle (negative delays), which CSS does and Motion does not, so they
+   * stay in CSS while state-driven motion uses Motion. */
+  .loop-ws {
+    opacity: 0;
+    animation: loop-ws 10s ease-in-out infinite;
+  }
+
+  .loop-sig-line {
+    stroke-dasharray: 140;
+    stroke-dashoffset: 140;
+    animation: loop-sig-line 8s ease-in-out infinite;
+  }
+
+  .loop-sig-text {
+    animation: loop-sig-text 8s steps(1) infinite;
+  }
+
+  .loop-tick {
+    opacity: 0;
+    animation: loop-tick 8s steps(1) infinite;
+  }
+
+  .loop-land {
+    animation: loop-land 7s linear infinite;
+  }
+
+  .loop-refuse {
+    animation: loop-refuse 7s linear infinite;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .loop-ws,
+    .loop-sig-line,
+    .loop-sig-text,
+    .loop-tick,
+    .loop-land,
+    .loop-refuse,
+    .animate-blink,
+    .animate-pulse-dot {
+      animation: none !important;
+      opacity: 1;
+      stroke-dashoffset: 0;
+    }
+  }
+}
+
+@keyframes loop-ws {
+  0%,
+  8% {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+
+  16%,
+  70% {
+    opacity: 1;
+    transform: none;
+  }
+
+  82%,
+  100% {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+}
+
+@keyframes loop-sig-line {
+  0%,
+  10% {
+    stroke-dashoffset: 140;
+  }
+
+  50%,
+  100% {
+    stroke-dashoffset: 0;
+  }
+}
+
+@keyframes loop-sig-text {
+  0%,
+  45% {
+    opacity: 0;
+  }
+
+  50%,
+  100% {
+    opacity: 1;
+  }
+}
+
+@keyframes loop-tick {
+  0%,
+  55% {
+    opacity: 0;
+  }
+
+  60%,
+  100% {
+    opacity: 1;
+  }
+}
+
+@keyframes loop-land {
+  0% {
+    transform: translateX(0);
+    opacity: 0;
+  }
+
+  6% {
+    opacity: 1;
+  }
+
+  48%,
+  60% {
+    transform: translateX(96px);
+  }
+
+  100% {
+    transform: translateX(190px);
+    opacity: 1;
+  }
+}
+
+@keyframes loop-refuse {
+  0% {
+    transform: translateX(0);
+    opacity: 0;
+  }
+
+  6% {
+    opacity: 1;
+  }
+
+  48%,
+  60% {
+    transform: translateX(96px);
+  }
+
+  100% {
+    transform: translateX(-10px);
+    opacity: 0;
+  }
 }
