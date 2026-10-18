@@ -47,6 +47,7 @@ Access & trust
 
 Support
   triage [--agent claude|codex]   hand a broken setup to your own coding agent
+  update [--channel release|nightly] [--check]  install the newest thaddeus build
 
 Server
   serve  [--port N] [--data DIR] [--attestation-aws-kms-key-arn ARN]  run a server
@@ -100,6 +101,17 @@ export const HELP: Record<string, string> = {
   With no argument, print the current default. --hosted sets the official server
   (https://ams1.thaddeus.run); --clear removes the default. The server is always
   your explicit choice — nothing is pre-filled.`,
+
+  update: `thaddeus update [--channel release|nightly] [--check]
+
+  Replace this thaddeus binary, and a lazythad beside it, with the newest build
+  on your update channel. release is the newest tagged release; nightly is the
+  newest build of main. --channel switches channel and remembers it; with no
+  saved channel, a binary stays on the channel it was built from. Switching
+  from a nightly to release installs the release even though it is older.
+  --check prints the installed and newest versions without installing. Every
+  download is checked against the release's SHA256SUMS before anything is
+  replaced. An npm install prints the npm command to run instead.`,
 
   create: `thaddeus create <repo> [--server <url>]
 

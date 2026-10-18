@@ -5,6 +5,19 @@ All notable changes to Thaddeus. Format follows
 
 ## [Unreleased]
 
+### Added
+
+- `thaddeus update` replaces an installed binary with the newest build on your
+  update channel, and updates a `lazythad` that sits beside it.
+  `--channel release|nightly` switches the channel and saves it in
+  `~/.config/thaddeus/config.json`. With no saved channel, a binary stays on the
+  channel it was built from. Switching from a nightly to `release` installs the
+  release even though it is older. `--check` prints the installed and newest
+  versions without installing anything. The command checks every download
+  against the release's `SHA256SUMS` and replaces nothing unless all of them
+  match. An npm install prints the `npm install -g` command to run instead, and
+  a run from source refuses to replace anything.
+
 ### Fixed
 
 - The landing page's status link opens https://status.thaddeus.run instead of
