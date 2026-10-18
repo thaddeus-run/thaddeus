@@ -83,8 +83,8 @@ One package, additive:
 - **Demo** — a Pillar 10 step in `examples/platform` (the north-star): two
   authors, one over-tier lands, one under-tier is gated.
 - **Docs** — `packages/platform/README.md` policy list; the roadmap table in
-  `docs/plans/2026-06-22-pillar-01-encrypted-capability-store.md` row 10 marked
-  in-progress.
+  `docs/plans/2026-06-22-pillar-01-encrypted-capability-store.md` (removed from
+  the tree on 2026-10-18; it remains in git history) row 10 marked in-progress.
 
 Not the job (deferred, §8): server-default wiring / a `--policy` reputation
 flag; a named tier ladder; operator-DID resolution (`registry.operatorOf`) for

@@ -91,8 +91,9 @@ One package, additive:
 - **Demo** — a Pillar 10 step in `examples/platform` (the north-star): an op
   with a verified CI attestation lands; an op without one is gated.
 - **Docs** — `packages/platform/README.md` policy list; the roadmap table in
-  `docs/plans/2026-06-22-pillar-01-encrypted-capability-store.md` row 10 stays
-  in-progress (already set).
+  `docs/plans/2026-06-22-pillar-01-encrypted-capability-store.md` (removed from
+  the tree on 2026-10-18; it remains in git history) row 10 stays in-progress
+  (already set).
 
 Not the job (deferred, §8): server-default wiring / a `--policy` flag;
 per-check-kind requirements (require types AND tests AND proof, each a distinct
