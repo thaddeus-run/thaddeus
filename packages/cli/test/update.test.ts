@@ -3,7 +3,9 @@ import { createHash } from 'node:crypto';
 import {
   mkdirSync,
   mkdtempSync,
+  readdirSync,
   readFileSync,
+  renameSync,
   rmSync,
   symlinkSync,
   writeFileSync,
@@ -19,6 +21,7 @@ import {
   installKind,
   RELEASES_API,
   RELEASES_DOWNLOAD,
+  replaceFile,
 } from '../src/update';
 import { VERSION } from '../src/version';
 
@@ -214,5 +217,48 @@ describe('update helpers', () => {
     expect(installKind('/home/u/.proto/tools/bun/1.3.14/bin/bun')).toBe(
       'source'
     );
+  });
+});
+
+describe('replaceFile', () => {
+  test('a failed rename leaves no temp file behind', () => {
+    const dir = mkdtempSync(join(tmp, 'replace-'));
+    // A non-empty directory at the target makes the final rename fail.
+    const dest = join(dir, 'thaddeus');
+    mkdirSync(dest);
+    writeFileSync(join(dest, 'keep'), '');
+    expect(() =>
+      replaceFile(dest, new TextEncoder().encode('new'), false)
+    ).toThrow();
+    expect(readdirSync(dir)).toEqual(['thaddeus']);
+  });
+
+  test('on Windows, a failed final rename puts the old binary back', () => {
+    const dir = mkdtempSync(join(tmp, 'replace-'));
+    const dest = join(dir, 'thaddeus.exe');
+    writeFileSync(dest, 'old');
+    // Let the move to .old through, then fail the temp file's rename.
+    const rename = (from: string, to: string): void => {
+      if (from.includes('.update-')) throw new Error('EBUSY');
+      renameSync(from, to);
+    };
+    expect(() =>
+      replaceFile(dest, new TextEncoder().encode('new'), true, rename)
+    ).toThrow('EBUSY');
+    expect(readFileSync(dest, 'utf8')).toBe('old');
+    expect(readdirSync(dir)).toEqual(['thaddeus.exe']);
+  });
+
+  test('on Windows, a successful swap keeps the old binary as .old', () => {
+    const dir = mkdtempSync(join(tmp, 'replace-'));
+    const dest = join(dir, 'thaddeus.exe');
+    writeFileSync(dest, 'old');
+    replaceFile(dest, new TextEncoder().encode('new'), true);
+    expect(readFileSync(dest, 'utf8')).toBe('new');
+    expect(readFileSync(`${dest}.old`, 'utf8')).toBe('old');
+    expect(readdirSync(dir).sort()).toEqual([
+      'thaddeus.exe',
+      'thaddeus.exe.old',
+    ]);
   });
 });

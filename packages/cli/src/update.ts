@@ -1,4 +1,4 @@
-import { createHash } from 'node:crypto';
+import { createHash, randomBytes } from 'node:crypto';
 import {
   existsSync,
   realpathSync,
@@ -122,23 +122,43 @@ function expectedHash(sums: string, asset: string): string | null {
 }
 
 // Write `bytes` beside `dest`, then rename over it, so an interrupted update
-// never leaves a half-written binary. Windows refuses to overwrite a running
-// .exe but lets it be renamed, so there the old file moves to `<dest>.old`
-// first; the next update removes it.
-function replaceFile(dest: string, bytes: Uint8Array, windows: boolean): void {
-  const tmp = `${dest}.update`;
-  rmSync(tmp, { force: true });
+// never leaves a half-written binary. The temp name is unique to this run, so
+// two updates of one install never delete or install each other's download.
+// Windows refuses to overwrite a running .exe but lets it be renamed, so there
+// the old file moves to `<dest>.old` first, and back again if the new file
+// can't take its place; the next update removes `.old`. `rename` is swappable
+// so tests can make the final rename fail.
+export function replaceFile(
+  dest: string,
+  bytes: Uint8Array,
+  windows: boolean,
+  rename: (from: string, to: string) => void = renameSync
+): void {
+  const tmp = `${dest}.update-${process.pid}-${randomBytes(4).toString('hex')}`;
   writeFileSync(tmp, bytes, { mode: 0o755 });
-  if (windows) {
+  try {
+    if (!windows) {
+      rename(tmp, dest);
+      return;
+    }
     const old = `${dest}.old`;
     try {
       rmSync(old, { force: true });
     } catch {
       // A process started before the last update may still run from it.
     }
-    if (existsSync(dest)) renameSync(dest, old);
+    const moved = existsSync(dest);
+    if (moved) rename(dest, old);
+    try {
+      rename(tmp, dest);
+    } catch (error) {
+      if (moved) rename(old, dest);
+      throw error;
+    }
+  } catch (error) {
+    rmSync(tmp, { force: true });
+    throw error;
   }
-  renameSync(tmp, dest);
 }
 
 /** What `thaddeus update` should do, after flags and config are resolved. */
