@@ -20,6 +20,7 @@ tasks:
       - '!node_modules/**'
       - '!.output/**'
       - '!.vercel/**'
+      - '/packages/cli/package.json'
     # Nitro writes the server and public bundles under .output/ (on Vercel it
     # writes .vercel/output/ instead, which Vercel picks up on its own).
     outputs:
