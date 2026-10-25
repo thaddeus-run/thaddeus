@@ -1,17 +1,21 @@
-import { FileBackend } from '@thaddeus.run/persist';
+import { FileBackend, MemoryBackend } from '@thaddeus.run/persist';
 import { Platform } from '@thaddeus.run/platform';
 import { afterAll, beforeAll, expect, test } from 'bun:test';
 import {
+  existsSync,
+  mkdirSync,
   mkdtempSync,
   readdirSync,
   readFileSync,
   rmSync,
   statSync,
+  writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import { fixtureDir, linkCopy } from '../src/fixtures/cache';
+import { materializeFixture } from '../src/fixtures/materialize';
 import { generateFixture, manifestHash } from '../src/fixtures/plan';
 import { tinySpec } from '../src/fixtures/spec';
 
@@ -75,5 +79,72 @@ test('linkCopy makes an independent, openable copy', async () => {
   const dst = join(tmp, 'copy');
   await linkCopy(src, dst);
   const repo = await new Platform().openDurable('bench', new FileBackend(dst));
+  expect(repo.log.ops()).toHaveLength(plan.spec.ops);
+});
+
+// Entries in a cache root that are leftovers of a build (temporary or stale).
+function leftovers(root: string): string[] {
+  return readdirSync(root).filter(
+    (n) => n.startsWith('.tmp-') || n.includes('.stale-')
+  );
+}
+
+test('a stale directory without a marker is replaced by a complete one', async () => {
+  const root = mkdtempSync(join(tmp, 'stale-'));
+  const plan = generateFixture(tinySpec());
+  const final = join(root, manifestHash(plan));
+  mkdirSync(final);
+  writeFileSync(join(final, 'junk'), 'half written');
+  expect(await fixtureDir(plan, { cacheRoot: root })).toBe(final);
+  expect(readFileSync(join(final, '.complete'), 'utf8')).toBe(
+    manifestHash(plan)
+  );
+  expect(existsSync(join(final, 'junk'))).toBe(false);
+  expect(leftovers(root)).toEqual([]);
+});
+
+test('losing the publish race keeps the winner and discards the temp build', async () => {
+  const root = mkdtempSync(join(tmp, 'race-'));
+  const plan = generateFixture(tinySpec());
+  const final = join(root, manifestHash(plan));
+  const dir = await fixtureDir(plan, {
+    cacheRoot: root,
+    beforePublish: () => {
+      // Another process publishes the same fixture while this one builds.
+      mkdirSync(final);
+      writeFileSync(join(final, 'winner'), 'x');
+      writeFileSync(join(final, '.complete'), manifestHash(plan));
+    },
+  });
+  expect(dir).toBe(final);
+  expect(existsSync(join(final, 'winner'))).toBe(true);
+  expect(leftovers(root)).toEqual([]);
+});
+
+test('a build that throws leaves no temp directory and no final', async () => {
+  const root = mkdtempSync(join(tmp, 'fail-'));
+  const good = generateFixture(tinySpec());
+  // Author 99 does not exist, so the first write throws mid-build.
+  const bad = {
+    ...good,
+    steps: good.steps.map((s) =>
+      s.kind === 'write' ? { ...s, author: 99 } : s
+    ),
+  };
+  let failed = false;
+  try {
+    await fixtureDir(bad, { cacheRoot: root });
+  } catch {
+    failed = true;
+  }
+  expect(failed).toBe(true);
+  expect(readdirSync(root)).toEqual([]);
+});
+
+test('landing an already-landed view is a no-op, not an error', async () => {
+  const plan = generateFixture(tinySpec());
+  const land = plan.steps.find((s) => s.kind === 'land')!;
+  const again = { ...plan, steps: [...plan.steps, land, land] };
+  const repo = await materializeFixture(again, new MemoryBackend());
   expect(repo.log.ops()).toHaveLength(plan.spec.ops);
 });

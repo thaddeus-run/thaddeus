@@ -22,15 +22,44 @@ const DEFAULT_CACHE_ROOT = join(
 const COMPLETE = '.complete';
 let tmpCounter = 0;
 
+// Moves a finished temporary build to its final path without ever deleting a
+// directory another process may have just published. If the rename loses to a
+// complete directory, that one is kept. If it loses to a stale directory (no
+// `.complete`, left by a killed build), the stale one is moved aside under a
+// unique name and the rename is retried once.
+async function publish(tmp: string, final: string): Promise<void> {
+  try {
+    await rename(tmp, final);
+    return;
+  } catch (error) {
+    if (existsSync(join(final, COMPLETE))) return;
+    if (!existsSync(final)) throw error;
+  }
+  const aside = `${final}.stale-${process.pid}-${tmpCounter++}`;
+  await rename(final, aside);
+  try {
+    await rename(tmp, final);
+  } catch (error) {
+    if (!existsSync(join(final, COMPLETE))) throw error;
+  } finally {
+    await rm(aside, { recursive: true, force: true });
+  }
+}
+
 // Returns the root of a finished FileBackend holding the plan's repository,
 // building it on first use. The build happens in a temporary directory that is
 // renamed into place only after `.complete` (holding the manifest hash) is
-// written, so a killed build never leaves a directory a later run would trust.
-// A final directory without `.complete` is stale and gets rebuilt.
+// written, so a killed build never leaves a directory a later run would trust,
+// and a directory without `.complete` is treated as stale and replaced.
 // `repos` is the total repository count: `bench` plus tiny `filler-<i>` ones.
+// `beforePublish` is a test seam that runs after the build, before the rename.
 export async function fixtureDir(
   plan: FixturePlan,
-  opts: { cacheRoot?: string; repos?: number } = {}
+  opts: {
+    cacheRoot?: string;
+    repos?: number;
+    beforePublish?: () => void | Promise<void>;
+  } = {}
 ): Promise<string> {
   const cacheRoot = opts.cacheRoot ?? DEFAULT_CACHE_ROOT;
   const repos = opts.repos ?? 1;
@@ -39,7 +68,6 @@ export async function fixtureDir(
 
   if (existsSync(join(final, COMPLETE))) return final;
   await mkdir(cacheRoot, { recursive: true });
-  await rm(final, { recursive: true, force: true });
 
   const tmp = join(cacheRoot, `.tmp-${process.pid}-${tmpCounter++}`);
   await rm(tmp, { recursive: true, force: true });
@@ -51,12 +79,8 @@ export async function fixtureDir(
       await materializeFixture(filler, backend, `filler-${i}`);
     }
     await writeFile(join(tmp, COMPLETE), hash);
-    try {
-      await rename(tmp, final);
-    } catch (error) {
-      // Another process finished the same fixture first; keep its copy.
-      if (!existsSync(join(final, COMPLETE))) throw error;
-    }
+    await opts.beforePublish?.();
+    await publish(tmp, final);
   } finally {
     await rm(tmp, { recursive: true, force: true });
   }

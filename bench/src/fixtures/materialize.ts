@@ -45,17 +45,20 @@ export async function materializeFixture(
         });
         break;
       case 'land': {
+        const before = repo.log.heads(step.into);
         const result = await repo.land({
           from: step.from,
           into: step.into,
           policy: allowAll,
         });
-        if (!result.landed && result.reason !== undefined) {
-          // "No incoming ops" is harmless; anything else means the plan and
-          // the log disagree, which would silently skew the fixture.
-          if (!result.reason.startsWith('no incoming ops')) {
-            throw new Error(`land ${step.from} failed: ${result.reason}`);
-          }
+        // Landing a view that is already merged is a harmless no-op: main's
+        // heads come back unchanged. Any other refusal means the plan and the
+        // log disagree, which would silently skew the fixture.
+        const unchanged =
+          result.heads.length === before.length &&
+          result.heads.every((head, i) => head === before[i]);
+        if (!result.landed && !unchanged) {
+          throw new Error(`land ${step.from} failed: ${result.reason}`);
         }
         break;
       }
