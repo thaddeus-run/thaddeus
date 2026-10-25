@@ -24,6 +24,8 @@ function isAlreadyLanded(repo: Repo, from: string, into: string): boolean {
 }
 
 // Replays a plan onto a durable repository, one step at a time, in order.
+// Every file another author writes is also granted to the owner, as the CLI
+// does when it reshares files to members.
 // Removes of a path the merged state no longer has are fine: the log just
 // appends a tombstone. Lands use `allowAll` because the generator wants
 // conflicts to reach main, and the default policy would block them.
@@ -42,15 +44,26 @@ export async function materializeFixture(
       case 'fork':
         repo.log.fork(step.view, step.from);
         break;
-      case 'write':
-        await repo.log.write(
+      case 'write': {
+        const op = await repo.log.write(
           step.view,
           step.path,
           contentFor(step),
           authors[step.author],
           { at: step.at }
         );
+        // `store.put` seals an object to its writer alone. The real client
+        // reshares every file to the repository's members before upload, so
+        // the owner (author 0) is granted each other author's files.
+        if (step.author !== 0 && op.payload !== null) {
+          await repo.store.grant(
+            op.payload,
+            authors[0].toPublic(),
+            authors[step.author]
+          );
+        }
         break;
+      }
       case 'remove':
         await repo.log.remove(step.view, step.path, authors[step.author], {
           at: step.at,
