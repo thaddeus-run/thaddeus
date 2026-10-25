@@ -25,7 +25,7 @@ test('seed and generator version both change the hash', () => {
     )
   ).not.toBe(base);
   expect(
-    manifestHash({ ...generateFixture(FIXTURES.small), generatorVersion: 2 })
+    manifestHash({ ...generateFixture(FIXTURES.small), generatorVersion: 99 })
   ).not.toBe(base);
 });
 
@@ -41,13 +41,13 @@ test('plan matches the spec table', () => {
   expect(p.steps.some((s) => s.kind === 'land')).toBe(true);
 });
 
-test('contentFor is deterministic TypeScript of the requested size', () => {
+test('contentFor is deterministic source of the requested size', () => {
   const w = generateFixture(FIXTURES.small).steps.find(
     (s) => s.kind === 'write'
   )!;
   expect(contentFor(w)).toEqual(contentFor(w));
   expect(Math.abs(contentFor(w).length - w.bytes)).toBeLessThan(64);
-  expect(new TextDecoder().decode(contentFor(w))).toContain('export function ');
+  expect(new TextDecoder().decode(contentFor(w))).toContain('fn f_');
 });
 
 // Pins the exact bytes contentFor produces. The manifest hash covers the recipe
@@ -59,19 +59,19 @@ test('contentFor output is pinned by golden hashes', () => {
       'src/f0.ts',
       12345,
       200,
-      '0df86e2943a699cc9c36a54817539c1fecd6524d5ffd216ccd044ef5e5756e5c',
+      'e046dd679956ecf9d3b6b7dbf1d9ecb8c879d19d35ea39cd3f72514a7c0e9ccb',
     ],
     [
       'src/f7.ts',
       987654,
       3000,
-      '4cc0a1b9417fd8fad68398ec470bb49cc0c0683fa7776775699f90425929c3dd',
+      '17d0369e89951a68e264394d8b90d9ff336c64c06c7d9034432638d6d592354f',
     ],
     [
       'src/f1999.ts',
       2000000000,
       8000,
-      '5d185e95b5c7417fd3786c90bf9ed8a71d1dc1e6f6efa96ba1ea0631d6bf3af2',
+      'd3524f1e5af248992db2007a0a2760e7c296cc4a70bd4fcacfac34ff3fd8d26d',
     ],
   ];
   for (const [path, contentSeed, bytes, hash] of golden) {

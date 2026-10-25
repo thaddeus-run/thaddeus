@@ -8,9 +8,11 @@ function fileIndex(path: string): number {
   return Number(match[1]);
 }
 
-// Builds deterministic TypeScript for one write step: a few imports from
-// lower-numbered files, then exported functions that call into them, so the
-// heuristic symbol extractor finds symbols and callers. The text is padded
+// Builds deterministic source for one write step: a few imports from
+// lower-numbered files, then functions that call into them. Functions are
+// written `fn name() { ... }` because that is the only definition shape the
+// graph package's HeuristicExtractor recognizes; with `export function` it
+// would find no symbols and the query cases would measure an empty graph. The text is padded
 // with a comment to land on `step.bytes`. It depends only on the step, so any
 // process regenerates identical bytes.
 export function contentFor(step: Extract<Step, { kind: 'write' }>): Uint8Array {
@@ -39,7 +41,7 @@ export function contentFor(step: Extract<Step, { kind: 'write' }>): Uint8Array {
     } else {
       call = k > 0 ? `f_${file}_${k - 1}()` : '0';
     }
-    return `export function f_${file}_${k}() { return ${call}; }\n`;
+    return `fn f_${file}_${k}() { return ${call}; }\n`;
   };
 
   // Every file defines f_<file>_0 and f_<file>_1 so imports always resolve.
