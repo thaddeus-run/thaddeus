@@ -1,0 +1,2306 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="color-scheme" content="dark" />
+    <title>
+      THA-5 Benchmark Suite and FileBackend Baseline — Implementation Plan
+    </title>
+    <style>
+      :root {
+        --bg: #000000;
+        --surface: #0c0c0c;
+        --rule: #232323;
+        --fg: #ededed;
+        --fg-strong: #ffffff;
+        --muted: #8b8b8b;
+        --code-bg: #242424;
+        --block-bg: #0e0e0e;
+        --accent: #6fdc8c;
+        --s: #5ee08a;
+        --a: #a8e05f;
+        --b: #e0c95e;
+        --c: #e0a35e;
+        --d: #e06f6f;
+        --x: #7a7a7a;
+      }
+      * {
+        box-sizing: border-box;
+      }
+      html {
+        -webkit-text-size-adjust: 100%;
+      }
+      body {
+        margin: 0;
+        background: var(--bg);
+        color: var(--fg);
+        font:
+          17px/1.7 system-ui,
+          -apple-system,
+          'Helvetica Neue',
+          'Segoe UI',
+          Arial,
+          sans-serif;
+        font-synthesis-weight: none;
+        -webkit-font-smoothing: antialiased;
+      }
+      .wrap {
+        max-width: 900px;
+        margin: 0 auto;
+        padding: 4rem 1.5rem 8rem;
+      }
+      h1,
+      h2,
+      h3 {
+        color: var(--fg-strong);
+        font-weight: 700;
+        letter-spacing: -0.021em;
+      }
+      h1 {
+        font-size: 2.25rem;
+        line-height: 1.15;
+        margin: 0 0 1rem;
+      }
+      h2 {
+        font-size: 1.4rem;
+        line-height: 1.25;
+        margin: 0 0 1.25rem;
+      }
+      h3 {
+        font-size: 1.05rem;
+        line-height: 1.4;
+        margin: 2rem 0 0.5rem;
+      }
+      p {
+        margin: 0 0 1.1rem;
+      }
+      a {
+        color: var(--accent);
+        text-decoration: none;
+      }
+      a:hover {
+        text-decoration: underline;
+      }
+      .lede {
+        color: var(--muted);
+        font-size: 1.05rem;
+        margin: 0;
+      }
+      .muted {
+        color: var(--muted);
+      }
+      section.block {
+        border-top: 1px solid var(--rule);
+        padding-top: 2.5rem;
+        margin-top: 2.5rem;
+      }
+      header {
+        padding-bottom: 1.75rem;
+      }
+      code {
+        font-family: ui-monospace, SFMono-Regular, 'SF Mono', Menlo, monospace;
+        font-size: 0.855em;
+        background: var(--code-bg);
+        color: #e8e8e8;
+        padding: 0.12em 0.42em;
+        border-radius: 4px;
+        white-space: nowrap;
+      }
+      pre {
+        background: var(--block-bg);
+        border: 1px solid var(--rule);
+        border-radius: 8px;
+        padding: 1rem 1.1rem;
+        overflow-x: auto;
+        font-size: 0.875rem;
+        line-height: 1.6;
+        margin: 0.9rem 0;
+      }
+      pre code {
+        background: none;
+        padding: 0;
+        font-size: inherit;
+        white-space: pre;
+        color: var(--fg);
+      }
+      .stats {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
+        gap: 0.9rem;
+        margin: 1.75rem 0;
+      }
+      .stat {
+        background: var(--surface);
+        border: 1px solid var(--rule);
+        border-radius: 10px;
+        padding: 1.2rem 1.3rem 1.35rem;
+      }
+      .stat b {
+        display: block;
+        color: var(--fg-strong);
+        font-size: 2rem;
+        font-weight: 500;
+        letter-spacing: -0.02em;
+        line-height: 1.1;
+        margin-bottom: 0.5rem;
+      }
+      .stat span {
+        color: var(--muted);
+        font-size: 0.95rem;
+        line-height: 1.45;
+      }
+      .table-scroll {
+        overflow-x: auto;
+        margin: 1.5rem 0;
+      }
+      table {
+        border-collapse: collapse;
+        width: 100%;
+      }
+      th {
+        text-align: left;
+        vertical-align: bottom;
+        color: var(--muted);
+        font-size: 0.74rem;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.1em;
+        padding: 0 1.5rem 0.8rem 0;
+        border-bottom: 1px solid var(--rule);
+        white-space: nowrap;
+      }
+      td {
+        text-align: left;
+        vertical-align: top;
+        padding: 0.95rem 1.5rem 0.95rem 0;
+        border-bottom: 1px solid var(--rule);
+      }
+      th:last-child,
+      td:last-child {
+        padding-right: 0;
+      }
+      tbody tr:last-child td {
+        border-bottom: 0;
+      }
+      td.num {
+        color: var(--muted);
+        font-variant-numeric: tabular-nums;
+      }
+      .legend {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 1.25rem;
+        color: var(--muted);
+        font-size: 0.95rem;
+        margin: 0 0 0.75rem;
+      }
+      .tier {
+        font-weight: 700;
+      }
+      .tier-s {
+        color: var(--s);
+      }
+      .tier-a {
+        color: var(--a);
+      }
+      .tier-b {
+        color: var(--b);
+      }
+      .tier-c {
+        color: var(--c);
+      }
+      .tier-d {
+        color: var(--d);
+      }
+      .tier-x {
+        color: var(--x);
+      }
+      .name {
+        color: var(--accent);
+        font-weight: 600;
+      }
+      .callout {
+        background: var(--surface);
+        border: 1px solid var(--rule);
+        border-radius: 10px;
+        padding: 1.15rem 1.35rem;
+        margin: 1.5rem 0;
+      }
+      .callout > :last-child {
+        margin-bottom: 0;
+      }
+      .callout strong {
+        color: var(--fg-strong);
+      }
+      .callout ul {
+        margin: 0.6rem 0 0;
+        padding-left: 1.15rem;
+      }
+      .callout li {
+        margin: 0.3rem 0;
+      }
+      section.task {
+        background: var(--surface);
+        border: 1px solid var(--rule);
+        border-radius: 10px;
+        padding: 1.4rem 1.6rem;
+        margin: 1.25rem 0;
+      }
+      .files {
+        font-size: 0.92rem;
+        color: var(--muted);
+        margin: 0 0 1rem;
+      }
+      .files code {
+        color: var(--fg);
+        white-space: normal;
+      }
+      .io {
+        margin: 0 0 1.25rem;
+        font-size: 0.95rem;
+      }
+      .io dt {
+        color: var(--muted);
+        font-size: 0.74rem;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.1em;
+      }
+      .io dd {
+        margin: 0.2rem 0 0.75rem;
+      }
+      ol.steps {
+        list-style: none;
+        padding: 0;
+        margin: 0;
+      }
+      ol.steps > li {
+        display: flex;
+        gap: 0.7rem;
+        align-items: flex-start;
+        padding: 0.7rem 0;
+        border-top: 1px solid var(--rule);
+      }
+      ol.steps > li:first-child {
+        border-top: 0;
+        padding-top: 0;
+      }
+      ol.steps input {
+        margin: 0.42rem 0 0;
+        flex: none;
+        width: 1rem;
+        height: 1rem;
+        accent-color: var(--accent);
+      }
+      ol.steps input:checked + .label {
+        color: var(--muted);
+      }
+      ol.steps input:checked + .label strong {
+        color: var(--muted);
+        text-decoration: line-through;
+      }
+      .label {
+        flex: 1;
+        min-width: 0;
+      }
+      .label strong {
+        color: var(--fg-strong);
+        font-weight: 600;
+      }
+      .progress {
+        color: var(--muted);
+        font-size: 0.95rem;
+        margin-top: 3rem;
+        border-top: 1px solid var(--rule);
+        padding-top: 1.5rem;
+      }
+      .progress b {
+        color: var(--accent);
+      }
+      @media (max-width: 620px) {
+        body {
+          font-size: 16px;
+        }
+        h1 {
+          font-size: 1.8rem;
+        }
+        .wrap {
+          padding: 2.5rem 1.1rem 5rem;
+        }
+        section.task {
+          padding: 1.1rem 1.15rem;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="wrap">
+      <header>
+        <h1>
+          THA-5 Benchmark Suite and FileBackend Baseline — Implementation Plan
+        </h1>
+        <p class="lede">
+          A deterministic benchmark suite for Thaddeus, a recorded baseline of
+          today's
+          <code>FileBackend</code>, and a report-only PR regression check whose
+          thresholds come from a measured noise study. Spec:
+          <code
+            >docs/superpowers/specs/2026-10-25-tha-5-benchmark-suite-design.md</code
+          >, committed in <code>4d4b7a8</code>.
+        </p>
+      </header>
+
+      <section class="block">
+        <h2>Goal and shape</h2>
+        <p>
+          <strong>Goal:</strong> Measure what ships today, so THA-21 has a
+          "before" and a later website figure has a committed run to link to.
+        </p>
+        <p>
+          <strong>Architecture:</strong> A new private moon project,
+          <code>bench/</code>, holds four parts:
+        </p>
+        <ul>
+          <li>
+            a pure, seeded fixture plan, with a manifest hash that proves the
+            inputs are identical
+          </li>
+          <li>
+            a runner that executes each case in its own subprocess, so it can
+            record peak memory and enforce time budgets
+          </li>
+          <li>a library suite that runs in-process</li>
+          <li>
+            an end-to-end suite that drives the real
+            <code>thaddeus</code> binary against <code>thaddeus serve</code>
+          </li>
+        </ul>
+        <p>
+          A small compare and noise module turns base and head runs into a
+          GitHub job summary.
+        </p>
+        <p>
+          <strong>Tech stack:</strong> Bun, TypeScript, <code>bun:test</code>,
+          moon, and <code>ajv</code> for JSON Schema validation.
+          <code>ajv</code> is already in <code>bun.lock</code> at 8.20.0 as a
+          transitive dependency, and gets added to the root catalog at that pin.
+        </p>
+
+        <div class="stats">
+          <div class="stat">
+            <b>10</b
+            ><span
+              >tasks in this PR, plus 1 follow-up PR that records the
+              baseline</span
+            >
+          </div>
+          <div class="stat">
+            <b>1</b
+            ><span>new catalog entry (<code>ajv</code> 8.20.0, dev only)</span>
+          </div>
+          <div class="stat">
+            <b>0</b
+            ><span
+              >changes to shipped packages under <code>packages/</code></span
+            >
+          </div>
+        </div>
+
+        <div class="callout">
+          <strong>Global constraints</strong>
+          <ul>
+            <li>
+              Package <code>@thaddeus.run/bench</code> has
+              <code>"private": true</code> and is never published. Dependencies
+              come from the root <code>workspaces.catalog</code> or
+              <code>workspace:*</code>.
+            </li>
+            <li>
+              Fixture table: small has 100 files, 1,000 ops, 1 author and 1
+              view. Medium has 2,000 files, 20,000 ops, 10 authors and 50 views.
+              Stress has 20,000 files, 200,000 ops, 100 authors and 500 views.
+            </li>
+            <li>
+              The sweep doubles history length: 1k, 2k, 4k … ops. It reports an
+              exponent together with its R².
+            </li>
+            <li>
+              A budget overrun is recorded as
+              <code>exceeded &lt;budget&gt; at n = X</code> and an out-of-memory
+              as <code>oom at n = X</code>. Both are results. Neither hangs nor
+              skips the run.
+            </li>
+            <li>
+              Every write, push and land result carries
+              <code
+                >durability: "none (FileBackend renames atomically, no
+                fsync)"</code
+              >.
+            </li>
+            <li>
+              The machine block names the host as a shared, virtualized guest:
+              KVM, 4 vCPU AMD EPYC Rome, 7 GB RAM.
+            </li>
+            <li>
+              <code>bench:record</code> refuses to start when the 1-minute load
+              average is above 0.5, or when less than 2 GiB is available. It
+              records both values in the result.
+            </li>
+            <li>
+              Results go to
+              <code
+                >bench/results/&lt;machine&gt;/&lt;date&gt;-&lt;short-commit&gt;.json</code
+              >, and the current reference run is copied to
+              <code>bench/results/&lt;machine&gt;/baseline.json</code>.
+            </li>
+            <li>
+              Cold cases run twice in <code>bench:record</code>: once with
+              <code>pageCache: "warm"</code> and once with
+              <code>"dropped"</code> (<code
+                >echo 3 &gt; /proc/sys/vm/drop_caches</code
+              >). The PR check runs warm only.
+            </li>
+            <li>
+              The end-to-end suite uses the shipped <code>serve</code> defaults
+              and raises only the limits a case hits. The exact flags go in
+              <code>serveFlags</code>.
+            </li>
+            <li>
+              PR thresholds are the 99th percentile of the head/base median
+              ratio from an A/A noise study. The check is a separate workflow
+              and is not part of <code>ci-passed</code>. It writes a job summary
+              and an artifact, and posts no PR comment.
+            </li>
+            <li>
+              Results are compared only when the case id, case version and
+              manifest hash all match. Anything else is shown as "new or
+              changed, not compared".
+            </li>
+            <li>
+              Commits follow Conventional Commits. Run
+              <code>moon run root:format root:lint</code> and
+              <code>moonx bench:typecheck bench:test</code> before every commit.
+              A non-trivial helper gets a short comment directly above it, aimed
+              at a reader new to the code.
+            </li>
+          </ul>
+        </div>
+
+        <div class="callout">
+          <strong>Review focus</strong>
+          <ul>
+            <li>
+              <strong>Setup fails, not the timed part.</strong> Building a
+              stress fixture can run out of memory or time on a 7 GB host.
+              Expected: the case is recorded with
+              <code>phase: "setup"</code> and the right status, and the run
+              continues. The test lives in Task 4.
+            </li>
+            <li>
+              <strong>Partial fixture cache after a killed run.</strong> A
+              budget kill during materialization must never leave a cache
+              directory that a later run trusts. Expected: the cache is built in
+              a temporary directory and renamed into place along with a
+              <code>.complete</code> marker that holds the manifest hash.
+              Anything without the marker is rebuilt. The test lives in Task 2.
+            </li>
+            <li>
+              <strong>Hard-link copies mutating the cache.</strong> Write cases
+              work on a <code>cp -al</code> copy. Expected: the cached fixture's
+              file count and bytes are unchanged afterwards. The test lives in
+              Task 5.
+            </li>
+            <li>
+              <strong>Record preflight.</strong> A dirty tree under
+              <code>packages/</code> or <code>bench/</code>, or
+              <code>sudo -n</code> being unavailable for dropping the page
+              cache, must stop <code>bench:record</code> before any case runs.
+              That keeps a results file from naming a commit it didn't measure,
+              and keeps a run from failing halfway. The test lives in Task 7.
+            </li>
+            <li>
+              <strong>Status differs between base and head.</strong> Base
+              <code>exceeded</code> with head <code>ok</code> counts as an
+              improvement. Base <code>ok</code> with head
+              <code>exceeded</code> or <code>oom</code> counts as a regression,
+              whatever the threshold. The test lives in Task 9.
+            </li>
+          </ul>
+        </div>
+
+        <p class="muted">
+          <strong>For agentic workers:</strong> use
+          <code>superpowers:subagent-driven-development</code> (recommended) or
+          <code>superpowers:executing-plans</code> to implement this plan
+          task-by-task. Run <code>export AGENT=1</code> first.
+        </p>
+      </section>
+
+      <section class="block">
+        <h2>What the code says today</h2>
+        <div class="table-scroll">
+          <table>
+            <thead>
+              <tr>
+                <th>Signal</th>
+                <th>Evidence</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>No benchmarks, no seeded generator, no perf CI</td>
+                <td>
+                  The only timing is a 1,000 ms assert in
+                  <code>packages/store/test/store.test.ts:79</code>.
+                  <code>.github/workflows/ci.yml</code> has no perf job.
+                </td>
+              </tr>
+              <tr>
+                <td>Deterministic inputs are possible</td>
+                <td>
+                  <code>Identity.fromSeed(seed32)</code>
+                  (<code>packages/identity/src/identity.ts:77</code>).
+                  <code>at</code> on <code>OpLog.write</code> and
+                  <code>remove</code>. <code>now</code> on the store and on
+                  <code>ServerConfig</code>.
+                </td>
+              </tr>
+              <tr>
+                <td>Ciphertext is random every run</td>
+                <td>
+                  <code>encrypt</code> takes its nonce and content key from
+                  <code>randombytes</code>
+                  (<code>packages/store/src/object.ts:25</code>). This is why
+                  the manifest hashes the plan and not the bytes.
+                </td>
+              </tr>
+              <tr>
+                <td>Writes and forks alone never conflict</td>
+                <td>
+                  <code>OpLog.write</code> sets the view's heads to the new op.
+                  Several heads only appear after <code>Repo.land</code> or
+                  <code>repoint</code>
+                  (<code>packages/platform/src/platform.ts:93</code>), so the
+                  generator must land.
+                </td>
+              </tr>
+              <tr>
+                <td>Land blocks on conflict by default</td>
+                <td>
+                  <code>blockOnConflict</code> is the default policy. Seeding
+                  passes
+                  <code>allowAll</code>
+                  (<code>packages/platform/src/policy.ts:37</code>).
+                </td>
+              </tr>
+              <tr>
+                <td><code>FileBackend</code> never writes in place</td>
+                <td>
+                  <code>put</code> writes a temp file and renames it
+                  (<code>packages/persist/src/file.ts:123</code>). A hard-link
+                  copy of a fixture is therefore safe to write into.
+                </td>
+              </tr>
+              <tr>
+                <td>The server runs in-process</td>
+                <td>
+                  <code>createServer({ backend })</code> returns a
+                  <code>fetch</code> handler, and
+                  <code>new Client(url, id, srv.fetch.bind(srv))</code> drives
+                  it (<code>packages/cli/test/collab.test.ts:22</code>).
+                </td>
+              </tr>
+              <tr>
+                <td>Serve defaults block stress and repos/min</td>
+                <td>
+                  The defaults are 20 repos per hour per owner, 100 repos,
+                  100,000 objects and 16 MiB bodies. The flags
+                  <code>--repository-creation-limit</code>,
+                  <code>--max-repositories</code>,
+                  <code>--max-objects</code> and
+                  <code>--max-request-body-bytes</code> raise them.
+                </td>
+              </tr>
+              <tr>
+                <td>The CLI reads its identity from a file</td>
+                <td>
+                  <code>&lt;home&gt;/.config/thaddeus/identity.json</code> holds
+                  <code>{ seed: base64(32 bytes), did }</code>
+                  (<code>packages/cli/src/identity.ts:6</code>).
+                </td>
+              </tr>
+              <tr>
+                <td>Push can skip landing</td>
+                <td>
+                  <code>thaddeus push --no-land</code> uploads only.
+                  <code>thaddeus land &lt;branch&gt;</code> lands a branch into
+                  the current view (<code>packages/cli/src/run.ts:1886</code>).
+                </td>
+              </tr>
+              <tr>
+                <td>Archive decode limit</td>
+                <td>
+                  <code
+                    >decodeReputationArchive(json, { maxContributions })</code
+                  >
+                  rejects more than 4,096 contributions by default.
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        <p class="muted">
+          One deviation from the spec, my call: result files must not name the
+          private Tailscale hostname, because the repo is public. The machine id
+          is <code>kvm-epyc-rome-4vcpu</code>, described in a committed
+          <code>bench/machines/kvm-epyc-rome-4vcpu.json</code>.
+        </p>
+      </section>
+
+      <section class="block">
+        <h2>Task 1: Project scaffold, seeded PRNG and fixture plan</h2>
+        <section class="task">
+          <p class="files">
+            Create <code>bench/package.json</code>, <code>bench/moon.yml</code>,
+            <code>bench/tsconfig.json</code>, <code>bench/src/prng.ts</code>,
+            <code>bench/src/fixtures/spec.ts</code>,
+            <code>bench/src/fixtures/plan.ts</code>,
+            <code>bench/src/fixtures/content.ts</code> · Modify
+            <code>package.json</code> (add <code>"bench"</code> to
+            <code>workspaces.packages</code>, <code>"ajv": "8.20.0"</code> to
+            the catalog), <code>.moon/workspace.yml</code> (add
+            <code>'bench'</code> to <code>projects.globs</code>),
+            <code>.gitignore</code> (<code>bench/.cache/</code>,
+            <code>bench/out/</code>) · Test <code>bench/test/plan.test.ts</code>
+          </p>
+          <dl class="io">
+            <dt>Produces</dt>
+            <dd>
+              <code
+                >createPrng(seed: number): { next(): number; int(n: number):
+                number }</code
+              >
+              (mulberry32; <code>next</code> in [0,1))<br />
+              <code>type FixtureName = 'small' | 'medium' | 'stress'</code
+              ><br />
+              <code
+                >interface FixtureSpec { name: string; seed: number; files:
+                number; ops: number; authors: number; views: number; landEvery:
+                number; removeRatio: number; hotFileShare: number }</code
+              ><br />
+              <code>FIXTURES: Record&lt;FixtureName, FixtureSpec&gt;</code>,
+              <code>sweepSpec(ops: number): FixtureSpec</code> (100 files, 4
+              authors, 8 views), <code>tinySpec(): FixtureSpec</code> (10 files,
+              20 ops, 2 authors, 2 views, for tests and filler repos)<br />
+              <code>GENERATOR_VERSION = 1</code><br />
+              <code
+                >type Step = { kind: 'write'; view: string; path: string;
+                author: number; contentSeed: number; bytes: number; at: string }
+                | { kind: 'remove'; view: string; path: string; author: number;
+                at: string } | { kind: 'fork'; view: string; from: string } | {
+                kind: 'land'; from: string; into: 'main' }</code
+              ><br />
+              <code
+                >interface FixturePlan { spec: FixtureSpec; generatorVersion:
+                number; authorSeeds: Uint8Array[]; steps: Step[] }</code
+              ><br />
+              <code>generateFixture(spec: FixtureSpec): FixturePlan</code>,
+              <code>manifestHash(plan: FixturePlan): string</code> (blake3
+              hex)<br />
+              <code
+                >contentFor(step: Extract&lt;Step, { kind: 'write' }&gt;):
+                Uint8Array</code
+              >
+            </dd>
+          </dl>
+          <ol class="steps">
+            <li>
+              <input type="checkbox" id="t1s1" /><span class="label">
+                <strong>Write the failing tests</strong>
+                <pre><code>test('same spec gives the same manifest hash', () =&gt; {
+  expect(manifestHash(generateFixture(FIXTURES.small)))
+    .toBe(manifestHash(generateFixture(FIXTURES.small)));
+});
+test('seed and generator version both change the hash', () =&gt; {
+  const base = manifestHash(generateFixture(FIXTURES.small));
+  expect(manifestHash(generateFixture({ ...FIXTURES.small, seed: FIXTURES.small.seed + 1 }))).not.toBe(base);
+  expect(manifestHash({ ...generateFixture(FIXTURES.small), generatorVersion: 2 })).not.toBe(base);
+});
+test('plan matches the spec table', () =&gt; {
+  const p = generateFixture(FIXTURES.medium);
+  const ops = p.steps.filter((s) =&gt; s.kind === 'write' || s.kind === 'remove');
+  expect(ops).toHaveLength(20_000);
+  expect(new Set(ops.map((s) =&gt; s.path)).size).toBeLessThanOrEqual(2_000);
+  expect(p.authorSeeds).toHaveLength(10);
+  expect(new Set(p.steps.filter((s) =&gt; s.kind === 'fork').map((s) =&gt; s.view)).size).toBe(49);
+  expect(p.steps.some((s) =&gt; s.kind === 'land')).toBe(true);
+});
+test('contentFor is deterministic TypeScript of the requested size', () =&gt; {
+  const w = generateFixture(FIXTURES.small).steps.find((s) =&gt; s.kind === 'write')!;
+  expect(contentFor(w)).toEqual(contentFor(w));
+  expect(Math.abs(contentFor(w).length - w.bytes)).toBeLessThan(64);
+  expect(new TextDecoder().decode(contentFor(w))).toContain('export function ');
+});</code></pre>
+              </span>
+            </li>
+            <li>
+              <input type="checkbox" id="t1s2" /><span class="label">
+                <strong>Run them and watch them fail</strong>:
+                <code>moonx bench:test</code> should report missing modules.
+              </span>
+            </li>
+            <li>
+              <input type="checkbox" id="t1s3" /><span class="label">
+                <strong>Implement the scaffold and the plan</strong>.
+                <ul>
+                  <li>
+                    <code>bench/package.json</code> follows
+                    <code>integration/package.json</code>. Its workspace deps
+                    are agent, client, fs, graph, identity, log, persist,
+                    platform, provenance, query, reputation, server, store and
+                    cli, plus <code>ajv</code> and <code>@types/bun</code> from
+                    the catalog.
+                  </li>
+                  <li>
+                    <code>moon.yml</code> declares
+                    <code>language: 'typescript'</code> and
+                    <code>layer: 'application'</code>. The tsconfig matches
+                    <code>integration/tsconfig.json</code> with
+                    <code>include: ["src/**/*.ts", "test/**/*.ts"]</code>.
+                  </li>
+                  <li>
+                    The plan has no crypto and no I/O. Use one PRNG stream
+                    seeded from <code>spec.seed</code>. Author seeds are 32
+                    bytes each, drawn from the stream.
+                  </li>
+                  <li>
+                    Timestamps are <code>2026-01-01T00:00:00Z</code> plus 1 s
+                    per op.
+                  </li>
+                  <li>
+                    Each write chooses a hot file with probability 0.8, from the
+                    first <code>hotFileShare</code> (0.1) of paths, and
+                    otherwise any path. Removes make up
+                    <code>removeRatio</code> (0.05) of ops and only target paths
+                    that exist in that view.
+                  </li>
+                  <li>
+                    Views <code>v1…v(n-1)</code> fork from <code>main</code> in
+                    round-robin, and every <code>landEvery</code> ops (small
+                    100, medium 400, stress 400, sweep 100) the next view lands
+                    into <code>main</code>.
+                  </li>
+                  <li>
+                    <code>manifestHash</code> is blake3 over canonical JSON of
+                    <code
+                      >{ generatorVersion, spec, authorSeeds (hex), steps
+                      }</code
+                    >.
+                  </li>
+                  <li>
+                    <code>contentFor</code> emits
+                    <code
+                      >export function f_&lt;file&gt;_&lt;k&gt;() { return
+                      f_&lt;other&gt;_&lt;j&gt;(); }</code
+                    >
+                    lines and imports between files. These give
+                    <code>HeuristicExtractor</code> symbols and callers to find.
+                    It pads to <code>bytes</code>, where sizes are drawn from
+                    200 to 8,000 bytes.
+                  </li>
+                </ul>
+              </span>
+            </li>
+            <li>
+              <input type="checkbox" id="t1s4" /><span class="label">
+                <strong>Run the tests and watch them pass</strong>: run
+                <code>bun install</code>, then
+                <code>moonx bench:test bench:typecheck</code>.
+              </span>
+            </li>
+            <li>
+              <input type="checkbox" id="t1s5" /><span class="label">
+                <strong>Commit</strong>:
+                <code
+                  >feat(bench): add seeded fixture plans with a manifest
+                  hash</code
+                >
+              </span>
+            </li>
+          </ol>
+        </section>
+      </section>
+
+      <section class="block">
+        <h2>
+          Task 2: Materialize a plan into a durable repository, with a safe
+          cache
+        </h2>
+        <section class="task">
+          <p class="files">
+            Create <code>bench/src/fixtures/materialize.ts</code>,
+            <code>bench/src/fixtures/cache.ts</code> · Test
+            <code>bench/test/materialize.test.ts</code>
+          </p>
+          <dl class="io">
+            <dt>Consumes</dt>
+            <dd>
+              Task 1: <code>FixturePlan</code>, <code>Step</code>,
+              <code>contentFor</code>, <code>manifestHash</code>
+            </dd>
+            <dt>Produces</dt>
+            <dd>
+              <code>authorsOf(plan: FixturePlan): Identity[]</code> (author 0 is
+              the owner)<br />
+              <code
+                >materializeFixture(plan: FixturePlan, backend: Backend,
+                repoName = 'bench'): Promise&lt;Repo&gt;</code
+              ><br />
+              <code
+                >fixtureDir(plan: FixturePlan, opts?: { cacheRoot?: string;
+                repos?: number }): Promise&lt;string&gt;</code
+              >, which returns
+              <code>bench/.cache/&lt;hash&gt;[-r&lt;repos&gt;]/</code>, a
+              complete <code>FileBackend</code> root<br />
+              <code
+                >linkCopy(src: string, dst: string): Promise&lt;void&gt;</code
+              >
+              (<code>cp -al</code>)
+            </dd>
+          </dl>
+          <ol class="steps">
+            <li>
+              <input type="checkbox" id="t2s1" /><span class="label">
+                <strong>Write the failing tests</strong>
+                <pre><code>test('materialized repo reopens with every op and a conflicting frontier', async () =&gt; {
+  const plan = generateFixture({ ...tinySpec(), ops: 200, files: 20, views: 4 });
+  const root = await fixtureDir(plan, { cacheRoot: tmp });
+  const repo = await new Platform().openDurable('bench', new FileBackend(root));
+  expect(repo.log.ops()).toHaveLength(200);
+  expect(repo.log.materialize('main').size).toBeGreaterThan(0);
+  expect(repo.log.conflicts().length).toBeGreaterThan(0);
+});
+test('a second call reuses the cache', async () =&gt; {
+  const plan = generateFixture(tinySpec());
+  const a = await fixtureDir(plan, { cacheRoot: tmp });
+  const before = statSync(join(a, '.complete')).mtimeMs;
+  expect(await fixtureDir(plan, { cacheRoot: tmp })).toBe(a);
+  expect(statSync(join(a, '.complete')).mtimeMs).toBe(before);
+});
+test('a directory without .complete is rebuilt', async () =&gt; {
+  const plan = generateFixture(tinySpec());
+  const dir = await fixtureDir(plan, { cacheRoot: tmp });
+  rmSync(join(dir, '.complete'));
+  await fixtureDir(plan, { cacheRoot: tmp });
+  expect(readFileSync(join(dir, '.complete'), 'utf8')).toBe(manifestHash(plan));
+});
+test('repos option adds tiny filler repos beside bench', async () =&gt; {
+  const dir = await fixtureDir(generateFixture(tinySpec()), { cacheRoot: tmp, repos: 3 });
+  const repos = new Set((await new FileBackend(dir).list('repo/')).map((k) =&gt; k.split('/')[1]));
+  expect(repos.size).toBe(3);
+});</code></pre>
+              </span>
+            </li>
+            <li>
+              <input type="checkbox" id="t2s2" /><span class="label">
+                <strong>Run them and watch them fail</strong>:
+                <code>moonx bench:test</code>
+              </span>
+            </li>
+            <li>
+              <input type="checkbox" id="t2s3" /><span class="label">
+                <strong>Implement</strong>.
+                <ul>
+                  <li>
+                    <code>materializeFixture</code> uses
+                    <code>new Platform().createDurable(name, backend)</code>,
+                    then plays the steps in order:
+                    <ul>
+                      <li>
+                        <code>fork</code> becomes
+                        <code>repo.log.fork(view, from)</code>
+                      </li>
+                      <li>
+                        <code>write</code> becomes
+                        <code
+                          >repo.log.write(view, path, contentFor(s),
+                          authors[s.author], { at })</code
+                        >
+                      </li>
+                      <li>
+                        <code>remove</code> becomes
+                        <code>repo.log.remove(…, { at })</code>
+                      </li>
+                      <li>
+                        <code>land</code> becomes
+                        <code
+                          >repo.land({ from, into: 'main', policy: allowAll
+                          })</code
+                        >
+                      </li>
+                    </ul>
+                  </li>
+                  <li>
+                    Call <code>ready()</code> from
+                    <code>@thaddeus.run/identity</code> first.
+                  </li>
+                  <li>
+                    <code>fixtureDir</code> builds into
+                    <code>&lt;cacheRoot&gt;/.tmp-&lt;pid&gt;-&lt;n&gt;</code>,
+                    writes <code>.complete</code> containing the manifest hash,
+                    and then <code>rename</code>s the directory into place.
+                  </li>
+                  <li>
+                    Filler repos are
+                    <code>generateFixture({ ...tinySpec(), seed: i })</code>,
+                    named <code>filler-&lt;i&gt;</code>, so
+                    <code>repos</code> counts the total including
+                    <code>bench</code>.
+                  </li>
+                  <li>The default cache root is <code>bench/.cache</code>.</li>
+                </ul>
+              </span>
+            </li>
+            <li>
+              <input type="checkbox" id="t2s4" /><span class="label">
+                <strong>Run the tests and watch them pass</strong>:
+                <code>moonx bench:test</code>
+              </span>
+            </li>
+            <li>
+              <input type="checkbox" id="t2s5" /><span class="label">
+                <strong>Commit</strong>:
+                <code
+                  >feat(bench): materialize fixture plans into cached
+                  FileBackend roots</code
+                >
+              </span>
+            </li>
+          </ol>
+        </section>
+      </section>
+
+      <section class="block">
+        <h2>Task 3: Result types, JSON Schema and statistics</h2>
+        <section class="task">
+          <p class="files">
+            Create <code>bench/src/result.ts</code>,
+            <code>bench/src/stats.ts</code>,
+            <code>bench/schema/bench-run.schema.json</code> · Test
+            <code>bench/test/stats.test.ts</code>,
+            <code>bench/test/schema.test.ts</code>
+          </p>
+          <dl class="io">
+            <dt>Produces</dt>
+            <dd>
+              <code
+                >FILEBACKEND_DURABILITY = 'none (FileBackend renames atomically,
+                no fsync)'</code
+              ><br />
+              <code>type CaseStatus = 'ok' | 'exceeded' | 'oom' | 'error'</code
+              ><br />
+              <code
+                >interface Machine { id; description; cpu; vcpus; memoryBytes;
+                virtualization; os; bun; loadAvg1; memAvailableBytes }</code
+              ><br />
+              <code
+                >interface CaseResult { id: string; version: number; suite:
+                'library' | 'e2e'; fixture: string; manifestHash: string;
+                status: CaseStatus; phase?: 'setup' | 'run'; budgetMs: number;
+                failedAtN?: number; repeats: number; warmup: number; samplesMs:
+                number[]; p50Ms: number | null; p95Ms: number | null; cv: number
+                | null; throughput?: { value: number; unit: 'ops/s' | 'MB/s' |
+                'repos/min' }; peakRssBytes: number; diskBytes?: number;
+                durability?: string; pageCache?: 'warm' | 'dropped';
+                serveFlags?: string[]; note?: string }</code
+              ><br />
+              <code
+                >interface SweepResult { id: string; version: number; points: {
+                n: number; p50Ms: number }[]; exponent: number | null; r2:
+                number | null; status: CaseStatus; failedAtN?: number }</code
+              ><br />
+              <code
+                >interface BenchRun { schemaVersion: 1; commit: string; dirty:
+                false; suiteVersion: string; recordedAt: string; machine:
+                Machine; method: { repeats: number; warmup: number; budgetMs:
+                number; isolation: 'subprocess' }; cases: CaseResult[]; sweeps:
+                SweepResult[] }</code
+              ><br />
+              <code>median</code>, <code>percentile(xs, p)</code> (linear
+              interpolation), <code>cv(xs)</code> (sample stdev / mean),
+              <code
+                >fitExponent(points: { n: number; t: number }[]): { exponent:
+                number; r2: number } | null</code
+              >
+              (least squares on ln n, ln t; null below 3 points),
+              <code>summarize(samplesMs): { p50Ms, p95Ms, cv }</code><br />
+              <code>validateRun(run: unknown): string[]</code> (ajv errors as
+              strings; empty when valid)
+            </dd>
+          </dl>
+          <ol class="steps">
+            <li>
+              <input type="checkbox" id="t3s1" /><span class="label">
+                <strong>Write the failing tests</strong>
+                <pre><code>expect(median([3, 1, 2])).toBe(2);
+expect(percentile(Array.from({ length: 100 }, (_, i) =&gt; i + 1), 95)).toBeCloseTo(95.05, 6);
+expect(cv([10, 10, 10])).toBe(0);
+const fit = fitExponent([1e3, 2e3, 4e3, 8e3].map((n) =&gt; ({ n, t: n * n })))!;
+expect(fit.exponent).toBeCloseTo(2, 9);
+expect(fit.r2).toBeCloseTo(1, 9);
+expect(fitExponent([{ n: 1, t: 1 }, { n: 2, t: 2 }])).toBeNull();
+// schema.test.ts: a hand-built minimal valid BenchRun passes; deleting machine,
+// or setting status: 'slow', each yields at least one error string.
+expect(validateRun(validRun)).toEqual([]);
+expect(validateRun({ ...validRun, machine: undefined }).length).toBeGreaterThan(0);</code></pre>
+              </span>
+            </li>
+            <li>
+              <input type="checkbox" id="t3s2" /><span class="label">
+                <strong>Run them and watch them fail</strong>:
+                <code>moonx bench:test</code>
+              </span>
+            </li>
+            <li>
+              <input type="checkbox" id="t3s3" /><span class="label">
+                <strong>Implement</strong>. The schema is draft 2020-12, mirrors
+                the interfaces above and sets
+                <code>additionalProperties: false</code> on
+                <code>BenchRun</code>, <code>CaseResult</code> and
+                <code>Machine</code>. <code>validateRun</code> compiles it once
+                with <code>new Ajv({ allErrors: true })</code>.
+              </span>
+            </li>
+            <li>
+              <input type="checkbox" id="t3s4" /><span class="label">
+                <strong>Run the tests and watch them pass</strong>:
+                <code>moonx bench:test</code>
+              </span>
+            </li>
+            <li>
+              <input type="checkbox" id="t3s5" /><span class="label">
+                <strong>Commit</strong>:
+                <code
+                  >feat(bench): define the result schema and summary
+                  statistics</code
+                >
+              </span>
+            </li>
+          </ol>
+        </section>
+      </section>
+
+      <section class="block">
+        <h2>Task 4: Subprocess runner with budgets, memory and sweeps</h2>
+        <section class="task">
+          <p class="files">
+            Create <code>bench/src/case.ts</code>,
+            <code>bench/src/runner.ts</code>, <code>bench/src/child.ts</code>,
+            <code>bench/test/fixtures/fake-cases.ts</code> · Test
+            <code>bench/test/runner.test.ts</code>
+          </p>
+          <dl class="io">
+            <dt>Consumes</dt>
+            <dd>
+              Task 1 <code>FIXTURES</code>, <code>sweepSpec</code>,
+              <code>generateFixture</code>. Task 3 <code>CaseResult</code>,
+              <code>SweepResult</code>, <code>summarize</code>,
+              <code>fitExponent</code>.
+            </dd>
+            <dt>Produces</dt>
+            <dd>
+              <code
+                >interface CaseContext { plan: FixturePlan; fixture: string;
+                workDir: string; pageCache: 'warm' | 'dropped' }</code
+              ><br />
+              <code
+                >interface BenchCase&lt;S = unknown&gt; { id: string; version:
+                number; suite: 'library' | 'e2e'; fixtures: readonly string[];
+                isolation: 'per-case' | 'per-sample'; writes?: boolean; cold?:
+                boolean; sweep?: boolean; setup(ctx: CaseContext):
+                Promise&lt;S&gt;; run(state: S, ctx: CaseContext):
+                Promise&lt;void | { bytes?: number; ops?: number; repos?: number
+                }&gt;; teardown?(state: S, ctx: CaseContext):
+                Promise&lt;void&gt; }</code
+              ><br />
+              <code
+                >interface RunOptions { repeats: number; warmup: number;
+                budgetMs: number; registry: string; pageCache?: 'warm' |
+                'dropped'; beforeSample?: () =&gt; Promise&lt;void&gt; }</code
+              ><br />
+              <code
+                >runCase(id: string, fixture: string, opts: RunOptions):
+                Promise&lt;CaseResult&gt;</code
+              ><br />
+              <code
+                >runSweep(id: string, sizes: readonly number[], opts:
+                RunOptions): Promise&lt;SweepResult&gt;</code
+              ><br />
+              <code
+                >SWEEP_SIZES = [1_000, 2_000, 4_000, 8_000, 16_000, 32_000,
+                64_000, 128_000, 256_000]</code
+              ><br />
+              Registry modules default-export <code>readonly BenchCase[]</code>.
+            </dd>
+          </dl>
+          <ol class="steps">
+            <li>
+              <input type="checkbox" id="t4s1" /><span class="label">
+                <strong>Write the failing tests</strong>. The fake cases are
+                <code>fake.ok</code> (a no-op), <code>fake.sleep</code> (waits 5
+                s), <code>fake.alloc</code> (holds 64 MiB),
+                <code>fake.throw</code> (throws in <code>run</code>) and
+                <code>fake.setup-sleep</code> (waits 5 s in <code>setup</code>),
+                plus <code>fake.linear</code> (busy-loops
+                <code>n</code> iterations) for the sweep.
+                <pre><code>const o = { repeats: 5, warmup: 1, budgetMs: 1_000, registry: FAKES };
+const ok = await runCase('fake.ok', 'small', o);
+expect(ok.status).toBe('ok'); expect(ok.samplesMs).toHaveLength(5); expect(ok.p50Ms).not.toBeNull();
+const slow = await runCase('fake.sleep', 'small', o);
+expect(slow.status).toBe('exceeded'); expect(slow.phase).toBe('run'); expect(slow.note).toContain('exceeded 1000 ms');
+expect((await runCase('fake.setup-sleep', 'small', o)).phase).toBe('setup');
+expect((await runCase('fake.alloc', 'small', o)).peakRssBytes).toBeGreaterThan(64 * 1024 * 1024);
+const bad = await runCase('fake.throw', 'small', o);
+expect(bad.status).toBe('error'); expect(bad.note).toContain('boom');
+const sw = await runSweep('fake.linear', [1_000, 2_000, 4_000, 8_000], { ...o, repeats: 3 });
+expect(sw.exponent!).toBeGreaterThan(0.7); expect(sw.exponent!).toBeLessThan(1.3);
+const cut = await runSweep('fake.sleep', [1_000, 2_000], o);
+expect(cut.status).toBe('exceeded'); expect(cut.failedAtN).toBe(1_000);</code></pre>
+              </span>
+            </li>
+            <li>
+              <input type="checkbox" id="t4s2" /><span class="label">
+                <strong>Run them and watch them fail</strong>:
+                <code>moonx bench:test</code>
+              </span>
+            </li>
+            <li>
+              <input type="checkbox" id="t4s3" /><span class="label">
+                <strong>Implement</strong>.
+                <ul>
+                  <li>
+                    The parent spawns <code>bun bench/src/child.ts</code> with a
+                    JSON argument:
+                    <code
+                      >{ registry, id, fixtureSpec, repeats, warmup, pageCache
+                      }</code
+                    >.
+                  </li>
+                  <li>
+                    <code>per-case</code> isolation means one child process runs
+                    <code>setup</code> once, then the warm-ups, then the timed
+                    repeats. <code>per-sample</code> means one child per timed
+                    sample, and <code>beforeSample</code> runs in the parent
+                    before each spawn. That hook is where Task 7 drops the page
+                    cache.
+                  </li>
+                  <li>
+                    The child prints <code>{"phase":"setup"}</code> when it
+                    starts setup and <code>{"phase":"run"}</code> when it starts
+                    timing, so a budget kill can name the phase. At the end it
+                    prints a final JSON line with <code>samplesMs</code>,
+                    <code>extra</code> and <code>peakRssBytes</code>, where
+                    <code
+                      >peakRssBytes = process.resourceUsage().maxRSS *
+                      1024</code
+                    >.
+                  </li>
+                  <li>
+                    The budget covers the whole child, setup included, and on
+                    expiry the parent sends SIGKILL and records
+                    <code>exceeded</code>.
+                  </li>
+                  <li>
+                    A SIGKILL the parent didn't send, or stderr matching
+                    <code
+                      >/out of memory|JavaScript heap|Allocation failed/i</code
+                    >, is recorded as <code>oom</code>. Any other non-zero exit
+                    is <code>error</code>, with the last 2 KB of stderr as
+                    <code>note</code>.
+                  </li>
+                  <li>
+                    Throughput is computed from the summed
+                    <code>extra</code> over the summed time.
+                  </li>
+                  <li>
+                    <code>runSweep</code> stops at the first size that doesn't
+                    come back <code>ok</code>, sets <code>failedAtN</code>, and
+                    fits the exponent over the points that did.
+                  </li>
+                </ul>
+              </span>
+            </li>
+            <li>
+              <input type="checkbox" id="t4s4" /><span class="label">
+                <strong>Run the tests and watch them pass</strong>:
+                <code>moonx bench:test</code>
+              </span>
+            </li>
+            <li>
+              <input type="checkbox" id="t4s5" /><span class="label">
+                <strong>Commit</strong>:
+                <code
+                  >feat(bench): run each case in its own subprocess with time
+                  budgets</code
+                >
+              </span>
+            </li>
+          </ol>
+        </section>
+      </section>
+
+      <section class="block">
+        <h2>
+          Task 5: Library cases for store, op-log, cold open and repo creation
+        </h2>
+        <section class="task">
+          <p class="files">
+            Create <code>bench/src/cases/store.ts</code>,
+            <code>bench/src/cases/oplog.ts</code>,
+            <code>bench/src/cases/open.ts</code>,
+            <code>bench/src/cases/index.ts</code> · Test
+            <code>bench/test/library-cases.test.ts</code>
+          </p>
+          <dl class="io">
+            <dt>Consumes</dt>
+            <dd>
+              Task 2 <code>fixtureDir</code>, <code>linkCopy</code>,
+              <code>authorsOf</code>. Task 4 <code>BenchCase</code>,
+              <code>runCase</code>. Task 3 <code>FILEBACKEND_DURABILITY</code>.
+            </dd>
+            <dt>Produces</dt>
+            <dd>
+              <code>bench/src/cases/index.ts</code> default-exports every
+              library case. Case ids, each at version 1:
+              <ul>
+                <li>
+                  <code>store.encrypt.{1k,64k,1m}</code> and
+                  <code>store.decrypt.{1k,64k,1m}</code>, reported in MB/s
+                </li>
+                <li>
+                  <code>store.put</code>, <code>store.ingest</code> and
+                  <code>store.get</code> on <code>FileBackend</code>, reported
+                  in ops/s
+                </li>
+                <li>
+                  <code>oplog.write</code> (durable append) and
+                  <code>oplog.ingest</code>, reported in ops/s
+                </li>
+                <li>
+                  <code>oplog.materialize.main</code>,
+                  <code>oplog.materialize.frontier</code>,
+                  <code>oplog.heads.frontier</code>,
+                  <code>oplog.conflicts.main</code> and
+                  <code>oplog.conflicts.frontier</code>
+                </li>
+                <li>
+                  <code>open.cold</code>, which is per-sample, cold and part of
+                  the sweep, plus <code>open.cold.root-{1,100,1000}</code>
+                </li>
+                <li>
+                  <code>repo.create</code>, which times
+                  <code>Platform.createDurable</code> on
+                  <code>FileBackend</code> and is per-sample
+                </li>
+              </ul>
+              The sweep covers <code>oplog.write</code>,
+              <code>oplog.materialize.frontier</code>,
+              <code>oplog.conflicts.frontier</code> and <code>open.cold</code>.
+              The <code>open.cold.root-*</code> cases run on
+              <code>small</code> only.
+            </dd>
+          </dl>
+          <ol class="steps">
+            <li>
+              <input type="checkbox" id="t5s1" /><span class="label">
+                <strong>Write the failing tests</strong>. These are smoke checks
+                on a tiny fixture with <code>repeats: 2</code>. The size cases
+                are covered by recording, not by tests.
+                <pre><code>for (const c of libraryCases) test(`${c.id} runs`, async () =&gt; {
+  const r = await runCase(c.id, 'tiny', { repeats: 2, warmup: 0, budgetMs: 60_000, registry: LIBRARY });
+  expect(r.status).toBe('ok');
+  if (c.writes) expect(r.durability).toBe(FILEBACKEND_DURABILITY);
+});
+test('ids are unique and versioned', () =&gt; {
+  expect(new Set(libraryCases.map((c) =&gt; c.id)).size).toBe(libraryCases.length);
+  expect(libraryCases.every((c) =&gt; c.version &gt;= 1)).toBe(true);
+});
+test('write cases never touch the cached fixture', async () =&gt; {
+  const dir = await fixtureDir(generateFixture(tinySpec()));
+  const before = snapshotTree(dir); // sorted [path, size, sha256] list
+  await runCase('oplog.write', 'tiny', { repeats: 2, warmup: 0, budgetMs: 60_000, registry: LIBRARY });
+  expect(snapshotTree(dir)).toEqual(before);
+});</code></pre>
+                To allow this, the runner's fixture lookup accepts
+                <code>'tiny'</code> and maps it to <code>tinySpec()</code>, in
+                Task 4's <code>child.ts</code>.
+              </span>
+            </li>
+            <li>
+              <input type="checkbox" id="t5s2" /><span class="label">
+                <strong>Run them and watch them fail</strong>:
+                <code>moonx bench:test</code>
+              </span>
+            </li>
+            <li>
+              <input type="checkbox" id="t5s3" /><span class="label">
+                <strong>Implement the cases</strong>.
+                <ul>
+                  <li>
+                    Read-only cases open the cached root directly. Write cases
+                    <code>linkCopy</code> it into <code>workDir</code> in
+                    <code>setup</code>, and then each timed op writes one new
+                    deterministic path, <code>bench-new/&lt;k&gt;.ts</code>.
+                  </li>
+                  <li>
+                    Cold cases do their whole <code>openDurable</code> inside
+                    <code>run</code>.
+                  </li>
+                  <li>
+                    <code>store.ingest</code> times
+                    <code>MemoryStore.ingest(object, caps)</code> on objects
+                    built in setup with <code>encrypt</code> and
+                    <code>issueCapability</code>.
+                  </li>
+                  <li>
+                    <code>diskBytes</code> is the recursive size of the fixture
+                    root, measured once per case.
+                  </li>
+                </ul>
+              </span>
+            </li>
+            <li>
+              <input type="checkbox" id="t5s4" /><span class="label">
+                <strong>Run the tests and watch them pass</strong>:
+                <code>moonx bench:test</code>
+              </span>
+            </li>
+            <li>
+              <input type="checkbox" id="t5s5" /><span class="label">
+                <strong>Commit</strong>:
+                <code
+                  >feat(bench): add store, op-log, cold-open and repo-creation
+                  cases</code
+                >
+              </span>
+            </li>
+          </ol>
+        </section>
+      </section>
+
+      <section class="block">
+        <h2>
+          Task 6: Library cases for query, graph and the reputation archive
+        </h2>
+        <section class="task">
+          <p class="files">
+            Create <code>bench/src/cases/query.ts</code>,
+            <code>bench/src/cases/reputation.ts</code> · Modify
+            <code>bench/src/cases/index.ts</code> · Test
+            <code>bench/test/library-cases.test.ts</code> (the loop picks these
+            cases up)
+          </p>
+          <dl class="io">
+            <dt>Consumes</dt>
+            <dd>Task 5's registry and the Task 2 helpers</dd>
+            <dt>Produces</dt>
+            <dd>
+              Case ids, each at version 1:
+              <ul>
+                <li>
+                  <code>graph.resolve</code>, <code>graph.callersOf</code>,
+                  <code>codedb.why</code>, <code>codedb.touchedSince</code> and
+                  <code>codedb.callers</code>. These are coarse, per-case, and
+                  run on every fixture.
+                </li>
+                <li>
+                  <code>reputation.export.{100,1000,10000}</code>, which times
+                  <code>archive</code> plus <code>encodeReputationArchive</code>
+                </li>
+                <li>
+                  <code>reputation.import.{100,1000,10000}</code>, which times
+                  <code
+                    >decodeReputationArchive(json, { maxContributions: n
+                    })</code
+                  >
+                  plus <code>ingestArchive</code> into a fresh
+                  <code>ReputationLog</code>
+                </li>
+              </ul>
+              The reputation cases ignore the fixture's op data and run on
+              <code>small</code> only.
+            </dd>
+          </dl>
+          <ol class="steps">
+            <li>
+              <input type="checkbox" id="t6s1" /><span class="label">
+                <strong>Write the failing test</strong>. The Task 5 loop already
+                covers smoke runs. Add the following:
+                <pre><code>test('graph sees symbols in fixture content', async () =&gt; {
+  const { graph } = await openQueryState(generateFixture(tinySpec()));
+  expect(graph.symbols().length).toBeGreaterThan(0);
+});
+test('10000-contribution import passes its own limit', async () =&gt; {
+  const r = await runCase('reputation.import.10000', 'small', { repeats: 1, warmup: 0, budgetMs: 120_000, registry: LIBRARY });
+  expect(r.status).toBe('ok');
+});</code></pre>
+              </span>
+            </li>
+            <li>
+              <input type="checkbox" id="t6s2" /><span class="label">
+                <strong>Run it and watch it fail</strong>:
+                <code>moonx bench:test</code>
+              </span>
+            </li>
+            <li>
+              <input type="checkbox" id="t6s3" /><span class="label">
+                <strong>Implement</strong>.
+                <ul>
+                  <li>
+                    <code>openQueryState(plan)</code> runs
+                    <code>openDurable</code> on the cached root, then
+                    <code
+                      >Workspace.open(log, store, { source: 'main', reader:
+                      owner })</code
+                    >, then
+                    <code
+                      >SymbolGraph.over(ws, { extractor: new
+                      HeuristicExtractor() })</code
+                    >, then
+                    <code
+                      >CodeDB.over({ graph, log, provenance: new
+                      ProvenanceLog(store) })</code
+                    >.
+                  </li>
+                  <li>
+                    Query targets are chosen in setup, deterministically from
+                    the plan: the first hot file's first symbol, the median op
+                    id, and the timestamp at 90% of history.
+                  </li>
+                  <li>
+                    Contributions come from
+                    <code
+                      >signContribution({ repo: 'bench', ref, kind: 'merge', at
+                      }, subject, host)</code
+                    >, with identities from fixed seeds.
+                  </li>
+                </ul>
+              </span>
+            </li>
+            <li>
+              <input type="checkbox" id="t6s4" /><span class="label">
+                <strong>Run the tests and watch them pass</strong>:
+                <code>moonx bench:test</code>
+              </span>
+            </li>
+            <li>
+              <input type="checkbox" id="t6s5" /><span class="label">
+                <strong>Commit</strong>:
+                <code
+                  >feat(bench): add coarse query, graph and reputation archive
+                  cases</code
+                >
+              </span>
+            </li>
+          </ol>
+        </section>
+      </section>
+
+      <section class="block">
+        <h2>Task 7: CLI, machine info, the quiet gate and moon tasks</h2>
+        <section class="task">
+          <p class="files">
+            Create <code>bench/src/cli.ts</code>,
+            <code>bench/src/machine.ts</code>, <code>bench/src/record.ts</code>,
+            <code>bench/machines/kvm-epyc-rome-4vcpu.json</code> · Modify
+            <code>bench/moon.yml</code> · Test
+            <code>bench/test/machine.test.ts</code>,
+            <code>bench/test/record.test.ts</code>
+          </p>
+          <dl class="io">
+            <dt>Consumes</dt>
+            <dd>
+              Task 4 <code>runCase</code>, <code>runSweep</code>,
+              <code>SWEEP_SIZES</code>. Task 3 <code>BenchRun</code>,
+              <code>validateRun</code>. Task 5/6 registry.
+            </dd>
+            <dt>Produces</dt>
+            <dd>
+              <code
+                >parseCpuinfo(text: string): { cpu: string; vcpus: number
+                }</code
+              >,
+              <code
+                >parseMeminfo(text: string): { totalBytes: number;
+                availableBytes: number }</code
+              >, <code>detectMachine(id: string): Machine</code><br />
+              <code
+                >preflight(env: { loadAvg1: number; memAvailableBytes: number;
+                dirtyPaths: string[]; sudoOk: boolean; needSudo: boolean }):
+                string | null</code
+              >
+              (a refusal reason, or null)<br />
+              <code>suiteVersion(cases: readonly BenchCase[]): string</code>
+              (blake3 hex of sorted <code>id@version</code> lines)<br />
+              <code
+                >runSuite(opts: { suite: 'library' | 'e2e' | 'all'; fixtures:
+                string[]; sweeps: boolean; pageCache: ('warm' | 'dropped')[];
+                repeats; warmup; budgetMs }): Promise&lt;BenchRun&gt;</code
+              ><br />
+              CLI:
+              <code
+                >bun src/cli.ts run [--suite library|e2e|all] [--fixtures
+                small,medium] [--sweeps] [--repeats N] [--out file]</code
+              >, <code>record [--baseline]</code>,
+              <code>merge &lt;files…&gt; --out file</code>,
+              <code>compare</code> and <code>noise</code> (Task 9)
+            </dd>
+          </dl>
+          <ol class="steps">
+            <li>
+              <input type="checkbox" id="t7s1" /><span class="label">
+                <strong>Write the failing tests</strong>
+                <pre><code>const quiet = { loadAvg1: 0.2, memAvailableBytes: 3 * 2 ** 30, dirtyPaths: [], sudoOk: true, needSudo: true };
+expect(preflight(quiet)).toBeNull();
+expect(preflight({ ...quiet, loadAvg1: 0.6 })).toContain('load average 0.6 is above 0.5');
+expect(preflight({ ...quiet, memAvailableBytes: 1.9 * 2 ** 30 })).toContain('less than 2 GiB available');
+expect(preflight({ ...quiet, dirtyPaths: ['packages/log/src/oplog.ts'] })).toContain('uncommitted changes');
+expect(preflight({ ...quiet, sudoOk: false })).toContain('sudo -v');
+expect(parseCpuinfo(EPYC_SAMPLE)).toEqual({ cpu: 'AMD EPYC-Rome Processor', vcpus: 4 });
+expect(parseMeminfo('MemTotal: 8000000 kB\nMemAvailable: 2500000 kB\n').availableBytes).toBe(2_560_000_000);
+test('run writes a schema-valid file', async () =&gt; {
+  await run(['run', '--suite', 'library', '--fixtures', 'tiny', '--repeats', '1', '--out', out]);
+  expect(validateRun(JSON.parse(readFileSync(out, 'utf8')))).toEqual([]);
+});</code></pre>
+              </span>
+            </li>
+            <li>
+              <input type="checkbox" id="t7s2" /><span class="label">
+                <strong>Run them and watch them fail</strong>:
+                <code>moonx bench:test</code>
+              </span>
+            </li>
+            <li>
+              <input type="checkbox" id="t7s3" /><span class="label">
+                <strong>Implement</strong>.
+                <ul>
+                  <li>
+                    <code>record</code> requires <code>BENCH_MACHINE</code> to
+                    name a file in <code>bench/machines/</code>. It reads
+                    <code>os.loadavg()[0]</code> and <code>/proc/meminfo</code>,
+                    takes the dirty paths from
+                    <code>git status --porcelain -- packages bench</code>, and
+                    checks sudo with <code>sudo -n true</code>.
+                  </li>
+                  <li>
+                    It then runs every fixture with sweeps, both page-cache
+                    modes for cold cases and the e2e suite, which comes from
+                    Task 8 and is skipped with a note until that task lands. The
+                    output file is
+                    <code
+                      >bench/results/&lt;id&gt;/&lt;YYYY-MM-DD&gt;-&lt;short
+                      sha&gt;.json</code
+                    >, and <code>--baseline</code> also copies it to
+                    <code>baseline.json</code>.
+                  </li>
+                  <li>
+                    The dropped mode's <code>beforeSample</code> is
+                    <code
+                      >sudo -n sh -c 'sync; echo 3 &gt;
+                      /proc/sys/vm/drop_caches'</code
+                    >.
+                  </li>
+                  <li>
+                    Default method: 10 repeats, 2 warm-ups, and a 600,000 ms
+                    budget for <code>record</code>. <code>run</code> uses a
+                    120,000 ms budget.
+                  </li>
+                  <li>
+                    <code>moon.yml</code> tasks:
+                    <ul>
+                      <li>
+                        <code>run</code> is <code>bun src/cli.ts run</code>
+                      </li>
+                      <li>
+                        <code>record</code> is
+                        <code>bun src/cli.ts record</code>, with
+                        <code>runInCI: 'skip'</code> and
+                        <code>deps: ['^:build', 'cli:compile']</code>
+                      </li>
+                      <li>both get <code>options.cache: false</code></li>
+                    </ul>
+                  </li>
+                </ul>
+              </span>
+            </li>
+            <li>
+              <input type="checkbox" id="t7s4" /><span class="label">
+                <strong>Run the tests and watch them pass</strong>:
+                <code>moonx bench:test</code>
+              </span>
+            </li>
+            <li>
+              <input type="checkbox" id="t7s5" /><span class="label">
+                <strong>Commit</strong>:
+                <code
+                  >feat(bench): add the bench CLI with a quiet-machine
+                  preflight</code
+                >
+              </span>
+            </li>
+          </ol>
+        </section>
+      </section>
+
+      <section class="block">
+        <h2>Task 8: End-to-end suite against the real CLI and server</h2>
+        <section class="task">
+          <p class="files">
+            Create <code>bench/src/e2e/seed.ts</code>,
+            <code>bench/src/e2e/serve.ts</code>,
+            <code>bench/src/e2e/home.ts</code>,
+            <code>bench/src/e2e/cases.ts</code> · Modify
+            <code>bench/src/record.ts</code> (include e2e) · Test
+            <code>bench/test/e2e.test.ts</code>
+          </p>
+          <dl class="io">
+            <dt>Consumes</dt>
+            <dd>
+              Task 2 <code>materializeFixture</code>, <code>authorsOf</code>,
+              <code>linkCopy</code>. Task 4 runner.
+              <code>signDelegation</code> from <code>@thaddeus.run/agent</code>.
+            </dd>
+            <dt>Produces</dt>
+            <dd>
+              <code
+                >seedServerRoot(plan: FixturePlan, root: string):
+                Promise&lt;void&gt;</code
+              >, cached as <code>bench/.cache/&lt;hash&gt;-server/</code> with
+              the same <code>.complete</code> rule<br />
+              <code>writeCliHome(home: string, seed: Uint8Array): void</code>,
+              which writes
+              <code>&lt;home&gt;/.config/thaddeus/identity.json</code> as
+              <code>{ seed: base64, did }</code><br />
+              <code
+                >startServe(opts: { cli: string[]; root: string; flags: string[]
+                }): Promise&lt;{ url: string; stop(): Promise&lt;void&gt;
+                }&gt;</code
+              ><br />
+              <code
+                >timeCli(cli: string[], args: string[], env: { home: string;
+                cwd: string }): Promise&lt;number&gt;</code
+              >
+              (ms, and it throws on a non-zero exit)<br />
+              <code>BENCH_CLI</code> env: the command prefix. It defaults to
+              <code>packages/cli/release/thaddeus</code>, and tests set it to
+              <code>bun packages/cli/src/bin.ts</code>.<br />
+              Case ids, each at version 1:
+              <ul>
+                <li><code>e2e.checkout.cold</code> (per-sample, cold)</li>
+                <li>
+                  <code>e2e.push.10</code> and <code>e2e.push.100</code>, timing
+                  <code>push --no-land</code> on a branch
+                </li>
+                <li><code>e2e.pull</code>, with a second identity</li>
+                <li>
+                  <code>e2e.land</code>, timing
+                  <code>thaddeus land &lt;branch&gt;</code>
+                </li>
+                <li>
+                  <code>e2e.repo.create</code>, run sequentially with the
+                  default limits and at most 15 samples
+                </li>
+                <li>
+                  <code>e2e.repos-per-minute</code>: 8 concurrent CLI processes
+                  with distinct identities, each running <code>create</code> for
+                  30 s
+                </li>
+              </ul>
+            </dd>
+          </dl>
+          <ol class="steps">
+            <li>
+              <input type="checkbox" id="t8s1" /><span class="label">
+                <strong>Write the failing tests</strong>, all on the
+                <code>tiny</code> fixture with
+                <code>BENCH_CLI='bun packages/cli/src/bin.ts'</code>.
+                <pre><code>test('seeded root serves a cloneable repo', async () =&gt; {
+  const srv = await startServe({ cli, root: await seededRoot(tinyPlan), flags: [] });
+  await timeCli(cli, ['clone', 'bench', dir, '--server', srv.url], { home: ownerHome, cwd: tmp });
+  expect(readdirSync(dir).filter((f) =&gt; f.endsWith('.ts')).length).toBeGreaterThan(0);
+  await srv.stop();
+});
+for (const id of ['e2e.checkout.cold', 'e2e.push.10', 'e2e.pull', 'e2e.land', 'e2e.repo.create'])
+  test(`${id} runs`, async () =&gt; {
+    const r = await runCase(id, 'tiny', { repeats: 2, warmup: 0, budgetMs: 120_000, registry: E2E });
+    expect(r.status).toBe('ok');
+    expect(r.serveFlags).toBeDefined();
+    if (id !== 'e2e.checkout.cold' &amp;&amp; id !== 'e2e.pull') expect(r.durability).toBe(FILEBACKEND_DURABILITY);
+  });
+test('repos-per-minute records its raised limits', async () =&gt; {
+  const r = await runCase('e2e.repos-per-minute', 'tiny', { repeats: 1, warmup: 0, budgetMs: 120_000, registry: E2E, durationMs: 3_000 });
+  expect(r.throughput?.unit).toBe('repos/min');
+  expect(r.serveFlags).toContain('--repository-creation-limit');
+});</code></pre>
+                <code>durationMs</code> is an optional
+                <code>RunOptions</code> field that is passed through to the
+                case. Add it to Task 4's interface.
+              </span>
+            </li>
+            <li>
+              <input type="checkbox" id="t8s2" /><span class="label">
+                <strong>Run them and watch them fail</strong>:
+                <code>moonx bench:test</code>
+              </span>
+            </li>
+            <li>
+              <input type="checkbox" id="t8s3" /><span class="label">
+                <strong>Implement</strong>.
+                <ul>
+                  <li>
+                    <strong>Seeding.</strong> It runs
+                    <code
+                      >createServer({ backend: new FileBackend(root), policy:
+                      allowAll, maxRequestBodyBytes: 1 &lt;&lt; 30, quotas:
+                      unlimited })</code
+                    >
+                    in-process, then
+                    <code
+                      >new Client('http://seed', owner,
+                      srv.fetch.bind(srv))</code
+                    >, then <code>createRepo('bench')</code>.
+                    <ul>
+                      <li>
+                        Each non-owner author gets
+                        <code
+                          >grant('bench', signDelegation({ agent, paths: ['**'],
+                          maxChanges: 1e9, maxSpend: 1e9 }, owner))</code
+                        >.
+                      </li>
+                      <li>
+                        The plan is materialized into a scratch
+                        <code>FileBackend</code> repo, and every view's heads
+                        are pushed. The owner pushes, unless the server returns
+                        403 for ops signed by another author, in which case each
+                        author pushes its own view.
+                      </li>
+                      <li>
+                        Finally the owner runs
+                        <code>land('bench', repo, repo.heads('main'))</code>.
+                      </li>
+                      <li>
+                        Pushes are chunked at each land point, so no single
+                        bundle carries more than one land interval of ops.
+                      </li>
+                    </ul>
+                  </li>
+                  <li>
+                    <strong>Serving.</strong> <code>startServe</code> picks a
+                    free port by binding port 0 and closing it, spawns
+                    <code
+                      >&lt;cli&gt; serve --data &lt;root&gt; --port &lt;port&gt;
+                      …flags</code
+                    >, and polls <code>GET /version</code> for up to 10 s.
+                  </li>
+                  <li>
+                    <strong>Server flags.</strong> Defaults are kept, with these
+                    exceptions:
+                    <ul>
+                      <li>
+                        stress adds
+                        <code
+                          >--max-objects 10000000 --max-request-body-bytes
+                          1073741824</code
+                        >
+                      </li>
+                      <li>
+                        repos-per-minute adds
+                        <code
+                          >--repository-creation-limit 1000000
+                          --max-repositories 1000000</code
+                        >
+                      </li>
+                    </ul>
+                    The flags are recorded verbatim.
+                  </li>
+                  <li>
+                    <strong>Server lifecycle.</strong> Every case starts its own
+                    server on a <code>linkCopy</code> of the seeded root during
+                    setup, and stops it during teardown.
+                  </li>
+                  <li>
+                    <strong>Branches.</strong> They're created with the CLI's
+                    own <code>branch</code> and <code>switch</code> commands.
+                    Check their exact flags with
+                    <code>thaddeus help branch</code> before writing the case.
+                  </li>
+                  <li>
+                    <strong>Change sets.</strong> They're deterministic files
+                    under <code>bench-change/&lt;i&gt;.ts</code>, so they never
+                    conflict with fixture paths, and the server's default
+                    <code>blockOnConflict</code> lets the land through.
+                  </li>
+                </ul>
+              </span>
+            </li>
+            <li>
+              <input type="checkbox" id="t8s4" /><span class="label">
+                <strong>Run the tests and watch them pass</strong>:
+                <code>moonx bench:test</code>. Then on this host, run
+                <code>CI= moon run cli:compile</code> followed by
+                <code
+                  >BENCH_CLI=packages/cli/release/thaddeus bun bench/src/cli.ts
+                  run --suite e2e --fixtures small --repeats 2</code
+                >. It passes when every e2e case reports
+                <code>status: "ok"</code>.
+              </span>
+            </li>
+            <li>
+              <input type="checkbox" id="t8s5" /><span class="label">
+                <strong>Commit</strong>:
+                <code
+                  >feat(bench): drive clone, push, pull and land through the
+                  real CLI</code
+                >
+              </span>
+            </li>
+          </ol>
+        </section>
+      </section>
+
+      <section class="block">
+        <h2>Task 9: Compare, noise study and the PR workflow</h2>
+        <section class="task">
+          <p class="files">
+            Create <code>bench/src/compare.ts</code>,
+            <code>.github/workflows/bench.yml</code> · Modify
+            <code>bench/src/cli.ts</code> (<code>compare</code>,
+            <code>noise</code>, <code>merge</code>) · Test
+            <code>bench/test/compare.test.ts</code>
+          </p>
+          <dl class="io">
+            <dt>Consumes</dt>
+            <dd>
+              Task 3 <code>BenchRun</code>, <code>percentile</code>,
+              <code>median</code>. Task 7 <code>suiteVersion</code>.
+            </dd>
+            <dt>Produces</dt>
+            <dd>
+              <code
+                >interface Thresholds { studiedAt: string; runnerImage: string;
+                suiteVersion: string; pairs: number; perCase: Record&lt;string,
+                number&gt; }</code
+              >
+              (key <code>id@version</code>, value = max head/base ratio)<br />
+              <code
+                >deriveThresholds(aa: Record&lt;string, number[]&gt;, meta:
+                Omit&lt;Thresholds, 'perCase'&gt;): Thresholds</code
+              >
+              (99th percentile, floored at 1.0)<br />
+              <code
+                >type Verdict = 'ok' | 'regression' | 'improvement' |
+                'not-compared' | 'no-threshold'</code
+              ><br />
+              <code
+                >compareRuns(base: BenchRun, head: BenchRun, t: Thresholds |
+                null): { rows: { key: string; baseP50: number | null; headP50:
+                number | null; ratio: number | null; threshold: number | null;
+                verdict: Verdict; reason?: string }[]; regressed: boolean
+                }</code
+              ><br />
+              <code>renderSummary(cmp): string</code> (a markdown table,
+              regressions listed first)<br />
+              Thresholds file:
+              <code>bench/thresholds/github-ubuntu-latest.json</code>
+            </dd>
+          </dl>
+          <ol class="steps">
+            <li>
+              <input type="checkbox" id="t9s1" /><span class="label">
+                <strong>Write the failing tests</strong>
+                <pre><code>const t = deriveThresholds({ 'oplog.write@1': [1.0, 1.02, 0.98, 1.05, 1.01] }, meta);
+expect(t.perCase['oplog.write@1']).toBeCloseTo(percentile([1.0, 1.02, 0.98, 1.05, 1.01], 99), 9);
+expect(deriveThresholds({ 'x@1': [0.9, 0.95] }, meta).perCase['x@1']).toBe(1);
+expect(verdict(cmp(base(100), head(130), 1.2))).toBe('regression');
+expect(verdict(cmp(base(100), head(110), 1.2))).toBe('ok');
+expect(verdict(cmp(base(100), head(70), 1.2))).toBe('improvement');
+expect(verdict(cmp(base(100, { version: 1 }), head(100, { version: 2 }), 1.2))).toBe('not-compared');
+expect(verdict(cmp(base(100, { manifestHash: 'a' }), head(100, { manifestHash: 'b' }), 1.2))).toBe('not-compared');
+expect(verdict(cmp(base(null, { status: 'exceeded' }), head(50), 1.2))).toBe('improvement');
+expect(verdict(cmp(base(50), head(null, { status: 'oom' }), 1.2))).toBe('regression');
+expect(verdict(compareRuns(baseRun, headRun, null))).toBe('no-threshold');
+expect(compareRuns(baseRun, headRun, null).regressed).toBe(false);</code></pre>
+              </span>
+            </li>
+            <li>
+              <input type="checkbox" id="t9s2" /><span class="label">
+                <strong>Run them and watch them fail</strong>:
+                <code>moonx bench:test</code>
+              </span>
+            </li>
+            <li>
+              <input type="checkbox" id="t9s3" /><span class="label">
+                <strong
+                  >Implement <code>compare.ts</code> and the CLI
+                  subcommands</strong
+                >.
+                <ul>
+                  <li>Ratio means head p50 over base p50.</li>
+                  <li>
+                    Improvement means <code>ratio &lt; 1 / threshold</code>.
+                  </li>
+                  <li>
+                    <code>merge</code> concatenates samples across round files
+                    that share a case key, then re-summarizes.
+                  </li>
+                  <li>
+                    <code>noise --rounds R --pairs P</code> runs P A/A pairs of
+                    the same commit, interleaved, and writes a thresholds file
+                    with the runner image taken from
+                    <code>$ImageOS</code>/<code>$ImageVersion</code>.
+                  </li>
+                  <li>
+                    <code>compare</code> appends <code>renderSummary</code> to
+                    <code>$GITHUB_STEP_SUMMARY</code> when that variable is set,
+                    and exits 1 when <code>regressed</code>.
+                  </li>
+                </ul>
+              </span>
+            </li>
+            <li>
+              <input type="checkbox" id="t9s4" /><span class="label">
+                <strong>Write <code>.github/workflows/bench.yml</code></strong
+                >.
+                <ul>
+                  <li>
+                    <strong>Triggers:</strong> <code>pull_request</code>, plus
+                    <code>workflow_dispatch</code> with input
+                    <code>mode: noise</code>. Set
+                    <code>permissions: contents: read</code>, runner
+                    <code>ubuntu-latest</code>,
+                    <code>timeout-minutes: 45</code>.
+                  </li>
+                  <li>
+                    <strong>Setup:</strong> the same checkout, proto and install
+                    steps as <code>ci.yml</code>, including the
+                    <code>minimumReleaseAge</code> sed. Then
+                    <code
+                      >git worktree add ../base ${{
+                      github.event.pull_request.base.sha }}</code
+                    >, install there, and run <code>moon run :build</code> in
+                    both trees.
+                  </li>
+                  <li>
+                    <strong>When the base has no <code>bench/</code>:</strong>
+                    write "base has no bench suite; nothing compared" to the
+                    summary and exit 0.
+                  </li>
+                  <li>
+                    <strong>Otherwise:</strong> run 5 rounds. Each round runs
+                    base, then head:
+                    <code
+                      >bun bench/src/cli.ts run --suite library --fixtures small
+                      --repeats 3 --out out/&lt;side&gt;-&lt;k&gt;.json</code
+                    >. Then <code>merge</code> each side, run
+                    <code>compare</code> against the committed thresholds (or
+                    none), and upload <code>out/</code> with
+                    <code>actions/upload-artifact@v4</code>.
+                  </li>
+                  <li>
+                    <strong>Noise mode:</strong> runs
+                    <code>noise --rounds 5 --pairs 20</code> on
+                    <code>main</code> and uploads the thresholds file.
+                  </li>
+                  <li>
+                    <strong>Not a merge gate:</strong> the job name is
+                    <code>Benchmarks (report only)</code>. Don't add it to
+                    <code>ci-passed</code> or to branch protection.
+                  </li>
+                </ul>
+              </span>
+            </li>
+            <li>
+              <input type="checkbox" id="t9s5" /><span class="label">
+                <strong>Run the tests and watch them pass</strong>:
+                <code>moonx bench:test</code>. Also validate the workflow with
+                <code>bunx actionlint .github/workflows/bench.yml</code>, or by
+                pushing the branch and reading the run.
+              </span>
+            </li>
+            <li>
+              <input type="checkbox" id="t9s6" /><span class="label">
+                <strong>Commit</strong>:
+                <code
+                  >ci(bench): add a report-only benchmark comparison on pull
+                  requests</code
+                >
+              </span>
+            </li>
+          </ol>
+        </section>
+      </section>
+
+      <section class="block">
+        <h2>
+          Task 10: Docs, target mapping and the proof rule for the website
+        </h2>
+        <section class="task">
+          <p class="files">
+            Create <code>bench/README.md</code> · Modify
+            <code>docs/agent-first-architecture.md</code> §5
+          </p>
+          <dl class="io">
+            <dt>Consumes</dt>
+            <dd>The case ids from Tasks 5, 6 and 8</dd>
+          </dl>
+          <ol class="steps">
+            <li>
+              <input type="checkbox" id="t10s1" /><span class="label">
+                <strong>Extend §5</strong> with one paragraph: the website
+                follows the same rule as repo documents. A measured figure links
+                to a committed file under <code>bench/results/</code> that names
+                the machine, commit, fixture, method and repeat count, and
+                anything not measured carries the word "target". Add a
+                <code>Benchmark</code> column to the targets table:
+                <ul>
+                  <li>
+                    cold checkout: <code>e2e.checkout.cold</code> with
+                    <code>pageCache: "dropped"</code>
+                  </li>
+                  <li>
+                    repo creation: <code>repo.create</code> and
+                    <code>e2e.repo.create</code>
+                  </li>
+                  <li>
+                    history query: <code>codedb.touchedSince</code> and
+                    <code>codedb.why</code>
+                  </li>
+                  <li>
+                    15k repos per minute: <code>e2e.repos-per-minute</code>,
+                    described as "a floor, not agent load"
+                  </li>
+                  <li>1,000 agents: "not measured here (THA-130)"</li>
+                </ul>
+                Leave the <code>Measured</code> column at "No" until the
+                follow-up PR.
+              </span>
+            </li>
+            <li>
+              <input type="checkbox" id="t10s2" /><span class="label">
+                <strong>Write <code>bench/README.md</code></strong> for a reader
+                new to the suite. Cover:
+                <ul>
+                  <li>what each suite measures</li>
+                  <li>the fixture table</li>
+                  <li>how to run <code>moonx bench:run</code></li>
+                  <li>
+                    how to record: stop the dev servers, <code>sudo -v</code>,
+                    then
+                    <code
+                      >BENCH_MACHINE=kvm-epyc-rome-4vcpu CI= moonx bench:record
+                      -- --baseline</code
+                    >
+                  </li>
+                  <li>
+                    what <code>exceeded</code>, <code>oom</code>,
+                    <code>durability</code> and <code>pageCache</code> mean in a
+                    result
+                  </li>
+                  <li>
+                    when to bump a case version: whenever its timed work changes
+                  </li>
+                  <li>
+                    when to re-run the noise study: when the suite version or
+                    the runner image changes
+                  </li>
+                </ul>
+                Use plain sentences, with no marketing copy.
+              </span>
+            </li>
+            <li>
+              <input type="checkbox" id="t10s3" /><span class="label">
+                <strong>Verify</strong>:
+                <code>moon run root:format root:lint</code> reports 0 errors,
+                then run <code>moonx bench:typecheck bench:test</code> and
+                <code>moon run :test</code> for the whole workspace.
+              </span>
+            </li>
+            <li>
+              <input type="checkbox" id="t10s4" /><span class="label">
+                <strong>Commit and open the PR</strong>:
+                <code
+                  >docs(bench): map performance targets to benchmarks and extend
+                  the proof rule</code
+                >. The PR title is
+                <code
+                  >feat(bench): add a reproducible benchmark suite and
+                  regression check</code
+                >. The body follows
+                <code>.github/pull_request_template.md</code> and includes
+                <code>Closes #58</code> and THA-5. It should say that the
+                baseline follows in a separate PR.
+              </span>
+            </li>
+          </ol>
+        </section>
+      </section>
+
+      <section class="block">
+        <h2>Task 11: Follow-up PR that records the baseline</h2>
+        <section class="task">
+          <p class="files">
+            Create
+            <code
+              >bench/results/kvm-epyc-rome-4vcpu/&lt;date&gt;-&lt;sha&gt;.json</code
+            >, <code>bench/results/kvm-epyc-rome-4vcpu/baseline.json</code>,
+            <code>bench/thresholds/github-ubuntu-latest.json</code> · Modify
+            <code>docs/agent-first-architecture.md</code> §5 (link the run in a
+            <code>Baseline</code> column)
+          </p>
+          <ol class="steps">
+            <li>
+              <input type="checkbox" id="t11s1" /><span class="label">
+                <strong>Run the noise study</strong> once the suite PR has
+                merged: <code>gh workflow run bench.yml -f mode=noise</code> on
+                <code>main</code>. Download its artifact and commit the
+                thresholds file.
+              </span>
+            </li>
+            <li>
+              <input type="checkbox" id="t11s2" /><span class="label">
+                <strong
+                  >Record on this host from the merged <code>main</code></strong
+                >. Stop the landing and docs dev servers, run
+                <code>sudo -v</code>, then
+                <code
+                  >BENCH_MACHINE=kvm-epyc-rome-4vcpu CI= moonx bench:record --
+                  --baseline</code
+                >. This step passes when the file validates against the schema,
+                every case id is present, and stress
+                <code>conflicts</code> either finishes or shows
+                <code>exceeded … at n = X</code>.
+              </span>
+            </li>
+            <li>
+              <input type="checkbox" id="t11s3" /><span class="label">
+                <strong>Prove that the check catches a slowdown</strong>. On a
+                throwaway branch, add <code>await Bun.sleep(5)</code> to the
+                start of <code>OpLog.materialize</code>, open a draft PR, and
+                confirm the bench job goes red on
+                <code>oplog.materialize.*</code>. Revert the change, confirm the
+                job goes green, then close the draft. Record both run URLs in
+                the follow-up PR body.
+              </span>
+            </li>
+            <li>
+              <input type="checkbox" id="t11s4" /><span class="label">
+                <strong>Commit and open the PR</strong>:
+                <code
+                  >perf(bench): record the FileBackend baseline and PR
+                  thresholds</code
+                >. In the body, list what was actually observed: the growth
+                exponents, which cases exceeded their budget, and the
+                noise-study pair count.
+              </span>
+            </li>
+          </ol>
+        </section>
+      </section>
+
+      <section class="block">
+        <h2>Sequencing</h2>
+        <p class="legend">
+          <span><span class="tier tier-s">S</span> do first</span>
+          <span><span class="tier tier-a">A</span> do after S lands</span>
+          <span><span class="tier tier-b">B</span> after A</span>
+        </p>
+        <div class="table-scroll">
+          <table>
+            <thead>
+              <tr>
+                <th>#</th>
+                <th>Task</th>
+                <th>Tier</th>
+                <th>Why it lands here</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td class="num">1–3</td>
+                <td><span class="name">plan, materialize, result</span></td>
+                <td><span class="tier tier-s">S</span></td>
+                <td>
+                  Every case reads the plan, the cache and the result types.
+                </td>
+              </tr>
+              <tr>
+                <td class="num">4</td>
+                <td><span class="name">runner</span></td>
+                <td><span class="tier tier-s">S</span></td>
+                <td>Cases can only be tested through it.</td>
+              </tr>
+              <tr>
+                <td class="num">5–6</td>
+                <td><span class="name">library cases</span></td>
+                <td><span class="tier tier-a">A</span></td>
+                <td>Independent of each other once the runner exists.</td>
+              </tr>
+              <tr>
+                <td class="num">7</td>
+                <td><span class="name">cli + record</span></td>
+                <td><span class="tier tier-a">A</span></td>
+                <td>Needs a registry to run. E2E is plugged in later.</td>
+              </tr>
+              <tr>
+                <td class="num">8</td>
+                <td><span class="name">e2e</span></td>
+                <td><span class="tier tier-b">B</span></td>
+                <td>
+                  The riskiest task: seeding and branch commands are where the
+                  guesses are.
+                </td>
+              </tr>
+              <tr>
+                <td class="num">9–10</td>
+                <td><span class="name">compare, CI, docs</span></td>
+                <td><span class="tier tier-b">B</span></td>
+                <td>Needs the CLI's <code>run</code> output.</td>
+              </tr>
+              <tr>
+                <td class="num">11</td>
+                <td><span class="name">baseline</span></td>
+                <td><span class="tier tier-b">B</span></td>
+                <td>
+                  A separate PR from <code>main</code>, because rebase merges
+                  rewrite branch shas.
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <p class="progress">
+        <b><span id="done">0</span></b> of <span id="total">0</span> steps
+        complete
+      </p>
+    </div>
+    <script>
+      var boxes = document.querySelectorAll('ol.steps input[type=checkbox]');
+      var doneEl = document.getElementById('done');
+      document.getElementById('total').textContent = String(boxes.length);
+      function refresh() {
+        var n = 0;
+        boxes.forEach(function (b) {
+          if (b.checked) n++;
+        });
+        doneEl.textContent = String(n);
+      }
+      boxes.forEach(function (b) {
+        b.addEventListener('change', refresh);
+      });
+      refresh();
+    </script>
+  </body>
+</html>
