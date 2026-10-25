@@ -15,6 +15,7 @@ projects:
     - '!ee/README.md'
     - 'examples/*'
     - 'integration'
+    - 'bench'
   sources:
     # Repo-wide tooling (lint, format, clean) lives on the root project.
     root: '.'

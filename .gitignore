@@ -41,3 +41,7 @@ tsconfig.tsbuildinfo
 # moon (generated per-clone/worktree state)
 .moon/cache/
 .moon/hooks/
+
+# Benchmark fixture cache and run output (generated, never committed).
+bench/.cache/
+bench/out/
