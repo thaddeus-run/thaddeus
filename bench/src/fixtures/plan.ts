@@ -8,7 +8,7 @@ import type { FixtureSpec } from './spec';
 // caches and old results stop matching. Bump it whenever plan.ts or content.ts
 // changes what it produces: the manifest hash covers the plan, not the
 // contentFor algorithm, and the golden test in plan.test.ts catches the latter.
-export const GENERATOR_VERSION = 1;
+export const GENERATOR_VERSION = 2;
 
 export type Step =
   | {

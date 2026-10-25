@@ -14,6 +14,7 @@ import { join, relative } from 'node:path';
 import type { BenchCase, CaseContext } from '../src/case';
 import libraryCases from '../src/cases/index';
 import type { CreateState } from '../src/cases/open';
+import { openQueryState } from '../src/cases/query';
 import { fixtureDir, WORK_ROOT } from '../src/fixtures/cache';
 import { generateFixture } from '../src/fixtures/plan';
 import { tinySpec } from '../src/fixtures/spec';
@@ -49,21 +50,27 @@ function snapshotTree(dir: string): [string, number, string][] {
   return out.sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
 }
 
+// The 10,000-contribution archive cases verify tens of thousands of
+// signatures: about 12 s of setup and 30 s per run. They get one repeat and a
+// larger budget.
+const LARGE = '.10000';
+
 for (const c of libraryCases) {
+  const large = c.id.endsWith(LARGE);
   test(
     `${c.id} runs`,
     async () => {
       const r = await runCase(c.id, 'tiny', {
-        repeats: 2,
+        repeats: large ? 1 : 2,
         warmup: 0,
-        budgetMs: 60_000,
+        budgetMs: large ? 120_000 : 60_000,
         registry: LIBRARY,
       });
       expect(r.note).toBeUndefined();
       expect(r.status).toBe('ok');
       if (c.writes === true) expect(r.durability).toBe(FILEBACKEND_DURABILITY);
     },
-    SLOW
+    large ? 2 * SLOW : SLOW
   );
 }
 
@@ -118,4 +125,28 @@ test(
     }
   },
   SLOW
+);
+
+test(
+  'graph sees symbols in fixture content',
+  async () => {
+    const { graph } = await openQueryState(generateFixture(tinySpec()));
+    expect((await graph.symbols()).length).toBeGreaterThan(0);
+  },
+  SLOW
+);
+
+test(
+  '10000-contribution import passes its own limit',
+  async () => {
+    const r = await runCase('reputation.import.10000', 'small', {
+      repeats: 1,
+      warmup: 0,
+      budgetMs: 120_000,
+      registry: LIBRARY,
+    });
+    expect(r.note).toBeUndefined();
+    expect(r.status).toBe('ok');
+  },
+  2 * SLOW
 );

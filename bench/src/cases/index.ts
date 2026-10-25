@@ -1,6 +1,8 @@
 import type { BenchCase } from '../case';
 import openCases from './open';
 import oplogCases from './oplog';
+import queryCases from './query';
+import reputationCases from './reputation';
 import storeCases from './store';
 
 // The library suite's registry: every in-process case. The runner imports
@@ -10,6 +12,8 @@ const libraryCases: readonly BenchCase[] = [
   ...storeCases,
   ...oplogCases,
   ...openCases,
+  ...queryCases,
+  ...reputationCases,
 ];
 
 export default libraryCases;
