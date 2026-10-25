@@ -1,10 +1,10 @@
-import { mkdtemp, rm } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
+import { mkdir, mkdtemp, rm } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { addExtra, type BenchCase, loadCase, type RunExtra } from './case';
 import type { ChildReport, ChildRequest } from './child';
+import { WORK_ROOT } from './fixtures/cache';
 import { generateFixture, manifestHash } from './fixtures/plan';
 import { resolveFixture, sweepSpec } from './fixtures/spec';
 import {
@@ -351,7 +351,8 @@ export async function runCase(
   const perSample = benchCase.isolation === 'per-sample';
   for (const child of childPlan(benchCase, opts)) {
     if (perSample) await opts.beforeSample?.();
-    const workDir = await mkdtemp(join(tmpdir(), 'thaddeus-bench-'));
+    await mkdir(WORK_ROOT, { recursive: true });
+    const workDir = await mkdtemp(join(WORK_ROOT, 'case-'));
     let outcome: ChildOutcome;
     try {
       outcome = await spawnChild(

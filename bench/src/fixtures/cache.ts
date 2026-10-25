@@ -22,6 +22,12 @@ const DEFAULT_CACHE_ROOT = join(
 const COMPLETE = '.complete';
 let tmpCounter = 0;
 
+// Scratch directories for running cases, on the same filesystem as the cache
+// so `linkCopy` can hard-link a fixture into them (a hard link cannot cross
+// filesystems, and /tmp is often a tmpfs). This also keeps write cases on the
+// disk the fixture lives on instead of in RAM.
+export const WORK_ROOT = join(DEFAULT_CACHE_ROOT, '.work');
+
 // Moves a finished temporary build to its final path without ever deleting a
 // directory another process may have just published. If the rename loses to a
 // complete directory, that one is kept. If it loses to a stale directory (no
