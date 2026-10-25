@@ -54,6 +54,11 @@ export interface BenchCase<S = unknown> {
   sweep?: boolean;
   setup(ctx: CaseContext): Promise<S>;
   run(state: S, ctx: CaseContext): Promise<void | RunExtra>;
+  /**
+   * Called once per child, after the timed repeats and before teardown, for
+   * sizes that are not timings (e.g. the fixture root's bytes on disk).
+   */
+  measure?(state: S, ctx: CaseContext): Promise<{ diskBytes?: number }>;
   teardown?(state: S, ctx: CaseContext): Promise<void>;
 }
 

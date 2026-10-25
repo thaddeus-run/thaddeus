@@ -226,6 +226,95 @@ test(
   SLOW
 );
 
+// Waits until the fake has written its pid into `file`, then returns it.
+async function pidFrom(file: string): Promise<number> {
+  const deadline = performance.now() + 10_000;
+  while (!existsSync(file) || readFileSync(file, 'utf8') === '') {
+    if (performance.now() > deadline) throw new Error(`no pid in ${file}`);
+    await Bun.sleep(20);
+  }
+  return Number(readFileSync(file, 'utf8'));
+}
+
+const DRIVER = join(import.meta.dir, 'fixtures', 'interrupt-driver.ts');
+
+test(
+  'a forwarded SIGINT rejects with Interrupted, not oom, and kills the group',
+  async () => {
+    const file = probe('interrupt-pid');
+    const driver = Bun.spawn([process.execPath, DRIVER, 'signal'], {
+      env: { ...process.env },
+      stdout: 'pipe',
+    });
+    const orphan = await pidFrom(file);
+    driver.kill('SIGINT');
+    const out = await new Response(driver.stdout).text();
+    await driver.exited;
+    expect(JSON.parse(out)).toEqual({
+      name: 'Interrupted',
+      message: 'Interrupted: interrupted by SIGINT',
+      sigints: 1,
+    });
+    expect(await goneWithin(orphan, 2_000)).toBe(true);
+  },
+  SLOW
+);
+
+test(
+  'the parent exiting kills live child groups',
+  async () => {
+    const file = probe('exit-pid');
+    const driver = Bun.spawn([process.execPath, DRIVER, 'exit'], {
+      env: { ...process.env },
+    });
+    await driver.exited;
+    expect(driver.exitCode).toBe(0);
+    expect(await goneWithin(await pidFrom(file), 2_000)).toBe(true);
+  },
+  SLOW
+);
+
+test(
+  'a grandchild holding the pipes open does not hang the runner',
+  async () => {
+    const file = probe('leaky-pid');
+    const started = performance.now();
+    const r = await runCase('fake.leaky', 'small', {
+      ...o,
+      repeats: 1,
+      warmup: 0,
+      budgetMs: 10_000,
+    });
+    const leak = await pidFrom(file);
+    try {
+      expect(r.status).toBe('ok');
+      expect(r.samplesMs).toHaveLength(1);
+      expect(performance.now() - started).toBeLessThan(6_000);
+    } finally {
+      process.kill(leak, 'SIGKILL');
+    }
+  },
+  SLOW
+);
+
+test(
+  'diskBytes from measure is the max over per-sample children',
+  async () => {
+    probe('disk-count');
+    const r = await runCase('fake.disk', 'small', {
+      ...o,
+      repeats: 3,
+      warmup: 0,
+      budgetMs: 10_000,
+    });
+    expect(r.status).toBe('ok');
+    expect(r.diskBytes).toBe(3_000);
+    const none = await runCase('fake.ok', 'small', { ...o, repeats: 1 });
+    expect(none.diskBytes).toBeUndefined();
+  },
+  SLOW
+);
+
 test('an unknown case id or fixture name throws', async () => {
   const missing = await runCase('fake.missing', 'small', o).catch(String);
   expect(missing).toContain('no case fake.missing');
