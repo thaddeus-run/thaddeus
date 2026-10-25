@@ -2,8 +2,9 @@ import type { FixturePlan } from './fixtures/plan';
 
 // What a case sees while it runs. `plan` is the fixture plan only: nothing is
 // on disk yet, so a case that needs a FileBackend root materializes it in
-// `setup`. `workDir` is an empty scratch directory the runner deletes after
-// the child exits.
+// `setup`. `workDir` is an empty scratch directory, on the same filesystem as
+// the fixture cache so a fixture can be hard-linked into it. The runner
+// deletes it after the child exits.
 export interface CaseContext {
   plan: FixturePlan;
   fixture: string;
