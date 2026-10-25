@@ -1,4 +1,5 @@
-import { FileBackend } from '@thaddeus.run/persist';
+import { FileBackend, MemoryBackend } from '@thaddeus.run/persist';
+import type { Backend } from '@thaddeus.run/store';
 import { spawn } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { mkdir, rename, rm, writeFile } from 'node:fs/promises';
@@ -22,11 +23,33 @@ const DEFAULT_CACHE_ROOT = join(
 const COMPLETE = '.complete';
 let tmpCounter = 0;
 
+// Puts in flight at once while copying a filler repository to disk.
+const FILLER_COPY_CONCURRENCY = 32;
+
 // Scratch directories for running cases, on the same filesystem as the cache
 // so `linkCopy` can hard-link a fixture into them (a hard link cannot cross
 // filesystems, and /tmp is often a tmpfs). This also keeps write cases on the
 // disk the fixture lives on instead of in RAM.
 export const WORK_ROOT = join(DEFAULT_CACHE_ROOT, '.work');
+
+// Materializes tiny filler repository `i` in memory, then copies its records
+// into `backend`. Replaying straight onto a FileBackend would make every
+// filler's createDurable list the whole root, which grows with each filler,
+// so a 1,000-repository root would take minutes instead of seconds.
+async function addFiller(backend: Backend, i: number): Promise<void> {
+  const memory = new MemoryBackend();
+  const filler = generateFixture({ ...tinySpec(), seed: i });
+  await materializeFixture(filler, memory, `filler-${i}`);
+  const keys = await memory.list('');
+  for (let at = 0; at < keys.length; at += FILLER_COPY_CONCURRENCY) {
+    await Promise.all(
+      keys.slice(at, at + FILLER_COPY_CONCURRENCY).map(async (key) => {
+        const bytes = await memory.get(key);
+        if (bytes !== undefined) await backend.put(key, bytes);
+      })
+    );
+  }
+}
 
 // Moves a finished temporary build to its final path without ever deleting a
 // directory another process may have just published. If the rename loses to a
@@ -80,10 +103,7 @@ export async function fixtureDir(
   try {
     const backend = new FileBackend(tmp);
     await materializeFixture(plan, backend, 'bench');
-    for (let i = 1; i < repos; i++) {
-      const filler = generateFixture({ ...tinySpec(), seed: i });
-      await materializeFixture(filler, backend, `filler-${i}`);
-    }
+    for (let i = 1; i < repos; i++) await addFiller(backend, i);
     await writeFile(join(tmp, COMPLETE), hash);
     await opts.beforePublish?.();
     await publish(tmp, final);
