@@ -34,11 +34,13 @@ export function cv(xs: number[]): number {
 
 // Fits t = c * n^exponent by least squares on (ln n, ln t) and returns the
 // slope as the exponent plus R² as a goodness-of-fit. Fewer than three points
-// cannot distinguish a trend from a coincidence, so the fit is null.
+// cannot distinguish a trend from a coincidence, so the fit is null. A point
+// with n or t at or below zero has no logarithm, so the fit is null too.
 export function fitExponent(
   points: { n: number; t: number }[]
 ): { exponent: number; r2: number } | null {
   if (points.length < 3) return null;
+  if (points.some((p) => !(p.n > 0 && p.t > 0))) return null;
   const xs = points.map((p) => Math.log(p.n));
   const ys = points.map((p) => Math.log(p.t));
   const count = points.length;

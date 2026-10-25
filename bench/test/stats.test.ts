@@ -41,6 +41,12 @@ test('fitExponent needs at least three points', () => {
   ).toBeNull();
 });
 
+test('fitExponent is null when a point has no positive time or size', () => {
+  const points = [1e3, 2e3, 4e3].map((n) => ({ n, t: n }));
+  expect(fitExponent([...points, { n: 8e3, t: 0 }])).toBeNull();
+  expect(fitExponent([...points, { n: 0, t: 1 }])).toBeNull();
+});
+
 test('summarize reports p50, p95 and cv, and nulls for no samples', () => {
   const s = summarize(oneToHundred);
   expect(s.p50Ms).toBeCloseTo(50.5, 6);
