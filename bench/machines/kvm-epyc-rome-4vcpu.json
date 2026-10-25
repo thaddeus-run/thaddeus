@@ -1,0 +1,4 @@
+{
+  "id": "kvm-epyc-rome-4vcpu",
+  "description": "Shared, virtualized KVM guest: 4 vCPU AMD EPYC Rome, 7 GB RAM. Client and server share the host."
+}
