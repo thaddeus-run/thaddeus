@@ -1,10 +1,20 @@
+import { FileBackend } from '@thaddeus.run/persist';
 import { expect, test } from 'bun:test';
 import { createHash } from 'node:crypto';
-import { readdirSync, readFileSync, statSync } from 'node:fs';
+import {
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  statSync,
+} from 'node:fs';
 import { join, relative } from 'node:path';
 
+import type { BenchCase, CaseContext } from '../src/case';
 import libraryCases from '../src/cases/index';
-import { fixtureDir } from '../src/fixtures/cache';
+import type { CreateState } from '../src/cases/open';
+import { fixtureDir, WORK_ROOT } from '../src/fixtures/cache';
 import { generateFixture } from '../src/fixtures/plan';
 import { tinySpec } from '../src/fixtures/spec';
 import { FILEBACKEND_DURABILITY } from '../src/result';
@@ -74,6 +84,38 @@ test(
       registry: LIBRARY,
     });
     expect(snapshotTree(dir)).toEqual(before);
+  },
+  SLOW
+);
+
+// The runner deletes a case's workDir, so this drives the case's own setup
+// and run in-process on a workDir the test keeps, then looks for the record.
+test(
+  "repo.create writes the new repository's signed genesis head",
+  async () => {
+    const benchCase = libraryCases.find(
+      (c) => c.id === 'repo.create'
+    ) as unknown as BenchCase<CreateState>;
+    mkdirSync(WORK_ROOT, { recursive: true });
+    const workDir = mkdtempSync(join(WORK_ROOT, 'test-'));
+    try {
+      const ctx: CaseContext = {
+        plan: generateFixture(tinySpec()),
+        fixture: 'tiny',
+        workDir,
+        pageCache: 'warm',
+      };
+      const state = await benchCase.setup(ctx);
+      const backend = new FileBackend(state.root);
+      const prefix = `repo/${state.name}/head/`;
+      expect(await backend.list(prefix)).toEqual([]);
+      await benchCase.run(state, ctx);
+      expect(await backend.list(prefix)).toEqual([
+        `${prefix}main/0000000000000000`,
+      ]);
+    } finally {
+      rmSync(workDir, { recursive: true, force: true });
+    }
   },
   SLOW
 );
