@@ -2,3 +2,28 @@ $schema: 'https://moonrepo.dev/schemas/project.json'
 
 language: 'typescript'
 layer: 'application'
+
+tasks:
+  # A suite run with no preflight, for development and the PR check (which
+  # calls the script directly). Pass flags after `--`, e.g.
+  # `CI= moonx bench:run -- --fixtures small --repeats 3 --out out/x.json`.
+  run:
+    command: 'bun src/cli.ts run'
+    deps:
+      - '^:build'
+    options:
+      cache: false
+      runInCI: 'skip'
+
+  # The recorded run on the benchmark machine: refuses a busy machine, a dirty
+  # tree or a missing `sudo -n`, then runs everything and files the result
+  # under results/<machine>/. Needs BENCH_MACHINE, e.g.
+  # `BENCH_MACHINE=kvm-epyc-rome-4vcpu CI= moonx bench:record -- --baseline`.
+  record:
+    command: 'bun src/cli.ts record'
+    deps:
+      - '^:build'
+      - 'cli:compile'
+    options:
+      cache: false
+      runInCI: 'skip'
