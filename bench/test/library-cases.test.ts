@@ -1,4 +1,5 @@
-import { FileBackend } from '@thaddeus.run/persist';
+import { ready } from '@thaddeus.run/identity';
+import { FileBackend, MemoryBackend } from '@thaddeus.run/persist';
 import { expect, test } from 'bun:test';
 import { createHash } from 'node:crypto';
 import {
@@ -16,6 +17,7 @@ import libraryCases from '../src/cases/index';
 import type { CreateState } from '../src/cases/open';
 import { openQueryState } from '../src/cases/query';
 import { fixtureDir, WORK_ROOT } from '../src/fixtures/cache';
+import { authorsOf, materializeFixture } from '../src/fixtures/materialize';
 import { generateFixture } from '../src/fixtures/plan';
 import { tinySpec } from '../src/fixtures/spec';
 import { FILEBACKEND_DURABILITY } from '../src/result';
@@ -150,3 +152,21 @@ test(
   },
   2 * SLOW
 );
+
+// Every file another author writes is sealed to that author alone unless the
+// materializer grants it to the owner, so a graph read as the owner would see
+// only the owner's files.
+test('the owner can read every path of main on a multi-author fixture', async () => {
+  await ready();
+  const plan = generateFixture(tinySpec());
+  expect(plan.spec.authors).toBeGreaterThan(1);
+  const repo = await materializeFixture(plan, new MemoryBackend());
+  const owner = authorsOf(plan)[0];
+  const entries = [...repo.log.materialize('main', owner).entries()];
+  expect(entries.length).toBeGreaterThan(1);
+  for (const [, entry] of entries) {
+    if (entry.ref === null) continue;
+    expect((await repo.store.get(entry.ref, owner)).length).toBeGreaterThan(0);
+  }
+  expect(new Set(entries.map(([, e]) => e.op.author)).size).toBeGreaterThan(1);
+});

@@ -5,10 +5,12 @@ import { createPrng } from '../prng';
 import type { FixtureSpec } from './spec';
 
 // Bump when the generator's output changes for the same spec, so old fixture
-// caches and old results stop matching. Bump it whenever plan.ts or content.ts
-// changes what it produces: the manifest hash covers the plan, not the
-// contentFor algorithm, and the golden test in plan.test.ts catches the latter.
-export const GENERATOR_VERSION = 2;
+// caches and old results stop matching. Bump it whenever plan.ts, content.ts or
+// materialize.ts changes what it produces: the manifest hash covers the plan,
+// not the contentFor algorithm or how the plan is replayed (for example which
+// capabilities the store holds). The golden test in plan.test.ts catches
+// content changes; materialize.ts changes need a deliberate bump here.
+export const GENERATOR_VERSION = 3;
 
 export type Step =
   | {

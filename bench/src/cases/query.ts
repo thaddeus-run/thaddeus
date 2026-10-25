@@ -1,5 +1,9 @@
 import { Workspace } from '@thaddeus.run/fs';
-import { HeuristicExtractor, SymbolGraph } from '@thaddeus.run/graph';
+import {
+  HeuristicExtractor,
+  SymbolGraph,
+  SymbolLedger,
+} from '@thaddeus.run/graph';
 import { ready } from '@thaddeus.run/identity';
 import { FileBackend } from '@thaddeus.run/persist';
 import { Platform, type Repo } from '@thaddeus.run/platform';
@@ -25,7 +29,7 @@ export interface QueryState {
   repo: Repo;
   graph: SymbolGraph;
   codedb: CodeDB;
-  /** Name and id of the first visible file's first symbol, falling back past hot files the owner cannot read. */
+  /** Name and id of the first hot file's first symbol. */
   symbolName: string;
   symbolId: string;
   /** The op in the middle of the log's (lamport, id) order. */
@@ -37,9 +41,9 @@ export interface QueryState {
 // Opens the fixture's `bench` repository from the cache and stacks the layers
 // the query cases use: a Workspace on main read as the owner, a SymbolGraph
 // over it with the heuristic extractor, and a CodeDB over both plus an empty
-// provenance log. The reader is the owner, so files whose last writer was
-// another author do not decrypt and the graph skips them; on the one-author
-// fixtures that is nothing.
+// provenance log. The fixture grants the owner every file other authors write
+// (as the CLI's reshare does), so the owner reads the whole of main and the
+// graph covers every file.
 export async function openQueryState(plan: FixturePlan): Promise<QueryState> {
   await ready();
   const root = await fixtureDir(plan);
@@ -49,8 +53,11 @@ export async function openQueryState(plan: FixturePlan): Promise<QueryState> {
     source: 'main',
     reader: owner,
   });
+  // The graph's ledger is kept so the target lookup can read bindings back.
+  const ledger = new SymbolLedger();
   const graph = SymbolGraph.over(workspace, {
     extractor: new HeuristicExtractor(),
+    ledger,
   });
   const codedb = CodeDB.over({
     graph,
@@ -64,26 +71,35 @@ export async function openQueryState(plan: FixturePlan): Promise<QueryState> {
     (s) => s.kind === 'write' || s.kind === 'remove'
   );
   const touchedSince = history[Math.floor(history.length * 0.9)].at;
-  const target = await firstVisibleSymbol(plan, graph);
+  const target = await firstHotSymbol(plan, graph, ledger);
   return { root, repo, graph, codedb, ...target, medianOpId, touchedSince };
 }
 
-// The first symbol of the first file the graph can see. The plan's hot files
-// come first in path order and take most writes, so the walk starts on the
-// first hot file. The generator defines `f_<n>_0` first in file n. A file may
-// be missing from main or written by another author (so the owner cannot read
-// it), which is why the walk can go on past the hot files: tiny has one hot
-// file and it belongs to the second author.
-async function firstVisibleSymbol(
+// The first symbol of the first hot file, from one pass over the graph. Hot
+// files are the first `hotFileShare` of the plan's paths and take most writes,
+// and the generator defines `f_<n>_0` first in file n. `graph.symbols()`
+// rebuilds the whole graph and mints every symbol into the ledger, so it is
+// called once and the ledger answers the lookups. A hot file can be missing
+// from main (removed, or never written); the walk then goes on to the next
+// file, hot files first, using the same pass.
+async function firstHotSymbol(
   plan: FixturePlan,
-  graph: SymbolGraph
+  graph: SymbolGraph,
+  ledger: SymbolLedger
 ): Promise<{ symbolName: string; symbolId: string }> {
+  const idByBinding = new Map<string, string>();
+  for (const { id } of await graph.symbols()) {
+    const binding = ledger.bindingOf(id);
+    if (binding !== null) {
+      idByBinding.set(`${binding.path}\0${binding.name}`, id);
+    }
+  }
   for (let n = 0; n < plan.spec.files; n++) {
     const symbolName = `f_${n}_0`;
-    const symbolId = await graph.resolveAt(`src/f${n}.ts`, symbolName);
-    if (symbolId !== null) return { symbolName, symbolId };
+    const symbolId = idByBinding.get(`src/f${n}.ts\0${symbolName}`);
+    if (symbolId !== undefined) return { symbolName, symbolId };
   }
-  throw new Error(`no file of ${plan.spec.name} defines a visible symbol`);
+  throw new Error(`no file of ${plan.spec.name} defines a symbol`);
 }
 
 // A read-only query case: setup opens the state once, and each repeat makes one
