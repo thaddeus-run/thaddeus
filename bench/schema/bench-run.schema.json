@@ -1,0 +1,150 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://thaddeus.run/schemas/bench-run.schema.json",
+  "title": "BenchRun",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "commit",
+    "dirty",
+    "suiteVersion",
+    "recordedAt",
+    "machine",
+    "method",
+    "cases",
+    "sweeps"
+  ],
+  "properties": {
+    "schemaVersion": { "const": 1 },
+    "commit": { "type": "string" },
+    "dirty": { "type": "boolean" },
+    "suiteVersion": { "type": "string" },
+    "recordedAt": { "type": "string" },
+    "machine": { "$ref": "#/$defs/machine" },
+    "method": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["repeats", "warmup", "budgetMs", "isolation"],
+      "properties": {
+        "repeats": { "type": "integer", "minimum": 0 },
+        "warmup": { "type": "integer", "minimum": 0 },
+        "budgetMs": { "type": "number", "minimum": 0 },
+        "isolation": { "const": "subprocess" }
+      }
+    },
+    "cases": { "type": "array", "items": { "$ref": "#/$defs/caseResult" } },
+    "sweeps": { "type": "array", "items": { "$ref": "#/$defs/sweepResult" } }
+  },
+  "$defs": {
+    "status": { "enum": ["ok", "exceeded", "oom", "error"] },
+    "machine": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "description",
+        "cpu",
+        "vcpus",
+        "memoryBytes",
+        "virtualization",
+        "os",
+        "bun",
+        "loadAvg1",
+        "memAvailableBytes"
+      ],
+      "properties": {
+        "id": { "type": "string" },
+        "description": { "type": "string" },
+        "cpu": { "type": "string" },
+        "vcpus": { "type": "integer", "minimum": 1 },
+        "memoryBytes": { "type": "number", "minimum": 0 },
+        "virtualization": { "type": "string" },
+        "os": { "type": "string" },
+        "bun": { "type": "string" },
+        "loadAvg1": { "type": "number", "minimum": 0 },
+        "memAvailableBytes": { "type": "number", "minimum": 0 }
+      }
+    },
+    "caseResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "version",
+        "suite",
+        "fixture",
+        "manifestHash",
+        "status",
+        "budgetMs",
+        "repeats",
+        "warmup",
+        "samplesMs",
+        "p50Ms",
+        "p95Ms",
+        "cv",
+        "peakRssBytes"
+      ],
+      "properties": {
+        "id": { "type": "string" },
+        "version": { "type": "integer", "minimum": 1 },
+        "suite": { "enum": ["library", "e2e"] },
+        "fixture": { "type": "string" },
+        "manifestHash": { "type": "string" },
+        "status": { "$ref": "#/$defs/status" },
+        "phase": { "enum": ["setup", "run"] },
+        "budgetMs": { "type": "number", "minimum": 0 },
+        "failedAtN": { "type": "number", "minimum": 0 },
+        "repeats": { "type": "integer", "minimum": 0 },
+        "warmup": { "type": "integer", "minimum": 0 },
+        "samplesMs": {
+          "type": "array",
+          "items": { "type": "number", "minimum": 0 }
+        },
+        "p50Ms": { "type": ["number", "null"] },
+        "p95Ms": { "type": ["number", "null"] },
+        "cv": { "type": ["number", "null"] },
+        "throughput": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["value", "unit"],
+          "properties": {
+            "value": { "type": "number" },
+            "unit": { "enum": ["ops/s", "MB/s", "repos/min"] }
+          }
+        },
+        "peakRssBytes": { "type": "number", "minimum": 0 },
+        "diskBytes": { "type": "number", "minimum": 0 },
+        "durability": { "type": "string" },
+        "pageCache": { "enum": ["warm", "dropped"] },
+        "serveFlags": { "type": "array", "items": { "type": "string" } },
+        "note": { "type": "string" }
+      }
+    },
+    "sweepResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "version", "points", "exponent", "r2", "status"],
+      "properties": {
+        "id": { "type": "string" },
+        "version": { "type": "integer", "minimum": 1 },
+        "points": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["n", "p50Ms"],
+            "properties": {
+              "n": { "type": "number" },
+              "p50Ms": { "type": "number" }
+            }
+          }
+        },
+        "exponent": { "type": ["number", "null"] },
+        "r2": { "type": ["number", "null"] },
+        "status": { "$ref": "#/$defs/status" },
+        "failedAtN": { "type": "number", "minimum": 0 }
+      }
+    }
+  }
+}
