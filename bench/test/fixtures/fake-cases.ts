@@ -1,4 +1,4 @@
-import { existsSync, writeFileSync } from 'node:fs';
+import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 import type { BenchCase, CaseContext } from '../../src/case';
@@ -84,6 +84,32 @@ const fakes: readonly BenchCase[] = [
       });
       writeFileSync(probeFile(), String(orphan.pid));
       return Bun.sleep(5_000);
+    },
+  }),
+  // Starts a grandchild in its own session that inherits the child's stdout
+  // and stderr, so the pipes stay open after the child exits. The runner must
+  // stop waiting on them. The grandchild's pid goes to FAKE_PROBE_FILE.
+  fake('fake.leaky', {
+    run: () => {
+      const leak = Bun.spawn(['sleep', '30'], {
+        stdio: ['ignore', 'inherit', 'inherit'],
+        detached: true,
+      });
+      writeFileSync(probeFile(), String(leak.pid));
+      return Promise.resolve();
+    },
+  }),
+  // Per-sample, and each child's `measure` reports 1,000 bytes more than the
+  // previous one by counting spawns in FAKE_PROBE_FILE, so the runner's max
+  // over children is visible.
+  fake('fake.disk', {
+    isolation: 'per-sample',
+    run: () => Promise.resolve(),
+    measure: () => {
+      const file = probeFile();
+      const count = existsSync(file) ? Number(readFileSync(file, 'utf8')) : 0;
+      writeFileSync(file, String(count + 1));
+      return Promise.resolve({ diskBytes: (count + 1) * 1_000 });
     },
   }),
   // Per-sample, cold and writing: checks the flags and the per-sample spawns.

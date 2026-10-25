@@ -32,6 +32,8 @@ export interface ChildReport {
   /** `RunExtra` summed over the timed repeats; warm-ups are not counted. */
   extra: RunExtra;
   peakRssBytes: number;
+  /** From the case's `measure`, when it has one and reports it. */
+  diskBytes?: number;
 }
 
 function emit(line: object): void {
@@ -59,10 +61,16 @@ async function main(req: ChildRequest): Promise<void> {
     samplesMs.push(performance.now() - started);
     addExtra(extra, result);
   }
+  const measured = await benchCase.measure?.(state, ctx);
   await benchCase.teardown?.(state, ctx);
   // maxRSS is in kibibytes on Linux.
   const peakRssBytes = process.resourceUsage().maxRSS * 1024;
-  emit({ samplesMs, extra, peakRssBytes } satisfies ChildReport);
+  emit({
+    samplesMs,
+    extra,
+    peakRssBytes,
+    ...(measured?.diskBytes !== undefined && { diskBytes: measured.diskBytes }),
+  } satisfies ChildReport);
 }
 
 if (import.meta.main) {

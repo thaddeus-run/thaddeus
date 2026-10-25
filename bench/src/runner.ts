@@ -51,12 +51,33 @@ interface ChildOutcome {
   elapsedMs: number;
 }
 
+// How long the parent keeps reading a child's stdout and stderr after the
+// child exits. A grandchild outside the child's process group can hold the
+// pipes open forever; past this limit the parent stops reading.
+const DRAIN_AFTER_EXIT_MS = 2_000;
+
+// Thrown by `runCase` when the parent received SIGINT, SIGTERM or SIGHUP while
+// a child was running. An interrupted case was not measured, so it is not a
+// result: nothing is recorded and the caller decides whether to stop.
+export class Interrupted extends Error {
+  constructor(readonly signal: NodeJS.Signals) {
+    super(`interrupted by ${signal}`);
+    this.name = 'Interrupted';
+  }
+}
+
 // Process groups of children that are still running. A child runs in its own
 // group so a budget kill also takes down whatever it started (an e2e case's
 // `thaddeus serve`). Being in its own group also means it no longer gets the
-// terminal's Ctrl-C, so the parent forwards SIGINT and SIGTERM while any
-// child is alive.
+// terminal's Ctrl-C or the SSH hangup, so while any child is alive the parent
+// forwards those signals and kills the groups on exit.
 const liveGroups = new Set<number>();
+
+// The signal that made `forwardSignal` kill a group, keyed by group id, so the
+// waiting `spawnChild` can tell an interruption from a kernel OOM kill.
+const interruptedBy = new Map<number, NodeJS.Signals>();
+
+const FORWARDED_SIGNALS = ['SIGINT', 'SIGTERM', 'SIGHUP'] as const;
 
 function killGroup(pgid: number): void {
   try {
@@ -66,33 +87,61 @@ function killGroup(pgid: number): void {
   }
 }
 
-// Kills every live child group, then re-raises the signal with the default
-// handler so the parent dies the way it would have without children.
-function forwardSignal(signal: NodeJS.Signals): void {
+function killLiveGroups(): void {
   for (const pgid of liveGroups) killGroup(pgid);
-  untrackSignals();
-  process.kill(process.pid, signal);
 }
 
-const onSigint = () => forwardSignal('SIGINT');
-const onSigterm = () => forwardSignal('SIGTERM');
+// Kills every live child group and marks it interrupted. If nobody else
+// listens for the signal, re-raises it so the parent dies the way it would
+// have without children; if someone does (a CLI cleaning up), they already
+// got this delivery and decide what happens next.
+function forwardSignal(signal: NodeJS.Signals): void {
+  for (const pgid of liveGroups) interruptedBy.set(pgid, signal);
+  killLiveGroups();
+  untrackSignals();
+  if (process.listenerCount(signal) === 0) process.kill(process.pid, signal);
+}
+
+const signalHandlers = FORWARDED_SIGNALS.map(
+  (signal) => [signal, () => forwardSignal(signal)] as const
+);
 
 function trackSignals(): void {
-  process.on('SIGINT', onSigint);
-  process.on('SIGTERM', onSigterm);
+  for (const [signal, handler] of signalHandlers) process.on(signal, handler);
+  process.on('exit', killLiveGroups);
 }
 
 function untrackSignals(): void {
-  process.off('SIGINT', onSigint);
-  process.off('SIGTERM', onSigterm);
+  for (const [signal, handler] of signalHandlers) process.off(signal, handler);
+  process.off('exit', killLiveGroups);
 }
 
-// Reads a child's stdout line by line and hands each JSON object to `onLine`.
-// Lines that are not JSON objects are a case's own logging and are skipped.
-async function readJsonLines(
+// Reads a stream chunk by chunk until it ends or `cancel` is called, so the
+// caller can stop waiting on a pipe that a stray process keeps open.
+function drain(
   stream: ReadableStream<Uint8Array>,
-  onLine: (line: Record<string, unknown>) => void
-): Promise<void> {
+  onChunk: (chunk: Uint8Array) => void
+): { done: Promise<void>; cancel: () => void } {
+  const reader = stream.getReader();
+  const done = (async () => {
+    for (;;) {
+      const { done: ended, value } = await reader.read();
+      if (ended) return;
+      onChunk(value);
+    }
+  })();
+  return {
+    done: done.catch(() => {}),
+    cancel: () => void reader.cancel().catch(() => {}),
+  };
+}
+
+// Splits a byte stream into lines and hands each JSON object to `onLine`.
+// Lines that are not JSON objects are a case's own logging and are skipped.
+function jsonLineParser(onLine: (line: Record<string, unknown>) => void): {
+  push: (chunk: Uint8Array) => void;
+  end: () => void;
+} {
   const decoder = new TextDecoder();
   let buffered = '';
   const handle = (text: string) => {
@@ -105,25 +154,31 @@ async function readJsonLines(
       // Not JSON: the case printed something.
     }
   };
-  for await (const chunk of stream) {
-    buffered += decoder.decode(chunk, { stream: true });
-    let newline = buffered.indexOf('\n');
-    while (newline !== -1) {
-      handle(buffered.slice(0, newline));
-      buffered = buffered.slice(newline + 1);
-      newline = buffered.indexOf('\n');
-    }
-  }
-  buffered += decoder.decode();
-  if (buffered.length > 0) handle(buffered);
+  return {
+    push: (chunk) => {
+      buffered += decoder.decode(chunk, { stream: true });
+      let newline = buffered.indexOf('\n');
+      while (newline !== -1) {
+        handle(buffered.slice(0, newline));
+        buffered = buffered.slice(newline + 1);
+        newline = buffered.indexOf('\n');
+      }
+    },
+    end: () => {
+      buffered += decoder.decode();
+      if (buffered.length > 0) handle(buffered);
+      buffered = '';
+    },
+  };
 }
 
 // Spawns one child in its own process group and waits for it, killing the
 // whole group with SIGKILL once `budgetMs` passes. Classifies the exit:
 // our kill is `exceeded`; a SIGKILL we did not send (the kernel OOM killer)
-// or an out-of-memory message is `oom`; any other failure is `error`. After
-// the child exits the group is killed regardless, so a leftover grandchild
-// can neither keep running nor hold the stdio pipes open.
+// or an out-of-memory message is `oom`; any other failure is `error`. A kill
+// from signal forwarding throws `Interrupted` instead. After the child exits
+// the group is killed regardless, so a leftover grandchild cannot keep
+// running, and the pipes are read for at most DRAIN_AFTER_EXIT_MS more.
 async function spawnChild(
   req: ChildRequest,
   budgetMs: number
@@ -142,11 +197,13 @@ async function spawnChild(
 
   let phase: 'setup' | 'run' = 'setup';
   let report: ChildReport | undefined;
-  const stdoutDone = readJsonLines(proc.stdout, (line) => {
+  const lines = jsonLineParser((line) => {
     if (line.phase === 'setup' || line.phase === 'run') phase = line.phase;
     if (Array.isArray(line.samplesMs)) report = line as unknown as ChildReport;
   });
-  const stderrDone = new Response(proc.stderr).arrayBuffer();
+  const stdout = drain(proc.stdout, lines.push);
+  const stderrChunks: Uint8Array[] = [];
+  const stderrDrain = drain(proc.stderr, (chunk) => stderrChunks.push(chunk));
 
   let killedByBudget = false;
   const timer = setTimeout(() => {
@@ -159,9 +216,24 @@ async function spawnChild(
   liveGroups.delete(proc.pid);
   if (liveGroups.size === 0) untrackSignals();
 
-  await stdoutDone;
-  const stderrBytes = new Uint8Array(await stderrDone);
-  const stderr = new TextDecoder().decode(stderrBytes);
+  let drainTimer: Timer | undefined;
+  await Promise.race([
+    Promise.all([stdout.done, stderrDrain.done]),
+    new Promise((resolve) => {
+      drainTimer = setTimeout(resolve, DRAIN_AFTER_EXIT_MS);
+    }),
+  ]);
+  clearTimeout(drainTimer);
+  stdout.cancel();
+  stderrDrain.cancel();
+  lines.end();
+
+  const signal = interruptedBy.get(proc.pid);
+  interruptedBy.delete(proc.pid);
+  if (signal !== undefined) throw new Interrupted(signal);
+
+  const stderrBytes = Buffer.concat(stderrChunks);
+  const stderr = stderrBytes.toString('utf8');
   const childRss = (proc.resourceUsage()?.maxRSS ?? 0) * 1024;
   const peakRssBytes = Math.max(report?.peakRssBytes ?? 0, childRss);
 
@@ -176,7 +248,7 @@ async function spawnChild(
     status,
     phase,
     ...(report !== undefined && { report }),
-    stderr: new TextDecoder().decode(stderrBytes.subarray(-STDERR_TAIL_BYTES)),
+    stderr: stderrBytes.subarray(-STDERR_TAIL_BYTES).toString('utf8'),
     exitCode: proc.exitCode,
     peakRssBytes,
     elapsedMs: performance.now() - started,
@@ -243,8 +315,9 @@ function childPlan(
 }
 
 // Runs one case on one fixture in fresh Bun subprocesses and returns its
-// result. A timeout, OOM or crash is a result, not an exception; only an
-// unknown case id or fixture name throws.
+// result. A timeout, OOM or crash is a result, not an exception. It throws
+// on an unknown case id or fixture name, and rejects with `Interrupted` when
+// the parent gets SIGINT, SIGTERM or SIGHUP mid-case.
 export async function runCase(
   id: string,
   fixture: string,
@@ -272,6 +345,8 @@ export async function runCase(
   const samplesMs: number[] = [];
   const extra: RunExtra = {};
   let peakRssBytes = 0;
+  // Max over children: per-sample children each measure their own copy.
+  let diskBytes: number | undefined;
   let spentMs = 0;
   const perSample = benchCase.isolation === 'per-sample';
   for (const child of childPlan(benchCase, opts)) {
@@ -297,6 +372,8 @@ export async function runCase(
     }
     spentMs += outcome.elapsedMs;
     peakRssBytes = Math.max(peakRssBytes, outcome.peakRssBytes);
+    const measured = outcome.report?.diskBytes;
+    if (measured !== undefined) diskBytes = Math.max(diskBytes ?? 0, measured);
     if (outcome.status !== 'ok') {
       return {
         ...base,
@@ -306,6 +383,7 @@ export async function runCase(
         samplesMs: [],
         ...summarize([]),
         peakRssBytes,
+        ...(diskBytes !== undefined && { diskBytes }),
         ...flags,
         note: failureNote(outcome, opts.budgetMs, spec.ops),
       };
@@ -324,6 +402,7 @@ export async function runCase(
     ...summarize(samplesMs),
     ...(throughput !== undefined && { throughput }),
     peakRssBytes,
+    ...(diskBytes !== undefined && { diskBytes }),
     ...flags,
   };
 }
