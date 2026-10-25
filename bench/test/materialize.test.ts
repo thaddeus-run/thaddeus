@@ -148,3 +148,19 @@ test('landing an already-landed view is a no-op, not an error', async () => {
   const repo = await materializeFixture(again, new MemoryBackend());
   expect(repo.log.ops()).toHaveLength(plan.spec.ops);
 });
+
+test('a refused land throws instead of being skipped', async () => {
+  const deny = () => ({ allow: false, reason: 'denied for the test' });
+  let message = '';
+  try {
+    await materializeFixture(
+      generateFixture(tinySpec()),
+      new MemoryBackend(),
+      'bench',
+      { policy: deny }
+    );
+  } catch (error) {
+    message = String(error);
+  }
+  expect(message).toContain('denied for the test');
+});
