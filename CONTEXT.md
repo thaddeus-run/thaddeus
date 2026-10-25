@@ -101,3 +101,10 @@ keyless server; host-blind, which no longer describes the hosted path.
 **Performance target**: A number a build is held to, as distinct from a
 measurement, which names the environment and the run that observed it. _Avoid_:
 Capability, result or benchmark when no run is linked.
+
+**Cold open**: Loading a repository that already exists on local disk into a
+usable state, with nothing cached in memory. _Avoid_: Startup, cold start.
+
+**Cold checkout**: Producing a usable local copy of a repository from a server
+into an empty directory. _Avoid_: Cold install, which names installing the tool;
+cold open, which starts from local disk.
