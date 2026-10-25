@@ -82,3 +82,14 @@ export function tinySpec(): FixtureSpec {
     hotFileShare: 0.1,
   };
 }
+
+// Maps a fixture name, as stored in results and passed to the runner, back to
+// its spec: `small`, `medium`, `stress`, `tiny` or `sweep-<ops>`. Throws on
+// any other name so a typo fails loudly instead of measuring the wrong input.
+export function resolveFixture(name: string): FixtureSpec {
+  if (Object.hasOwn(FIXTURES, name)) return FIXTURES[name as FixtureName];
+  if (name === 'tiny') return tinySpec();
+  const sweep = /^sweep-([1-9]\d*)$/.exec(name);
+  if (sweep !== null) return sweepSpec(Number(sweep[1]));
+  throw new Error(`unknown fixture ${name}`);
+}

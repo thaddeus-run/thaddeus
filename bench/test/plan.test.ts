@@ -4,7 +4,12 @@ import { expect, test } from 'bun:test';
 
 import { contentFor } from '../src/fixtures/content';
 import { generateFixture, manifestHash } from '../src/fixtures/plan';
-import { FIXTURES } from '../src/fixtures/spec';
+import {
+  FIXTURES,
+  resolveFixture,
+  sweepSpec,
+  tinySpec,
+} from '../src/fixtures/spec';
 
 test('same spec gives the same manifest hash', () => {
   expect(manifestHash(generateFixture(FIXTURES.small))).toBe(
@@ -80,5 +85,26 @@ test('contentFor output is pinned by golden hashes', () => {
       at: '2026-01-01T00:00:00Z',
     };
     expect(bytesToHex(blake3(contentFor(step)))).toBe(hash);
+  }
+});
+
+test('resolveFixture maps every fixture name to its spec', () => {
+  expect(resolveFixture('small')).toEqual(FIXTURES.small);
+  expect(resolveFixture('medium')).toEqual(FIXTURES.medium);
+  expect(resolveFixture('stress')).toEqual(FIXTURES.stress);
+  expect(resolveFixture('tiny')).toEqual(tinySpec());
+  expect(resolveFixture('sweep-4000')).toEqual(sweepSpec(4_000));
+});
+
+test('resolveFixture rejects names it does not know', () => {
+  for (const name of [
+    'huge',
+    'sweep-',
+    'sweep-0',
+    'sweep-01',
+    'sweep-1.5',
+    'toString',
+  ]) {
+    expect(() => resolveFixture(name)).toThrow(name);
   }
 });
