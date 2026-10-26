@@ -11,6 +11,14 @@ import { dirname, join, resolve } from 'node:path';
 import { parseArgs } from 'node:util';
 
 import {
+  budgetCaseIds,
+  BUDGETS_FILE,
+  combineBudgetLines,
+  evaluateBudgets,
+  readBudgets,
+  renderBudgets,
+} from './budget';
+import {
   compareRuns,
   deriveThresholds,
   mergeRuns,
@@ -52,6 +60,11 @@ const USAGE = `usage:
                      merge round files of one commit into one run
   bun src/cli.ts compare <base.json> <head.json> [--thresholds file]
                      print a base/head summary; exit 1 on a regression
+  bun src/cli.ts budget <run.json>... [--budgets file]
+                     report runs against the everyday-command budgets; exit 0
+                     even when a target is missed
+  bun src/cli.ts budget --case-ids [--budgets file]
+                     print the comma-joined ids of the cases the budgets measure
   bun src/cli.ts noise [--rounds R] [--pairs P] [--suite ...] [--fixtures ...]
                      [--repeats N] [--warmup N] [--exclude glob,...] [--only glob,...]
                      [--out file]
@@ -335,6 +348,64 @@ function compareCommand(argv: readonly string[], host: Host): number {
   return cmp.regressed ? 1 : 0;
 }
 
+// `bench budget <run.json>... [--budgets file]`: sets the runs against the
+// everyday-command budgets, prints the Markdown report and appends it to
+// $GITHUB_STEP_SUMMARY when that is set. Runs of one commit and suite
+// version are merged first; runs of different commits cannot be, so each
+// group is evaluated on its own and the lines are combined (see
+// `combineBudgetLines`). A missed target is reported and does not change the
+// exit code. `--case-ids` prints the ids of the cases the budgets measure
+// (what CI runs) and exits 0.
+function budgetCommand(argv: readonly string[], host: Host): number {
+  const { values, positionals } = parseArgs({
+    args: [...argv],
+    options: {
+      budgets: { type: 'string' },
+      'case-ids': { type: 'boolean', default: false },
+    },
+    allowPositionals: true,
+    strict: true,
+  });
+  let budgets;
+  try {
+    budgets = readBudgets(values.budgets ?? BUDGETS_FILE);
+  } catch (error) {
+    throw new FileError((error as Error).message);
+  }
+  if (values['case-ids']) {
+    if (positionals.length > 0) {
+      throw new UsageError('budget --case-ids takes no run files');
+    }
+    process.stdout.write(`${budgetCaseIds(budgets).join(',')}\n`);
+    return 0;
+  }
+  if (positionals.length === 0) throw new UsageError('budget takes run files');
+  const groups = new Map<string, BenchRun[]>();
+  for (const path of positionals) {
+    const r = readRun(path);
+    const key = `${r.commit}\0${r.suiteVersion}`;
+    groups.set(key, [...(groups.get(key) ?? []), r]);
+  }
+  const sets = [...groups.values()].map((group) => {
+    try {
+      const [only, ...more] = group;
+      return evaluateBudgets(
+        more.length === 0 ? only : mergeRuns(group),
+        budgets
+      );
+    } catch (error) {
+      throw new FileError(`budget: ${(error as Error).message}`);
+    }
+  });
+  const report = renderBudgets(combineBudgetLines(sets));
+  process.stdout.write(report);
+  const stepSummary = (host.env ?? process.env).GITHUB_STEP_SUMMARY;
+  if (stepSummary !== undefined && stepSummary !== '') {
+    appendFileSync(stepSummary, report);
+  }
+  return 0;
+}
+
 // `bench noise --rounds R --pairs P`: the A/A noise study. Each pair runs
 // this commit as "base" and again as "head", interleaved round by round the
 // way the PR check runs base and head, merges each side and records every
@@ -458,6 +529,7 @@ export async function run(
     if (command === 'fixture') return await fixtureCommand(rest);
     if (command === 'merge') return mergeCommand(rest, host);
     if (command === 'compare') return compareCommand(rest, host);
+    if (command === 'budget') return budgetCommand(rest, host);
     if (command === 'noise') return await noiseCommand(rest, host);
     throw new UsageError(
       command === undefined ? 'no command' : `unknown command ${command}`

@@ -1,0 +1,113 @@
+{
+  "$schema": "../schema/budgets.schema.json",
+  "version": 1,
+  "targetFixture": "medium-serial",
+  "rows": [
+    {
+      "command": "status",
+      "env": "developer",
+      "thaddeus": "wc.status",
+      "git": "git.status",
+      "targetMs": 50,
+      "targetMultiple": 1
+    },
+    {
+      "command": "status",
+      "env": "agent",
+      "thaddeus": "wc.status.agents8",
+      "git": "git.status.agents8",
+      "targetMs": 100,
+      "targetMultiple": 1
+    },
+    {
+      "command": "diff",
+      "env": "developer",
+      "thaddeus": "wc.diff",
+      "git": "git.diff",
+      "targetMs": 100,
+      "targetMultiple": 1
+    },
+    {
+      "command": "diff",
+      "env": "agent",
+      "thaddeus": "wc.diff.agents8",
+      "git": "git.diff.agents8",
+      "targetMs": 200,
+      "targetMultiple": 1
+    },
+    {
+      "command": "commit",
+      "env": "developer",
+      "thaddeus": "e2e.push.10",
+      "git": "git.commit",
+      "targetMs": 1000,
+      "targetMultiple": 1
+    },
+    {
+      "command": "checkout",
+      "env": "developer",
+      "thaddeus": "e2e.workspace",
+      "git": "git.worktree",
+      "targetMs": 1000,
+      "targetMultiple": 1
+    },
+    {
+      "command": "pull",
+      "env": "developer",
+      "thaddeus": "e2e.pull",
+      "git": "git.pull",
+      "targetMs": 5000,
+      "targetMultiple": 1
+    },
+    {
+      "command": "ci-checkout",
+      "env": "ci",
+      "thaddeus": "e2e.checkout.cold",
+      "git": "git.clone",
+      "pageCache": "dropped",
+      "targetMs": 1000,
+      "targetMultiple": 1
+    },
+    {
+      "command": "rebase",
+      "env": "developer",
+      "targetMs": 2000,
+      "targetMultiple": 1,
+      "unmeasured": "thaddeus has no rebase; updating a workspace base is THA-11",
+      "owner": "THA-11"
+    },
+    {
+      "command": "rebase",
+      "env": "agent",
+      "targetMs": 2000,
+      "targetMultiple": 1,
+      "unmeasured": "thaddeus has no rebase; updating a workspace base is THA-11",
+      "owner": "THA-11"
+    },
+    {
+      "command": "commit",
+      "env": "agent",
+      "targetMs": 1000,
+      "targetMultiple": 1,
+      "unmeasured": "concurrent writers on one server need the replayable agent workload harness",
+      "owner": "THA-118"
+    },
+    {
+      "command": "checkout",
+      "env": "agent",
+      "targetMs": 1000,
+      "targetMultiple": 1,
+      "unmeasured": "concurrent writers on one server need the replayable agent workload harness",
+      "owner": "THA-118"
+    },
+    {
+      "command": "pull",
+      "env": "agent",
+      "targetMs": 5000,
+      "targetMultiple": 1,
+      "unmeasured": "concurrent writers on one server need the replayable agent workload harness",
+      "owner": "THA-118"
+    }
+  ],
+  "attribution": {}
+}

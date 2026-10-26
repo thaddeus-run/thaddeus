@@ -168,8 +168,10 @@ Each case runs in its own subprocess. That gives every case its own peak memory
 reading and lets the runner enforce its time budget. Other commands, which have
 no moon task, run from the `bench` directory with `bun src/cli.ts`:
 `fixture <name>` builds a cache and prints its path, `merge` joins round files
-of one commit, `compare <base> <head>` prints the comparison table, and `noise`
-runs the A/A study.
+of one commit, `compare <base> <head>` prints the comparison table, `noise` runs
+the A/A study, and `budget <run.json>...` reports runs against the
+everyday-command targets in `budgets/everyday.json` (it exits 0 when a target is
+missed; `budget --case-ids` prints the ids of the cases the budgets measure).
 
 ## Recording a result
 

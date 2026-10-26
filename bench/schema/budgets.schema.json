@@ -1,0 +1,64 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://thaddeus.run/schemas/budgets.schema.json",
+  "title": "Budgets",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["version", "targetFixture", "rows", "attribution"],
+  "properties": {
+    "$schema": { "type": "string" },
+    "version": { "const": 1 },
+    "targetFixture": { "type": "string", "minLength": 1 },
+    "rows": { "type": "array", "items": { "$ref": "#/$defs/row" } },
+    "attribution": {
+      "type": "object",
+      "additionalProperties": { "$ref": "#/$defs/attribution" }
+    }
+  },
+  "$defs": {
+    "row": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["command", "env", "targetMs", "targetMultiple"],
+      "properties": {
+        "command": { "type": "string", "minLength": 1 },
+        "env": { "type": "string", "minLength": 1 },
+        "thaddeus": { "type": "string", "minLength": 1 },
+        "git": { "type": "string", "minLength": 1 },
+        "pageCache": { "enum": ["warm", "dropped"] },
+        "targetMs": { "type": "number", "exclusiveMinimum": 0 },
+        "targetMultiple": { "type": "number", "exclusiveMinimum": 0 },
+        "unmeasured": { "type": "string", "minLength": 1 },
+        "owner": { "type": "string", "minLength": 1 }
+      },
+      "oneOf": [
+        {
+          "required": ["thaddeus", "git"],
+          "not": {
+            "anyOf": [{ "required": ["unmeasured"] }, { "required": ["owner"] }]
+          }
+        },
+        {
+          "required": ["unmeasured", "owner"],
+          "not": {
+            "anyOf": [
+              { "required": ["thaddeus"] },
+              { "required": ["git"] },
+              { "required": ["pageCache"] }
+            ]
+          }
+        }
+      ]
+    },
+    "attribution": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["owner", "cause", "evidence"],
+      "properties": {
+        "owner": { "type": ["string", "null"] },
+        "cause": { "type": "string" },
+        "evidence": { "type": "string" }
+      }
+    }
+  }
+}
