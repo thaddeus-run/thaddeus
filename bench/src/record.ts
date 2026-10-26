@@ -141,6 +141,11 @@ export interface SuiteOptions {
   repeats: number;
   warmup: number;
   budgetMs: number;
+  /**
+   * Globs over case ids (e.g. `reputation.*.10000`) of cases to leave out.
+   * Excluded cases still count towards the suite version.
+   */
+  exclude?: string[];
 }
 
 // What a suite run records about where it ran, and the hooks it calls.
@@ -416,6 +421,22 @@ export async function runSuite(
   const lookup = env.registryFor ?? registryFor;
   const sweepSizes = env.sweepSizes ?? SWEEP_SIZES;
 
+  const excludes = (opts.exclude ?? []).map((pattern) => ({
+    pattern,
+    glob: new Bun.Glob(pattern),
+    matched: false,
+  }));
+  // Whether `id` matches any exclusion; marks every glob that matches it.
+  const excluded = (id: string) => {
+    let hit = false;
+    for (const e of excludes) {
+      if (!e.glob.match(id)) continue;
+      e.matched = true;
+      hit = true;
+    }
+    return hit;
+  };
+
   const allCases: BenchCase[] = [];
   const jobs: Job[] = [];
   const sweepJobs: Job[] = [];
@@ -430,6 +451,7 @@ export async function runSuite(
     const mod = (await import(registry)) as { default: readonly BenchCase[] };
     for (const benchCase of mod.default) {
       allCases.push(benchCase);
+      if (excluded(benchCase.id)) continue;
       for (const requested of opts.fixtures) {
         if (!benchCase.fixtures.includes(requested)) continue;
         const fixture =
@@ -447,6 +469,11 @@ export async function runSuite(
     }
   }
   jobs.push(...sweepJobs);
+  // A glob that matches nothing is most likely a typo or a renamed case, and
+  // the case it meant to leave out is now running.
+  for (const e of excludes) {
+    if (!e.matched) env.log(`--exclude ${e.pattern} matched no case`);
+  }
 
   const failures = await prebuildFixtures(
     jobs,
@@ -508,7 +535,18 @@ export interface Host {
   outDir: string;
   runSuite: typeof runSuite;
   log(line: string): void;
+  /** Environment variables `compare` and `noise` read; process.env by default. */
+  env?: Record<string, string | undefined>;
+  /** The thresholds `compare` reads without `--thresholds`. */
+  thresholdsFile?: string;
 }
+
+// The committed thresholds of the PR check's runner, from the noise study.
+export const THRESHOLDS_FILE = join(
+  BENCH_ROOT,
+  'thresholds',
+  'github-ubuntu-latest.json'
+);
 
 // Runs git in the repository root and returns its stdout, throwing on a
 // non-zero exit.

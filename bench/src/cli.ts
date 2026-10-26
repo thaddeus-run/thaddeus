@@ -1,7 +1,22 @@
+import {
+  appendFileSync,
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  writeFileSync,
+} from 'node:fs';
 import { constants } from 'node:os';
-import { join, resolve } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 import { parseArgs } from 'node:util';
 
+import {
+  compareRuns,
+  deriveThresholds,
+  mergeRuns,
+  renderSummary,
+  runnerImage,
+  type Thresholds,
+} from './compare';
 import { seededRoot } from './e2e/seed';
 import { fixtureDir } from './fixtures/cache';
 import { generateFixture } from './fixtures/plan';
@@ -12,21 +27,38 @@ import {
   type Host,
   type PageCacheMode,
   record,
+  type SuiteEnv,
   type SuiteName,
+  type SuiteOptions,
+  THRESHOLDS_FILE,
   UsageError,
   writeRun,
 } from './record';
+import { type BenchRun, validateRun } from './result';
 import { childrenRunning, Interrupted } from './runner';
 
 const USAGE = `usage:
   bun src/cli.ts run [--suite library|e2e|all] [--fixtures small,medium] [--sweeps]
-                     [--repeats N] [--warmup N] [--page-cache warm,dropped] [--out file]
+                     [--repeats N] [--warmup N] [--page-cache warm,dropped]
+                     [--exclude glob,...] [--out file]
   BENCH_MACHINE=<id> bun src/cli.ts record [--baseline]
   bun src/cli.ts fixture <name> [--repos N | --server]
-                     build a fixture cache (or the e2e seeded server root), print its path`;
+                     build a fixture cache (or the e2e seeded server root), print its path
+  bun src/cli.ts merge <round.json>... --out file
+                     merge round files of one commit into one run
+  bun src/cli.ts compare <base.json> <head.json> [--thresholds file]
+                     print a base/head summary; exit 1 on a regression
+  bun src/cli.ts noise [--rounds R] [--pairs P] [--suite ...] [--fixtures ...]
+                     [--repeats N] [--warmup N] [--exclude glob,...] [--out file]
+                     A/A noise study of this commit; writes the thresholds file`;
 
 // `run` defaults for the method. The budget is a fifth of `record`'s.
 const RUN_DEFAULTS = { repeats: 10, warmup: 2, budgetMs: 120_000 };
+
+// The PR check's method (see .github/workflows/bench.yml). The noise study
+// defaults to it, because thresholds only hold for the method they were
+// measured with.
+const PR_METHOD = { repeats: 3, warmup: 1, rounds: 5, pairs: 20 };
 
 // The machine id of a `run` without BENCH_MACHINE.
 const LOCAL_MACHINE = 'local';
@@ -53,6 +85,68 @@ function count(name: string, value: string, min: number): number {
   return n;
 }
 
+// The parseArgs options that pick the cases and the method, shared by `run`
+// and `noise` with their own repeat and warm-up defaults.
+function suiteFlags(defaults: { repeats: number; warmup: number }) {
+  return {
+    suite: { type: 'string', default: 'library' },
+    fixtures: { type: 'string', default: 'small' },
+    repeats: { type: 'string', default: String(defaults.repeats) },
+    warmup: { type: 'string', default: String(defaults.warmup) },
+    exclude: { type: 'string', default: '' },
+  } as const;
+}
+
+// Turns parsed suite flags into suite options (warm, no sweeps; `run` adds
+// those flags itself), throwing a UsageError on a bad value.
+function suiteOptionsOf(values: {
+  suite: string;
+  fixtures: string;
+  repeats: string;
+  warmup: string;
+  exclude: string;
+}): SuiteOptions {
+  const suite = values.suite;
+  if (suite !== 'library' && suite !== 'e2e' && suite !== 'all') {
+    throw new UsageError(`unknown suite ${suite}`);
+  }
+  return {
+    suite: suite as SuiteName | 'all',
+    fixtures: list(values.fixtures),
+    sweeps: false,
+    pageCache: ['warm'],
+    repeats: count('repeats', values.repeats, 1),
+    warmup: count('warmup', values.warmup, 0),
+    budgetMs: RUN_DEFAULTS.budgetMs,
+    exclude: list(values.exclude),
+  };
+}
+
+// The machine and commit a `run` or `noise` measures, with the commit's
+// short sha, or an exit code when BENCH_MACHINE names no machine file.
+function suiteEnvOf(host: Host): { env: SuiteEnv; short: string } | number {
+  const id = host.machineId ?? LOCAL_MACHINE;
+  if (
+    host.machineId !== undefined &&
+    readMachineFile(id, host.machinesDir) === undefined
+  ) {
+    host.log(`bench: BENCH_MACHINE=${id} has no file in bench/machines`);
+    return 1;
+  }
+  const { sha, short } = host.commit();
+  const env = {
+    machine: detectMachine(id, {
+      probe: host.probe,
+      machinesDir: host.machinesDir,
+    }),
+    commit: sha,
+    dirty: host.dirtyPaths().length > 0,
+    dropPageCache: host.dropPageCache,
+    log: host.log,
+  };
+  return { env, short };
+}
+
 // `bench run`: runs a suite with the given method and writes the result to
 // `--out` (default bench/out/<date>-<short sha>.json). Unlike `record` it has
 // no preflight: a dirty tree is recorded as `dirty: true`, not refused.
@@ -63,21 +157,15 @@ async function runCommand(
   const { values } = parseArgs({
     args: [...argv],
     options: {
-      suite: { type: 'string', default: 'library' },
-      fixtures: { type: 'string', default: 'small' },
+      ...suiteFlags(RUN_DEFAULTS),
       sweeps: { type: 'boolean', default: false },
-      repeats: { type: 'string', default: String(RUN_DEFAULTS.repeats) },
-      warmup: { type: 'string', default: String(RUN_DEFAULTS.warmup) },
       'page-cache': { type: 'string', default: 'warm' },
       out: { type: 'string' },
     },
     strict: true,
   });
 
-  const suite = values.suite;
-  if (suite !== 'library' && suite !== 'e2e' && suite !== 'all') {
-    throw new UsageError(`unknown suite ${suite}`);
-  }
+  const opts = suiteOptionsOf(values);
   const pageCache = list(values['page-cache']);
   for (const mode of pageCache) {
     if (mode !== 'warm' && mode !== 'dropped') {
@@ -90,42 +178,188 @@ async function runCommand(
     );
     return 1;
   }
-  const id = host.machineId ?? LOCAL_MACHINE;
-  if (
-    host.machineId !== undefined &&
-    readMachineFile(id, host.machinesDir) === undefined
-  ) {
-    host.log(`bench run: BENCH_MACHINE=${id} has no file in bench/machines`);
-    return 1;
-  }
+  const target = suiteEnvOf(host);
+  if (typeof target === 'number') return target;
 
-  const { sha, short } = host.commit();
   const run = await host.runSuite(
     {
-      suite: suite as SuiteName | 'all',
-      fixtures: list(values.fixtures),
+      ...opts,
       sweeps: values.sweeps,
       pageCache: pageCache as PageCacheMode[],
-      repeats: count('repeats', values.repeats, 1),
-      warmup: count('warmup', values.warmup, 0),
-      budgetMs: RUN_DEFAULTS.budgetMs,
     },
-    {
-      machine: detectMachine(id, {
-        probe: host.probe,
-        machinesDir: host.machinesDir,
-      }),
-      commit: sha,
-      dirty: host.dirtyPaths().length > 0,
-      dropPageCache: host.dropPageCache,
-      log: host.log,
-    }
+    target.env
   );
   const out =
     values.out === undefined
-      ? join(host.outDir, `${run.recordedAt.slice(0, 10)}-${short}.json`)
+      ? join(host.outDir, `${run.recordedAt.slice(0, 10)}-${target.short}.json`)
       : resolve(values.out);
   writeRun(out, run);
+  host.log(`wrote ${out}`);
+  return 0;
+}
+
+// Reads and validates a BenchRun file, or throws a FileError naming it.
+function readRun(path: string): BenchRun {
+  let value: unknown;
+  try {
+    value = JSON.parse(readFileSync(path, 'utf8'));
+  } catch (error) {
+    throw new FileError(`${path}: ${(error as Error).message}`);
+  }
+  const errors = validateRun(value);
+  if (errors.length > 0) {
+    throw new FileError(
+      `${path} is not a bench run:\n  ${errors.slice(0, 5).join('\n  ')}`
+    );
+  }
+  return value as BenchRun;
+}
+
+// Reads a thresholds file, or throws a FileError naming it when it is not
+// one. Only the fields `compareRuns` relies on are checked.
+function readThresholds(path: string): Thresholds {
+  let value: unknown;
+  try {
+    value = JSON.parse(readFileSync(path, 'utf8'));
+  } catch (error) {
+    throw new FileError(`${path}: ${(error as Error).message}`);
+  }
+  const t = value as Partial<Thresholds> | null;
+  const perCase = t?.perCase;
+  const valid =
+    typeof t?.suiteVersion === 'string' &&
+    typeof t.studiedAt === 'string' &&
+    typeof t.runnerImage === 'string' &&
+    typeof t.pairs === 'number' &&
+    typeof perCase === 'object' &&
+    perCase !== null &&
+    Object.values(perCase).every((v) => typeof v === 'number' && v >= 1);
+  if (!valid) throw new FileError(`${path} is not a thresholds file`);
+  return value as Thresholds;
+}
+
+// A bad input file: printed without the usage, exit code 1.
+class FileError extends Error {
+  override name = 'FileError';
+}
+
+// `bench merge <round.json>... --out file`: merges the round files of one
+// commit (the PR check runs each side in interleaved rounds) into one run.
+function mergeCommand(argv: readonly string[], host: Host): number {
+  const { values, positionals } = parseArgs({
+    args: [...argv],
+    options: { out: { type: 'string' } },
+    allowPositionals: true,
+    strict: true,
+  });
+  if (positionals.length === 0) throw new UsageError('merge takes round files');
+  if (values.out === undefined) throw new UsageError('merge needs --out');
+  let merged: BenchRun;
+  try {
+    merged = mergeRuns(positionals.map(readRun));
+  } catch (error) {
+    if (error instanceof FileError) throw error;
+    throw new FileError(`merge: ${(error as Error).message}`);
+  }
+  const out = resolve(values.out);
+  writeRun(out, merged);
+  host.log(`merged ${positionals.length} rounds into ${out}`);
+  return 0;
+}
+
+// `bench compare <base.json> <head.json> [--thresholds file]`: prints the
+// markdown summary, appends it to $GITHUB_STEP_SUMMARY when that is set, and
+// exits 1 when a case regressed. Without `--thresholds` it reads the
+// committed file and compares without thresholds when there is none yet.
+function compareCommand(argv: readonly string[], host: Host): number {
+  const { values, positionals } = parseArgs({
+    args: [...argv],
+    options: { thresholds: { type: 'string' } },
+    allowPositionals: true,
+    strict: true,
+  });
+  const [basePath, headPath, ...extra] = positionals;
+  if (basePath === undefined || headPath === undefined || extra.length > 0) {
+    throw new UsageError('compare takes a base and a head run');
+  }
+  const explicit = values.thresholds;
+  if (explicit !== undefined && !existsSync(explicit)) {
+    throw new UsageError(`no thresholds file at ${explicit}`);
+  }
+  const thresholdsPath = explicit ?? host.thresholdsFile ?? THRESHOLDS_FILE;
+  const thresholds = existsSync(thresholdsPath)
+    ? readThresholds(thresholdsPath)
+    : null;
+  const cmp = compareRuns(readRun(basePath), readRun(headPath), thresholds);
+  const summary = renderSummary(cmp);
+  process.stdout.write(summary);
+  const stepSummary = (host.env ?? process.env).GITHUB_STEP_SUMMARY;
+  if (stepSummary !== undefined && stepSummary !== '') {
+    appendFileSync(stepSummary, summary);
+  }
+  return cmp.regressed ? 1 : 0;
+}
+
+// `bench noise --rounds R --pairs P`: the A/A noise study. Each pair runs
+// this commit as "base" and again as "head", interleaved round by round the
+// way the PR check runs base and head, merges each side and records every
+// case's head/base p50 ratio. Noise is all that separates the two sides, so
+// the 99th percentile of a case's ratios over the pairs becomes its
+// threshold. Writes the thresholds file (by default the committed one).
+async function noiseCommand(
+  argv: readonly string[],
+  host: Host
+): Promise<number> {
+  const { values } = parseArgs({
+    args: [...argv],
+    options: {
+      ...suiteFlags(PR_METHOD),
+      rounds: { type: 'string', default: String(PR_METHOD.rounds) },
+      pairs: { type: 'string', default: String(PR_METHOD.pairs) },
+      out: { type: 'string' },
+    },
+    strict: true,
+  });
+  const opts = suiteOptionsOf(values);
+  const rounds = count('rounds', values.rounds, 1);
+  const pairs = count('pairs', values.pairs, 1);
+  const target = suiteEnvOf(host);
+  if (typeof target === 'number') return target;
+  const { env } = target;
+
+  const studiedAt = new Date().toISOString();
+  const ratios: Record<string, number[]> = {};
+  let suite: string | undefined;
+  for (let pair = 1; pair <= pairs; pair++) {
+    const a: BenchRun[] = [];
+    const b: BenchRun[] = [];
+    for (let round = 1; round <= rounds; round++) {
+      host.log(`noise: pair ${pair}/${pairs}, round ${round}/${rounds}`);
+      a.push(await host.runSuite(opts, env));
+      b.push(await host.runSuite(opts, env));
+    }
+    const cmp = compareRuns(mergeRuns(a), mergeRuns(b), null);
+    suite = a[0].suiteVersion;
+    for (const row of cmp.rows) {
+      if (row.ratio === null) continue;
+      (ratios[row.thresholdKey] ??= []).push(row.ratio);
+    }
+    const pairRatios = cmp.rows.flatMap((r) => r.ratio ?? []);
+    host.log(
+      pairRatios.length === 0
+        ? `noise: pair ${pair}/${pairs} done, no case ok on both sides`
+        : `noise: pair ${pair}/${pairs} done, largest ratio ${Math.max(...pairRatios).toFixed(3)}`
+    );
+  }
+  const thresholds = deriveThresholds(ratios, {
+    studiedAt,
+    runnerImage: runnerImage(host.env ?? process.env),
+    suiteVersion: suite ?? '',
+    pairs,
+  });
+  const out = values.out === undefined ? THRESHOLDS_FILE : resolve(values.out);
+  mkdirSync(dirname(out), { recursive: true });
+  writeFileSync(out, `${JSON.stringify(thresholds, null, 2)}\n`);
   host.log(`wrote ${out}`);
   return 0;
 }
@@ -178,6 +412,9 @@ export async function run(
     if (command === 'run') return await runCommand(rest, host);
     if (command === 'record') return await record(rest, host);
     if (command === 'fixture') return await fixtureCommand(rest);
+    if (command === 'merge') return mergeCommand(rest, host);
+    if (command === 'compare') return compareCommand(rest, host);
+    if (command === 'noise') return await noiseCommand(rest, host);
     throw new UsageError(
       command === undefined ? 'no command' : `unknown command ${command}`
     );
@@ -189,6 +426,10 @@ export async function run(
     const parseError =
       error instanceof TypeError &&
       String((error as { code?: unknown }).code).startsWith('ERR_PARSE_ARGS');
+    if (error instanceof FileError) {
+      host.log(`bench: ${error.message}`);
+      return 1;
+    }
     if (error instanceof UsageError || parseError) {
       host.log(`bench: ${error.message}\n${USAGE}`);
       return 2;
