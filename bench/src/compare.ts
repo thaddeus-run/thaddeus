@@ -3,18 +3,37 @@
 // functions here are pure; the CLI reads and writes the files.
 
 import type { BenchRun, CaseResult, CaseStatus } from './result';
-import { percentile, summarize } from './stats';
+import { logMeanStdev, normalQuantile, summarize } from './stats';
 
-// The result of an A/A noise study: for each case (`id@version`), the largest
-// head/base p50 ratio that noise alone produces on this runner image. A PR
-// whose ratio is above it is a regression.
-export interface Thresholds {
+// Where and how an A/A noise study ran. `pairs` counts the pairs it
+// completed, which is fewer than asked when the study was cut off.
+export interface ThresholdStudy {
   studiedAt: string;
   runnerImage: string;
   suiteVersion: string;
   pairs: number;
+}
+
+// The result of an A/A noise study: for each case (`id@version`), the
+// largest head/base p50 ratio noise plausibly produces on this runner image.
+// The bounds hold for the whole family of cases at once: with every case
+// unchanged, all of them stay under their thresholds in 99% of PRs.
+export interface Thresholds extends ThresholdStudy {
+  method: 'lognormal-family-wise';
+  /** How many cases got a threshold (N in the Bonferroni split). */
+  familySize: number;
+  /** The normal quantile of 1 - 0.01 / familySize; null when N is 0. */
+  z: number | null;
   perCase: Record<string, number>;
 }
+
+// The family-wise error rate the thresholds allow: the chance that a PR
+// changing nothing is flagged on noise alone.
+const FAMILY_WISE_ALPHA = 0.01;
+
+// A case needs at least this many A/A ratios for a standard deviation that
+// means anything.
+const MIN_RATIOS = 3;
 
 export type Verdict =
   | 'ok'
@@ -53,19 +72,39 @@ export interface Comparison {
   headSuiteVersion: string;
 }
 
-// The noise study's threshold for each case: the 99th percentile of its A/A
-// ratios. A threshold below 1 would flag a case that did not slow down at
-// all, so thresholds are floored at 1. A case with no ratios gets none.
+// The noise study's threshold for each case. A/A ratios are modelled as
+// lognormal: with mu and sigma the mean and sample standard deviation of a
+// case's log ratios, its threshold is exp(mu + z * sigma). z is the normal
+// quantile of 1 - 0.01 / N for the N cases that get a threshold, a
+// Bonferroni split that keeps the chance of any false alarm in a PR at 1%.
+// (An empirical 99th percentile over 20 pairs is about each case's maximum,
+// which a new draw beats ~5% of the time per case.) A threshold below 1
+// would flag a case that did not slow down at all, so thresholds are floored
+// at 1. A case with fewer than three ratios gets none.
 export function deriveThresholds(
   aa: Record<string, number[]>,
-  meta: Omit<Thresholds, 'perCase'>
+  meta: ThresholdStudy
 ): Thresholds {
+  const studied = Object.entries(aa).filter(
+    ([, ratios]) => ratios.length >= MIN_RATIOS
+  );
+  const familySize = studied.length;
+  const z =
+    familySize === 0
+      ? null
+      : normalQuantile(1 - FAMILY_WISE_ALPHA / familySize);
   const perCase: Record<string, number> = {};
-  for (const [key, ratios] of Object.entries(aa)) {
-    if (ratios.length === 0) continue;
-    perCase[key] = Math.max(1, percentile(ratios, 99));
+  for (const [key, ratios] of studied) {
+    const { mu, sigma } = logMeanStdev(ratios);
+    perCase[key] = Math.max(1, Math.exp(mu + (z ?? 0) * sigma));
   }
-  return { ...meta, perCase };
+  return {
+    ...meta,
+    method: 'lognormal-family-wise',
+    familySize,
+    z,
+    perCase,
+  };
 }
 
 // The runner image a noise study ran on, from the variables GitHub's hosted
@@ -162,6 +201,9 @@ function studyOf(t: Thresholds): Omit<Thresholds, 'perCase'> {
     runnerImage: t.runnerImage,
     suiteVersion: t.suiteVersion,
     pairs: t.pairs,
+    method: t.method,
+    familySize: t.familySize,
+    z: t.z,
   };
 }
 
@@ -274,7 +316,9 @@ export function renderSummary(cmp: Comparison): string {
   const study = cmp.study;
   if (cmp.thresholds === 'current' && study !== undefined) {
     lines.push(
-      `Thresholds from the A/A noise study of ${study.studiedAt.slice(0, 10)} on ${study.runnerImage} (${plural(study.pairs, 'pair')}).`
+      `Thresholds from the A/A noise study of ${study.studiedAt.slice(0, 10)} on ${study.runnerImage} (${plural(study.pairs, 'pair')}): ` +
+        `each is exp(mean + z × stdev) of the case's log A/A ratios, with z = ${study.z?.toFixed(2) ?? '–'} so that all ${study.familySize} studied cases together raise a false alarm in at most 1% of PRs. ` +
+        'A case without a threshold is checked for status changes only.'
     );
   } else if (cmp.thresholds === 'stale' && study !== undefined) {
     lines.push(

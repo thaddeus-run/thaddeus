@@ -26,7 +26,7 @@ import {
   type Machine,
   validateRun,
 } from '../src/result';
-import { percentile } from '../src/stats';
+import { normalQuantile } from '../src/stats';
 
 const scratch = mkdtempSync(join(tmpdir(), 'bench-compare-test-'));
 afterAll(() => rmSync(scratch, { recursive: true, force: true }));
@@ -107,7 +107,14 @@ function thresholdsOf(
   perCase: Record<string, number>,
   over: Partial<Thresholds> = {}
 ): Thresholds {
-  return { ...meta, perCase, ...over };
+  return {
+    ...meta,
+    method: 'lognormal-family-wise',
+    familySize: Object.keys(perCase).length,
+    z: 2.5,
+    perCase,
+    ...over,
+  };
 }
 
 // Compares two one-case runs under a threshold of `t` for that case.
@@ -122,24 +129,57 @@ function verdict(c: Comparison): string {
 const baseRun = base(100);
 const headRun = head(150);
 
-test('a threshold is the 99th percentile of the A/A ratios', () => {
-  const t = deriveThresholds(
-    { 'oplog.write@1': [1.0, 1.02, 0.98, 1.05, 1.01] },
-    meta
-  );
+// The lognormal bound the noise study sets: exp(mean + z * sample stdev)
+// of the log ratios, computed here independently of compare.ts.
+function lognormalBound(ratios: number[], z: number): number {
+  const logs = ratios.map(Math.log);
+  const mu = logs.reduce((a, b) => a + b, 0) / logs.length;
+  const variance =
+    logs.reduce((a, x) => a + (x - mu) ** 2, 0) / (logs.length - 1);
+  return Math.exp(mu + z * Math.sqrt(variance));
+}
+
+test('a threshold is a lognormal 99% bound over the A/A ratios', () => {
+  const ratios = [1.0, 1.02, 0.98, 1.05, 1.01];
+  const t = deriveThresholds({ 'oplog.write@1': ratios }, meta);
   expect(t.perCase['oplog.write@1']).toBeCloseTo(
-    percentile([1.0, 1.02, 0.98, 1.05, 1.01], 99),
+    lognormalBound(ratios, normalQuantile(0.99)),
     9
   );
-  expect(t).toMatchObject(meta);
+  expect(t).toMatchObject({
+    ...meta,
+    method: 'lognormal-family-wise',
+    familySize: 1,
+  });
+  expect(t.z).toBeCloseTo(2.326348, 6);
+});
+
+test('thresholds bound the whole family of cases at 99%', () => {
+  const a = [1.0, 1.02, 0.98, 1.05, 1.01];
+  const b = [1.1, 0.9, 1.0, 1.05];
+  const t = deriveThresholds({ 'a@1': a, 'b@1': b, 'few@1': [1, 2] }, meta);
+  // Two cases get thresholds, so each is held to 1 - 0.01 / 2.
+  const z = normalQuantile(1 - 0.01 / 2);
+  expect(t.familySize).toBe(2);
+  expect(t.z).toBeCloseTo(z, 12);
+  expect(t.perCase['a@1']).toBeCloseTo(lognormalBound(a, z), 9);
+  expect(t.perCase['b@1']).toBeCloseTo(lognormalBound(b, z), 9);
+  expect(t.perCase['a@1']).toBeGreaterThan(
+    lognormalBound(a, normalQuantile(0.99))
+  );
 });
 
 test('a threshold is floored at 1.0', () => {
-  expect(deriveThresholds({ 'x@1': [0.9, 0.95] }, meta).perCase['x@1']).toBe(1);
+  expect(
+    deriveThresholds({ 'x@1': [0.9, 0.91, 0.92] }, meta).perCase['x@1']
+  ).toBe(1);
 });
 
-test('a case with no A/A ratios gets no threshold', () => {
-  expect(deriveThresholds({ 'x@1': [] }, meta).perCase).toEqual({});
+test('a case with fewer than three A/A ratios gets no threshold', () => {
+  const t = deriveThresholds({ 'x@1': [0.9, 0.95], 'y@1': [] }, meta);
+  expect(t.perCase).toEqual({});
+  expect(t.familySize).toBe(0);
+  expect(t.z).toBeNull();
 });
 
 test('the ratio against the threshold decides the verdict', () => {
@@ -502,8 +542,50 @@ test('noise runs interleaved A/A pairs and writes thresholds', async () => {
   expect(t.pairs).toBe(pairs);
   expect(t.runnerImage).toBe('ubuntu24-1.0');
   expect(t.suiteVersion).toBe('suite-a');
+  expect(t.method).toBe('lognormal-family-wise');
   expect(t.perCase['oplog.write@1']).toBeCloseTo(
-    percentile([1.0, 1.01, 1.02], 99),
+    lognormalBound([1.0, 1.01, 1.02], normalQuantile(0.99)),
+    9
+  );
+});
+
+test('noise rewrites the thresholds file after every pair', async () => {
+  // Pair k (0-based) has ratio 1 + k / 100. The suite run that would start
+  // the fifth pair dies, the way a study cut off by the job limit does.
+  const rounds = 1;
+  const seen: number[] = [];
+  const out = join(scratch, 'partial-thresholds.json');
+  const host: Host = {
+    ...fakeHost(() => baseRun, []),
+    runSuite: () => {
+      const call = seen.length;
+      const pair = Math.floor(call / (2 * rounds));
+      if (call % 2 === 0) {
+        seen.push(
+          existsSync(out)
+            ? (JSON.parse(readFileSync(out, 'utf8')) as Thresholds).pairs
+            : 0
+        );
+      } else {
+        seen.push(-1);
+      }
+      if (pair === 4) return Promise.reject(new Error('runner went away'));
+      return Promise.resolve(
+        runOf([caseOf(call % 2 === 0 ? 100 : 100 + pair)])
+      );
+    },
+  };
+  rmSync(out, { force: true });
+  expect(
+    run(['noise', '--rounds', '1', '--pairs', '10', '--out', out], host)
+  ).rejects.toThrow('runner went away');
+  await Bun.sleep(0);
+  // Before each pair's first run, the file holds every pair done so far.
+  expect(seen.filter((n) => n >= 0)).toEqual([0, 1, 2, 3, 4]);
+  const t = JSON.parse(readFileSync(out, 'utf8')) as Thresholds;
+  expect(t.pairs).toBe(4);
+  expect(t.perCase['oplog.write@1']).toBeCloseTo(
+    lognormalBound([1.0, 1.01, 1.02, 1.03], normalQuantile(0.99)),
     9
   );
 });

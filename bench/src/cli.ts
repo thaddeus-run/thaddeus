@@ -3,6 +3,7 @@ import {
   existsSync,
   mkdirSync,
   readFileSync,
+  renameSync,
   writeFileSync,
 } from 'node:fs';
 import { constants } from 'node:os';
@@ -231,11 +232,23 @@ function readThresholds(path: string): Thresholds {
     typeof t.studiedAt === 'string' &&
     typeof t.runnerImage === 'string' &&
     typeof t.pairs === 'number' &&
+    t.method === 'lognormal-family-wise' &&
+    typeof t.familySize === 'number' &&
+    (t.z === null || typeof t.z === 'number') &&
     typeof perCase === 'object' &&
     perCase !== null &&
     Object.values(perCase).every((v) => typeof v === 'number' && v >= 1);
   if (!valid) throw new FileError(`${path} is not a thresholds file`);
   return value as Thresholds;
+}
+
+// Writes a thresholds file through a temporary file and a rename, so a
+// study killed mid-write never leaves a truncated file behind.
+function writeThresholds(path: string, thresholds: Thresholds): void {
+  mkdirSync(dirname(path), { recursive: true });
+  const tmp = `${path}.tmp`;
+  writeFileSync(tmp, `${JSON.stringify(thresholds, null, 2)}\n`);
+  renameSync(tmp, path);
 }
 
 // A bad input file: printed without the usage, exit code 1.
@@ -304,8 +317,8 @@ function compareCommand(argv: readonly string[], host: Host): number {
 // this commit as "base" and again as "head", interleaved round by round the
 // way the PR check runs base and head, merges each side and records every
 // case's head/base p50 ratio. Noise is all that separates the two sides, so
-// the 99th percentile of a case's ratios over the pairs becomes its
-// threshold. Writes the thresholds file (by default the committed one).
+// the ratios set each case's threshold (see `deriveThresholds`). Rewrites
+// the thresholds file (by default the committed one) after every pair.
 async function noiseCommand(
   argv: readonly string[],
   host: Host
@@ -327,9 +340,10 @@ async function noiseCommand(
   if (typeof target === 'number') return target;
   const { env } = target;
 
+  const out = values.out === undefined ? THRESHOLDS_FILE : resolve(values.out);
   const studiedAt = new Date().toISOString();
+  const image = runnerImage(host.env ?? process.env);
   const ratios: Record<string, number[]> = {};
-  let suite: string | undefined;
   for (let pair = 1; pair <= pairs; pair++) {
     const a: BenchRun[] = [];
     const b: BenchRun[] = [];
@@ -339,7 +353,6 @@ async function noiseCommand(
       b.push(await host.runSuite(opts, env));
     }
     const cmp = compareRuns(mergeRuns(a), mergeRuns(b), null);
-    suite = a[0].suiteVersion;
     for (const row of cmp.rows) {
       if (row.ratio === null) continue;
       (ratios[row.thresholdKey] ??= []).push(row.ratio);
@@ -350,16 +363,18 @@ async function noiseCommand(
         ? `noise: pair ${pair}/${pairs} done, no case ok on both sides`
         : `noise: pair ${pair}/${pairs} done, largest ratio ${Math.max(...pairRatios).toFixed(3)}`
     );
+    // Rewritten after every pair, so a study cut off by the job's time
+    // limit still leaves the thresholds of the pairs it finished.
+    writeThresholds(
+      out,
+      deriveThresholds(ratios, {
+        studiedAt,
+        runnerImage: image,
+        suiteVersion: a[0].suiteVersion,
+        pairs: pair,
+      })
+    );
   }
-  const thresholds = deriveThresholds(ratios, {
-    studiedAt,
-    runnerImage: runnerImage(host.env ?? process.env),
-    suiteVersion: suite ?? '',
-    pairs,
-  });
-  const out = values.out === undefined ? THRESHOLDS_FILE : resolve(values.out);
-  mkdirSync(dirname(out), { recursive: true });
-  writeFileSync(out, `${JSON.stringify(thresholds, null, 2)}\n`);
   host.log(`wrote ${out}`);
   return 0;
 }
