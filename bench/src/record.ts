@@ -18,11 +18,21 @@ import {
 import {
   type BenchRun,
   type CaseResult,
+  type CaseStatus,
   type Machine,
   type SweepResult,
   validateRun,
 } from './result';
-import { runCase, runSweep, SWEEP_SIZES } from './runner';
+import {
+  classify,
+  failureNote,
+  runCase,
+  type RunOptions,
+  runSweep,
+  setupFailure,
+  spawnBudgeted,
+  SWEEP_SIZES,
+} from './runner';
 
 // The bench project directory and the repository root above it.
 export const BENCH_ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
@@ -145,6 +155,8 @@ export interface SuiteEnv {
   registryFor?: (suite: SuiteName) => string | null;
   /** Test seam: replaces SWEEP_SIZES. */
   sweepSizes?: readonly number[];
+  /** Test seam: the command that pre-builds one fixture cache. */
+  buildCommand?: (fixture: string, repos: number) => string[];
 }
 
 type Job =
@@ -164,56 +176,157 @@ function extraRootsOf(benchCase: BenchCase): number[] {
   return match === null ? [] : [Number(match[1])];
 }
 
-// Builds one fixture cache through `cli.ts fixture` in a child process, so a
-// build that runs out of memory kills the child and not the suite run.
-// Returns null on success, or why the build failed.
-async function buildFixtureInChild(
+// Why a fixture cache could not be pre-built, in the form of a case result.
+interface BuildFailure {
+  status: Exclude<CaseStatus, 'ok'>;
+  note: string;
+}
+
+// Pre-build failures keyed by `fixtureKey`.
+type BuildFailures = Map<string, BuildFailure>;
+
+function fixtureKey(fixture: string, repos: number): string {
+  return `${fixture}:${repos}`;
+}
+
+// The command that builds one fixture cache: `cli.ts fixture` in a child.
+function defaultBuildCommand(fixture: string, repos: number): string[] {
+  return [process.execPath, CLI, 'fixture', fixture, '--repos', String(repos)];
+}
+
+// Builds one fixture cache in a child process under the case budget, so a
+// build that runs out of memory or time is classified the way a case child
+// is (`spawnBudgeted` and `classify`) instead of taking the suite run down
+// or hanging it. Returns null on success.
+async function buildFixture(
   fixture: string,
-  repos: number
-): Promise<string | null> {
-  const proc = Bun.spawn(
-    [process.execPath, CLI, 'fixture', fixture, '--repos', String(repos)],
-    { stdin: 'ignore', stdout: 'ignore', stderr: 'pipe' }
+  repos: number,
+  budgetMs: number,
+  command: (fixture: string, repos: number) => string[]
+): Promise<BuildFailure | null> {
+  const outcome = await spawnBudgeted(command(fixture, repos), budgetMs);
+  const status = classify(outcome, true);
+  if (status === 'ok') return null;
+  const reason = failureNote(
+    {
+      status,
+      stderr: outcome.stderrTail,
+      exitCode: outcome.exitCode,
+      reported: true,
+    },
+    budgetMs,
+    resolveFixture(fixture).ops
   );
-  const kill = () => proc.kill('SIGKILL');
-  process.on('exit', kill);
-  const [code, stderr] = await Promise.all([
-    proc.exited,
-    new Response(proc.stderr).text(),
-  ]);
-  process.off('exit', kill);
-  if (code === 0) return null;
-  if (proc.signalCode !== null) return `killed by ${proc.signalCode}`;
-  const lines = stderr.trim().split('\n');
-  return lines.at(-1) ?? `exited with code ${code}`;
+  return { status, note: `fixture pre-build failed: ${reason}` };
 }
 
 // Builds every fixture cache the jobs will open, before anything is timed.
 // Cases still call `fixtureDir` themselves and then hit the cache, so the
-// first case on a fixture does not spend its budget building it. A build
-// that fails is logged and skipped: each case on that fixture then tries the
-// build in its own setup and records the failure as its result.
+// first case on a fixture does not spend its budget building it. Returns the
+// builds that failed; the jobs that need them are recorded as setup failures
+// without running, so a fixture that cannot be built costs one budget, not
+// one per case.
 async function prebuildFixtures(
   jobs: readonly Job[],
   sweepSizes: readonly number[],
+  budgetMs: number,
+  command: (fixture: string, repos: number) => string[],
   log: (line: string) => void
-): Promise<void> {
+): Promise<BuildFailures> {
   const wanted = new Map<string, { fixture: string; repos: number }>();
   const want = (fixture: string, benchCase: BenchCase) => {
     for (const repos of [1, ...extraRootsOf(benchCase)]) {
-      wanted.set(`${fixture}:${repos}`, { fixture, repos });
+      wanted.set(fixtureKey(fixture, repos), { fixture, repos });
     }
   };
   for (const job of jobs) {
     if (job.kind === 'case') want(job.fixture, job.benchCase);
     else for (const n of sweepSizes) want(sweepSpec(n).name, job.benchCase);
   }
-  for (const { fixture, repos } of wanted.values()) {
+  const failures: BuildFailures = new Map();
+  for (const [key, { fixture, repos }] of wanted) {
     const name = `${fixture}${repos > 1 ? ` with ${repos} repositories` : ''}`;
     log(`fixture ${name}`);
-    const failure = await buildFixtureInChild(fixture, repos);
-    if (failure !== null) log(`fixture ${name} failed to build: ${failure}`);
+    const failure = await buildFixture(fixture, repos, budgetMs, command);
+    if (failure === null) continue;
+    log(`fixture ${name}: ${failure.status}, ${failure.note}`);
+    failures.set(key, failure);
   }
+  return failures;
+}
+
+// The first failed pre-build among the caches `benchCase` opens on `fixture`.
+function failedBuildOf(
+  failures: BuildFailures,
+  benchCase: BenchCase,
+  fixture: string
+): BuildFailure | undefined {
+  for (const repos of [1, ...extraRootsOf(benchCase)]) {
+    const failure = failures.get(fixtureKey(fixture, repos));
+    if (failure !== undefined) return failure;
+  }
+  return undefined;
+}
+
+// Runs one case job. A failed pre-build becomes a setup failure without a
+// spawn. A page-cache drop that throws becomes an `error` result for this
+// job only, so one bad drop does not end an hours-long record.
+async function runCaseJob(
+  job: Extract<Job, { kind: 'case' }>,
+  opts: RunOptions,
+  failures: BuildFailures,
+  dropPageCache: (() => Promise<void>) | undefined
+): Promise<CaseResult> {
+  const { benchCase, fixture, pageCache } = job;
+  const caseOpts: RunOptions = {
+    ...opts,
+    ...(pageCache !== undefined && { pageCache }),
+  };
+  const failed = failedBuildOf(failures, benchCase, fixture);
+  if (failed !== undefined) {
+    return setupFailure(benchCase.id, fixture, caseOpts, failed);
+  }
+  let dropError: string | undefined;
+  const beforeSample = async () => {
+    try {
+      await dropPageCache?.();
+    } catch (error) {
+      dropError = error instanceof Error ? error.message : Bun.inspect(error);
+      throw error;
+    }
+  };
+  try {
+    return await runCase(benchCase.id, fixture, {
+      ...caseOpts,
+      ...(pageCache === 'dropped' && { beforeSample }),
+    });
+  } catch (error) {
+    if (dropError === undefined) throw error;
+    return setupFailure(benchCase.id, fixture, caseOpts, {
+      status: 'error',
+      note: `dropping the page cache failed: ${dropError}`,
+    });
+  }
+}
+
+// Runs one sweep job over the sizes before the first one whose pre-build
+// failed; that size, if any, becomes the sweep's failure point.
+async function runSweepJob(
+  job: Extract<Job, { kind: 'sweep' }>,
+  sweepSizes: readonly number[],
+  opts: RunOptions,
+  failures: BuildFailures
+): Promise<SweepResult> {
+  const failedAt = sweepSizes.findIndex(
+    (n) =>
+      failedBuildOf(failures, job.benchCase, sweepSpec(n).name) !== undefined
+  );
+  const sizes = failedAt === -1 ? sweepSizes : sweepSizes.slice(0, failedAt);
+  const result = await runSweep(job.benchCase.id, sizes, opts);
+  const n = sweepSizes[failedAt];
+  if (n === undefined || result.status !== 'ok') return result;
+  const failure = failedBuildOf(failures, job.benchCase, sweepSpec(n).name);
+  return { ...result, status: failure?.status ?? 'error', failedAtN: n };
 }
 
 // Three significant digits below 100 ms, whole milliseconds above.
@@ -282,7 +395,13 @@ export async function runSuite(
   }
   jobs.push(...sweepJobs);
 
-  await prebuildFixtures(jobs, sweepSizes, env.log);
+  const failures = await prebuildFixtures(
+    jobs,
+    sweepSizes,
+    opts.budgetMs,
+    env.buildCommand ?? defaultBuildCommand,
+    env.log
+  );
 
   const method = {
     repeats: opts.repeats,
@@ -295,14 +414,10 @@ export async function runSuite(
     const runOpts = { ...method, registry: job.registry };
     let result: CaseResult | SweepResult;
     if (job.kind === 'sweep') {
-      result = await runSweep(job.benchCase.id, sweepSizes, runOpts);
+      result = await runSweepJob(job, sweepSizes, runOpts, failures);
       sweeps.push(result);
     } else {
-      result = await runCase(job.benchCase.id, job.fixture, {
-        ...runOpts,
-        ...(job.pageCache !== undefined && { pageCache: job.pageCache }),
-        ...(job.pageCache === 'dropped' && { beforeSample: env.dropPageCache }),
-      });
+      result = await runCaseJob(job, runOpts, failures, env.dropPageCache);
       cases.push(result);
     }
     env.log(`[${i + 1}/${jobs.length}] ${describe(job, result)}`);
@@ -499,6 +614,16 @@ export async function record(
     );
   } finally {
     clearInterval(keepalive);
+  }
+
+  // The tree must still be the commit the run names: an edit during a
+  // multi-hour record would otherwise go unnoticed.
+  const changed = host.dirtyPaths();
+  if (changed.length > 0) {
+    host.log(
+      `bench record: packages/ or bench/ changed during the run (${changed.slice(0, 5).join(', ')}); no result written`
+    );
+    return 1;
   }
 
   const dir = join(host.resultsDir, id);
