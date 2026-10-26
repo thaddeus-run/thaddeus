@@ -43,6 +43,7 @@ const USAGE = `usage:
   bun src/cli.ts run [--suite library|e2e|everyday|all] [--fixtures small,medium] [--sweeps]
                      [--repeats N] [--warmup N] [--page-cache warm,dropped]
                      [--exclude glob,...] [--only glob,...] [--out file]
+                     [--budget-ms N] [--prebuild-budget-ms N]
   BENCH_MACHINE=<id> bun src/cli.ts record [--baseline]
   bun src/cli.ts fixture <name> [--repos N | --server | --git]
                      build a fixture cache (or the e2e seeded server root, or the
@@ -173,11 +174,21 @@ async function runCommand(
       sweeps: { type: 'boolean', default: false },
       'page-cache': { type: 'string', default: 'warm' },
       out: { type: 'string' },
+      'budget-ms': { type: 'string', default: String(RUN_DEFAULTS.budgetMs) },
+      'prebuild-budget-ms': { type: 'string' },
     },
     strict: true,
   });
 
   const opts = suiteOptionsOf(values);
+  opts.budgetMs = count('budget-ms', values['budget-ms'], 1);
+  if (values['prebuild-budget-ms'] !== undefined) {
+    opts.prebuildBudgetMs = count(
+      'prebuild-budget-ms',
+      values['prebuild-budget-ms'],
+      1
+    );
+  }
   const pageCache = list(values['page-cache']);
   for (const mode of pageCache) {
     if (mode !== 'warm' && mode !== 'dropped') {

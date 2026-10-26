@@ -3,7 +3,9 @@ import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 
 import type { BenchCase, CaseContext } from '../case';
+import { writeChangeSet } from '../e2e/cases';
 import { cliCommand, timeCli, writeCliHome } from '../e2e/home';
+import { linkCopy } from '../fixtures/cache';
 import { gitFixture, timeGit } from './git';
 import { applyEdit, editPaths } from './tree';
 import { thadWorkingCopy } from './workcopy';
@@ -154,6 +156,165 @@ function gitCase(command: 'status' | 'diff', agents: boolean) {
   });
 }
 
+// What a git baseline of a server command holds: the git home, the hard-link
+// copy of the cached bare repository that plays the server, and the case's
+// work directory.
+interface RemoteState {
+  home: string;
+  remote: string;
+  workDir: string;
+}
+
+// Hard-link copies the cached bare repository to `<workDir>/remote.git`, the
+// repository a sample pushes to and pulls from. That is safe for the same
+// reason it is for FileBackend: git writes new objects as new files and moves
+// refs into place by rename, so nothing reaches the cache.
+async function gitRemote(ctx: CaseContext): Promise<RemoteState> {
+  const home = join(ctx.workDir, 'git-home');
+  mkdirSync(home, { recursive: true });
+  const remote = join(ctx.workDir, 'remote.git');
+  await linkCopy(await gitFixture(ctx.plan), remote);
+  return { home, remote, workDir: ctx.workDir };
+}
+
+// Clones the remote into `<workDir>/<name>` (setup, not timed) and returns
+// the path.
+async function cloneRemote(s: RemoteState, name: string): Promise<string> {
+  const dir = join(s.workDir, name);
+  await timeGit(['clone', '-q', s.remote, dir], {
+    home: s.home,
+    cwd: s.workDir,
+  });
+  return dir;
+}
+
+// The skeleton of one git baseline of a server command. Each sample is a
+// fresh process on a fresh copy of the remote (`per-sample`), because the
+// timed command changes the remote or the clone. Git's transport here is the
+// local one, so these cases carry no loopback HTTP, which the thaddeus side
+// pays; the note says so.
+function gitServerCase<S extends RemoteState>(c: {
+  id: string;
+  cold?: boolean;
+  note: string;
+  setup: (s: RemoteState) => Promise<S>;
+  run: (s: S) => Promise<void>;
+}): BenchCase<S> {
+  return {
+    id: c.id,
+    version: 1,
+    suite: 'everyday',
+    fixtures: FIXTURES,
+    variant: 'serial',
+    isolation: 'per-sample',
+    needs: ['git'],
+    ...(c.cold === true && { cold: true }),
+    note: c.note,
+    setup: async (ctx) => c.setup(await gitRemote(ctx)),
+    run: (s) => c.run(s),
+  };
+}
+
+interface CloneState extends RemoteState {
+  clone: string;
+}
+
+// Commit: clone, switch to a new branch and write the 10-file change set that
+// `e2e.push.10` pushes. The timed commands are `git add -A`, `git commit` and
+// `git push` of the branch to the remote; thaddeus has no local-only commit,
+// so its push stands against all three, and the sample is their sum.
+const gitCommit: BenchCase<CloneState> = gitServerCase({
+  id: 'git.commit',
+  note: "git add -A, git commit and git push of a 10-file change set, summed; git's transport is local (a path to a hard-link copy of the bare repository), not loopback HTTP; git applies its own fsync settings, so the pair is not durability-matched",
+  setup: async (s) => {
+    const clone = await cloneRemote(s, 'clone');
+    const at = { home: s.home, cwd: clone };
+    await timeGit(['switch', '-q', '-c', 'bench-push'], at);
+    writeChangeSet(clone, 10);
+    return { ...s, clone };
+  },
+  run: async (s) => {
+    const at = { home: s.home, cwd: s.clone };
+    await timeGit(['add', '-A'], at);
+    await timeGit(['commit', '-q', '-m', 'bench'], at);
+    await timeGit(['push', '-q', 'origin', 'bench-push'], at);
+  },
+});
+
+// Checkout: clone and create a branch; the timed command opens it in a new
+// directory with `git worktree add`, which is what `thaddeus workspace` does.
+const gitWorktree: BenchCase<CloneState> = gitServerCase({
+  id: 'git.worktree',
+  note: 'git worktree add of a branch into a new directory; warm, because setup read everything it needs',
+  setup: async (s) => {
+    const clone = await cloneRemote(s, 'clone');
+    await timeGit(['branch', 'bench-ws'], { home: s.home, cwd: clone });
+    return { ...s, clone };
+  },
+  run: async (s) => {
+    await timeGit(
+      ['worktree', 'add', '-q', join(s.workDir, 'ws'), 'bench-ws'],
+      {
+        home: s.home,
+        cwd: s.clone,
+      }
+    );
+  },
+});
+
+interface ReaderState extends RemoteState {
+  reader: string;
+}
+
+// Pull: an owner clone and a reader clone, then the owner commits the same
+// 10-file change set to main and pushes it. The timed command is the reader's
+// fast-forward `git pull`.
+const gitPull: BenchCase<ReaderState> = gitServerCase({
+  id: 'git.pull',
+  note: "git pull --ff-only of a 10-file commit in a second clone; git's transport is local (a path to a hard-link copy of the bare repository), not loopback HTTP",
+  setup: async (s) => {
+    const owner = await cloneRemote(s, 'owner-clone');
+    const reader = await cloneRemote(s, 'reader-clone');
+    const at = { home: s.home, cwd: owner };
+    writeChangeSet(owner, 10);
+    await timeGit(['add', '-A'], at);
+    await timeGit(['commit', '-q', '-m', 'bench'], at);
+    await timeGit(['push', '-q', 'origin', 'main'], at);
+    return { ...s, reader };
+  },
+  run: async (s) => {
+    await timeGit(['pull', '-q', '--ff-only'], {
+      home: s.home,
+      cwd: s.reader,
+    });
+  },
+});
+
+// CI checkout: a depth-1 clone, which is what `actions/checkout` does by
+// default, over a file:// URL (a plain path would ignore the depth). Cold like
+// `e2e.checkout.cold`: in the dropped mode the page cache is dropped before
+// setup, and setup's hard-link copy re-warms only directory entries and
+// inodes, not file contents.
+const gitClone: BenchCase<RemoteState> = gitServerCase({
+  id: 'git.clone',
+  cold: true,
+  note: "git clone --depth 1 of a file:// URL into an empty directory, in a fresh home; cold like e2e.checkout.cold: in the dropped mode, setup's hard-link copy (cp -al) re-warms directory entries and inodes but not file contents. git's transport is local, not loopback HTTP",
+  setup: (s) => Promise.resolve(s),
+  run: async (s) => {
+    await timeGit(
+      [
+        'clone',
+        '-q',
+        '--depth',
+        '1',
+        `file://${s.remote}`,
+        join(s.workDir, 'checkout'),
+      ],
+      { home: s.home, cwd: s.workDir }
+    );
+  },
+});
+
 // The everyday suite's registry, imported by the runner in the parent and in
 // each case child.
 const everydayCases: readonly BenchCase[] = [
@@ -165,6 +326,10 @@ const everydayCases: readonly BenchCase[] = [
   gitCase('diff', false),
   gitCase('status', true),
   gitCase('diff', true),
+  gitCommit,
+  gitWorktree,
+  gitPull,
+  gitClone,
 ];
 
 export default everydayCases;

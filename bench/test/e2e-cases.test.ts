@@ -67,6 +67,18 @@ test('stress and medium raise only the limits their pushes hit', () => {
   ]);
 });
 
+// Opening a branch is warm by design: setup clones and creates the branch, so
+// everything the timed command reads is warm again even when the runner drops
+// the page cache before setup. Marking it cold would label a warm run dropped.
+test('workspace is warm, a pure client command, and takes the default samples', () => {
+  const ws = byId('e2e.workspace');
+  expect(ws.cold).toBeUndefined();
+  expect(ws.writes).toBeUndefined();
+  expect(ws.isolation).toBe('per-sample');
+  expect(ws.maxRepeats).toBeUndefined();
+  expect(ws.serveFlags?.('medium-serial')).toEqual([]);
+});
+
 test('the checkout note says the dropped mode re-warms dentries and inodes', () => {
   expect(byId('e2e.checkout.cold').note).toContain('cp -al');
   expect(byId('e2e.checkout.cold').note).toContain('inodes');
@@ -80,6 +92,7 @@ test('the e2e registry is the one suite runs use', () => {
     'e2e.push.100',
     'e2e.pull',
     'e2e.land',
+    'e2e.workspace',
     'e2e.repo.create',
     'e2e.repos-per-minute',
   ]);

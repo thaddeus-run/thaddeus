@@ -51,8 +51,9 @@ const CHANGE_FILE_BYTES = 4_096;
 
 // The i-th file of a change set: `bench-change/<i>.ts`, a path no fixture
 // writes, so a change set never collides with fixture data. The content is
-// fixed per i, so every sample pushes the same bytes.
-function writeChangeSet(dir: string, files: number): void {
+// fixed per i, so every sample pushes the same bytes. The everyday suite's git
+// cases write the same files, so both tools push identical bytes.
+export function writeChangeSet(dir: string, files: number): void {
   mkdirSync(join(dir, 'bench-change'), { recursive: true });
   for (let i = 0; i < files; i++) {
     const path = `bench-change/${i}.ts`;
@@ -255,6 +256,28 @@ interface LandState extends E2eState {
   clone: string;
 }
 
+// Checkout: thaddeus has no tree switch. Opening a branch is `thaddeus
+// workspace`, which pulls the branch into the shared store and writes its
+// files to a new directory. Setup clones and creates the branch; the timed
+// command opens it. Compared with `git worktree add`. Not cold: the runner
+// drops the page cache before setup, and setup's clone and branch read
+// everything the timed command needs, so the cache is warm again by the time
+// it runs.
+const workspace: BenchCase<LandState> = e2eCase({
+  id: 'e2e.workspace',
+  isolation: 'per-sample',
+  pushes: false,
+  setup: async (ctx) => {
+    const s = await serveFor(workspace, ctx);
+    const clone = await ownerClone(s, 'clone');
+    await asOwner(s, ['branch', 'bench-ws'], clone);
+    return { ...s, clone };
+  },
+  run: async (s) => {
+    await asOwner(s, ['workspace', 'bench-ws', join(s.workDir, 'ws')], s.clone);
+  },
+});
+
 // Land: the owner opens branch `bench-land`, pushes a 10-file change set to
 // it (uploaded and landed on the branch), and the timed command is
 // `thaddeus land bench-land` from the main clone, landing it into main.
@@ -378,6 +401,7 @@ const e2eCases: readonly BenchCase[] = [
   pushCase(100),
   pull,
   land,
+  workspace,
   repoCreate,
   reposPerMinute,
 ];

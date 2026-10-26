@@ -23,25 +23,57 @@ const EVERYDAY_FAKES = join(
   'everyday-suite-cases.ts'
 );
 
-test('the everyday suite has the eight local cases', () => {
-  expect(everydayCases.map((c) => c.id)).toEqual([
-    'wc.status',
-    'wc.diff',
-    'wc.status.agents8',
-    'wc.diff.agents8',
-    'git.status',
-    'git.diff',
-    'git.status.agents8',
-    'git.diff.agents8',
-  ]);
+const LOCAL_IDS = [
+  'wc.status',
+  'wc.diff',
+  'wc.status.agents8',
+  'wc.diff.agents8',
+  'git.status',
+  'git.diff',
+  'git.status.agents8',
+  'git.diff.agents8',
+];
+
+// The git baselines of server commands, paired with e2e cases by the budgets
+// file, so their ids are fixed.
+const SERVER_IDS = ['git.commit', 'git.worktree', 'git.pull', 'git.clone'];
+
+const byId = (id: string) => {
+  const found = everydayCases.find((c) => c.id === id);
+  if (found === undefined) throw new Error(`no case ${id}`);
+  return found;
+};
+
+test('the everyday suite has the eight local cases and four git baselines', () => {
+  expect(everydayCases.map((c) => c.id)).toEqual([...LOCAL_IDS, ...SERVER_IDS]);
   for (const c of everydayCases) {
     expect(c.suite).toBe('everyday');
     expect(c.version).toBe(1);
     expect(c.variant).toBe('serial');
-    expect(c.isolation).toBe('per-case');
     expect(c.fixtures).toEqual(['tiny', 'small', 'medium', 'stress']);
     expect(c.note).toBeDefined();
   }
+});
+
+test('local cases set up once and the git baselines take a fresh process per sample', () => {
+  for (const id of LOCAL_IDS) expect(byId(id).isolation).toBe('per-case');
+  for (const id of SERVER_IDS) expect(byId(id).isolation).toBe('per-sample');
+});
+
+test('only git.clone is cold, and no everyday case carries the FileBackend durability label', () => {
+  expect(everydayCases.filter((c) => c.cold === true).map((c) => c.id)).toEqual(
+    ['git.clone']
+  );
+  expect(everydayCases.filter((c) => c.writes === true)).toEqual([]);
+  expect(byId('git.commit').note).toContain('not durability-matched');
+});
+
+test('the git baselines of server commands say their transport is local', () => {
+  for (const id of ['git.commit', 'git.pull', 'git.clone']) {
+    expect(byId(id).note).toContain('local');
+    expect(byId(id).note).toContain('not loopback HTTP');
+  }
+  expect(byId('git.clone').note).toContain('cold');
 });
 
 test('working-copy cases need the fixture cache and git cases the git cache', () => {
@@ -165,4 +197,32 @@ test('run --suite all is accepted', async () => {
   expect(await run(['run', '--suite', 'all', '--out', out], host)).toBe(0);
   expect(calls[0]?.opts.suite).toBe('all');
   expect(calls[0]?.opts.only).toEqual([]);
+});
+
+test('run --budget-ms and --prebuild-budget-ms reach the suite options', async () => {
+  const { host, calls } = fakeHost(scratch);
+  const out = join(scratch, 'budgets.json');
+  const args = ['--budget-ms', '400000', '--prebuild-budget-ms', '2400000'];
+  expect(await run(['run', ...args, '--out', out], host)).toBe(0);
+  expect(calls[0]?.opts.budgetMs).toBe(400_000);
+  expect(calls[0]?.opts.prebuildBudgetMs).toBe(2_400_000);
+});
+
+test('run keeps the 120 s budget, and a pre-build budget of its own is left unset', async () => {
+  const { host, calls } = fakeHost(scratch);
+  const out = join(scratch, 'default-budgets.json');
+  expect(await run(['run', '--out', out], host)).toBe(0);
+  expect(calls[0]?.opts.budgetMs).toBe(120_000);
+  expect(calls[0]?.opts.prebuildBudgetMs).toBeUndefined();
+});
+
+test('run rejects a budget that is not a positive integer', async () => {
+  for (const flag of ['--budget-ms', '--prebuild-budget-ms']) {
+    const { host, lines, calls } = fakeHost(scratch);
+    expect(await run(['run', flag, '0'], host)).toBe(2);
+    expect(lines.join('\n')).toContain(
+      `${flag} must be an integer of at least 1`
+    );
+    expect(calls).toHaveLength(0);
+  }
 });

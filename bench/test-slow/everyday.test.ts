@@ -1,8 +1,21 @@
 import { afterAll, expect, test } from 'bun:test';
-import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
+import type { CaseContext } from '../src/case';
+import everydayCases from '../src/everyday/cases';
+import { gitFixture, timeGit } from '../src/everyday/git';
+import { WORK_ROOT } from '../src/fixtures/cache';
+import { generateFixture } from '../src/fixtures/plan';
+import { resolveFixture } from '../src/fixtures/spec';
 import { type BenchRun, validateRun } from '../src/result';
 
 // The everyday suite through the real `bench run` command on tiny: the
@@ -75,9 +88,22 @@ test(
         'git.diff',
         'git.status.agents8',
         'git.diff.agents8',
+        'git.commit',
+        'git.worktree',
+        'git.pull',
+        'git.clone',
       ].map((id) => [id, 'everyday', 'tiny-serial', 'ok'])
     );
     for (const c of run.cases) expect(c.p50Ms).toBeGreaterThan(0);
+    const byId = (id: string) => run.cases.find((c) => c.id === id);
+    // No everyday result carries the FileBackend label, and only git.clone is
+    // cold.
+    for (const c of run.cases) expect(c.durability).toBeUndefined();
+    expect(byId('git.clone')?.pageCache).toBe('warm');
+    expect(byId('git.worktree')?.pageCache).toBeUndefined();
+    for (const id of ['git.commit', 'git.worktree', 'git.pull', 'git.clone']) {
+      expect(byId(id)?.samplesMs).toHaveLength(1);
+    }
   },
   SLOW
 );
@@ -133,3 +159,116 @@ test(
   },
   SLOW
 );
+
+// Runs one case's setup and timed run by hand in a fresh work directory, as
+// its per-sample child does, and returns the directory.
+async function runByHand(id: string): Promise<string> {
+  const found = everydayCases.find((c) => c.id === id);
+  if (found === undefined) throw new Error(`no case ${id}`);
+  mkdirSync(WORK_ROOT, { recursive: true });
+  const workDir = mkdtempSync(join(WORK_ROOT, 'everyday-case-test-'));
+  scratchDirs.push(workDir);
+  const ctx: CaseContext = {
+    plan: generateFixture(resolveFixture('tiny-serial')),
+    fixture: 'tiny-serial',
+    workDir,
+    pageCache: 'warm',
+  };
+  await found.run(await found.setup(ctx), ctx);
+  return workDir;
+}
+
+const scratchDirs: string[] = [];
+afterAll(() => {
+  for (const dir of scratchDirs) rmSync(dir, { recursive: true, force: true });
+});
+
+// Runs `git <args>` in `cwd` and returns its trimmed stdout.
+async function gitOut(cwd: string, args: string[]): Promise<string> {
+  const proc = Bun.spawn(['git', ...args], {
+    cwd,
+    stdout: 'pipe',
+    stderr: 'pipe',
+  });
+  const [out, err, code] = await Promise.all([
+    new Response(proc.stdout).text(),
+    new Response(proc.stderr).text(),
+    proc.exited,
+  ]);
+  if (code !== 0) throw new Error(`git ${args.join(' ')} failed: ${err}`);
+  return out.trim();
+}
+
+const tinyPlan = () => generateFixture(resolveFixture('tiny-serial'));
+
+test(
+  'git.commit pushes a 10-file commit on a new branch to its own copy of the remote',
+  async () => {
+    const cached = await gitFixture(tinyPlan());
+    const before = await gitOut(cached, ['for-each-ref']);
+    const workDir = await runByHand('git.commit');
+    const remote = join(workDir, 'remote.git');
+    expect(
+      await gitOut(remote, ['log', '-1', '--format=%s', 'bench-push'])
+    ).toBe('bench');
+    const changed = await gitOut(remote, [
+      'ls-tree',
+      '--name-only',
+      'bench-push',
+      'bench-change/',
+    ]);
+    expect(changed.split('\n')).toHaveLength(10);
+    // The push reached the work directory's copy, not the cached repository.
+    expect(await gitOut(cached, ['for-each-ref'])).toBe(before);
+    expect(before).not.toContain('bench-push');
+  },
+  SLOW
+);
+
+test(
+  'git.worktree opens the branch in a new directory with the fixture files',
+  async () => {
+    const workDir = await runByHand('git.worktree');
+    const ws = join(workDir, 'ws');
+    expect(await gitOut(ws, ['branch', '--show-current'])).toBe('bench-ws');
+    expect(readdirSync(join(ws, 'src')).length).toBeGreaterThan(0);
+  },
+  SLOW
+);
+
+test(
+  'git.pull fast-forwards the reader onto the 10-file commit',
+  async () => {
+    const workDir = await runByHand('git.pull');
+    const reader = join(workDir, 'reader-clone');
+    expect(readdirSync(join(reader, 'bench-change'))).toHaveLength(10);
+    expect(await gitOut(reader, ['rev-parse', 'HEAD'])).toBe(
+      await gitOut(join(workDir, 'remote.git'), ['rev-parse', 'main'])
+    );
+  },
+  SLOW
+);
+
+test(
+  'git.clone makes a depth-1 checkout',
+  async () => {
+    const workDir = await runByHand('git.clone');
+    const checkout = join(workDir, 'checkout');
+    expect(await gitOut(checkout, ['rev-list', '--count', 'HEAD'])).toBe('1');
+    expect(existsSync(join(checkout, '.git', 'shallow'))).toBe(true);
+  },
+  SLOW
+);
+
+test('a failed timed git command is an error, never a sample', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'bench-everyday-fail-'));
+  scratchDirs.push(dir);
+  // Caught and then asserted, so the assertion always runs.
+  let message = 'timeGit resolved';
+  try {
+    await timeGit(['pull', '-q', '--ff-only'], { home: dir, cwd: dir });
+  } catch (error) {
+    message = error instanceof Error ? error.message : String(error);
+  }
+  expect(message).toMatch(/exited with code/);
+});

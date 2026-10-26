@@ -39,6 +39,7 @@ the result says so. Only these numbers are candidates for the website.
 | `e2e.push.10`, `.100`  | `thaddeus push --no-land` of a 10-file or 100-file change set                   |
 | `e2e.pull`             | a second identity runs `thaddeus pull` for a 10-file change                     |
 | `e2e.land`             | `thaddeus land` of a branch holding a 10-file change into `main`                |
+| `e2e.workspace`        | `thaddeus workspace` opens a branch in a new directory                          |
 | `e2e.repo.create`      | `thaddeus create`, one after another                                            |
 | `e2e.repos-per-minute` | 8 concurrent clients, each its own identity, create repositories for 30 seconds |
 
@@ -152,10 +153,12 @@ CI= moonx bench:run -- --fixtures small,medium --sweeps --out out/try.json
 By default `run` uses the library suite, the `small` fixture, 10 repeats, 2
 warm-ups and a 120 second budget per case, with the page cache left as it is
 (`warm`). It writes `bench/out/<date>-<short-commit>.json` unless you pass
-`--out`. The flags are `--suite library|e2e|all`, `--fixtures`, `--sweeps`,
-`--repeats`, `--warmup`, `--page-cache warm,dropped`, `--exclude` (globs over
-case ids) and `--out`. `--page-cache dropped` needs `sudo -n`, so run `sudo -v`
-first.
+`--out`. The flags are `--suite library|e2e|everyday|all`, `--fixtures`,
+`--sweeps`, `--repeats`, `--warmup`, `--page-cache warm,dropped`, `--exclude`
+(globs over case ids), `--only` (globs over case ids), `--budget-ms` (per-case
+budget, default 120000), `--prebuild-budget-ms` (per fixture pre-build, default
+the case budget) and `--out`. `--page-cache dropped` needs `sudo -n`, so run
+`sudo -v` first.
 
 The e2e suite needs the compiled binary. `bench:run` depends on the build of the
 packages, and `bench:record` also depends on `cli:compile`. Compile the CLI

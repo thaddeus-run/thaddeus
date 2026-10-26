@@ -144,6 +144,7 @@ for (const id of [
   'e2e.push.10',
   'e2e.pull',
   'e2e.land',
+  'e2e.workspace',
   'e2e.repo.create',
 ]) {
   test(
@@ -161,7 +162,11 @@ for (const id of [
       expect(r.manifestHash).toBe(manifestHash(tinyPlan));
       expect(r.samplesMs).toHaveLength(2);
       expect(r.serveFlags).toEqual([]);
-      if (id === 'e2e.checkout.cold' || id === 'e2e.pull') {
+      if (
+        id === 'e2e.checkout.cold' ||
+        id === 'e2e.pull' ||
+        id === 'e2e.workspace'
+      ) {
         expect(r.durability).toBeUndefined();
       } else {
         expect(r.durability).toBe(FILEBACKEND_DURABILITY);
@@ -172,6 +177,8 @@ for (const id of [
       } else {
         expect(r.note).toBeUndefined();
       }
+      // Only the checkout is cold: workspace's setup re-warms what it reads.
+      if (id === 'e2e.workspace') expect(r.pageCache).toBeUndefined();
       // The case's server wrote into a hard-link copy, never the cache.
       expect(snapshotTree(await seededRoot(tinyPlan))).toEqual(seeded);
     },
