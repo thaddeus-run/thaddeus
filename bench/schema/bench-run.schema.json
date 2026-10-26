@@ -30,6 +30,7 @@
         "repeats": { "type": "integer", "minimum": 0 },
         "warmup": { "type": "integer", "minimum": 0 },
         "budgetMs": { "type": "number", "minimum": 0 },
+        "prebuildBudgetMs": { "type": "number", "minimum": 0 },
         "isolation": { "const": "subprocess" }
       }
     },
@@ -133,17 +134,20 @@
           "items": {
             "type": "object",
             "additionalProperties": false,
-            "required": ["n", "p50Ms"],
+            "required": ["n", "p50Ms", "manifestHash"],
             "properties": {
               "n": { "type": "number" },
-              "p50Ms": { "type": "number" }
+              "p50Ms": { "type": "number" },
+              "manifestHash": { "type": "string" }
             }
           }
         },
         "exponent": { "type": ["number", "null"] },
         "r2": { "type": ["number", "null"] },
         "status": { "$ref": "#/$defs/status" },
-        "failedAtN": { "type": "number", "minimum": 0 }
+        "failedAtN": { "type": "number", "minimum": 0 },
+        "durability": { "type": "string" },
+        "note": { "type": "string" }
       }
     }
   }

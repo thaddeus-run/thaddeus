@@ -1,5 +1,5 @@
 import { Identity, ready } from '@thaddeus.run/identity';
-import { allowAll, Platform } from '@thaddeus.run/platform';
+import { Platform } from '@thaddeus.run/platform';
 import type { LandPolicy, Repo } from '@thaddeus.run/platform';
 import type { Backend } from '@thaddeus.run/store';
 
@@ -23,12 +23,27 @@ function isAlreadyLanded(repo: Repo, from: string, into: string): boolean {
   return repo.log.heads(from).every((head) => merged.has(head));
 }
 
+// The head-set a land of `from` into `into` re-points `into` to: the sorted,
+// de-duplicated union of both views' heads. A copy of `mergeHeads` in
+// packages/platform/src/platform.ts, which the platform does not export;
+// the materialize test checks that both give the same persisted state.
+function mergedHeads(repo: Repo, from: string, into: string): string[] {
+  return [
+    ...new Set([...repo.log.heads(into), ...repo.log.heads(from)]),
+  ].sort();
+}
+
 // Replays a plan onto a durable repository, one step at a time, in order.
 // Every file another author writes is also granted to the owner, as the CLI
 // does when it reshares files to members.
 // Removes of a path the merged state no longer has are fine: the log just
-// appends a tombstone. Lands use `allowAll` because the generator wants
-// conflicts to reach main, and the default policy would block them.
+// appends a tombstone. A land re-points `into` straight to the merged heads,
+// which is what `Repo.land` persists under `allowAll` (the generator wants
+// conflicts to reach main). It skips `Repo.land` because that always runs
+// `conflicts()` on the merged view, the very cost the suite measures: it
+// made fixture builds grow about as n^4 with history length. Pass `policy`
+// to land through `Repo.land` under that policy instead, as tests do to
+// compare the two paths or to check that a refused land fails the build.
 export async function materializeFixture(
   plan: FixturePlan,
   backend: Backend,
@@ -71,10 +86,21 @@ export async function materializeFixture(
         break;
       case 'land': {
         if (isAlreadyLanded(repo, step.from, step.into)) break;
+        if (opts.policy === undefined) {
+          // `repoint` writes view/<into> through to the backend, as the
+          // allowed branch of Repo.land does. Repo.land's dry-run view
+          // (land/<into>/<n>) is set with `view()`, which is memory only, so
+          // skipping it leaves the same records on disk.
+          await repo.log.repoint(
+            step.into,
+            mergedHeads(repo, step.from, step.into)
+          );
+          break;
+        }
         const result = await repo.land({
           from: step.from,
           into: step.into,
-          policy: opts.policy ?? allowAll,
+          policy: opts.policy,
         });
         // Any refusal here means the plan and the log disagree, which would
         // silently skew the fixture, so fail loudly.

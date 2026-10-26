@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import { generateFixture, manifestHash } from '../src/fixtures/plan';
-import { FIXTURES } from '../src/fixtures/spec';
+import { FIXTURES, sweepSpec } from '../src/fixtures/spec';
 import {
   type BenchRun,
   FILEBACKEND_DURABILITY,
@@ -378,6 +378,25 @@ test(
     expect(cut.points).toEqual([]);
     expect(cut.exponent).toBeNull();
     expect(cut.r2).toBeNull();
+    // The failing size's note says where and why it stopped.
+    expect(cut.note).toBe('exceeded 1000 ms at n = 1000');
+  },
+  SLOW
+);
+
+test(
+  'a sweep carries per-point manifest hashes, and durability when it writes',
+  async () => {
+    const one = { ...o, repeats: 1, warmup: 0 };
+    const writes = await runSweep('fake.cold-write', [1_000, 2_000], one);
+    expect(writes.status).toBe('ok');
+    expect(writes.points.map((p) => p.manifestHash)).toEqual(
+      [1_000, 2_000].map((n) => manifestHash(generateFixture(sweepSpec(n))))
+    );
+    expect(writes.durability).toBe(FILEBACKEND_DURABILITY);
+    expect(writes.note).toBeUndefined();
+    const plain = await runSweep('fake.ok', [1_000], one);
+    expect(plain.durability).toBeUndefined();
   },
   SLOW
 );
@@ -391,11 +410,12 @@ test(
       warmup: 0,
     });
     const bad = await runCase('fake.throw', 'small', o);
-    const sweep = await runSweep('fake.ok', [1_000, 2_000, 4_000], {
+    const sweep = await runSweep('fake.cold-write', [1_000, 2_000, 4_000], {
       ...o,
       repeats: 1,
       warmup: 0,
     });
+    const cut = await runSweep('fake.sleep', [1_000], o);
     const run: BenchRun = {
       schemaVersion: 1,
       commit: '0000000',
@@ -418,11 +438,14 @@ test(
         repeats: 1,
         warmup: 0,
         budgetMs: 1_000,
+        prebuildBudgetMs: 1_000,
         isolation: 'subprocess',
       },
       cases: [ok, bad],
-      sweeps: [sweep],
+      sweeps: [sweep, cut],
     };
+    expect(sweep.durability).toBeDefined();
+    expect(cut.note).toBeDefined();
     expect(validateRun(run)).toEqual([]);
   },
   SLOW

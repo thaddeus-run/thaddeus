@@ -12,6 +12,8 @@ import { join } from 'node:path';
 import type { BenchCase } from '../src/case';
 import libraryCases from '../src/cases/index';
 import { run } from '../src/cli';
+import { generateFixture, manifestHash } from '../src/fixtures/plan';
+import { sweepSpec } from '../src/fixtures/spec';
 import { detectMachine, type MachineProbe } from '../src/machine';
 import {
   BENCH_ROOT,
@@ -165,6 +167,7 @@ test(
       repeats: 2,
       warmup: 0,
       budgetMs: 60_000,
+      prebuildBudgetMs: 60_000,
       isolation: 'subprocess',
     });
     expect(lines).toContain('e2e suite not available yet');
@@ -253,15 +256,20 @@ test(
       ],
     ]);
     expect(result.cases.every((c) => c.samplesMs.length === 0)).toBe(true);
-    // The sweep stops at its first size, whose fixture never got built.
+    // The sweep stops at its first size, whose fixture never got built, and
+    // says so; the larger size is not even attempted.
     expect(result.sweeps).toEqual([
       expect.objectContaining({
         id: 'suite.sweep',
         status: 'exceeded',
         failedAtN: 1_000,
         points: [],
+        note: 'fixture pre-build failed: exceeded 300 ms at n = 1000',
       }),
     ]);
+    expect(lines).toContain('fixture sweep-2000: skipped, sweep-1000 failed');
+    // Without a pre-build budget of its own, a pre-build gets the case budget.
+    expect(result.method.prebuildBudgetMs).toBe(300);
     // No case child ran, so nothing dropped the cache or left a probe.
     expect(drops).toBe(0);
     expect(spawned).toEqual([]);
@@ -284,10 +292,95 @@ test(
       ['error', undefined, 'fixture pre-build failed: disk full'],
       ['error', undefined, 'fixture pre-build failed: disk full'],
     ]);
-    expect(result.sweeps.map((s) => [s.status, s.failedAtN])).toEqual([
-      ['error', 1_000],
+    expect(result.sweeps.map((s) => [s.status, s.failedAtN, s.note])).toEqual([
+      ['error', 1_000, 'fixture pre-build failed: disk full'],
     ]);
     expect(spawned).toEqual([]);
+  },
+  SLOW
+);
+
+// A sweep-only suite run (no case fixtures) whose pre-builds run
+// `command(fixture)`, with three sweep sizes. Returns the run, the log and
+// the fixtures whose build was started, in order.
+async function sweepSuite(
+  command: (fixture: string) => string[],
+  budgets: { budgetMs: number; prebuildBudgetMs?: number }
+): Promise<{ run: BenchRun; lines: string[]; builds: string[] }> {
+  const lines: string[] = [];
+  const builds: string[] = [];
+  const result = await runSuite(
+    {
+      suite: 'library',
+      fixtures: [],
+      sweeps: true,
+      pageCache: ['warm'],
+      repeats: 1,
+      warmup: 0,
+      ...budgets,
+    },
+    suiteEnv({
+      log: (line) => lines.push(line),
+      sweepSizes: [1_000, 2_000, 4_000],
+      buildCommand: (fixture) => {
+        builds.push(fixture);
+        return command(fixture);
+      },
+    })
+  );
+  return { run: result, lines, builds };
+}
+
+test(
+  'pre-builds run under their own budget, which the method records',
+  async () => {
+    const { run: result } = await sweepSuite(() => ['sleep', '30'], {
+      budgetMs: 60_000,
+      prebuildBudgetMs: 300,
+    });
+    expect(validateRun(result)).toEqual([]);
+    expect(result.method).toEqual({
+      repeats: 1,
+      warmup: 0,
+      budgetMs: 60_000,
+      prebuildBudgetMs: 300,
+      isolation: 'subprocess',
+    });
+    expect(result.sweeps.map((s) => s.note)).toEqual([
+      'fixture pre-build failed: exceeded 300 ms at n = 1000',
+    ]);
+  },
+  SLOW
+);
+
+test(
+  'sweep pre-builds stop at the first size that fails, and the sweep says it was the build',
+  async () => {
+    const {
+      run: result,
+      lines,
+      builds,
+    } = await sweepSuite(
+      (fixture) =>
+        fixture === 'sweep-2000'
+          ? ['sh', '-c', 'echo no space >&2; exit 1']
+          : ['true'],
+      { budgetMs: 60_000 }
+    );
+    expect(validateRun(result)).toEqual([]);
+    expect(builds).toEqual(['sweep-1000', 'sweep-2000']);
+    expect(lines).toContain('fixture sweep-4000: skipped, sweep-2000 failed');
+    const [sweep] = result.sweeps;
+    expect(sweep.status).toBe('error');
+    expect(sweep.failedAtN).toBe(2_000);
+    expect(sweep.note).toBe('fixture pre-build failed: no space');
+    // The size before the failure still ran, and names its fixture's hash.
+    expect(sweep.points).toEqual([
+      expect.objectContaining({
+        n: 1_000,
+        manifestHash: manifestHash(generateFixture(sweepSpec(1_000))),
+      }),
+    ]);
   },
   SLOW
 );
@@ -410,6 +503,7 @@ test('record runs everything and writes <machine>/<date>-<sha>.json', async () =
     repeats: 10,
     warmup: 2,
     budgetMs: 600_000,
+    prebuildBudgetMs: 1_800_000,
   });
   expect(env.dirty).toBe(false);
   expect(env.commit).toBe('a'.repeat(40));

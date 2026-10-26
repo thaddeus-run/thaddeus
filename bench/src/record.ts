@@ -56,9 +56,16 @@ export function registryFor(suite: SuiteName): string | null {
 }
 
 // `bench:record` runs every fixture but tiny (tiny exists for smoke tests) with
-// this method.
+// this method. A fixture pre-build gets its own, longer budget: building
+// stress or a large sweep size is not what the run measures, and it can take
+// longer than any one case on it.
 export const RECORD_FIXTURES = ['small', 'medium', 'stress'];
-export const RECORD_METHOD = { repeats: 10, warmup: 2, budgetMs: 600_000 };
+export const RECORD_METHOD = {
+  repeats: 10,
+  warmup: 2,
+  budgetMs: 600_000,
+  prebuildBudgetMs: 1_800_000,
+};
 
 // The record preflight's limits: the 1-minute load average must not be above
 // MAX_LOAD_AVG_1, and at least MIN_AVAILABLE_BYTES must be available.
@@ -141,6 +148,8 @@ export interface SuiteOptions {
   repeats: number;
   warmup: number;
   budgetMs: number;
+  /** Budget of each fixture pre-build; `budgetMs` when absent. */
+  prebuildBudgetMs?: number;
   /**
    * Globs over case ids (e.g. `reputation.*.10000`) of cases to leave out.
    * Excluded cases still count towards the suite version.
@@ -235,7 +244,7 @@ function defaultBuildCommand(
   ];
 }
 
-// Builds one cache in a child process under the case budget, so a build
+// Builds one cache in a child process under the pre-build budget, so a build
 // that runs out of memory or time is classified the way a case child is
 // (`spawnBudgeted` and `classify`) instead of taking the suite run down or
 // hanging it. Returns null on success.
@@ -269,7 +278,9 @@ async function buildFixture(
 // first case on a fixture does not spend its budget building it. Returns the
 // builds that failed; the jobs that need them are recorded as setup failures
 // without running, so a fixture that cannot be built costs one budget, not
-// one per case.
+// one per case. Sweep fixtures are built last, smallest first, and once one
+// size fails the larger ones are not attempted: they would only fail the
+// same way more slowly, and every sweep stops at the failed size anyway.
 async function prebuildFixtures(
   jobs: readonly Job[],
   sweepSizes: readonly number[],
@@ -278,17 +289,49 @@ async function prebuildFixtures(
   log: (line: string) => void
 ): Promise<BuildFailures> {
   const wanted = new Map<string, CacheNeed>();
-  const want = (fixture: string, benchCase: BenchCase) => {
-    for (const need of cachesOf(benchCase, fixture)) {
-      wanted.set(fixtureKey(need), need);
-    }
-  };
+  const sweepWanted = new Map<string, CacheNeed>();
   for (const job of jobs) {
-    if (job.kind === 'case') want(job.fixture, job.benchCase);
-    else for (const n of sweepSizes) want(sweepSpec(n).name, job.benchCase);
+    if (job.kind === 'case') {
+      for (const need of cachesOf(job.benchCase, job.fixture)) {
+        wanted.set(fixtureKey(need), need);
+      }
+      continue;
+    }
+    for (const n of [...sweepSizes].sort((a, b) => a - b)) {
+      for (const need of cachesOf(job.benchCase, sweepSpec(n).name)) {
+        sweepWanted.set(fixtureKey(need), need);
+      }
+    }
   }
   const failures: BuildFailures = new Map();
-  for (const [key, need] of wanted) {
+  await buildAll(wanted, budgetMs, command, log, failures);
+  let failedSweep: string | undefined;
+  for (const [key, need] of sweepWanted) {
+    if (wanted.has(key)) {
+      if (failures.has(key)) failedSweep ??= need.fixture;
+      continue;
+    }
+    if (failedSweep !== undefined) {
+      log(`fixture ${need.fixture}: skipped, ${failedSweep} failed`);
+      continue;
+    }
+    await buildAll(new Map([[key, need]]), budgetMs, command, log, failures);
+    if (failures.has(key)) failedSweep = need.fixture;
+  }
+  return failures;
+}
+
+// Builds each cache in `needs` in order, adding a failed build to
+// `failures`. A seeded server root is built from its fixture root, so it is
+// skipped, with the same failure, when that root failed.
+async function buildAll(
+  needs: ReadonlyMap<string, CacheNeed>,
+  budgetMs: number,
+  command: NonNullable<SuiteEnv['buildCommand']>,
+  log: (line: string) => void,
+  failures: BuildFailures
+): Promise<void> {
+  for (const [key, need] of needs) {
     // A seeded server root is built from the fixture root, so it cannot be
     // built when that failed.
     const base = failures.get(fixtureKey({ ...need, server: false }));
@@ -305,7 +348,6 @@ async function prebuildFixtures(
     log(`fixture ${name}: ${failure.status}, ${failure.note}`);
     failures.set(key, failure);
   }
-  return failures;
 }
 
 // The first failed pre-build among the caches `benchCase` opens on `fixture`.
@@ -363,7 +405,8 @@ async function runCaseJob(
 }
 
 // Runs one sweep job over the sizes before the first one whose pre-build
-// failed; that size, if any, becomes the sweep's failure point.
+// failed; that size, if any, becomes the sweep's failure point, and the
+// sweep's note says it was the fixture pre-build that failed, not the case.
 async function runSweepJob(
   job: Extract<Job, { kind: 'sweep' }>,
   sweepSizes: readonly number[],
@@ -379,7 +422,12 @@ async function runSweepJob(
   const n = sweepSizes[failedAt];
   if (n === undefined || result.status !== 'ok') return result;
   const failure = failedBuildOf(failures, job.benchCase, sweepSpec(n).name);
-  return { ...result, status: failure?.status ?? 'error', failedAtN: n };
+  return {
+    ...result,
+    status: failure?.status ?? 'error',
+    failedAtN: n,
+    note: failure?.note ?? 'fixture pre-build failed',
+  };
 }
 
 // Three significant digits below 100 ms, whole milliseconds above.
@@ -475,10 +523,11 @@ export async function runSuite(
     if (!e.matched) env.log(`--exclude ${e.pattern} matched no case`);
   }
 
+  const prebuildBudgetMs = opts.prebuildBudgetMs ?? opts.budgetMs;
   const failures = await prebuildFixtures(
     jobs,
     sweepSizes,
-    opts.budgetMs,
+    prebuildBudgetMs,
     env.buildCommand ?? defaultBuildCommand,
     env.log
   );
@@ -510,7 +559,7 @@ export async function runSuite(
     suiteVersion: suiteVersion(allCases),
     recordedAt,
     machine: env.machine,
-    method: { ...method, isolation: 'subprocess' },
+    method: { ...method, prebuildBudgetMs, isolation: 'subprocess' },
     cases,
     sweeps,
   };
