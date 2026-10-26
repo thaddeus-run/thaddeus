@@ -526,15 +526,16 @@ async function e2eSuiteWithBuilds(
 }
 
 test(
-  'an e2e case pre-builds its fixture, then its seeded server root',
+  'a serial e2e case pre-builds its variant fixture, then its seeded server root',
   async () => {
     const { run: result, builds } = await e2eSuiteWithBuilds(() => ['true']);
+    // A serial case runs on, and pre-builds, the serial variant.
     expect(builds).toEqual([
-      ['tiny', 1, false],
-      ['tiny', 1, true],
+      ['tiny-serial', 1, false],
+      ['tiny-serial', 1, true],
     ]);
-    expect(result.cases.map((c) => [c.id, c.status])).toEqual([
-      ['suite.e2e', 'ok'],
+    expect(result.cases.map((c) => [c.id, c.fixture, c.status])).toEqual([
+      ['suite.e2e', 'tiny-serial', 'ok'],
     ]);
   },
   SLOW
@@ -548,7 +549,7 @@ test(
       '-c',
       'echo no fixture >&2; exit 1',
     ]);
-    expect(builds).toEqual([['tiny', 1, false]]);
+    expect(builds).toEqual([['tiny-serial', 1, false]]);
     expect(result.cases.map((c) => [c.id, c.status, c.phase, c.note])).toEqual([
       ['suite.e2e', 'error', 'setup', 'fixture pre-build failed: no fixture'],
     ]);

@@ -7,6 +7,7 @@ import { generateFixture, manifestHash } from '../src/fixtures/plan';
 import {
   FIXTURES,
   resolveFixture,
+  serialSpec,
   sweepSpec,
   tinySpec,
 } from '../src/fixtures/spec';
@@ -94,6 +95,10 @@ test('resolveFixture maps every fixture name to its spec', () => {
   expect(resolveFixture('stress')).toEqual(FIXTURES.stress);
   expect(resolveFixture('tiny')).toEqual(tinySpec());
   expect(resolveFixture('sweep-4000')).toEqual(sweepSpec(4_000));
+  expect(resolveFixture('small-serial')).toEqual(serialSpec(FIXTURES.small));
+  expect(resolveFixture('sweep-4000-serial')).toEqual(
+    serialSpec(sweepSpec(4_000))
+  );
 });
 
 test('resolveFixture rejects names it does not know', () => {
@@ -104,7 +109,82 @@ test('resolveFixture rejects names it does not know', () => {
     'sweep-01',
     'sweep-1.5',
     'toString',
+    'huge-serial',
+    'small-serial-serial',
   ]) {
     expect(() => resolveFixture(name)).toThrow(name);
+  }
+});
+
+// The base plans' hashes, pinned: adding the serial variant must not change
+// a single base plan (it would orphan every cache and stored result).
+test('base plans keep their manifest hashes', () => {
+  const hashes = Object.fromEntries(
+    ['tiny', 'small', 'medium', 'stress'].map((name) => [
+      name,
+      manifestHash(generateFixture(resolveFixture(name))),
+    ])
+  );
+  expect(hashes).toEqual({
+    tiny: '0d92e879013c810053c3c51b5ce74eeef66956e20383da2282ad87ce27a3ffd6',
+    small: '2089381e4d20f272fd88eb6f4f4299fe1187d1c0302cf86d132fbbc243f3de64',
+    medium: '5c21d4fdd1fcaca5b88a7ec654ee9fb658aa29bc60ac4227a54a12d4d3ce8f46',
+    stress: '6a902980d64162903720662820a937c5d5665c827ec00490729ee1d3bcefb04b',
+  });
+});
+
+test('a serial variant is named apart and hashes apart from its base', () => {
+  for (const base of [tinySpec(), FIXTURES.small, FIXTURES.medium]) {
+    const serial = serialSpec(base);
+    expect(serial.name).toBe(`${base.name}-serial`);
+    expect(manifestHash(generateFixture(serial))).not.toBe(
+      manifestHash(generateFixture(base))
+    );
+  }
+});
+
+// Replays a plan's step list, tracking each view's paths and which views
+// are open (forked and not yet landed), and checks the serial shape: same
+// op count and authors as the spec, at most `views` views, no write to main
+// while another view is open, every remove on a path its view holds, and
+// main ending with exactly the paths of the last landed view.
+function checkSerial(name: string): void {
+  const plan = generateFixture(resolveFixture(`${name}-serial`));
+  const spec = plan.spec;
+  const files = new Map<string, Set<string>>([['main', new Set()]]);
+  let open: string | undefined;
+  let ops = 0;
+  for (const step of plan.steps) {
+    if (step.kind === 'fork') {
+      expect(open).toBeUndefined();
+      open = step.view;
+      files.set(step.view, new Set(files.get('main')));
+    } else if (step.kind === 'land') {
+      expect(step.from).toBe(open!);
+      files.set('main', new Set(files.get(step.from)));
+      open = undefined;
+    } else {
+      ops += 1;
+      expect(step.view).toBe(open ?? 'main');
+      const viewFiles = files.get(step.view)!;
+      if (step.kind === 'remove') {
+        expect(viewFiles.has(step.path)).toBe(true);
+        viewFiles.delete(step.path);
+      } else viewFiles.add(step.path);
+    }
+  }
+  expect(open).toBeUndefined();
+  expect(ops).toBe(spec.ops);
+  expect(plan.authorSeeds).toHaveLength(spec.authors);
+  expect(files.size).toBeLessThanOrEqual(spec.views);
+  if (spec.views > 1)
+    expect(files.size).toBe(
+      Math.min(spec.views, 1 + Math.ceil(spec.ops / spec.landEvery))
+    );
+}
+
+test('serial plans fork from main, land before the next fork, and keep the counts', () => {
+  for (const name of ['tiny', 'small', 'medium', 'stress', 'sweep-1000']) {
+    checkSerial(name);
   }
 });

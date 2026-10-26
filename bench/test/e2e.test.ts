@@ -2,6 +2,7 @@ import { Identity, ready } from '@thaddeus.run/identity';
 import { afterAll, beforeAll, expect, test } from 'bun:test';
 import { createHash } from 'node:crypto';
 import {
+  existsSync,
   mkdirSync,
   mkdtempSync,
   readdirSync,
@@ -16,8 +17,8 @@ import { cliCommand, timeCli, writeCliHome } from '../src/e2e/home';
 import { seededRoot } from '../src/e2e/seed';
 import { startServe } from '../src/e2e/serve';
 import { fixtureDir, WORK_ROOT } from '../src/fixtures/cache';
-import { generateFixture } from '../src/fixtures/plan';
-import { tinySpec } from '../src/fixtures/spec';
+import { generateFixture, manifestHash } from '../src/fixtures/plan';
+import { serialSpec, tinySpec } from '../src/fixtures/spec';
 import { registryFor } from '../src/record';
 import { FILEBACKEND_DURABILITY } from '../src/result';
 import { runCase } from '../src/runner';
@@ -39,11 +40,10 @@ process.env.BENCH_CLI = `${process.execPath} ${BIN}`;
 const cli = cliCommand();
 
 // Every e2e step starts real processes; the first test also seeds the tiny
-// server root. On small, `land` alone takes about 20 s today.
+// server root.
 const SLOW = 120_000;
-const SMALL = 300_000;
 
-const tinyPlan = generateFixture(tinySpec());
+const tinyPlan = generateFixture(serialSpec(tinySpec()));
 
 let tmp: string;
 let ownerHome: string;
@@ -108,7 +108,12 @@ test(
     const before = snapshotTree(cached);
     const cacheRoot = join(tmp, 'seed-cache');
     const root = await seededRoot(tinyPlan, { cacheRoot });
-    expect(readFileSync(join(root, '.complete'), 'utf8')).not.toBe('');
+    expect(readFileSync(join(root, '.complete'), 'utf8')).toBe(
+      manifestHash(tinyPlan)
+    );
+    expect(root).toBe(join(cacheRoot, `${manifestHash(tinyPlan)}-server-v1`));
+    // The seed's expired nonces are gone, so no timed command loads them.
+    expect(existsSync(join(root, '.replay-nonces-v1'))).toBe(false);
     expect(snapshotTree(cached)).toEqual(before);
   },
   SLOW
@@ -133,25 +138,41 @@ test('timeCli throws with the output on a non-zero exit', async () => {
   await promise.catch(() => {});
 });
 
-for (const id of ['e2e.checkout.cold', 'e2e.push.10', 'e2e.repo.create']) {
+// Every case but repos per minute, on the serial variant of tiny. Its main
+// holds no conflict, so pull and land get their change set landed under the
+// shipped `blockOnConflict` policy.
+for (const id of [
+  'e2e.checkout.cold',
+  'e2e.push.10',
+  'e2e.pull',
+  'e2e.land',
+  'e2e.repo.create',
+]) {
   test(
     `${id} runs`,
     async () => {
       const seeded = snapshotTree(await seededRoot(tinyPlan));
-      const r = await runCase(id, 'tiny', {
+      const r = await runCase(id, 'tiny-serial', {
         repeats: 2,
         warmup: 0,
         budgetMs: 120_000,
         registry: E2E,
       });
       expect(r.status).toBe('ok');
+      expect(r.fixture).toBe('tiny-serial');
+      expect(r.manifestHash).toBe(manifestHash(tinyPlan));
       expect(r.samplesMs).toHaveLength(2);
       expect(r.serveFlags).toEqual([]);
-      if (id !== 'e2e.checkout.cold') {
-        expect(r.durability).toBe(FILEBACKEND_DURABILITY);
-      } else {
+      if (id === 'e2e.checkout.cold' || id === 'e2e.pull') {
         expect(r.durability).toBeUndefined();
+      } else {
+        expect(r.durability).toBe(FILEBACKEND_DURABILITY);
+      }
+      if (id === 'e2e.checkout.cold') {
         expect(r.pageCache).toBe('warm');
+        expect(r.note).toContain("server's cold open of the repository");
+      } else {
+        expect(r.note).toBeUndefined();
       }
       // The case's server wrote into a hard-link copy, never the cache.
       expect(snapshotTree(await seededRoot(tinyPlan))).toEqual(seeded);
@@ -160,55 +181,29 @@ for (const id of ['e2e.checkout.cold', 'e2e.push.10', 'e2e.repo.create']) {
   );
 }
 
-// tiny's main holds one conflict the generator landed on purpose. The shipped
-// serve refuses every land into a view with a conflict (`blockOnConflict`),
-// and there is no serve flag for another policy, so pull and land cannot get
-// their change landed there. That is a result, reported in setup.
-for (const id of ['e2e.pull', 'e2e.land']) {
-  test(
-    `${id} on tiny reports the land the default policy refuses`,
-    async () => {
-      const r = await runCase(id, 'tiny', {
-        repeats: 1,
-        warmup: 0,
-        budgetMs: 120_000,
-        registry: E2E,
-      });
-      expect(r.status).toBe('error');
-      expect(r.phase).toBe('setup');
-      expect(r.note).toContain('not landed: 1 conflict(s)');
-    },
-    SLOW
-  );
-}
-
-// small's main is one view with no conflicts, so the change set lands.
-for (const id of ['e2e.pull', 'e2e.land']) {
-  test(
-    `${id} runs on small`,
-    async () => {
-      const r = await runCase(id, 'small', {
-        repeats: 1,
-        warmup: 0,
-        budgetMs: SMALL,
-        registry: E2E,
-      });
-      expect(r.status).toBe('ok');
-      expect(r.samplesMs).toHaveLength(1);
-      expect(r.serveFlags).toEqual([]);
-      if (id === 'e2e.land') expect(r.durability).toBe(FILEBACKEND_DURABILITY);
-      else expect(r.durability).toBeUndefined();
-    },
-    SMALL
-  );
-}
+// The base tiny plan lands a conflict into main on purpose. The seed lands
+// main under the shipped policy, so it refuses to build a root that a real
+// server could never hold.
+test(
+  'seeding a plan whose main holds a conflict throws',
+  async () => {
+    const cacheRoot = join(tmp, 'conflicted-cache');
+    const conflicted = generateFixture(tinySpec());
+    expect(seededRoot(conflicted, { cacheRoot })).rejects.toThrow(
+      /seeding land of main failed: 1 conflict\(s\)/
+    );
+    await seededRoot(conflicted, { cacheRoot }).catch(() => {});
+    expect(existsSync(cacheRoot) ? readdirSync(cacheRoot) : []).toEqual([]);
+  },
+  SLOW
+);
 
 test(
   'repos-per-minute records its raised limits',
   async () => {
-    const r = await runCase('e2e.repos-per-minute', 'tiny', {
+    const r = await runCase('e2e.repos-per-minute', 'tiny-serial', {
       repeats: 1,
-      warmup: 0,
+      warmup: 2,
       budgetMs: 120_000,
       registry: E2E,
       durationMs: 3_000,
@@ -219,6 +214,8 @@ test(
     expect(r.serveFlags).toContain('--repository-creation-limit');
     expect(r.serveFlags).toContain('--max-repositories');
     expect(r.durability).toBe(FILEBACKEND_DURABILITY);
+    // Its warm-ups are capped at 0, whatever the run asks for.
+    expect(r.warmup).toBe(0);
   },
   SLOW
 );
@@ -263,5 +260,6 @@ test('the e2e registry is the one suite runs use', () => {
   for (const c of e2eCases) {
     expect(c.suite).toBe('e2e');
     expect(c.version).toBe(1);
+    expect(c.variant).toBe('serial');
   }
 });

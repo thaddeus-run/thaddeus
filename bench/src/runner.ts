@@ -366,12 +366,14 @@ function childPlan(
   ];
 }
 
-// The run options with the timed repeats capped at the case's `maxRepeats`.
+// The run options with the timed repeats and warm-ups capped at the case's
+// `maxRepeats` and `maxWarmup`.
 function capRepeats(benchCase: BenchCase, opts: RunOptions): RunOptions {
-  const cap = benchCase.maxRepeats;
-  return cap === undefined || opts.repeats <= cap
-    ? opts
-    : { ...opts, repeats: cap };
+  return {
+    ...opts,
+    repeats: Math.min(opts.repeats, benchCase.maxRepeats ?? Infinity),
+    warmup: Math.min(opts.warmup, benchCase.maxWarmup ?? Infinity),
+  };
 }
 
 // The fields every result of `benchCase` on `fixture` carries, whatever its
@@ -439,7 +441,8 @@ export async function setupFailure(
 // result. A timeout, OOM or crash is a result, not an exception. It throws
 // on an unknown case id or fixture name, and rejects with `Interrupted` when
 // the parent gets SIGINT, SIGTERM or SIGHUP mid-case. A case's `maxRepeats`
-// caps the timed repeats, and the result says how many ran.
+// and `maxWarmup` cap the repeats and warm-ups, and the result says how many
+// ran.
 export async function runCase(
   id: string,
   fixture: string,
@@ -519,6 +522,7 @@ export async function runCase(
     peakRssBytes,
     ...(diskBytes !== undefined && { diskBytes }),
     ...flags,
+    ...(benchCase.note !== undefined && { note: benchCase.note }),
   };
 }
 
