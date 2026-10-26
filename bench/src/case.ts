@@ -53,6 +53,18 @@ export interface BenchCase<S = unknown> {
   cold?: boolean;
   /** The case takes part in the history-length sweep. */
   sweep?: boolean;
+  /**
+   * Caps the timed repeats, whatever the run asks for, for a case that a
+   * server limit would otherwise refuse partway (e.g. the hourly
+   * repository-creation limit). The result records the capped count.
+   */
+  maxRepeats?: number;
+  /**
+   * The exact flags the case passes to `thaddeus serve` on `fixture`, copied
+   * verbatim into every result as `serveFlags`. The case starts its server
+   * with the same function, so the two cannot disagree.
+   */
+  serveFlags?(fixture: string): string[];
   setup(ctx: CaseContext): Promise<S>;
   run(state: S, ctx: CaseContext): Promise<void | RunExtra>;
   /**

@@ -20,7 +20,8 @@ const DEFAULT_CACHE_ROOT = join(
   '.cache'
 );
 
-const COMPLETE = '.complete';
+// The marker a finished cache directory holds; its content is the hash.
+export const COMPLETE = '.complete';
 let tmpCounter = 0;
 
 // Puts in flight at once while copying a filler repository to disk.
@@ -75,13 +76,39 @@ async function publish(tmp: string, final: string): Promise<void> {
   }
 }
 
+// Returns `<cacheRoot>/<name>`, building it with `build` on first use. The
+// build writes into a temporary directory that is renamed into place only
+// after `.complete` (holding `hash`) is written, so a killed build never
+// leaves a directory a later run would trust, and a directory without
+// `.complete` is treated as stale and replaced. `beforePublish` is a test
+// seam that runs after the build, before the rename.
+export async function cachedBuild(
+  name: string,
+  hash: string,
+  build: (tmp: string) => Promise<void>,
+  opts: { cacheRoot?: string; beforePublish?: () => void | Promise<void> } = {}
+): Promise<string> {
+  const cacheRoot = opts.cacheRoot ?? DEFAULT_CACHE_ROOT;
+  const final = join(cacheRoot, name);
+  if (existsSync(join(final, COMPLETE))) return final;
+  await mkdir(cacheRoot, { recursive: true });
+
+  const tmp = join(cacheRoot, `.tmp-${process.pid}-${tmpCounter++}`);
+  await rm(tmp, { recursive: true, force: true });
+  try {
+    await build(tmp);
+    await writeFile(join(tmp, COMPLETE), hash);
+    await opts.beforePublish?.();
+    await publish(tmp, final);
+  } finally {
+    await rm(tmp, { recursive: true, force: true });
+  }
+  return final;
+}
+
 // Returns the root of a finished FileBackend holding the plan's repository,
-// building it on first use. The build happens in a temporary directory that is
-// renamed into place only after `.complete` (holding the manifest hash) is
-// written, so a killed build never leaves a directory a later run would trust,
-// and a directory without `.complete` is treated as stale and replaced.
+// building it on first use through `cachedBuild`, under the manifest hash.
 // `repos` is the total repository count: `bench` plus tiny `filler-<i>` ones.
-// `beforePublish` is a test seam that runs after the build, before the rename.
 export async function fixtureDir(
   plan: FixturePlan,
   opts: {
@@ -90,27 +117,18 @@ export async function fixtureDir(
     beforePublish?: () => void | Promise<void>;
   } = {}
 ): Promise<string> {
-  const cacheRoot = opts.cacheRoot ?? DEFAULT_CACHE_ROOT;
   const repos = opts.repos ?? 1;
   const hash = manifestHash(plan);
-  const final = join(cacheRoot, repos > 1 ? `${hash}-r${repos}` : hash);
-
-  if (existsSync(join(final, COMPLETE))) return final;
-  await mkdir(cacheRoot, { recursive: true });
-
-  const tmp = join(cacheRoot, `.tmp-${process.pid}-${tmpCounter++}`);
-  await rm(tmp, { recursive: true, force: true });
-  try {
-    const backend = new FileBackend(tmp);
-    await materializeFixture(plan, backend, 'bench');
-    for (let i = 1; i < repos; i++) await addFiller(backend, i);
-    await writeFile(join(tmp, COMPLETE), hash);
-    await opts.beforePublish?.();
-    await publish(tmp, final);
-  } finally {
-    await rm(tmp, { recursive: true, force: true });
-  }
-  return final;
+  return cachedBuild(
+    repos > 1 ? `${hash}-r${repos}` : hash,
+    hash,
+    async (tmp) => {
+      const backend = new FileBackend(tmp);
+      await materializeFixture(plan, backend, 'bench');
+      for (let i = 1; i < repos; i++) await addFiller(backend, i);
+    },
+    opts
+  );
 }
 
 // Copies a directory tree using hard links (`cp -al`), so a large fixture is
