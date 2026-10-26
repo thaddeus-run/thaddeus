@@ -421,24 +421,47 @@ export interface P50Ceiling {
   logSd: number;
 }
 
-// The result of a calibration study: for each ratio key (see `ratioKey`),
-// the largest thaddeus p50 that host and runner noise plausibly produce. The
-// gate holds the thaddeus p50 to it; the multiple of git is only reported,
-// because git's median drifts between runs more than thaddeus's own.
+// The ceilings of one group of calibration runs (one CPU model, or all of
+// them pooled): for each ratio key (see `ratioKey`), the largest thaddeus p50
+// that host noise plausibly produces within the group. `runs` and `hosts`
+// count what they rest on.
+export interface CeilingGroup {
+  runs: number;
+  /** How many distinct hosts the runs came from. */
+  hosts: number;
+  /** How many keys got a ceiling (N in the Bonferroni split). */
+  familySize: number;
+  p50Ceilings: Record<string, P50Ceiling>;
+}
+
+// The result of a calibration study. The gate holds the thaddeus p50 of each
+// row to a ceiling; the multiple of git is only reported, because git's
+// median drifts between runs more than thaddeus's own. Hosts differ in speed
+// by CPU model (a row's p50 differs 2x between models on GitHub's runners),
+// and one pooled ceiling over a mix of models has to sit above the slowest
+// model, so the file keeps a group per CPU model next to the pooled one. The
+// gate uses a model's group when it rests on enough runs and hosts (see
+// `ceilingGroupFor`) and the pooled one otherwise.
 export interface Ceilings {
   studiedAt: string;
   runnerImage: string;
-  /** How many calibration runs the ceilings rest on. */
+  /** How many calibration runs the study had in all. */
   runs: number;
   /** The page-cache modes the study measured; the gate requires only those. */
   pageCache: PageCacheMode[];
   /** Every gated case id and the version the study measured, so a changed case invalidates its ceilings. */
   caseVersions: Record<string, number>;
   method: 'lognormal-family-wise-t-p50';
-  /** How many keys got a ceiling (N in the Bonferroni split). */
-  familySize: number;
-  p50Ceilings: Record<string, P50Ceiling>;
+  pooled: CeilingGroup;
+  /** By `machine.cpu` of the runs. */
+  byCpu: Record<string, CeilingGroup>;
 }
+
+// A CPU model's group is used by the gate only with at least this many runs
+// from at least this many hosts: two runs on one host agree within a few
+// percent, so they say little about the model's host-to-host spread.
+export const GROUP_MIN_RUNS = 6;
+export const GROUP_MIN_HOSTS = 3;
 
 // The family-wise error rate the ceilings allow: the chance that an
 // unchanged PR fails the gate on noise alone.
@@ -448,9 +471,8 @@ const FAMILY_WISE_ALPHA = 0.01;
 // anything.
 const MIN_RUNS = 3;
 
-// The gate's ceiling for each ratio key: the largest thaddeus p50 that
-// host and runner noise plausibly produce, from a calibration study over
-// many runs (ideally on many hosts, since hosts differ in speed). The p50s
+// The ceilings of one group: the largest thaddeus p50 that host and runner
+// noise plausibly produce for each ratio key, from the group's runs. The p50s
 // of a key are modelled as lognormal: with mu and sigma the mean and sample
 // standard deviation of their logs, the ceiling is exp(mu + t * sigma). t is
 // the Student-t quantile of 1 - 0.01 / N at n - 1 degrees of freedom, for the
@@ -458,10 +480,10 @@ const MIN_RUNS = 3;
 // false alarm in a PR at nominally about 1%. Student's t rather than the
 // normal, because sigma is estimated from only n runs. A key with fewer than
 // three p50s gets no ceiling.
-export function deriveCeilings(
+export function deriveGroup(
   p50s: Record<string, number[]>,
-  meta: Omit<Ceilings, 'method' | 'familySize' | 'p50Ceilings'>
-): Ceilings {
+  counts: { runs: number; hosts: number }
+): CeilingGroup {
   const studied = Object.entries(p50s).filter(([, r]) => r.length >= MIN_RUNS);
   const p50Ceilings: Record<string, P50Ceiling> = {};
   for (const [key, r] of studied) {
@@ -475,11 +497,45 @@ export function deriveCeilings(
       logSd: sigma,
     };
   }
+  return { ...counts, familySize: studied.length, p50Ceilings };
+}
+
+// The host a result file came from: the `<host>` of `run-<host>-<k>.json` (the
+// CI calibration names its files so), or the file name itself, which counts
+// the file as a host of its own.
+export function hostOfFile(name: string): string {
+  const base = name.slice(name.lastIndexOf('/') + 1);
+  const match = /^run-(.+)-\d+\.json$/.exec(base);
+  return match === null ? name : match[1];
+}
+
+// The ceilings the gate uses for a run, and why: the group of the run's CPU
+// model when it rests on at least `GROUP_MIN_RUNS` runs from
+// `GROUP_MIN_HOSTS` hosts, else the pooled group. `note` is the one line
+// the gate prints about the choice.
+export function ceilingGroupFor(
+  ceilings: Ceilings,
+  cpu: string
+): { group: CeilingGroup; note: string } {
+  const own = ceilings.byCpu[cpu];
+  const counted = (g: CeilingGroup) => `${g.runs} runs from ${g.hosts} hosts`;
+  if (
+    own !== undefined &&
+    own.runs >= GROUP_MIN_RUNS &&
+    own.hosts >= GROUP_MIN_HOSTS
+  ) {
+    return {
+      group: own,
+      note: `ceilings: using the group of CPU model ${cpu} (${counted(own)})`,
+    };
+  }
+  const why =
+    own === undefined
+      ? 'was not calibrated'
+      : `was calibrated on only ${counted(own)}, and a group needs ${GROUP_MIN_RUNS} runs from ${GROUP_MIN_HOSTS} hosts`;
   return {
-    ...meta,
-    method: 'lognormal-family-wise-t-p50',
-    familySize: studied.length,
-    p50Ceilings,
+    group: ceilings.pooled,
+    note: `ceilings: using the pooled group (${counted(ceilings.pooled)}); CPU model ${cpu} ${why}`,
   };
 }
 
@@ -579,13 +635,30 @@ function measuredModes(
   return (['warm', 'dropped'] as const).filter((m) => modes.has(m));
 }
 
-// Derives the ceilings file from runs of the gate method, one run per file.
-// Used by `bench ceilings` (runs gathered on many hosts) and by `bench
-// calibrate` (runs of one host in a loop), so both derive the same way. Throws
-// an Error when two runs measured different case versions, because their p50s
-// are not of the same work.
+// The p50 of every gated row in each of `runs`, by ratio key.
+function p50sOf(
+  runs: readonly { run: BenchRun }[],
+  budgets: Budgets
+): Record<string, number[]> {
+  const p50s: Record<string, number[]> = {};
+  for (const { run } of runs) {
+    for (const [key, p50] of Object.entries(
+      linesP50(evaluateBudgets(run, budgets))
+    )) {
+      (p50s[key] ??= []).push(p50);
+    }
+  }
+  return p50s;
+}
+
+// Derives the ceilings file from runs of the gate method, one run per file,
+// each with the host it ran on: a group per CPU model (`machine.cpu`) and the
+// pooled group over all runs. Used by `bench ceilings` (runs gathered on many
+// hosts) and by `bench calibrate` (runs of one host in a loop), so both derive
+// the same way. Throws an Error when two runs measured different case
+// versions, because their p50s are not of the same work.
 export function ceilingsFromRuns(
-  runs: readonly { name: string; run: BenchRun }[],
+  runs: readonly { name: string; host: string; run: BenchRun }[],
   budgets: Budgets,
   meta: { studiedAt: string; runnerImage: string }
 ): Ceilings {
@@ -602,15 +675,16 @@ export function ceilingsFromRuns(
       );
     }
   }
-  const p50s: Record<string, number[]> = {};
-  for (const { run } of runs) {
-    for (const [key, p50] of Object.entries(
-      linesP50(evaluateBudgets(run, budgets))
-    )) {
-      (p50s[key] ??= []).push(p50);
-    }
+  const groupOf = (members: typeof runs) =>
+    deriveGroup(p50sOf(members, budgets), {
+      runs: members.length,
+      hosts: new Set(members.map((m) => m.host)).size,
+    });
+  const byCpu: Record<string, CeilingGroup> = {};
+  for (const cpu of new Set(runs.map((r) => r.run.machine.cpu))) {
+    byCpu[cpu] = groupOf(runs.filter((r) => r.run.machine.cpu === cpu));
   }
-  return deriveCeilings(p50s, {
+  return {
     ...meta,
     runs: runs.length,
     pageCache: measuredModes(
@@ -618,7 +692,10 @@ export function ceilingsFromRuns(
       budgets
     ),
     caseVersions,
-  });
+    method: 'lognormal-family-wise-t-p50',
+    pooled: groupOf(runs),
+    byCpu,
+  };
 }
 
 // Reads a ceilings file. A file that does not exist is `null`, which the gate
@@ -640,20 +717,15 @@ export function readCeilings(path: string): Ceilings | null {
   }
   const c = value as Partial<Ceilings> | null;
   const positive = (v: unknown): boolean => typeof v === 'number' && v > 0;
-  const valid =
-    typeof c?.studiedAt === 'string' &&
-    typeof c.runnerImage === 'string' &&
-    typeof c.runs === 'number' &&
-    Array.isArray(c.pageCache) &&
-    c.pageCache.every((m) => m === 'warm' || m === 'dropped') &&
-    c.method === 'lognormal-family-wise-t-p50' &&
-    typeof c.familySize === 'number' &&
-    typeof c.caseVersions === 'object' &&
-    c.caseVersions !== null &&
-    Object.values(c.caseVersions).every(positive) &&
-    typeof c.p50Ceilings === 'object' &&
-    c.p50Ceilings !== null &&
-    Object.values(c.p50Ceilings).every(
+  const validGroup = (g: CeilingGroup | undefined): boolean =>
+    typeof g === 'object' &&
+    g !== null &&
+    typeof g.runs === 'number' &&
+    typeof g.hosts === 'number' &&
+    typeof g.familySize === 'number' &&
+    typeof g.p50Ceilings === 'object' &&
+    g.p50Ceilings !== null &&
+    Object.values(g.p50Ceilings).every(
       (k) =>
         positive(k.ceilingMs) &&
         positive(k.geoMeanMs) &&
@@ -662,6 +734,20 @@ export function readCeilings(path: string): Ceilings | null {
         typeof k.n === 'number' &&
         k.n >= MIN_RUNS
     );
+  const valid =
+    typeof c?.studiedAt === 'string' &&
+    typeof c.runnerImage === 'string' &&
+    typeof c.runs === 'number' &&
+    Array.isArray(c.pageCache) &&
+    c.pageCache.every((m) => m === 'warm' || m === 'dropped') &&
+    c.method === 'lognormal-family-wise-t-p50' &&
+    typeof c.caseVersions === 'object' &&
+    c.caseVersions !== null &&
+    Object.values(c.caseVersions).every(positive) &&
+    validGroup(c.pooled) &&
+    typeof c.byCpu === 'object' &&
+    c.byCpu !== null &&
+    Object.values(c.byCpu).every(validGroup);
   if (!valid) throw new Error(`${path} is not a ceilings file`);
   return value as Ceilings;
 }
@@ -685,7 +771,9 @@ function msText(value: number): string {
 // result was measured with the gate method (`methods`, from `gateMethods`),
 // every measured row has results that finished `ok`, and every p50 is at or
 // below its ceiling. A verdict it cannot reach (no ceilings file, a
-// ceiling-less key) is a failure, never a pass. Unmeasured rows are ignored,
+// ceiling-less key) is a failure, never a pass. The ceilings are those of the
+// run's CPU model when calibrated well enough, else the pooled ones; the
+// first line says which (see `ceilingGroupFor`). Unmeasured rows are ignored,
 // and neither a missed absolute target nor the multiple of git fails the
 // gate; the multiple is printed for information. A row of a page-cache mode
 // the calibration did not measure is skipped only when the run has no result
@@ -721,7 +809,8 @@ export function checkGate(
     };
   }
 
-  const lines: string[] = [];
+  const { group, note } = ceilingGroupFor(ceilings, run.machine.cpu);
+  const lines: string[] = [note];
   let failed = false;
   const fail = (name: string, why: string): void => {
     failed = true;
@@ -754,7 +843,7 @@ export function checkGate(
       fail(name, 'the thaddeus case recorded no p50');
       continue;
     }
-    const ceiling = ceilings.p50Ceilings[ratioKey(line)];
+    const ceiling = group.p50Ceilings[ratioKey(line)];
     if (ceiling === undefined) {
       fail(name, 'no ceiling; re-run calibration');
       continue;

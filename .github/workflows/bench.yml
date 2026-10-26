@@ -227,11 +227,13 @@ jobs:
           path: bench/thresholds/github-ubuntu-latest.json
           if-no-files-found: error
 
-  # The calibration study behind the everyday-command gate's ceilings. Ten
+  # The calibration study behind the everyday-command gate's ceilings. Twenty
   # hosted runners each run the gate's own method (`gate-run`: the budgeted
   # cases on small-serial, warm and with the page cache dropped) twice, so the
-  # `everyday-calibrate` job below has 20 runs on 10 hosts: the spread between
-  # runners and between runs on one runner both go into the ceilings. It runs
+  # `everyday-calibrate` job below has 40 runs on 20 hosts: the spread between
+  # runners and between runs on one runner both go into the ceilings. Runners
+  # differ in CPU model, and the ceilings are kept per model, so more hosts
+  # means more models with enough runs to gate on. It runs
   # on the dispatched ref, because the ceilings must be measured with the
   # cases and budgets that ref holds. A run is uploaded even when a later step
   # fails, and a failed host does not stop the others.
@@ -241,11 +243,33 @@ jobs:
       ${{ github.event_name == 'workflow_dispatch' && inputs.mode ==
       'everyday-calibrate' }}
     runs-on: ubuntu-latest
-    timeout-minutes: 90
+    timeout-minutes: 100
     strategy:
       fail-fast: false
       matrix:
-        host: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
+        host:
+          [
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7,
+            8,
+            9,
+            10,
+            11,
+            12,
+            13,
+            14,
+            15,
+            16,
+            17,
+            18,
+            19,
+            20,
+          ]
     steps:
       - uses: actions/checkout@v4
 
@@ -291,15 +315,18 @@ jobs:
 
   # Derives the ceilings from every run the matrix uploaded. Commit the
   # `everyday-ceilings` artifact to
-  # bench/budgets/ceilings-github-ubuntu-latest.json. `if: always()` (guarded
-  # by the mode) lets it pool the runs of the hosts that finished when another
-  # host failed; `ceilings` refuses a pool too small to give a ceiling.
+  # bench/budgets/ceilings-github-ubuntu-latest.json. `if: !cancelled()`
+  # (guarded by the mode) lets it pool the runs of the hosts that finished when
+  # another host failed, without running after a cancel. `ceilings` keeps a
+  # group per CPU model plus a pooled one and logs how many runs and hosts each
+  # rests on; it does not refuse a thin pool. At gate time a model with fewer
+  # than 6 runs from 3 hosts falls back to the pooled ceilings.
   everyday-calibrate:
     name: Everyday-command calibration ceilings
     needs: everyday-calibrate-runs
     if:
-      ${{ always() && github.event_name == 'workflow_dispatch' && inputs.mode ==
-      'everyday-calibrate' }}
+      ${{ !cancelled() && github.event_name == 'workflow_dispatch' &&
+      inputs.mode == 'everyday-calibrate' }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:

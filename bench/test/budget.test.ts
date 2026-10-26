@@ -8,11 +8,15 @@ import {
   type BudgetLine,
   type Budgets,
   BUDGETS_FILE,
+  ceilingGroupFor,
   ceilingsFromRuns,
   checkGate,
-  deriveCeilings,
+  deriveGroup,
   evaluateBudgets,
   gateOptions,
+  GROUP_MIN_HOSTS,
+  GROUP_MIN_RUNS,
+  hostOfFile,
   ratioKey,
   readBudgets,
   readCeilings,
@@ -531,21 +535,14 @@ test('bench budget with no run files is a usage error', async () => {
 const smallKey = (command: string, env: string) =>
   `${command}/${env} small-serial null`;
 
-const meta = {
-  studiedAt: '2026-10-26T00:00:00.000Z',
-  runnerImage: 'unknown',
-  runs: 3,
-  pageCache: ['warm' as const],
-  caseVersions: { 'wc.status': 1 },
-};
+const meta = { runs: 3, hosts: 3 };
 
-test('deriveCeilings is exp(mu + t * sigma) of the log p50s and records what it rests on', () => {
+test('deriveGroup is exp(mu + t * sigma) of the log p50s and records what it rests on', () => {
   const key = 'status/developer small-serial null';
-  const c = deriveCeilings({ [key]: [1500, 1600, 1700] }, meta);
+  const c = deriveGroup({ [key]: [1500, 1600, 1700] }, meta);
   const logs = [1500, 1600, 1700].map(Math.log);
   const mu = logs.reduce((a, b) => a + b) / 3;
   const sigma = Math.sqrt(logs.reduce((a, x) => a + (x - mu) ** 2, 0) / 2);
-  expect(c.method).toBe('lognormal-family-wise-t-p50');
   expect(c.familySize).toBe(1);
   // Three runs: two degrees of freedom, t(0.99, 2) = 6.965 (table value).
   expect(c.p50Ceilings[key].t).toBeCloseTo(6.965, 2);
@@ -560,8 +557,8 @@ test('deriveCeilings is exp(mu + t * sigma) of the log p50s and records what it 
   expect(c).toMatchObject(meta);
 });
 
-test('deriveCeilings gives a key with two runs no ceiling and splits alpha over the keys that got one', () => {
-  const c = deriveCeilings(
+test('deriveGroup gives a key with two runs no ceiling and splits alpha over the keys that got one', () => {
+  const c = deriveGroup(
     { a: [100, 110, 120], b: [200, 210, 220], few: [300, 310] },
     meta
   );
@@ -570,17 +567,17 @@ test('deriveCeilings gives a key with two runs no ceiling and splits alpha over 
   // The family of two splits alpha: each key's t is at 1 - 0.01 / 2, with n - 1
   // degrees of freedom; a key of four runs gets a smaller t than one of three.
   expect(c.p50Ceilings.a.t).toBeCloseTo(tQuantile(1 - 0.01 / 2, 2), 12);
-  const four = deriveCeilings({ a: [100, 110, 120, 115] }, meta);
+  const four = deriveGroup({ a: [100, 110, 120, 115] }, meta);
   expect(four.p50Ceilings.a.n).toBe(4);
   expect(four.p50Ceilings.a.t).toBeCloseTo(tQuantile(0.99, 3), 12);
   expect(four.p50Ceilings.a.t).toBeLessThan(c.p50Ceilings.a.t);
-  const none = deriveCeilings({ few: [300, 310] }, meta);
+  const none = deriveGroup({ few: [300, 310] }, meta);
   expect(none.p50Ceilings).toEqual({});
   expect(none.familySize).toBe(0);
 });
 
 test('a ceiling is a time, so a faster thaddeus keeps its headroom instead of being floored', () => {
-  const c = deriveCeilings({ k: [0.4, 0.41, 0.42] }, meta);
+  const c = deriveGroup({ k: [0.4, 0.41, 0.42] }, meta);
   expect(c.p50Ceilings.k.ceilingMs).toBeLessThan(1);
 });
 
@@ -588,9 +585,12 @@ test('checkGate passes a run whose p50s are at or below their ceilings and print
   const r = gateRun(budgets);
   const result = checkGate(r, budgets, ceilingsOf(budgets, r, 200), METHODS);
   expect(result.failed).toBe(false);
-  expect(result.lines).toHaveLength(7);
-  expect(result.lines.every((l) => l.startsWith('ok '))).toBe(true);
+  expect(result.lines).toHaveLength(8);
   expect(result.lines[0]).toBe(
+    'ceilings: using the group of CPU model Test CPU (6 runs from 3 hosts)'
+  );
+  expect(result.lines.slice(1).every((l) => l.startsWith('ok '))).toBe(true);
+  expect(result.lines[1]).toBe(
     'ok status/developer small-serial null: p50 200.0 ms <= ceiling 200.0 ms (2.0x git)'
   );
 });
@@ -613,7 +613,7 @@ test('the multiple of git never fails the gate, whatever it is', () => {
   const ceilings = ceilingsOf(budgets, gateRun(budgets), 250);
   const fast = checkGate(r, budgets, ceilings, METHODS);
   expect(fast.failed).toBe(false);
-  expect(fast.lines[0]).toContain('(1000.0x git)');
+  expect(fast.lines[1]).toContain('(1000.0x git)');
   const slowGit = checkGate(
     gateRun(budgets, { gitP50: 5000 }),
     budgets,
@@ -628,7 +628,7 @@ test('the multiple of git never fails the gate, whatever it is', () => {
   });
   const zeroResult = checkGate(zero, budgets, ceilings, METHODS);
   expect(zeroResult.failed).toBe(false);
-  expect(zeroResult.lines[0]).toContain('(no multiple of git)');
+  expect(zeroResult.lines[1]).toContain('(no multiple of git)');
 });
 
 test('checkGate fails on a null ceilings file, naming calibration', () => {
@@ -681,7 +681,7 @@ test('checkGate fails when a measured row has no result at all', () => {
 test('checkGate fails on a p50 with no ceiling', () => {
   const r = gateRun(budgets);
   const ceilings = ceilingsOf(budgets, r, 100_000);
-  delete ceilings.p50Ceilings[smallKey('diff', 'developer')];
+  delete ceilings.byCpu['Test CPU'].p50Ceilings[smallKey('diff', 'developer')];
   const result = checkGate(r, budgets, ceilings, METHODS);
   expect(result.failed).toBe(true);
   expect(result.lines).toContain(
@@ -781,74 +781,198 @@ test('checkGate fails a run that has results only on a fixture without ceilings'
     METHODS
   );
   expect(result.failed).toBe(true);
-  expect(result.lines.every((l) => l.startsWith('not ok'))).toBe(true);
+  expect(result.lines.slice(1).every((l) => l.startsWith('not ok'))).toBe(true);
 });
 
-test('ceilingsFromRuns pools the p50 of each key over runs and takes the page-cache modes they measured', () => {
-  const runs = [190, 200, 210, 205].map((p50, i) => ({
-    name: `run-${i}.json`,
-    run: gateRun(budgets, { p50, dropped: true }),
-  }));
+// A run of `gateRun` on the CPU model `cpu`.
+function onCpu(cpu: string, options: Parameters<typeof gateRun>[1] = {}) {
+  const base = gateRun(budgets, options);
+  return { ...base, machine: { ...base.machine, cpu } };
+}
+
+test('hostOfFile reads the host of run-<host>-<k>.json and counts any other file as a host of its own', () => {
+  expect(hostOfFile('/tmp/calruns/everyday-gate-run-3/run-3-2.json')).toBe('3');
+  expect(hostOfFile('run-12-1.json')).toBe('12');
+  expect(hostOfFile('out/p50-run-1.json')).toBe('out/p50-run-1.json');
+  expect(hostOfFile('other.json')).toBe('other.json');
+});
+
+test('ceilingsFromRuns keeps a group per CPU model next to the pooled one, each counting its runs and hosts', () => {
+  const at = (cpu: string, host: string, k: number, p50: number) => ({
+    name: `run-${host}-${k}.json`,
+    host,
+    run: onCpu(cpu, { p50, dropped: true }),
+  });
+  const runs = [
+    at('Fast', '1', 1, 100),
+    at('Fast', '1', 2, 104),
+    at('Fast', '2', 1, 98),
+    at('Fast', '3', 1, 101),
+    at('Slow', '4', 1, 200),
+    at('Slow', '4', 2, 204),
+  ];
   const c = ceilingsFromRuns(runs, budgets, {
     studiedAt: 's',
     runnerImage: 'r',
   });
-  expect(c.runs).toBe(4);
+  expect(c.runs).toBe(6);
   expect(c.pageCache).toEqual(['warm', 'dropped']);
   expect(c.caseVersions['e2e.pull']).toBe(1);
-  expect(c.familySize).toBe(8);
-  const k = c.p50Ceilings[smallKey('status', 'developer')];
-  expect(k.n).toBe(4);
-  expect(k.geoMeanMs).toBeCloseTo(
-    Math.exp([190, 200, 210, 205].reduce((a, x) => a + Math.log(x), 0) / 4),
+  expect(Object.keys(c.byCpu).sort()).toEqual(['Fast', 'Slow']);
+  expect(c.byCpu.Fast).toMatchObject({ runs: 4, hosts: 3, familySize: 8 });
+  expect(c.byCpu.Slow).toMatchObject({ runs: 2, hosts: 1, familySize: 0 });
+  expect(c.pooled).toMatchObject({ runs: 6, hosts: 4, familySize: 8 });
+  const key = smallKey('status', 'developer');
+  const fast = c.byCpu.Fast.p50Ceilings[key];
+  expect(fast.n).toBe(4);
+  expect(fast.geoMeanMs).toBeCloseTo(
+    Math.exp([100, 104, 98, 101].reduce((a, x) => a + Math.log(x), 0) / 4),
     9
   );
-  expect(k.t).toBeCloseTo(tQuantile(1 - 0.01 / 8, 3), 12);
-  expect(c.p50Ceilings['ci-checkout/ci small-serial dropped'].n).toBe(4);
-  // Warm-only runs measure only warm.
+  expect(fast.t).toBeCloseTo(tQuantile(1 - 0.01 / 8, 3), 12);
+  // A group of two runs has no ceilings; the pooled one pools both models, so
+  // its ceiling sits well above the fast model's.
+  expect(c.byCpu.Slow.p50Ceilings).toEqual({});
+  expect(c.pooled.p50Ceilings[key].n).toBe(6);
+  expect(c.pooled.p50Ceilings[key].ceilingMs).toBeGreaterThan(
+    fast.ceilingMs * 2
+  );
+  expect(c.pooled.p50Ceilings['ci-checkout/ci small-serial dropped'].n).toBe(6);
+  // Warm-only runs measure only warm; files that do not match the naming each
+  // count as a host.
   const warm = ceilingsFromRuns(
-    [0, 1, 2].map((i) => ({ name: `w${i}`, run: gateRun(budgets) })),
+    [0, 1, 2].map((i) => ({
+      name: `w${i}.json`,
+      host: hostOfFile(`w${i}.json`),
+      run: gateRun(budgets),
+    })),
     budgets,
     { studiedAt: 's', runnerImage: 'r' }
   );
   expect(warm.pageCache).toEqual(['warm']);
+  expect(warm.pooled.hosts).toBe(3);
 });
 
 test('ceilingsFromRuns refuses runs of other case versions and a run lost by one case only thins that key', () => {
-  const a = { name: 'a.json', run: gateRun(budgets) };
-  const newer = {
-    name: 'b.json',
-    run: gateRun(budgets, {
+  const file = (name: string, run: BenchRun) => ({ name, host: name, run });
+  const a = file('a.json', gateRun(budgets));
+  const newer = file(
+    'b.json',
+    gateRun(budgets, {
       caseOver: (c) => (c.id === 'wc.diff' ? { version: 2 } : {}),
-    }),
-  };
+    })
+  );
   expect(() =>
     ceilingsFromRuns([a, newer], budgets, { studiedAt: 's', runnerImage: 'r' })
   ).toThrow('b.json has other case versions than a.json (wc.diff)');
   expect(() =>
     ceilingsFromRuns([], budgets, { studiedAt: 's', runnerImage: 'r' })
   ).toThrow('no runs');
-  const lost = {
-    name: 'lost.json',
-    run: gateRun(budgets, {
+  const lost = file(
+    'lost.json',
+    gateRun(budgets, {
       caseOver: (c) =>
         c.id === 'e2e.pull'
           ? { status: 'exceeded', p50Ms: null, samplesMs: [] }
           : {},
-    }),
-  };
+    })
+  );
   const c = ceilingsFromRuns(
     [
       a,
       lost,
-      { name: 'c', run: gateRun(budgets) },
-      { name: 'd', run: gateRun(budgets) },
+      file('c.json', gateRun(budgets)),
+      file('d.json', gateRun(budgets)),
     ],
     budgets,
     { studiedAt: 's', runnerImage: 'r' }
   );
-  expect(c.p50Ceilings[smallKey('pull', 'developer')].n).toBe(3);
-  expect(c.p50Ceilings[smallKey('status', 'developer')].n).toBe(4);
+  expect(c.pooled.p50Ceilings[smallKey('pull', 'developer')].n).toBe(3);
+  expect(c.pooled.p50Ceilings[smallKey('status', 'developer')].n).toBe(4);
+});
+
+test('ceilingGroupFor uses the CPU model group only with enough runs and hosts, and says which group applies', () => {
+  const r = gateRun(budgets);
+  const own = (runs: number, hosts: number) =>
+    ceilingsOf(budgets, r, 200, ['warm'], { own: { runs, hosts } });
+  expect([GROUP_MIN_RUNS, GROUP_MIN_HOSTS]).toEqual([6, 3]);
+  const used = ceilingGroupFor(own(6, 3), 'Test CPU');
+  expect(used.group.runs).toBe(6);
+  expect(used.note).toBe(
+    'ceilings: using the group of CPU model Test CPU (6 runs from 3 hosts)'
+  );
+  // One run short, or one host short, falls back.
+  for (const [runs, hosts] of [
+    [5, 3],
+    [10, 2],
+  ]) {
+    const thin = ceilingGroupFor(own(runs, hosts), 'Test CPU');
+    expect(thin.group.runs).toBe(20);
+    expect(thin.note).toBe(
+      `ceilings: using the pooled group (20 runs from 10 hosts); CPU model Test CPU was calibrated on only ${runs} runs from ${hosts} hosts, and a group needs 6 runs from 3 hosts`
+    );
+  }
+  const unknown = ceilingGroupFor(own(6, 3), 'Unseen CPU');
+  expect(unknown.group.runs).toBe(20);
+  expect(unknown.note).toBe(
+    'ceilings: using the pooled group (20 runs from 10 hosts); CPU model Unseen CPU was not calibrated'
+  );
+});
+
+test('checkGate holds a run on a calibrated CPU to that CPU group, so a regression inside the pooled ceiling still fails', () => {
+  // The model's group allows 200 ms; the pooled group, spanning slower models,
+  // allows 500 ms. A 300 ms p50 is a regression for this CPU only.
+  const r = gateRun(budgets, { p50: 300 });
+  const ceilings = ceilingsOf(budgets, r, 200, ['warm'], { pooledMs: 500 });
+  const result = checkGate(r, budgets, ceilings, METHODS);
+  expect(result.failed).toBe(true);
+  expect(result.lines[0]).toContain('using the group of CPU model Test CPU');
+  expect(result.lines.filter((l) => l.startsWith('regression'))).toHaveLength(
+    7
+  );
+  expect(result.lines[1]).toContain('is above its ceiling 200.0 ms');
+});
+
+test('checkGate falls back to the pooled ceilings, and says so, for a thin or unknown CPU model', () => {
+  const r = gateRun(budgets, { p50: 300 });
+  const thin = checkGate(
+    r,
+    budgets,
+    ceilingsOf(budgets, r, 200, ['warm'], {
+      pooledMs: 500,
+      own: { runs: 4, hosts: 2 },
+    }),
+    METHODS
+  );
+  expect(thin.failed).toBe(false);
+  expect(thin.lines[0]).toContain(
+    'using the pooled group (20 runs from 10 hosts)'
+  );
+  expect(thin.lines[0]).toContain('calibrated on only 4 runs from 2 hosts');
+  expect(thin.lines[1]).toBe(
+    'ok status/developer small-serial null: p50 300.0 ms <= ceiling 500.0 ms (3.0x git)'
+  );
+  const unknown = checkGate(
+    r,
+    budgets,
+    ceilingsOf(budgets, r, 200, ['warm'], { pooledMs: 500, own: null }),
+    METHODS
+  );
+  expect(unknown.failed).toBe(false);
+  expect(unknown.lines[0]).toContain('CPU model Test CPU was not calibrated');
+  // The pooled ceilings still catch a regression of their own.
+  const slow = gateRun(budgets, { p50: 600 });
+  expect(
+    checkGate(
+      slow,
+      budgets,
+      ceilingsOf(budgets, slow, 200, ['warm'], {
+        pooledMs: 500,
+        own: null,
+      }),
+      METHODS
+    ).failed
+  ).toBe(true);
 });
 
 test('readCeilings reads a ceilings file, returns null for a missing one and throws on a bad one', () => {
@@ -859,8 +983,23 @@ test('readCeilings reads a ceilings file, returns null for a missing one and thr
   const key = smallKey('status', 'developer');
   const bad = writeJson('ceilings-bad.json', {
     ...ceilings,
-    p50Ceilings: { [key]: { ...ceilings.p50Ceilings[key], ceilingMs: 'x' } },
+    pooled: {
+      ...ceilings.pooled,
+      p50Ceilings: {
+        [key]: { ...ceilings.pooled.p50Ceilings[key], ceilingMs: 'x' },
+      },
+    },
   });
+  const noPooled = writeJson('ceilings-nopooled.json', {
+    ...ceilings,
+    pooled: undefined,
+  });
+  expect(() => readCeilings(noPooled)).toThrow('is not a ceilings file');
+  const badGroup = writeJson('ceilings-badgroup.json', {
+    ...ceilings,
+    byCpu: { x: { runs: 1 } },
+  });
+  expect(() => readCeilings(badGroup)).toThrow('is not a ceilings file');
   expect(() => readCeilings(bad)).toThrow('is not a ceilings file');
   // A file of an earlier method (ratio ceilings) is not this format.
   const old = writeJson('ceilings-old.json', {

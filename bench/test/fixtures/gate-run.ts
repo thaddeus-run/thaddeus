@@ -94,28 +94,45 @@ export function gateRun(
 }
 
 // Ceilings that allow a thaddeus p50 up to `ceilingMs` on every key `run` has
-// a p50 for, calibrated on case version 1.
+// a p50 for, calibrated on case version 1. The pooled group allows
+// `groups.pooledMs` (default `ceilingMs`); the group of the run's CPU model
+// allows `ceilingMs` on `groups.own` runs and hosts (default 6 and 3, enough
+// for the gate to use it), or does not exist when `own` is null.
 export function ceilingsOf(
   budgets: Budgets,
   run: BenchRun,
   ceilingMs: number,
-  pageCache: ('warm' | 'dropped')[] = ['warm']
+  pageCache: ('warm' | 'dropped')[] = ['warm'],
+  groups: {
+    pooledMs?: number;
+    own?: { runs: number; hosts: number } | null;
+  } = {}
 ): Ceilings {
-  const p50Ceilings = Object.fromEntries(
-    Object.keys(linesP50(evaluateBudgets(run, budgets))).map((k) => [
-      k,
-      { ceilingMs, n: 3, t: 2.5, geoMeanMs: ceilingMs / 2, logSd: 0.1 },
-    ])
-  );
+  const keys = Object.keys(linesP50(evaluateBudgets(run, budgets)));
+  const groupOf = (ms: number, runs: number, hosts: number) => ({
+    runs,
+    hosts,
+    familySize: keys.length,
+    p50Ceilings: Object.fromEntries(
+      keys.map((k) => [
+        k,
+        { ceilingMs: ms, n: runs, t: 2.5, geoMeanMs: ms / 2, logSd: 0.1 },
+      ])
+    ),
+  });
+  const own = groups.own === undefined ? { runs: 6, hosts: 3 } : groups.own;
   const caseVersions = Object.fromEntries(run.cases.map((c) => [c.id, 1]));
   return {
     studiedAt: '2026-10-26T00:00:00.000Z',
     runnerImage: 'unknown',
-    runs: 3,
+    runs: 20,
     pageCache,
     caseVersions,
     method: 'lognormal-family-wise-t-p50',
-    familySize: Object.keys(p50Ceilings).length,
-    p50Ceilings,
+    pooled: groupOf(groups.pooledMs ?? ceilingMs, 20, 10),
+    byCpu:
+      own === null
+        ? { 'Other CPU': groupOf(1, 10, 5) }
+        : { [run.machine.cpu]: groupOf(ceilingMs, own.runs, own.hosts) },
   };
 }

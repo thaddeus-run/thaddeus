@@ -1,6 +1,7 @@
 import { afterAll, expect, test } from 'bun:test';
 import {
   existsSync,
+  mkdirSync,
   mkdtempSync,
   readFileSync,
   rmSync,
@@ -112,12 +113,12 @@ test('calibrate --runs 3 runs the gate method each time and rewrites the file af
   expect(c.runs).toBe(3);
   expect(c.method).toBe('lognormal-family-wise-t-p50');
   expect(c.pageCache).toEqual(['warm', 'dropped']);
-  expect(c.familySize).toBe(8);
-  expect(Object.keys(c.p50Ceilings)).toContain(
+  expect(c.pooled.familySize).toBe(8);
+  expect(Object.keys(c.pooled.p50Ceilings)).toContain(
     'ci-checkout/ci small-serial dropped'
   );
   expect(c.caseVersions['e2e.pull']).toBe(1);
-  const key = c.p50Ceilings['status/developer small-serial null'];
+  const key = c.pooled.p50Ceilings['status/developer small-serial null'];
   const { mu, sigma } = logMeanStdev([1500, 1600, 1700]);
   expect(key.n).toBe(3);
   expect(key.ceilingMs).toBeCloseTo(
@@ -125,12 +126,16 @@ test('calibrate --runs 3 runs the gate method each time and rewrites the file af
     6
   );
   expect(
-    c.p50Ceilings['pull/developer small-serial null'].ceilingMs
+    c.pooled.p50Ceilings['pull/developer small-serial null'].ceilingMs
   ).toBeCloseTo(200, 6);
-  // Only the third run has the three p50s a ceiling needs.
+  // Only the third run has the three p50s a ceiling needs; it logs them for
+  // the CPU model group and the pooled one. All runs are one host, so the
+  // group is too thin for the gate to use.
   expect(
-    logs.filter((l) => l.startsWith('ceilings: status/developer'))
-  ).toHaveLength(1);
+    logs.filter((l) => l.startsWith('ceilings:   status/developer'))
+  ).toHaveLength(2);
+  expect(c.pooled).toMatchObject({ runs: 3, hosts: 1 });
+  expect(c.byCpu['Test CPU']).toMatchObject({ runs: 3, hosts: 1 });
 });
 
 test('calibrate leaves a case that did not finish out of that run only', async () => {
@@ -156,8 +161,8 @@ test('calibrate leaves a case that did not finish out of that run only', async (
   ).toBe(0);
   const c = JSON.parse(readFileSync(out, 'utf8')) as Ceilings;
   // The pull row has three p50s and the others four.
-  expect(c.p50Ceilings['pull/developer small-serial null'].n).toBe(3);
-  expect(c.p50Ceilings['status/developer small-serial null'].n).toBe(4);
+  expect(c.pooled.p50Ceilings['pull/developer small-serial null'].n).toBe(3);
+  expect(c.pooled.p50Ceilings['status/developer small-serial null'].n).toBe(4);
   // The run that lost a case says so; the warm-only study does not report the
   // dropped-cache row it never asked for.
   expect(logs).toContain(
@@ -230,17 +235,19 @@ test('ceilings derives the file from gate-run result files and logs what each ce
   const c = JSON.parse(readFileSync(out, 'utf8')) as Ceilings;
   expect(c.runs).toBe(5);
   expect(c.pageCache).toEqual(['warm']);
-  expect(c.familySize).toBe(7);
+  expect(c.pooled.familySize).toBe(7);
   const { mu, sigma } = logMeanStdev([180, 190, 200, 210, 220]);
-  const k = c.p50Ceilings['status/developer small-serial null'];
+  const k = c.pooled.p50Ceilings['status/developer small-serial null'];
   expect(k.n).toBe(5);
   expect(k.ceilingMs).toBeCloseTo(
     Math.exp(mu + tQuantile(1 - 0.01 / 7, 4) * sigma),
     6
   );
+  // Each file named other than run-<host>-<k>.json is a host of its own.
+  expect(c.pooled).toMatchObject({ runs: 5, hosts: 5 });
   expect(
     logs.some((l) =>
-      l.startsWith('ceilings: status/developer small-serial null: n 5')
+      l.startsWith('ceilings:   status/developer small-serial null: n 5')
     )
   ).toBe(true);
   // A file derived this way gates a run of the same method.
@@ -253,6 +260,66 @@ test('ceilings derives the file from gate-run result files and logs what each ce
       )
     ).code
   ).toBe(0);
+});
+
+test('ceilings counts hosts from run-<host>-<k>.json names and logs each CPU model group with whether the gate uses it', async () => {
+  const dir = join(scratch, 'cei-hosts');
+  mkdirSync(dir, { recursive: true });
+  const write = (name: string, cpu: string, p50: number) => {
+    const base = gateRun(budgets, { p50 });
+    const path = join(dir, name);
+    writeFileSync(
+      path,
+      `${JSON.stringify({ ...base, machine: { ...base.machine, cpu } })}\n`
+    );
+    return path;
+  };
+  const files = [
+    write('run-1-1.json', 'Fast', 100),
+    write('run-1-2.json', 'Fast', 102),
+    write('run-2-1.json', 'Fast', 99),
+    write('run-2-2.json', 'Fast', 101),
+    write('run-3-1.json', 'Fast', 103),
+    write('run-3-2.json', 'Fast', 98),
+    write('run-4-1.json', 'Slow', 200),
+    write('run-4-2.json', 'Slow', 205),
+  ];
+  const out = join(scratch, 'ceilings-hosts.json');
+  const logs: string[] = [];
+  const { host } = hostOf(() => gateRun(budgets), logs);
+  expect((await cli(['ceilings', ...files, '--out', out], host)).code).toBe(0);
+  const c = JSON.parse(readFileSync(out, 'utf8')) as Ceilings;
+  expect(c.byCpu.Fast).toMatchObject({ runs: 6, hosts: 3 });
+  expect(c.byCpu.Slow).toMatchObject({ runs: 2, hosts: 1 });
+  expect(c.pooled).toMatchObject({ runs: 8, hosts: 4 });
+  expect(logs).toContain(
+    'ceilings: CPU model Fast: 6 runs from 3 hosts, used by the gate'
+  );
+  expect(logs).toContain(
+    'ceilings: CPU model Slow: 2 runs from 1 hosts, too thin for the gate (needs 6 runs from 3 hosts), pooled applies'
+  );
+  expect(logs).toContain(
+    'ceilings: pooled: 8 runs from 4 hosts, used for any other CPU model'
+  );
+  expect(
+    logs.some((l) =>
+      /^ceilings: {3}status\/developer small-serial null: n 6, .*ceiling\/geomean 1\.\d+$/.test(
+        l
+      )
+    )
+  ).toBe(true);
+  // The gate prints which group it used.
+  const fresh = writeJson(
+    'cei-hosts-fresh.json',
+    gateRun(budgets, { p50: 101 })
+  );
+  const gate = await cli(
+    ['gate', fresh, '--ceilings', out, '--page-cache', 'warm'],
+    host
+  );
+  expect(gate.out.split('\n')[0]).toContain(
+    'CPU model Test CPU was not calibrated'
+  );
 });
 
 test('ceilings refuses files of other case versions, files not measured with the gate method, and no files', async () => {

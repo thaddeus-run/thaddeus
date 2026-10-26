@@ -14,6 +14,7 @@ import {
   budgetCaseIds,
   type Budgets,
   BUDGETS_FILE,
+  type CeilingGroup,
   type Ceilings,
   CEILINGS_FILE,
   ceilingsFromRuns,
@@ -23,6 +24,9 @@ import {
   GATE_METHOD,
   gateMethods,
   gateOptions,
+  GROUP_MIN_HOSTS,
+  GROUP_MIN_RUNS,
+  hostOfFile,
   linesP50,
   methodMismatches,
   readBudgets,
@@ -587,7 +591,7 @@ async function gateCommand(
 // ceiling rests on.
 function publishCeilings(
   out: string,
-  runs: { name: string; run: BenchRun }[],
+  runs: { name: string; host: string; run: BenchRun }[],
   budgets: Budgets,
   host: Host,
   studiedAt: string
@@ -602,17 +606,36 @@ function publishCeilings(
     throw new FileError(`ceilings: ${(error as Error).message}`);
   }
   writeCeilings(out, ceilings);
-  for (const [key, k] of Object.entries(ceilings.p50Ceilings)) {
+  const logGroup = (title: string, g: CeilingGroup, qualifies: string) => {
     host.log(
-      `ceilings: ${key}: n ${k.n}, geometric mean ${k.geoMeanMs.toFixed(1)} ms, log-sd ${k.logSd.toFixed(3)}, t ${k.t.toFixed(2)}, ceiling ${k.ceilingMs.toFixed(1)} ms`
+      `ceilings: ${title}: ${g.runs} runs from ${g.hosts} hosts${qualifies}`
+    );
+    for (const [key, k] of Object.entries(g.p50Ceilings)) {
+      host.log(
+        `ceilings:   ${key}: n ${k.n}, geometric mean ${k.geoMeanMs.toFixed(1)} ms, log-sd ${k.logSd.toFixed(3)}, t ${k.t.toFixed(2)}, ceiling ${k.ceilingMs.toFixed(1)} ms, ceiling/geomean ${(k.ceilingMs / k.geoMeanMs).toFixed(3)}`
+      );
+    }
+  };
+  for (const [cpu, g] of Object.entries(ceilings.byCpu)) {
+    logGroup(
+      `CPU model ${cpu}`,
+      g,
+      g.runs >= GROUP_MIN_RUNS && g.hosts >= GROUP_MIN_HOSTS
+        ? ', used by the gate'
+        : `, too thin for the gate (needs ${GROUP_MIN_RUNS} runs from ${GROUP_MIN_HOSTS} hosts), pooled applies`
     );
   }
+  logGroup('pooled', ceilings.pooled, ', used for any other CPU model');
 }
 
 // `bench ceilings <run.json>... [--out file]`: derives the ceilings file from
 // existing `gate-run` result files, one run per file (the CI matrix runs the
-// gate on many hosts, and this job pools their files). A file measured with
-// another method, or on other case versions than the first, is refused.
+// gate on many hosts, and this job pools their files). Files named
+// `run-<host>-<k>.json` count as runs of host `<host>`; any other file is a
+// host of its own. Ceilings are kept per CPU model and pooled, and the log
+// says per group how many runs and hosts it rests on and whether the gate
+// will use it. A file measured with another method, or on other case versions
+// than the first, is refused.
 async function ceilingsCommand(
   argv: readonly string[],
   host: Host
@@ -627,7 +650,11 @@ async function ceilingsCommand(
     throw new UsageError('ceilings takes run files');
   const budgets = budgetsOf(values.budgets);
   const methods = await gateMethods(budgets);
-  const runs = positionals.map((path) => ({ name: path, run: readRun(path) }));
+  const runs = positionals.map((path) => ({
+    name: path,
+    host: hostOfFile(path),
+    run: readRun(path),
+  }));
   const refused = runs.flatMap(({ name, run }) =>
     methodMismatches(run, budgets, methods).map(
       (m) => `${name}: ${m.name}: ${m.why}`
@@ -676,11 +703,11 @@ async function calibrateCommand(
   const budgets = budgetsOf(values.budgets);
   const out = values.out === undefined ? CEILINGS_FILE : resolve(values.out);
   const studiedAt = new Date().toISOString();
-  const measured: { name: string; run: BenchRun }[] = [];
+  const measured: { name: string; host: string; run: BenchRun }[] = [];
   for (let n = 1; n <= runs; n++) {
     host.log(`calibrate: run ${n}/${runs}`);
     const run = await host.runSuite(target.opts, target.env);
-    measured.push({ name: `run ${n}`, run });
+    measured.push({ name: `run ${n}`, host: 'this host', run });
     const lines = evaluateBudgets(run, budgets);
     // A dropped-cache row of a warm-only study is not a failure to report.
     const unfinished = lines.filter(
