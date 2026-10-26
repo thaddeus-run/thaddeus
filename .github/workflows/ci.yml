@@ -89,6 +89,75 @@ jobs:
       - name: Test
         run: cargo test --manifest-path lazythad/Cargo.toml
 
+  # Times the everyday commands (status, diff, push, workspace, pull and a cold
+  # clone) on this runner against git, on small-serial: the cases
+  # bench/budgets/everyday.json names, warm and with the page cache dropped.
+  # It fails when a thaddeus p50 is above the ceiling that
+  # bench/budgets/ceilings-github-ubuntu-latest.json records for it, when a
+  # gated case no longer finishes ok, or when that file is missing or was
+  # calibrated for other case versions or page-cache modes. A missed target
+  # and the multiple of git are in the job summary and never fail the job:
+  # today's numbers miss most targets, and a gate that is red on every PR
+  # would only get switched off. After changing a gated case, or when the
+  # runner image shifts, dispatch the Benchmarks workflow with
+  # `mode: everyday-calibrate` and commit the `everyday-ceilings` artifact
+  # over that file. The dropped-cache modes drop the page cache with
+  # `sudo -n`, which hosted runners allow.
+  everyday-gate:
+    name: Everyday-command latency gate
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # moon detects CI and compares against the pull request's base
+          # branch on every run, so the checkout needs full history and refs.
+          fetch-depth: 0
+
+      - name: Install proto toolchain
+        uses: moonrepo/setup-toolchain@v0
+        with:
+          auto-install: true
+
+      - name: Install dependencies
+        run: |
+          # See the check job: minimumReleaseAge is a dev-machine gate.
+          sed -i 's/^minimumReleaseAge = .*/minimumReleaseAge = 0/' bunfig.toml
+          bun install --frozen-lockfile
+
+      # The e2e cases drive the compiled binary. cli:compile is runInCI: skip,
+      # so the CI= prefix clears the marker for that one task.
+      - name: Build bench's packages and the CLI binary
+        run: |
+          moon run bench:build-deps
+          CI= moon run cli:compile
+
+      - name: Time the everyday commands against git
+        run: |
+          export AGENT=1
+          cd bench
+          bun src/cli.ts gate-run --out out/gate.json
+
+      - name: Report against the budgets
+        run: |
+          export AGENT=1
+          cd bench
+          bun src/cli.ts budget out/gate.json
+
+      - name: Gate on the calibrated ceilings
+        run: |
+          export AGENT=1
+          cd bench
+          bun src/cli.ts gate out/gate.json
+
+      - name: Upload the run
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: everyday-gate
+          path: bench/out/
+          if-no-files-found: ignore
+
   # Branch protection requires this job by its name, `CI passed`. It fails when
   # any job it needs fails, is cancelled or is skipped, so splitting or
   # renaming jobs needs no ruleset change. Add every new job to `needs`.
@@ -97,7 +166,7 @@ jobs:
   ci-passed:
     name: CI passed
     if: ${{ always() }}
-    needs: [check, lazythad]
+    needs: [check, lazythad, everyday-gate]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:

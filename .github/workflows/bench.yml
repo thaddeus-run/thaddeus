@@ -4,7 +4,9 @@
 # comparison to the job summary. It is not a merge gate: it is not in
 # `ci-passed` and not in branch protection, and it posts no PR comment (fork
 # PRs get a read-only token). Dispatched with `mode: noise`, it runs the A/A
-# noise study on main that the thresholds come from.
+# noise study on main that the thresholds come from. Dispatched with
+# `mode: everyday-calibrate`, it runs the study the everyday-command latency
+# gate's ceilings come from (the `everyday-gate` job in ci.yml).
 name: Benchmarks
 
 on:
@@ -12,19 +14,26 @@ on:
   workflow_dispatch:
     inputs:
       mode:
-        description: 'noise: run the A/A noise study on main'
+        description:
+          'noise: run the A/A noise study on main; everyday-calibrate: run the
+          everyday-command gate on 10 runners and derive its ceilings'
         type: choice
-        options: [noise]
+        options: [noise, everyday-calibrate]
         default: noise
         required: true
 
 permissions:
   contents: read
 
-# A newer push to the same PR makes the older comparison moot. A noise study
-# runs for hours and is never cancelled by a later dispatch (that one waits).
+# A newer push to the same PR makes the older comparison moot. A dispatched
+# study (noise or calibration) runs for hours and is never cancelled by a later
+# dispatch: each dispatch gets its own group, because a group holds one
+# running and one pending run and a third dispatch would cancel the pending
+# one. Studies only share the repository, not a runner, so they can overlap.
 concurrency:
-  group: bench-${{ github.event_name }}-${{ github.ref }}
+  group:
+    bench-${{ github.event_name }}-${{ github.event_name == 'pull_request' &&
+    github.ref || github.run_id }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
@@ -216,4 +225,117 @@ jobs:
         with:
           name: bench-thresholds
           path: bench/thresholds/github-ubuntu-latest.json
+          if-no-files-found: error
+
+  # The calibration study behind the everyday-command gate's ceilings. Ten
+  # hosted runners each run the gate's own method (`gate-run`: the budgeted
+  # cases on small-serial, warm and with the page cache dropped) twice, so the
+  # `everyday-calibrate` job below has 20 runs on 10 hosts: the spread between
+  # runners and between runs on one runner both go into the ceilings. It runs
+  # on the dispatched ref, because the ceilings must be measured with the
+  # cases and budgets that ref holds. A run is uploaded even when a later step
+  # fails, and a failed host does not stop the others.
+  everyday-calibrate-runs:
+    name: Everyday-command calibration run (host ${{ matrix.host }})
+    if:
+      ${{ github.event_name == 'workflow_dispatch' && inputs.mode ==
+      'everyday-calibrate' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        host: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install proto toolchain
+        uses: moonrepo/setup-toolchain@v0
+        with:
+          auto-install: true
+
+      - name: Install dependencies
+        run: |
+          # See the compare job: minimumReleaseAge is a dev-machine gate.
+          sed -i 's/^minimumReleaseAge = .*/minimumReleaseAge = 0/' bunfig.toml
+          bun install --frozen-lockfile
+
+      # The e2e cases drive the compiled binary. cli:compile is runInCI: skip,
+      # so the CI= prefix clears the marker for that one task.
+      - name: Build bench's packages and the CLI binary
+        run: |
+          moon run bench:build-deps
+          CI= moon run cli:compile
+
+      # Two runs per host in separate steps, so a failure in the second still
+      # leaves the first to upload. Each step's limit is under the job's.
+      - name: Run the gate method, first time
+        timeout-minutes: 40
+        run:
+          cd bench && bun src/cli.ts gate-run --out out/run-${{ matrix.host
+          }}-1.json
+
+      - name: Run the gate method, second time
+        timeout-minutes: 40
+        run:
+          cd bench && bun src/cli.ts gate-run --out out/run-${{ matrix.host
+          }}-2.json
+
+      - name: Upload the runs
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: everyday-gate-run-${{ matrix.host }}
+          path: bench/out/
+          if-no-files-found: ignore
+
+  # Derives the ceilings from every run the matrix uploaded. Commit the
+  # `everyday-ceilings` artifact to
+  # bench/budgets/ceilings-github-ubuntu-latest.json. `if: always()` (guarded
+  # by the mode) lets it pool the runs of the hosts that finished when another
+  # host failed; `ceilings` refuses a pool too small to give a ceiling.
+  everyday-calibrate:
+    name: Everyday-command calibration ceilings
+    needs: everyday-calibrate-runs
+    if:
+      ${{ always() && github.event_name == 'workflow_dispatch' && inputs.mode ==
+      'everyday-calibrate' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install proto toolchain
+        uses: moonrepo/setup-toolchain@v0
+        with:
+          auto-install: true
+
+      - name: Install dependencies
+        run: |
+          # See the compare job: minimumReleaseAge is a dev-machine gate.
+          sed -i 's/^minimumReleaseAge = .*/minimumReleaseAge = 0/' bunfig.toml
+          bun install --frozen-lockfile
+
+      - name: Build
+        run: moon run bench:build-deps
+
+      - name: Download the runs
+        uses: actions/download-artifact@v4
+        with:
+          pattern: everyday-gate-run-*
+          merge-multiple: true
+          path: bench/out
+
+      - name: Derive the ceilings
+        run: |
+          cd bench
+          ls out/run-*.json
+          bun src/cli.ts ceilings out/run-*.json \
+            --out budgets/ceilings-github-ubuntu-latest.json
+
+      - name: Upload the ceilings
+        uses: actions/upload-artifact@v4
+        with:
+          name: everyday-ceilings
+          path: bench/budgets/ceilings-github-ubuntu-latest.json
           if-no-files-found: error
