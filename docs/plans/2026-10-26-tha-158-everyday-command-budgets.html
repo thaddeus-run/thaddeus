@@ -1,0 +1,2014 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="color-scheme" content="dark" />
+    <title>
+      THA-158 everyday-command latency budgets vs git, with a CI gate —
+      Implementation Plan
+    </title>
+    <style>
+      :root {
+        --bg: #000000;
+        --surface: #0c0c0c;
+        --rule: #232323;
+        --fg: #ededed;
+        --fg-strong: #ffffff;
+        --muted: #8b8b8b;
+        --code-bg: #242424;
+        --block-bg: #0e0e0e;
+        --accent: #6fdc8c;
+        --s: #5ee08a;
+        --a: #a8e05f;
+        --b: #e0c95e;
+        --c: #e0a35e;
+        --d: #e06f6f;
+        --x: #7a7a7a;
+      }
+      * {
+        box-sizing: border-box;
+      }
+      html {
+        -webkit-text-size-adjust: 100%;
+      }
+      body {
+        margin: 0;
+        background: var(--bg);
+        color: var(--fg);
+        font:
+          17px/1.7 system-ui,
+          -apple-system,
+          'Helvetica Neue',
+          'Segoe UI',
+          Arial,
+          sans-serif;
+        font-synthesis-weight: none;
+        -webkit-font-smoothing: antialiased;
+      }
+      .wrap {
+        max-width: 900px;
+        margin: 0 auto;
+        padding: 4rem 1.5rem 8rem;
+      }
+      h1,
+      h2,
+      h3 {
+        color: var(--fg-strong);
+        font-weight: 700;
+        letter-spacing: -0.021em;
+      }
+      h1 {
+        font-size: 2.25rem;
+        line-height: 1.15;
+        margin: 0 0 1rem;
+      }
+      h2 {
+        font-size: 1.4rem;
+        line-height: 1.25;
+        margin: 0 0 1.25rem;
+      }
+      h3 {
+        font-size: 1.05rem;
+        line-height: 1.4;
+        margin: 2rem 0 0.5rem;
+      }
+      p {
+        margin: 0 0 1.1rem;
+      }
+      a {
+        color: var(--accent);
+        text-decoration: none;
+      }
+      a:hover {
+        text-decoration: underline;
+      }
+      .lede {
+        color: var(--muted);
+        font-size: 1.05rem;
+        margin: 0;
+      }
+      .muted {
+        color: var(--muted);
+      }
+      section.block {
+        border-top: 1px solid var(--rule);
+        padding-top: 2.5rem;
+        margin-top: 2.5rem;
+      }
+      header {
+        padding-bottom: 1.75rem;
+      }
+      code {
+        font-family: ui-monospace, SFMono-Regular, 'SF Mono', Menlo, monospace;
+        font-size: 0.855em;
+        background: var(--code-bg);
+        color: #e8e8e8;
+        padding: 0.12em 0.42em;
+        border-radius: 4px;
+        white-space: nowrap;
+      }
+      pre {
+        background: var(--block-bg);
+        border: 1px solid var(--rule);
+        border-radius: 8px;
+        padding: 1rem 1.1rem;
+        overflow-x: auto;
+        font-size: 0.875rem;
+        line-height: 1.6;
+        margin: 0.9rem 0;
+      }
+      pre code {
+        background: none;
+        padding: 0;
+        font-size: inherit;
+        white-space: pre;
+        color: var(--fg);
+      }
+      .stats {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
+        gap: 0.9rem;
+        margin: 1.75rem 0;
+      }
+      .stat {
+        background: var(--surface);
+        border: 1px solid var(--rule);
+        border-radius: 10px;
+        padding: 1.2rem 1.3rem 1.35rem;
+      }
+      .stat b {
+        display: block;
+        color: var(--fg-strong);
+        font-size: 2rem;
+        font-weight: 500;
+        letter-spacing: -0.02em;
+        line-height: 1.1;
+        margin-bottom: 0.5rem;
+      }
+      .stat span {
+        color: var(--muted);
+        font-size: 0.95rem;
+        line-height: 1.45;
+      }
+      .table-scroll {
+        overflow-x: auto;
+        margin: 1.5rem 0;
+      }
+      table {
+        border-collapse: collapse;
+        width: 100%;
+      }
+      th {
+        text-align: left;
+        vertical-align: bottom;
+        color: var(--muted);
+        font-size: 0.74rem;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.1em;
+        padding: 0 1.5rem 0.8rem 0;
+        border-bottom: 1px solid var(--rule);
+        white-space: nowrap;
+      }
+      td {
+        text-align: left;
+        vertical-align: top;
+        padding: 0.95rem 1.5rem 0.95rem 0;
+        border-bottom: 1px solid var(--rule);
+      }
+      th:last-child,
+      td:last-child {
+        padding-right: 0;
+      }
+      tbody tr:last-child td {
+        border-bottom: 0;
+      }
+      td.num {
+        color: var(--muted);
+        font-variant-numeric: tabular-nums;
+      }
+      .legend {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 1.25rem;
+        color: var(--muted);
+        font-size: 0.95rem;
+        margin: 0 0 0.75rem;
+      }
+      .tier {
+        font-weight: 700;
+      }
+      .tier-s {
+        color: var(--s);
+      }
+      .tier-a {
+        color: var(--a);
+      }
+      .tier-b {
+        color: var(--b);
+      }
+      .tier-c {
+        color: var(--c);
+      }
+      .tier-d {
+        color: var(--d);
+      }
+      .tier-x {
+        color: var(--x);
+      }
+      .name {
+        color: var(--accent);
+        font-weight: 600;
+      }
+      .callout {
+        background: var(--surface);
+        border: 1px solid var(--rule);
+        border-radius: 10px;
+        padding: 1.15rem 1.35rem;
+        margin: 1.5rem 0;
+      }
+      .callout > :last-child {
+        margin-bottom: 0;
+      }
+      .callout strong {
+        color: var(--fg-strong);
+      }
+      .callout ul {
+        margin: 0.6rem 0 0;
+        padding-left: 1.15rem;
+      }
+      .callout li {
+        margin: 0.3rem 0;
+      }
+      section.task {
+        background: var(--surface);
+        border: 1px solid var(--rule);
+        border-radius: 10px;
+        padding: 1.4rem 1.6rem;
+        margin: 1.25rem 0;
+      }
+      .files {
+        font-size: 0.92rem;
+        color: var(--muted);
+        margin: 0 0 1rem;
+      }
+      .files code {
+        color: var(--fg);
+        white-space: normal;
+      }
+      .io {
+        margin: 0 0 1.25rem;
+        font-size: 0.95rem;
+      }
+      .io dt {
+        color: var(--muted);
+        font-size: 0.74rem;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.1em;
+      }
+      .io dd {
+        margin: 0.2rem 0 0.75rem;
+      }
+      ol.steps {
+        list-style: none;
+        padding: 0;
+        margin: 0;
+      }
+      ol.steps > li {
+        display: flex;
+        gap: 0.7rem;
+        align-items: flex-start;
+        padding: 0.7rem 0;
+        border-top: 1px solid var(--rule);
+      }
+      ol.steps > li:first-child {
+        border-top: 0;
+        padding-top: 0;
+      }
+      ol.steps input {
+        margin: 0.42rem 0 0;
+        flex: none;
+        width: 1rem;
+        height: 1rem;
+        accent-color: var(--accent);
+      }
+      ol.steps input:checked + .label {
+        color: var(--muted);
+      }
+      ol.steps input:checked + .label strong {
+        color: var(--muted);
+        text-decoration: line-through;
+      }
+      .label {
+        flex: 1;
+        min-width: 0;
+      }
+      .label strong {
+        color: var(--fg-strong);
+        font-weight: 600;
+      }
+      .progress {
+        color: var(--muted);
+        font-size: 0.95rem;
+        margin-top: 3rem;
+        border-top: 1px solid var(--rule);
+        padding-top: 1.5rem;
+      }
+      .progress b {
+        color: var(--accent);
+      }
+      @media (max-width: 620px) {
+        body {
+          font-size: 16px;
+        }
+        h1 {
+          font-size: 1.8rem;
+        }
+        .wrap {
+          padding: 2.5rem 1.1rem 5rem;
+        }
+        section.task {
+          padding: 1.1rem 1.15rem;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="wrap">
+      <header>
+        <h1>
+          THA-158: everyday-command latency budgets against git, gated in CI
+        </h1>
+        <p class="lede">
+          Build order 005a. This plan adds git baselines next to the THA-5
+          benchmark suite, writes each everyday command's target down as a
+          number in milliseconds and as a multiple of git, and adds a required
+          CI job that fails when thaddeus gets slower relative to git. It starts
+          from
+          <code>a898b8a</code> on <code>main</code>.
+        </p>
+      </header>
+
+      <section class="block">
+        <h2>Goal and shape</h2>
+        <p>
+          <strong>Goal.</strong> Each everyday command gets a median target, an
+          observed median on a populated repository, a measured multiple of git
+          on the same repository, and a CI check that fails when that multiple
+          gets worse.
+        </p>
+        <p>
+          <strong>Architecture.</strong> A new <code>everyday</code> suite in
+          <code>bench/</code> holds the git baseline cases and the thaddeus
+          cases that need no server (<code>status</code>, <code>diff</code>).
+          The git side replays the same fixture plan through
+          <code>git fast-import</code>, so both tools see the same files and the
+          same number of changes. The thaddeus commands that talk to a server
+          reuse the THA-5 e2e cases. A budgets file pairs each thaddeus case
+          with its git case. The CI gate compares the thaddeus/git ratio on the
+          runner against a ceiling taken from a calibration study on GitHub
+          runners. That uses the same lognormal, Bonferroni-split bound the PR
+          check already uses for its thresholds.
+        </p>
+        <p>
+          <strong>Tech stack.</strong> Bun and TypeScript in
+          <code>bench/</code>, the compiled <code>thaddeus</code> binary, git
+          2.x, GitHub Actions. No new dependencies.
+        </p>
+
+        <div class="stats">
+          <div class="stat">
+            <b>9</b
+            ><span>tasks, each one commit or a short run of commits</span>
+          </div>
+          <div class="stat">
+            <b>12</b><span>new bench cases: 4 thaddeus, 8 git</span>
+          </div>
+          <div class="stat"><b>0</b><span>new runtime dependencies</span></div>
+        </div>
+
+        <div class="callout">
+          <strong>Global constraints</strong>
+          <ul>
+            <li>
+              Every e2e and everyday case runs on the serial fixture variant
+              (<code>small-serial</code> and so on), because the shipped server
+              refuses lands into a main that holds a conflict.
+            </li>
+            <li>
+              Do not mock or stub anything to make a case pass. A case that
+              cannot run records <code>exceeded</code>, <code>oom</code> or
+              <code>error</code>, and that status is the result.
+            </li>
+            <li>
+              Thresholds come from a measured study, never from a percentage
+              someone picked. This is the THA-5 rule and the gate follows it.
+            </li>
+            <li>
+              A figure in a document either carries the word "target" or links
+              to the run that produced it (architecture contract section 5).
+            </li>
+            <li>
+              Verification baseline after every code task:
+              <code>moon run root:format root:lint</code>,
+              <code>moonx bench:typecheck</code>, <code>moonx bench:test</code>.
+              Run <code>export AGENT=1</code> first.
+            </li>
+            <li>
+              Commits follow Conventional Commits with the <code>bench</code> or
+              <code>ci</code> scope, as in recent history (<code
+                >feat(bench): ...</code
+              >, <code>ci(bench): ...</code>).
+            </li>
+          </ul>
+        </div>
+      </section>
+
+      <section class="block">
+        <h2>What the code says today</h2>
+        <div class="table-scroll">
+          <table>
+            <thead>
+              <tr>
+                <th>Signal</th>
+                <th>Evidence</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>The suite has no git baseline</td>
+                <td>
+                  No case in <code>bench/src</code> runs git. Without one there
+                  is no "multiple of git" to state.
+                </td>
+              </tr>
+              <tr>
+                <td>Server commands are slow even on the small fixture</td>
+                <td>
+                  On this machine (KVM, 4 vCPU EPYC Rome) with 3 repeats and 1
+                  warm-up,
+                  <code>bench run --suite e2e --fixtures small</code> on
+                  <code>small-serial</code> (100 files, 1,000 ops) measured:
+                  <code>e2e.checkout.cold</code> p50 6,221 ms,
+                  <code>e2e.push.10</code> 6,792 ms,
+                  <code>e2e.push.100</code> 7,343 ms. Going from 10 to 100 files
+                  adds about 0.5 s, so a fixed cost per command dominates.
+                  <code>e2e.pull</code> and <code>e2e.land</code> went past the
+                  120 s case budget even capped at 3 samples, which is why
+                  <code>GATE_METHOD</code> uses 300 s. These are development
+                  runs on a dirty branch, so they cannot be cited. Task 9
+                  records the citable numbers.
+                </td>
+              </tr>
+              <tr>
+                <td>Server commands cannot run on medium or stress yet</td>
+                <td>
+                  The bench README says seeding a medium or stress server root
+                  runs the server's land, and so <code>conflicts()</code>, on
+                  20,000 or more ops (THA-21). Each e2e case on those fixtures
+                  records a setup failure.
+                </td>
+              </tr>
+              <tr>
+                <td>
+                  <code>status</code> and <code>diff</code> need no server
+                </td>
+                <td>
+                  <code>packages/cli/src/run.ts:1515</code> opens the local
+                  store, decrypts every file on the branch
+                  (<code>baseSnapshot</code>, <code>workcopy.ts:103</code>) and
+                  compares the bytes with the files on disk. A working copy
+                  built straight from the fixture cache can therefore time them
+                  on medium and stress today.
+                </td>
+              </tr>
+              <tr>
+                <td>
+                  <code>workspace</code> is checkout, and it needs a server
+                </td>
+                <td>
+                  <code>run.ts:1379</code> refuses <code>checkout</code> and
+                  points to
+                  <code>thaddeus workspace &lt;branch&gt; [dir]</code>, which
+                  calls <code>client.listViews</code> and
+                  <code>client.pull</code> before it writes the files.
+                </td>
+              </tr>
+              <tr>
+                <td>There is no rebase</td>
+                <td>
+                  <code>pull</code> refuses local unpublished commits
+                  (<code>help.ts</code>). Updating a workspace's base is THA-11
+                  (build order 046).
+                </td>
+              </tr>
+              <tr>
+                <td>Commit and upload are one command</td>
+                <td>
+                  <code>thaddeus push</code> commits and uploads
+                  (<code>run.ts:1763</code>). No command commits locally only.
+                </td>
+              </tr>
+              <tr>
+                <td>The PR benchmark check is report-only</td>
+                <td>
+                  <code>.github/workflows/bench.yml</code> is not part of
+                  <code>ci-passed</code>. <code>ci.yml</code>'s
+                  <code>CI passed</code> job is the one branch protection
+                  requires.
+                </td>
+              </tr>
+              <tr>
+                <td>The reference has no per-command numbers</td>
+                <td>
+                  The Scion post gives no medians or per-command multiples of
+                  git. The only latency claim in it is that CI and research jobs
+                  check out "two orders of magnitude faster (in seconds rather
+                  than minutes)". The targets below come from the shape in the
+                  issue: status in tens of milliseconds, checkout about 1 s,
+                  pull in single-digit seconds.
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section class="block">
+        <h2>Decisions this plan makes</h2>
+        <p>
+          These were open in the issue. Each one is a default I picked so the
+          work can go ahead without waiting on an answer. Change any of them in
+          review.
+        </p>
+        <div class="table-scroll">
+          <table>
+            <thead>
+              <tr>
+                <th>Question</th>
+                <th>Decision</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>What counts as "commit"</td>
+                <td>
+                  <code>thaddeus push --no-land</code> of 10 files
+                  (<code>e2e.push.10</code>), against <code>git add -A</code>,
+                  <code>git commit</code> and <code>git push</code> to a bare
+                  repository, summed. thaddeus has no local-only commit, so the
+                  git baseline includes the push too.
+                </td>
+              </tr>
+              <tr>
+                <td>What counts as "checkout"</td>
+                <td>
+                  <code>thaddeus workspace bench-ws &lt;dir&gt;</code> (new case
+                  <code>e2e.workspace</code>), against
+                  <code>git worktree add &lt;dir&gt; bench-ws</code>. Both open
+                  a branch in a new directory, which is the thaddeus model.
+                </td>
+              </tr>
+              <tr>
+                <td>What counts as "pull/sync"</td>
+                <td>
+                  <code>e2e.pull</code>, where a second identity pulls a 10-file
+                  change, against <code>git pull --ff-only</code> of a 10-file
+                  commit.
+                </td>
+              </tr>
+              <tr>
+                <td>Checkout at the start of a CI job</td>
+                <td>
+                  <code>e2e.checkout.cold</code> (<code>thaddeus clone</code>
+                  into an empty directory, fresh home) with the page cache
+                  dropped, against
+                  <code>git clone --depth 1 file://...</code> with the page
+                  cache dropped. Depth 1 is what
+                  <code>actions/checkout</code> does by default.
+                </td>
+              </tr>
+              <tr>
+                <td>Developer and agent environments</td>
+                <td>
+                  Developer means one command at a time on the machine. Agent
+                  means 8 agents on one 4-vCPU host, each in its own working
+                  copy, all running the command at once. The sample is the time
+                  until the last of the 8 finishes. The agent rows cover
+                  <code>status</code> and <code>diff</code>, which run locally.
+                  Agent load on server commands needs concurrent writers on one
+                  server, which is THA-118's replayable agent workload (build
+                  order 006). Those rows are listed as unmeasured and owned by
+                  THA-118.
+                </td>
+              </tr>
+              <tr>
+                <td>Rebase</td>
+                <td>
+                  It gets a target row, marked unmeasured because the command
+                  does not exist, and THA-11 owns it. Timing
+                  <code>land</code> instead would put a number on a different
+                  operation.
+                </td>
+              </tr>
+              <tr>
+                <td>Which fixture the absolute targets apply to</td>
+                <td>
+                  <code>medium-serial</code> (2,000 paths, 20,000 ops, 10
+                  authors), which the bench README calls "a real active
+                  repository". Multiples are reported on every fixture that ran.
+                  <code>stress-serial</code> is reported too.
+                </td>
+              </tr>
+              <tr>
+                <td>Target multiples</td>
+                <td>
+                  1.0 for every row, meaning "no slower than git". The issue
+                  asks for an advantage over git, and parity is the first number
+                  that can show one. Nothing measured supports a tighter
+                  multiple yet.
+                </td>
+              </tr>
+              <tr>
+                <td>What the gate fails on</td>
+                <td>
+                  A thaddeus/git ratio above its calibrated ceiling, a gated
+                  case that no longer finishes <code>ok</code>, a missing
+                  ceilings file, or ceilings recorded for other case versions. A
+                  missed target does not fail the build. It is reported with the
+                  issue that owns the fix, because today's numbers miss most
+                  targets and a gate that is red on every PR would only get
+                  switched off.
+                </td>
+              </tr>
+              <tr>
+                <td>Where the gate runs</td>
+                <td>
+                  A new job in <code>ci.yml</code>, listed in
+                  <code>ci-passed</code>'s <code>needs</code>, so it is
+                  required. It runs on <code>small-serial</code>, warm, 3
+                  repeats and 1 warm-up. That is the largest fixture the server
+                  cases can seed today.
+                </td>
+              </tr>
+              <tr>
+                <td>Where observed numbers are kept</td>
+                <td>
+                  The CI ceilings file holds the observed ratios from the
+                  calibration study and is committed. The KVM run of Task 9 goes
+                  in the PR body and the Linear issue, tagged with its commit.
+                  The bench README says a citable
+                  <code>bench/results/</code> file is recorded from the merged
+                  <code>main</code> commit in a separate PR, because merges
+                  rebase. This plan follows that rule and leaves the post-merge
+                  record as a follow-up.
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section class="block">
+        <h2>The budget table</h2>
+        <p>
+          Targets as committed in <code>bench/budgets/everyday.json</code>.
+          Every value in this table is a target. Task 9 adds the observed
+          columns.
+        </p>
+        <div class="table-scroll">
+          <table>
+            <thead>
+              <tr>
+                <th>Command</th>
+                <th>Env</th>
+                <th>thaddeus case</th>
+                <th>git case</th>
+                <th>Target</th>
+                <th>Multiple</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>status</td>
+                <td>developer</td>
+                <td><code>wc.status</code></td>
+                <td><code>git.status</code></td>
+                <td class="num">50 ms</td>
+                <td class="num">1.0</td>
+              </tr>
+              <tr>
+                <td>status</td>
+                <td>agent</td>
+                <td><code>wc.status.agents8</code></td>
+                <td><code>git.status.agents8</code></td>
+                <td class="num">100 ms</td>
+                <td class="num">1.0</td>
+              </tr>
+              <tr>
+                <td>diff</td>
+                <td>developer</td>
+                <td><code>wc.diff</code></td>
+                <td><code>git.diff</code></td>
+                <td class="num">100 ms</td>
+                <td class="num">1.0</td>
+              </tr>
+              <tr>
+                <td>diff</td>
+                <td>agent</td>
+                <td><code>wc.diff.agents8</code></td>
+                <td><code>git.diff.agents8</code></td>
+                <td class="num">200 ms</td>
+                <td class="num">1.0</td>
+              </tr>
+              <tr>
+                <td>commit</td>
+                <td>developer</td>
+                <td><code>e2e.push.10</code></td>
+                <td><code>git.commit</code></td>
+                <td class="num">1,000 ms</td>
+                <td class="num">1.0</td>
+              </tr>
+              <tr>
+                <td>checkout</td>
+                <td>developer</td>
+                <td><code>e2e.workspace</code></td>
+                <td><code>git.worktree</code></td>
+                <td class="num">1,000 ms</td>
+                <td class="num">1.0</td>
+              </tr>
+              <tr>
+                <td>pull</td>
+                <td>developer</td>
+                <td><code>e2e.pull</code></td>
+                <td><code>git.pull</code></td>
+                <td class="num">5,000 ms</td>
+                <td class="num">1.0</td>
+              </tr>
+              <tr>
+                <td>ci-checkout</td>
+                <td>ci</td>
+                <td><code>e2e.checkout.cold</code> dropped</td>
+                <td><code>git.clone</code> dropped</td>
+                <td class="num">1,000 ms</td>
+                <td class="num">1.0</td>
+              </tr>
+              <tr>
+                <td>rebase</td>
+                <td>developer</td>
+                <td colspan="2">unmeasured, no command (THA-11)</td>
+                <td class="num">2,000 ms</td>
+                <td class="num">1.0</td>
+              </tr>
+              <tr>
+                <td>rebase</td>
+                <td>agent</td>
+                <td colspan="2">unmeasured, no command (THA-11)</td>
+                <td class="num">2,000 ms</td>
+                <td class="num">1.0</td>
+              </tr>
+              <tr>
+                <td>commit, checkout, pull</td>
+                <td>agent</td>
+                <td colspan="2">unmeasured, concurrent writers (THA-118)</td>
+                <td class="num">same as developer</td>
+                <td class="num">1.0</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section class="block">
+        <h2>Task 1: the fixture's main tree and its git replay</h2>
+        <section class="task">
+          <p class="files">
+            Create <code>bench/src/everyday/tree.ts</code> · Create
+            <code>bench/src/everyday/git.ts</code> · Test
+            <code>bench/test/everyday-tree.test.ts</code> · Test
+            <code>bench/test-slow/everyday-git.test.ts</code>
+          </p>
+          <dl class="io">
+            <dt>Consumes</dt>
+            <dd>
+              <code>FixturePlan</code>, <code>Step</code>,
+              <code>manifestHash</code> (plan.ts),
+              <code>contentFor</code> (content.ts), <code>cachedBuild</code>,
+              <code>WORK_ROOT</code> (cache.ts), <code>generateFixture</code>,
+              <code>resolveFixture</code>.
+            </dd>
+            <dt>Produces</dt>
+            <dd>
+              <code>mainTree(plan): Map&lt;string, Uint8Array&gt;</code>,
+              <code>editPaths(plan): string[]</code>,
+              <code>applyEdit(dir, paths): void</code>,
+              <code>EDIT_FILES = 10</code> in tree.ts.
+              <code>fastImportStream(plan): Uint8Array</code>,
+              <code>gitFixture(plan, opts?): Promise&lt;string&gt;</code> (path
+              of a bare repository),
+              <code>gitEnv(home): Record&lt;string,string&gt;</code>,
+              <code>timeGit(args, env): Promise&lt;number&gt;</code>,
+              <code>GIT_SEED_VERSION</code> in git.ts.
+            </dd>
+          </dl>
+          <ol class="steps">
+            <li>
+              <input type="checkbox" id="t1s1" /><span class="label">
+                <strong>Write the failing unit tests</strong> for
+                <code>mainTree</code>. It replays a serial plan in memory and
+                throws on a base plan, whose lands merge concurrent views.
+                <pre><code>import { expect, test } from 'bun:test';
+import { generateFixture } from '../src/fixtures/plan';
+import { resolveFixture } from '../src/fixtures/spec';
+import { editPaths, mainTree, EDIT_FILES } from '../src/everyday/tree';
+
+test('mainTree of tiny-serial holds only paths the plan wrote last on main', () =&gt; {
+  const plan = generateFixture(resolveFixture('tiny-serial'));
+  const tree = mainTree(plan);
+  expect(tree.size).toBeGreaterThan(0);
+  for (const path of tree.keys()) expect(path).toMatch(/^src\/f\d+\.ts$/);
+});
+
+test('mainTree refuses a base plan', () =&gt; {
+  expect(() =&gt; mainTree(generateFixture(resolveFixture('tiny')))).toThrow(/serial/);
+});
+
+test('editPaths takes the first EDIT_FILES paths of main in sorted order', () =&gt; {
+  const plan = generateFixture(resolveFixture('small-serial'));
+  const paths = editPaths(plan);
+  expect(paths).toHaveLength(EDIT_FILES);
+  expect(paths).toEqual([...mainTree(plan).keys()].sort().slice(0, EDIT_FILES));
+});</code></pre>
+              </span>
+            </li>
+            <li>
+              <input type="checkbox" id="t1s2" /><span class="label">
+                <strong>Run them and watch them fail</strong> with
+                <code
+                  >cd bench &amp;&amp; bun test
+                  ./test/everyday-tree.test.ts</code
+                >. Expect
+                <code>Cannot find module '../src/everyday/tree'</code>.
+              </span>
+            </li>
+            <li>
+              <input type="checkbox" id="t1s3" /><span class="label">
+                <strong>Write <code>tree.ts</code>.</strong> Only the active
+                view's map is kept, and it is dropped after it lands. Without
+                that, stress would hold 500 copies of a 20,000-file tree.
+                <pre><code>// The plaintext main tree of a serial plan, and the fixed edit the
+// status and diff cases apply to it. Both the thaddeus and the git side
+// apply the same edit to the same tree.
+export const EDIT_FILES = 10;
+const EDIT_LINE = '// bench edit\n';
+
+export function mainTree(plan: FixturePlan): Map&lt;string, Uint8Array&gt; {
+  if (plan.spec.variant !== 'serial') {
+    throw new Error(`mainTree needs a serial plan, got ${plan.spec.name}`);
+  }
+  let main = new Map&lt;string, Uint8Array&gt;();
+  const open = new Map&lt;string, Map&lt;string, Uint8Array&gt;&gt;();
+  const tree = (view: string) =&gt; (view === 'main' ? main : open.get(view));
+  for (const step of plan.steps) {
+    if (step.kind === 'fork') open.set(step.view, new Map(main));
+    else if (step.kind === 'land') {
+      const landed = open.get(step.from);
+      if (landed !== undefined) main = landed;
+      open.delete(step.from);
+    } else if (step.kind === 'write') tree(step.view)?.set(step.path, contentFor(step));
+    else tree(step.view)?.delete(step.path);
+  }
+  return main;
+}
+
+export function editPaths(plan: FixturePlan): string[] {
+  return [...mainTree(plan).keys()].sort().slice(0, EDIT_FILES);
+}
+
+export function applyEdit(dir: string, paths: readonly string[]): void {
+  for (const path of paths) appendFileSync(join(dir, path), EDIT_LINE);
+}</code></pre>
+              </span>
+            </li>
+            <li>
+              <input type="checkbox" id="t1s4" /><span class="label">
+                <strong>Run the unit tests and watch them pass.</strong>
+              </span>
+            </li>
+            <li>
+              <input type="checkbox" id="t1s5" /><span class="label">
+                <strong>Write <code>git.ts</code>.</strong> The stream makes one
+                commit per write or remove step on that view's branch, with the
+                step's author and time. A fork starts the view at main's tip. A
+                land moves <code>main</code> to the view's tip, which is a
+                fast-forward in a serial plan because main gets no writes of its
+                own. The bare repository is cached as
+                <code
+                  >&lt;hash&gt;-git-v&lt;GIT_SEED_VERSION&gt;/bench.git</code
+                >
+                through <code>cachedBuild</code>, the same way the server root
+                is.
+                <pre><code>export const GIT_SEED_VERSION = 1;
+
+export function fastImportStream(plan: FixturePlan): Uint8Array {
+  const enc = new TextEncoder();
+  const parts: Uint8Array[] = [];
+  const text = (s: string) =&gt; parts.push(enc.encode(s));
+  const tips = new Map&lt;string, number&gt;();
+  let mark = 0;
+  for (const step of plan.steps) {
+    if (step.kind === 'fork') {
+      const tip = tips.get(step.from);
+      if (tip === undefined) tips.delete(step.view);
+      else tips.set(step.view, tip);
+      continue;
+    }
+    if (step.kind === 'land') {
+      const tip = tips.get(step.from);
+      if (tip === undefined) continue;
+      tips.set('main', tip);
+      text(`reset refs/heads/main\nfrom :${tip}\n\n`);
+      continue;
+    }
+    const when = Math.floor(Date.parse(step.at) / 1000);
+    const who = `author-${step.author} &lt;author-${step.author}@bench.invalid&gt; ${when} +0000`;
+    const message = `${step.kind} ${step.path}\n`;
+    mark += 1;
+    text(`commit refs/heads/${step.view}\nmark :${mark}\nauthor ${who}\ncommitter ${who}\n`);
+    text(`data ${message.length}\n${message}`);
+    const parent = tips.get(step.view);
+    if (parent !== undefined) text(`from :${parent}\n`);
+    if (step.kind === 'write') {
+      const bytes = contentFor(step);
+      text(`M 100644 inline ${step.path}\ndata ${bytes.length}\n`);
+      parts.push(bytes);
+      text('\n');
+    } else {
+      text(`D ${step.path}\n`);
+    }
+    text('\n');
+    tips.set(step.view, mark);
+  }
+  return concatBytes(parts);
+}
+
+// Git with no system or user config, so a developer's ~/.gitconfig cannot
+// change what a case times.
+export function gitEnv(home: string): Record&lt;string, string&gt; {
+  return {
+    ...process.env, HOME: home, GIT_CONFIG_NOSYSTEM: '1',
+    GIT_CONFIG_GLOBAL: '/dev/null', GIT_TERMINAL_PROMPT: '0',
+    GIT_AUTHOR_NAME: 'bench', GIT_AUTHOR_EMAIL: 'bench@bench.invalid',
+    GIT_COMMITTER_NAME: 'bench', GIT_COMMITTER_EMAIL: 'bench@bench.invalid',
+  } as Record&lt;string, string&gt;;
+}</code></pre>
+                <code>timeGit</code> copies <code>timeCli</code> in
+                <code>e2e/home.ts</code>: it spawns <code>git</code> with
+                <code>gitEnv</code>, measures wall-clock time including process
+                start, and throws on a non-zero exit with the end of the output.
+                <code>gitFixture</code> runs
+                <code>git init --bare -q -b main</code>, then pipes the stream
+                into <code>git fast-import --quiet</code>.
+              </span>
+            </li>
+            <li>
+              <input type="checkbox" id="t1s6" /><span class="label">
+                <strong>Write the slow test</strong> in
+                <code>test-slow/everyday-git.test.ts</code>. For
+                <code>tiny-serial</code> and <code>small-serial</code>, it
+                checks that <code>git ls-tree -r --name-only main</code> lists
+                exactly the keys of <code>mainTree</code>, that
+                <code>git cat-file blob main:&lt;path&gt;</code> returns the
+                same bytes for every path, and that
+                <code>git rev-list --count main</code> equals the plan's number
+                of write and remove steps. Run it with
+                <code
+                  >cd bench &amp;&amp; bun test
+                  ./test-slow/everyday-git.test.ts</code
+                >
+                and watch it pass. Then break the stream on purpose by dropping
+                the <code>D</code> line. Watch the test fail, and restore the
+                line.
+              </span>
+            </li>
+            <li>
+              <input type="checkbox" id="t1s7" /><span class="label">
+                <strong>Commit.</strong>
+                <pre><code>git add bench/src/everyday/tree.ts bench/src/everyday/git.ts \
+  bench/test/everyday-tree.test.ts bench/test-slow/everyday-git.test.ts
+git commit -m "feat(bench): replay serial fixtures into a git repository"</code></pre>
+              </span>
+            </li>
+          </ol>
+        </section>
+      </section>
+
+      <section class="block">
+        <h2>Task 2: a thaddeus working copy built from the fixture cache</h2>
+        <section class="task">
+          <p class="files">
+            Create <code>bench/src/everyday/workcopy.ts</code> · Test
+            <code>bench/test-slow/everyday-workcopy.test.ts</code>
+          </p>
+          <dl class="io">
+            <dt>Consumes</dt>
+            <dd>
+              <code>fixtureDir</code>, <code>linkCopy</code>,
+              <code>COMPLETE</code> (cache.ts),
+              <code>authorsOf</code> (materialize.ts), <code>Platform</code>,
+              <code>FileBackend</code>, <code>cliCommand</code>,
+              <code>writeCliHome</code>, <code>timeCli</code> (e2e/home.ts),
+              <code>mainTree</code> (Task 1).
+            </dd>
+            <dt>Produces</dt>
+            <dd>
+              <code>thadWorkingCopy(plan, dir): Promise&lt;void&gt;</code> and
+              <code>UNUSED_SERVER = 'http://127.0.0.1:9'</code>.
+            </dd>
+          </dl>
+          <ol class="steps">
+            <li>
+              <input type="checkbox" id="t2s1" /><span class="label">
+                <strong>Write the failing slow test.</strong> On
+                <code>small-serial</code>, build a working copy, run
+                <code>thaddeus status --json</code> as the owner, and expect
+                <code>clean: true</code> with no skipped files. Apply the edit
+                and expect exactly the <code>editPaths</code> as
+                <code>modified</code>. Also compare every file on disk with
+                <code>mainTree</code>, byte for byte. Use
+                <code>BENCH_CLI="bun &lt;abs&gt;/packages/cli/src/bin.ts"</code>
+                the way <code>test-slow/e2e.test.ts</code>
+                does, so the test needs no compiled binary.
+              </span>
+            </li>
+            <li>
+              <input type="checkbox" id="t2s2" /><span class="label">
+                <strong>Run it and watch it fail</strong> on the missing module.
+              </span>
+            </li>
+            <li>
+              <input type="checkbox" id="t2s3" /><span class="label">
+                <strong>Write <code>workcopy.ts</code>.</strong>
+                <pre><code>// A working copy as `thaddeus clone` leaves one, built without a server:
+// the fixture's store hard-linked into .thaddeus/store, main written to
+// disk as the owner reads it, and a config whose base is main's heads.
+// status and diff only read the store and the disk, so they cannot tell
+// it from a clone. Commands that talk to a server would fail on the
+// unused address, and no case runs them here.
+export const UNUSED_SERVER = 'http://127.0.0.1:9';
+
+export async function thadWorkingCopy(plan: FixturePlan, dir: string): Promise&lt;void&gt; {
+  await ready();
+  const store = join(dir, '.thaddeus', 'store');
+  await linkCopy(await fixtureDir(plan), store);
+  rmSync(join(store, COMPLETE), { force: true });
+  const [owner] = authorsOf(plan);
+  const repo = await new Platform().openDurable('bench', new FileBackend(store));
+  for (const [path, entry] of repo.log.materialize('main', owner)) {
+    if (entry.ref === null) continue;
+    const full = join(dir, path);
+    mkdirSync(dirname(full), { recursive: true });
+    writeFileSync(full, await repo.store.get(entry.ref, owner));
+  }
+  const config = { server: UNUSED_SERVER, repo: 'bench', base: [...repo.heads('main')], view: 'main' };
+  writeFileSync(join(dir, '.thaddeus', 'config.json'), `${JSON.stringify(config, null, 2)}\n`);
+}</code></pre>
+              </span>
+            </li>
+            <li>
+              <input type="checkbox" id="t2s4" /><span class="label">
+                <strong>Run the test and watch it pass.</strong> If
+                <code>status</code> reports the working copy as ahead or dirty,
+                the config is wrong. Fix the config. Do not loosen the test.
+              </span>
+            </li>
+            <li>
+              <input type="checkbox" id="t2s5" /><span class="label">
+                <strong>Commit</strong> as
+                <code
+                  >feat(bench): build a thaddeus working copy from a fixture
+                  cache</code
+                >.
+              </span>
+            </li>
+          </ol>
+        </section>
+      </section>
+
+      <section class="block">
+        <h2>Task 3: the everyday suite with the local cases</h2>
+        <section class="task">
+          <p class="files">
+            Create <code>bench/src/everyday/cases.ts</code> · Modify
+            <code>bench/src/record.ts</code> (<code>REGISTRIES</code>,
+            <code>SuiteName</code>, <code>SuiteOptions.only</code>, case
+            filtering) · Modify <code>bench/src/cli.ts</code> (<code
+              >--suite everyday</code
+            >, <code>--only</code>) · Modify
+            <code>bench/schema/bench-run.schema.json</code> if it lists suite
+            names · Test <code>bench/test/everyday-cases.test.ts</code>,
+            <code>bench/test-slow/everyday.test.ts</code>
+          </p>
+          <dl class="io">
+            <dt>Consumes</dt>
+            <dd>
+              Tasks 1 and 2, <code>BenchCase</code>, <code>timeCli</code>,
+              <code>cliCommand</code>, <code>writeCliHome</code>.
+            </dd>
+            <dt>Produces</dt>
+            <dd>
+              Suite <code>everyday</code> with <code>wc.status</code>,
+              <code>wc.diff</code>, <code>wc.status.agents8</code>,
+              <code>wc.diff.agents8</code>, <code>git.status</code>,
+              <code>git.diff</code>, <code>git.status.agents8</code>,
+              <code>git.diff.agents8</code>, all <code>version: 1</code>,
+              <code>variant: 'serial'</code>, on tiny, small, medium and stress.
+              <code>SuiteOptions.only?: string[]</code> holds globs over case
+              ids, applied before fixture pre-builds the same way
+              <code>exclude</code> is. <code>--suite all</code> now includes
+              <code>everyday</code>, so <code>bench:record</code> records it.
+            </dd>
+          </dl>
+          <ol class="steps">
+            <li>
+              <input type="checkbox" id="t3s1" /><span class="label">
+                <strong>Write the failing unit test</strong> in
+                <code>test/everyday-cases.test.ts</code>. It imports the
+                registry and checks the ids above, that every case is
+                <code>variant: 'serial'</code> and
+                <code>isolation: 'per-case'</code>, and that
+                <code>registryFor('everyday')</code> points at the module. Add a
+                runner test with the fake cases that shows
+                <code>only: ['git.*']</code> runs only the matching cases and
+                builds no fixture for the others.
+              </span>
+            </li>
+            <li>
+              <input type="checkbox" id="t3s2" /><span class="label">
+                <strong>Run it and watch it fail.</strong>
+              </span>
+            </li>
+            <li>
+              <input type="checkbox" id="t3s3" /><span class="label">
+                <strong>Write the cases.</strong> These commands only read, so a
+                case sets up once (<code>per-case</code>) and the warm-ups
+                absorb first-run effects such as git refreshing its index. Setup
+                builds the working copy, or
+                <code>git clone -q &lt;bare&gt; &lt;dir&gt;</code>
+                for git, then applies the edit. Timed commands:
+                <code>thaddeus status</code>, <code>thaddeus diff</code>,
+                <code>git status</code>, <code>git diff</code>, each run from
+                the working copy with <code>timeCli</code>/<code>timeGit</code>.
+                For the agent cases, setup builds 8 working copies (<code
+                  >wc-0</code
+                >
+                to <code>wc-7</code>), and one sample runs the command in all 8
+                at once.
+                <pre><code>const AGENTS = 8;
+
+// One sample of an agent case: AGENTS copies of the command at once, one
+// per working copy, timed until the last one exits. That is how long an
+// agent on a shared host waits when the others are busy too.
+async function together(dirs: readonly string[], one: (dir: string) =&gt; Promise&lt;number&gt;) {
+  await Promise.all(dirs.map(one));
+}</code></pre>
+                Each case's <code>note</code> says what it times. The agent
+                cases' note says "8 concurrent copies on one host; the sample is
+                the slowest".
+              </span>
+            </li>
+            <li>
+              <input type="checkbox" id="t3s4" /><span class="label">
+                <strong>Wire the suite.</strong> Add <code>everyday</code> to
+                <code>SuiteName</code> and <code>REGISTRIES</code>. Have
+                <code>suiteOptionsOf</code> accept it, make
+                <code>all</code> mean library, e2e and everyday, and add
+                <code>--only</code> to <code>suiteFlags</code>. Update
+                <code>USAGE</code>.
+              </span>
+            </li>
+            <li>
+              <input type="checkbox" id="t3s5" /><span class="label">
+                <strong>Run the unit tests and watch them pass</strong> with
+                <code>moonx bench:test</code>.
+              </span>
+            </li>
+            <li>
+              <input type="checkbox" id="t3s6" /><span class="label">
+                <strong>Write and run the slow test.</strong> It runs
+                <code
+                  >bun src/cli.ts run --suite everyday --fixtures tiny --repeats
+                  1 --warmup 0</code
+                >
+                and expects every case <code>ok</code>. Then run it for real on
+                small, which takes about a minute here:
+                <pre><code>cd bench &amp;&amp; CI= bun src/cli.ts run --suite everyday --fixtures small \
+  --repeats 3 --warmup 1 --out out/everyday-small.json</code></pre>
+                Expect eight <code>ok</code> lines. Paste them into the commit
+                body.
+              </span>
+            </li>
+            <li>
+              <input type="checkbox" id="t3s7" /><span class="label">
+                <strong>Commit</strong> as
+                <code
+                  >feat(bench): add the everyday suite with status and diff
+                  against git</code
+                >.
+              </span>
+            </li>
+          </ol>
+        </section>
+      </section>
+
+      <section class="block">
+        <h2>Task 4: server-side git baselines and the workspace case</h2>
+        <section class="task">
+          <p class="files">
+            Modify <code>bench/src/everyday/cases.ts</code> · Modify
+            <code>bench/src/e2e/cases.ts</code> (add <code>e2e.workspace</code>;
+            export <code>writeChangeSet</code>) · Test
+            <code>bench/test/everyday-cases.test.ts</code>,
+            <code>bench/test/e2e-cases.test.ts</code>,
+            <code>bench/test-slow/everyday.test.ts</code>,
+            <code>bench/test-slow/e2e.test.ts</code>
+          </p>
+          <dl class="io">
+            <dt>Consumes</dt>
+            <dd>
+              <code>gitFixture</code>, <code>timeGit</code>,
+              <code>linkCopy</code>, <code>writeChangeSet</code>, and the e2e
+              helpers <code>serveFor</code>, <code>ownerClone</code>,
+              <code>asOwner</code>.
+            </dd>
+            <dt>Produces</dt>
+            <dd>
+              <code>git.commit</code>, <code>git.worktree</code>,
+              <code>git.pull</code>, <code>git.clone</code> (cold) in the
+              everyday suite, and <code>e2e.workspace</code> in the e2e suite.
+              All are <code>per-sample</code> and <code>version: 1</code>. The
+              existing e2e cases keep their versions because their timed work
+              does not change.
+            </dd>
+          </dl>
+          <ol class="steps">
+            <li>
+              <input type="checkbox" id="t4s1" /><span class="label">
+                <strong>Extend the failing unit tests</strong> with the new ids,
+                that <code>git.clone</code> and <code>e2e.workspace</code> are
+                <code>cold</code>, and that <code>git.commit</code> is
+                <code>writes: true</code>. Run them and watch them fail.
+              </span>
+            </li>
+            <li>
+              <input type="checkbox" id="t4s2" /><span class="label">
+                <strong>Write the git cases.</strong> Each sample hard-link
+                copies the cached bare repository to
+                <code>&lt;workDir&gt;/remote.git</code>. That is safe for the
+                same reason it is for FileBackend: git writes new objects as new
+                files and updates refs by rename.
+                <ul>
+                  <li>
+                    <code>git.commit</code>: setup clones and runs
+                    <code>git switch -q -c bench-push</code>, then
+                    <code>writeChangeSet(clone, 10)</code>. The timed part runs
+                    <code>git add -A</code>,
+                    <code>git commit -q -m bench</code> and
+                    <code>git push -q origin bench-push</code>, and the sample
+                    is the sum of the three.
+                  </li>
+                  <li>
+                    <code>git.worktree</code>: setup clones and runs
+                    <code>git branch bench-ws</code>. The timed part runs
+                    <code>git worktree add -q &lt;workDir&gt;/ws bench-ws</code
+                    >.
+                  </li>
+                  <li>
+                    <code>git.pull</code>: setup makes an owner clone and a
+                    reader clone, then the owner commits a 10-file change set to
+                    main and pushes it. The timed part runs
+                    <code>git pull -q --ff-only</code> in the reader clone.
+                  </li>
+                  <li>
+                    <code>git.clone</code>: timed
+                    <code
+                      >git clone -q --depth 1 file://&lt;remote.git&gt;
+                      &lt;workDir&gt;/checkout</code
+                    >, in a fresh home, with a <code>cold: true</code> note
+                    matching <code>e2e.checkout.cold</code>.
+                  </li>
+                </ul>
+              </span>
+            </li>
+            <li>
+              <input type="checkbox" id="t4s3" /><span class="label">
+                <strong>Write <code>e2e.workspace</code></strong> in the same
+                style as <code>pushCase</code>:
+                <pre><code>// Checkout: thaddeus has no tree switch. Opening a branch is
+// `thaddeus workspace`, which pulls the branch into the shared store and
+// writes its files to a new directory. Setup clones and creates the
+// branch; the timed command opens it. Compared with `git worktree add`.
+const workspace: BenchCase&lt;LandState&gt; = e2eCase({
+  id: 'e2e.workspace',
+  isolation: 'per-sample',
+  cold: true,
+  pushes: false,
+  setup: async (ctx) =&gt; {
+    const s = await serveFor(workspace, ctx);
+    const clone = await ownerClone(s, 'clone');
+    await asOwner(s, ['branch', 'bench-ws'], clone);
+    return { ...s, clone };
+  },
+  run: async (s) =&gt; {
+    await asOwner(s, ['workspace', 'bench-ws', join(s.workDir, 'ws')], s.clone);
+  },
+});</code></pre>
+                Add it to <code>e2eCases</code>. Adding a case changes the suite
+                version, which is expected. The noise thresholds only cover the
+                library suite, so this does not make them stale.
+              </span>
+            </li>
+            <li>
+              <input type="checkbox" id="t4s4" /><span class="label">
+                <strong>Run the unit tests and watch them pass</strong>, then
+                run the slow tests on tiny. Then run for real:
+                <pre><code>cd bench &amp;&amp; CI= bun src/cli.ts run --suite all --fixtures small \
+  --only 'git.*,e2e.workspace,e2e.push.10,e2e.pull,e2e.checkout.cold' \
+  --repeats 3 --warmup 1 --out out/server-small.json</code></pre>
+                Expect <code>ok</code> for all eight. Paste the lines into the
+                commit body.
+              </span>
+            </li>
+            <li>
+              <input type="checkbox" id="t4s5" /><span class="label">
+                <strong>Commit</strong> as
+                <code
+                  >feat(bench): add git commit, worktree, pull and clone
+                  baselines and a workspace case</code
+                >.
+              </span>
+            </li>
+          </ol>
+        </section>
+      </section>
+
+      <section class="block">
+        <h2>Task 5: the budgets file and the budget report</h2>
+        <section class="task">
+          <p class="files">
+            Create <code>bench/budgets/everyday.json</code> · Create
+            <code>bench/schema/budgets.schema.json</code> · Create
+            <code>bench/src/budget.ts</code> · Modify
+            <code>bench/src/cli.ts</code> (<code>bench budget</code>) · Test
+            <code>bench/test/budget.test.ts</code>
+          </p>
+          <dl class="io">
+            <dt>Consumes</dt>
+            <dd>
+              <code>BenchRun</code>, <code>CaseResult</code> (result.ts), ajv as
+              <code>validateRun</code> uses it.
+            </dd>
+            <dt>Produces</dt>
+            <dd>
+              Types <code>BudgetRow</code>, <code>Budgets</code>,
+              <code>BudgetLine</code>. <code>readBudgets(path)</code>,
+              <code>evaluateBudgets(run, budgets): BudgetLine[]</code>,
+              <code>renderBudgets(lines): string</code>,
+              <code>budgetCaseIds(budgets): string[]</code>,
+              <code>ratioKey(line)</code> =
+              <code>`${command}/${env} ${fixture} ${pageCache}`</code>.
+            </dd>
+          </dl>
+          <ol class="steps">
+            <li>
+              <input type="checkbox" id="t5s1" /><span class="label">
+                <strong>Write the budgets file.</strong> The rows are the budget
+                table above. A row with no case has
+                <code>"unmeasured"</code> and <code>"owner"</code>. Misses are
+                filled in under <code>"attribution"</code> in Task 9.
+                <pre><code>{
+  "$schema": "../schema/budgets.schema.json",
+  "version": 1,
+  "targetFixture": "medium-serial",
+  "rows": [
+    { "command": "status", "env": "developer", "thaddeus": "wc.status",
+      "git": "git.status", "targetMs": 50, "targetMultiple": 1 },
+    { "command": "ci-checkout", "env": "ci", "thaddeus": "e2e.checkout.cold",
+      "git": "git.clone", "pageCache": "dropped", "targetMs": 1000, "targetMultiple": 1 },
+    { "command": "rebase", "env": "developer", "targetMs": 2000, "targetMultiple": 1,
+      "unmeasured": "thaddeus has no rebase; updating a workspace base is THA-11",
+      "owner": "THA-11" }
+  ],
+  "attribution": {}
+}</code></pre>
+                That is three of the thirteen rows. The file in the commit has
+                all thirteen.
+              </span>
+            </li>
+            <li>
+              <input type="checkbox" id="t5s2" /><span class="label">
+                <strong>Write the failing tests.</strong> Build a
+                <code>BenchRun</code> by hand with <code>wc.status</code> p50
+                120 and <code>git.status</code> p50 10 on
+                <code>medium-serial</code>, and expect a line with multiple 12,
+                <code>targetMet: false</code> and
+                <code>multipleMet: false</code>. On <code>small-serial</code>,
+                expect <code>targetMet: null</code>, because absolute targets
+                apply to the target fixture only. A thaddeus result that is
+                <code>exceeded</code> gives <code>status: 'exceeded'</code> and
+                no multiple. A row whose <code>pageCache</code> is
+                <code>dropped</code> ignores warm results. An unmeasured row
+                comes out once, with its owner. Also test that the schema
+                rejects a row with neither cases nor <code>unmeasured</code>.
+              </span>
+            </li>
+            <li>
+              <input type="checkbox" id="t5s3" /><span class="label">
+                <strong>Run them and watch them fail.</strong>
+              </span>
+            </li>
+            <li>
+              <input type="checkbox" id="t5s4" /><span class="label">
+                <strong>Write <code>budget.ts</code>.</strong>
+                <code>evaluateBudgets</code> takes every fixture with a result
+                for both of a row's cases (and the row's page-cache mode, or
+                <code>warm</code> when the row has none and the case is cold),
+                and makes one <code>BudgetLine</code> per row and fixture:
+                <pre><code>export interface BudgetLine {
+  command: string;
+  env: string;
+  fixture: string | null;
+  pageCache: 'warm' | 'dropped' | null;
+  thaddeusP50: number | null;
+  gitP50: number | null;
+  multiple: number | null;
+  targetMs: number;
+  targetMultiple: number;
+  /** null when the fixture is not the target fixture or a side did not finish. */
+  targetMet: boolean | null;
+  multipleMet: boolean | null;
+  status: 'ok' | 'exceeded' | 'oom' | 'error' | 'missing' | 'unmeasured';
+  owner: string | null;
+  cause: string | null;
+}</code></pre>
+                <code>renderBudgets</code> prints a Markdown table with these
+                columns, then the attribution of every missed line.
+                <code>bench budget &lt;run.json&gt;... [--budgets path]</code>
+                merges the runs with <code>mergeRuns</code>, prints the table,
+                appends it to <code>$GITHUB_STEP_SUMMARY</code> when that is
+                set, and exits 0. Missing a target is reported, and it does not
+                change the exit code.
+              </span>
+            </li>
+            <li>
+              <input type="checkbox" id="t5s5" /><span class="label">
+                <strong>Run the tests and watch them pass.</strong> Then run the
+                report on the runs from Tasks 3 and 4:
+                <code
+                  >cd bench &amp;&amp; bun src/cli.ts budget
+                  out/everyday-small.json out/server-small.json</code
+                >. Expect one line per measured row on
+                <code>small-serial</code>, and five unmeasured rows.
+              </span>
+            </li>
+            <li>
+              <input type="checkbox" id="t5s6" /><span class="label">
+                <strong>Commit</strong> as
+                <code
+                  >feat(bench): define everyday-command budgets and report runs
+                  against them</code
+                >.
+              </span>
+            </li>
+          </ol>
+        </section>
+      </section>
+
+      <section class="block">
+        <h2>Task 6: ceilings, the gate and calibration</h2>
+        <section class="task">
+          <p class="files">
+            Modify <code>bench/src/budget.ts</code> · Modify
+            <code>bench/src/cli.ts</code> (<code>bench gate</code>,
+            <code>bench calibrate</code>) · Test
+            <code>bench/test/budget.test.ts</code>,
+            <code>bench/test/cli-gate.test.ts</code>
+          </p>
+          <dl class="io">
+            <dt>Consumes</dt>
+            <dd>
+              <code>logMeanStdev</code>, <code>normalQuantile</code> (stats.ts),
+              <code>runnerImage</code> (compare.ts), the
+              <code>Host.runSuite</code> seam.
+            </dd>
+            <dt>Produces</dt>
+            <dd>
+              <code>GATE_METHOD</code>, <code>Ceilings</code>,
+              <code>deriveCeilings(ratios, meta): Ceilings</code>,
+              <code
+                >checkGate(run, budgets, ceilings | null): { failed: boolean;
+                lines: string[] }</code
+              >, and the ceilings file path
+              <code>bench/budgets/ceilings-github-ubuntu-latest.json</code>.
+            </dd>
+          </dl>
+          <ol class="steps">
+            <li>
+              <input type="checkbox" id="t6s1" /><span class="label">
+                <strong>Write the failing tests.</strong>
+                <code>deriveCeilings</code> with ratios
+                <code>[10, 11, 12]</code> for one key and N = 1 gives
+                <code>exp(mu + z·sigma)</code>, with z =
+                <code>normalQuantile(0.99)</code>. It does not floor at 1,
+                because a command faster than git (a ratio below 1) must keep
+                its lead. A key with two ratios gets no ceiling.
+                <code>checkGate</code> fails when the ratio is above the
+                ceiling, when a gated case is not <code>ok</code>, when the
+                ceilings file is <code>null</code>, and when the ceilings file's
+                <code>caseVersions</code> differ from the run's. It passes when
+                the ratio is at or below the ceiling. The CLI test drives
+                <code>calibrate --runs 3</code> through a fake
+                <code>runSuite</code> and checks that the file is rewritten
+                after every run.
+              </span>
+            </li>
+            <li>
+              <input type="checkbox" id="t6s2" /><span class="label">
+                <strong>Run them and watch them fail.</strong>
+              </span>
+            </li>
+            <li>
+              <input type="checkbox" id="t6s3" /><span class="label">
+                <strong>Write the code.</strong>
+                <pre><code>// What the CI gate measures: every case a budget row names, on small,
+// warm, 3 repeats and 1 warm-up. Server cases cannot seed medium until
+// THA-21, so small is the largest fixture the gate can run today.
+export const GATE_METHOD = {
+  suite: 'all' as const, fixtures: ['small'], sweeps: false,
+  pageCache: ['warm' as const], repeats: 3, warmup: 1, budgetMs: 300_000,
+};
+
+// The gate's ceiling for each ratio key: the largest thaddeus/git ratio
+// runner noise plausibly produces, from a calibration study on the CI
+// runner. The same lognormal bound and Bonferroni split as
+// deriveThresholds, nominally a 1% chance that an unchanged PR fails, but
+// not floored at 1: a command that is faster than git keeps that lead.
+export function deriveCeilings(
+  ratios: Record&lt;string, number[]&gt;,
+  meta: { studiedAt: string; runnerImage: string; runs: number;
+          caseVersions: Record&lt;string, number&gt; }
+): Ceilings {
+  const studied = Object.entries(ratios).filter(([, r]) =&gt; r.length &gt;= 3);
+  const z = studied.length === 0 ? null : normalQuantile(1 - 0.01 / studied.length);
+  const perKey: Record&lt;string, number&gt; = {};
+  for (const [key, r] of studied) {
+    const { mu, sigma } = logMeanStdev(r);
+    perKey[key] = Math.exp(mu + (z ?? 0) * sigma);
+  }
+  return { ...meta, method: 'lognormal-family-wise', familySize: studied.length, z, perKey };
+}</code></pre>
+                <code>bench gate &lt;run.json&gt; [--ceilings path]</code>
+                prints one line per checked key (<code>ok</code>,
+                <code>regression</code>, <code>not ok</code>) and exits 1 on any
+                failure. <code>bench calibrate --runs K [--out path]</code> runs
+                <code>GATE_METHOD</code> with <code>only</code> set to
+                <code>budgetCaseIds</code> K times, collects each key's ratio,
+                and rewrites the ceilings file after every run.
+              </span>
+            </li>
+            <li>
+              <input type="checkbox" id="t6s4" /><span class="label">
+                <strong>Run the tests and watch them pass.</strong> Then
+                calibrate a local file and gate a fresh run against it:
+                <pre><code>cd bench &amp;&amp; CI= bun src/cli.ts calibrate --runs 3 --out out/ceilings-local.json
+CI= bun src/cli.ts run --suite all --fixtures small --repeats 3 --warmup 1 \
+  --only "$(bun -e "import {budgetCaseIds,readBudgets} from './src/budget'; console.log(budgetCaseIds(readBudgets('budgets/everyday.json')).join(','))")" \
+  --out out/gate-local.json
+bun src/cli.ts gate out/gate-local.json --ceilings out/ceilings-local.json; echo "exit $?"</code></pre>
+                Expect <code>exit 0</code>. Then prove the gate catches a
+                slowdown. Add <code>Bun.sleepSync(200)</code> at the top of the
+                <code>status</code> branch in
+                <code>packages/cli/src/run.ts</code>, recompile with
+                <code>CI= moon run cli:compile</code>, rerun the
+                <code>run</code> and <code>gate</code> commands, and expect
+                <code>regression</code> on <code>status/developer</code> and
+                <code>exit 1</code>. Revert the sleep and recompile. Do not
+                commit the sleep.
+              </span>
+            </li>
+            <li>
+              <input type="checkbox" id="t6s5" /><span class="label">
+                <strong>Commit</strong> as
+                <code
+                  >feat(bench): gate thaddeus/git ratios against calibrated
+                  ceilings</code
+                >.
+              </span>
+            </li>
+          </ol>
+        </section>
+      </section>
+
+      <section class="block">
+        <h2>Task 7: the required CI job and the calibration mode</h2>
+        <section class="task">
+          <p class="files">
+            Modify <code>.github/workflows/ci.yml</code> · Modify
+            <code>.github/workflows/bench.yml</code>
+          </p>
+          <dl class="io">
+            <dt>Consumes</dt>
+            <dd>
+              <code>bench budget</code>, <code>bench gate</code>,
+              <code>bench calibrate</code>.
+            </dd>
+            <dt>Produces</dt>
+            <dd>
+              Job <code>everyday-gate</code>, named "Everyday-command latency
+              gate", in <code>ci-passed.needs</code>. A
+              <code>mode: everyday-calibrate</code> dispatch in
+              <code>bench.yml</code> that uploads the ceilings file.
+            </dd>
+          </dl>
+          <ol class="steps">
+            <li>
+              <input type="checkbox" id="t7s1" /><span class="label">
+                <strong>Add the job</strong> to <code>ci.yml</code>:
+                <pre><code>  # Times every everyday command against git on small-serial, on this
+  # runner, and fails when a thaddeus/git ratio is above the ceiling that
+  # bench/budgets/ceilings-github-ubuntu-latest.json records for it.
+  # Missed targets are reported in the summary but do not fail the job.
+  everyday-gate:
+    name: Everyday-command latency gate
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: moonrepo/setup-toolchain@v0
+        with:
+          auto-install: true
+      - name: Install dependencies
+        run: |
+          sed -i 's/^minimumReleaseAge = .*/minimumReleaseAge = 0/' bunfig.toml
+          bun install --frozen-lockfile
+      - name: Build bench's packages and the CLI binary
+        run: |
+          moon run bench:build-deps
+          CI= moon run cli:compile
+      - name: Time everyday commands against git
+        run: |
+          export AGENT=1
+          cd bench
+          bun src/cli.ts run --suite all --fixtures small --repeats 3 --warmup 1 \
+            --only "$(bun src/cli.ts budget --case-ids)" --out out/gate.json
+      - name: Report against the budgets
+        run: cd bench &amp;&amp; bun src/cli.ts budget out/gate.json
+      - name: Gate on the calibrated ceilings
+        run: cd bench &amp;&amp; bun src/cli.ts gate out/gate.json
+      - uses: actions/upload-artifact@v4
+        if: ${{ !cancelled() }}
+        with:
+          name: everyday-gate
+          path: bench/out/
+          if-no-files-found: ignore</code></pre>
+                Add <code>bench budget --case-ids</code> to Task 5's command,
+                printing <code>budgetCaseIds</code> joined by commas. Add
+                <code>everyday-gate</code> to <code>ci-passed</code>'s
+                <code>needs</code>.
+              </span>
+            </li>
+            <li>
+              <input type="checkbox" id="t7s2" /><span class="label">
+                <strong>Add the calibration mode</strong> to
+                <code>bench.yml</code>. Add <code>everyday-calibrate</code> to
+                the <code>mode</code> options. Add a job
+                <code>everyday-calibrate</code> with the same setup steps, a
+                step running
+                <code>bun src/cli.ts calibrate --runs 10</code> with a step
+                timeout under the job's, and an upload of
+                <code>bench/budgets/ceilings-github-ubuntu-latest.json</code>.
+                Its <code>if:</code> checks
+                <code>inputs.mode == 'everyday-calibrate'</code>, and the noise
+                job's <code>if:</code> keeps checking <code>'noise'</code>.
+              </span>
+            </li>
+            <li>
+              <input type="checkbox" id="t7s3" /><span class="label">
+                <strong>Check the YAML</strong> with
+                <code>moon run root:format root:lint</code>, and read the diff
+                for indentation.
+              </span>
+            </li>
+            <li>
+              <input type="checkbox" id="t7s4" /><span class="label">
+                <strong>Commit</strong> as
+                <code
+                  >ci(bench): require the everyday-command latency gate and add
+                  its calibration run</code
+                >.
+              </span>
+            </li>
+          </ol>
+        </section>
+      </section>
+
+      <section class="block">
+        <h2>Task 8: calibrate on GitHub and commit the ceilings</h2>
+        <section class="task">
+          <p class="files">
+            Create <code>bench/budgets/ceilings-github-ubuntu-latest.json</code>
+          </p>
+          <ol class="steps">
+            <li>
+              <input type="checkbox" id="t8s1" /><span class="label">
+                <strong>Push the branch and open the PR as a draft.</strong> The
+                gate job fails with "no ceilings file". That is expected,
+                because no calibration has run yet.
+              </span>
+            </li>
+            <li>
+              <input type="checkbox" id="t8s2" /><span class="label">
+                <strong>Dispatch the calibration on the branch.</strong>
+                <pre><code>gh workflow run bench.yml --ref feature/tha-158-005a-perf-everyday-command-latency-budget-vs-git-and-ci \
+  -f mode=everyday-calibrate</code></pre>
+                If GitHub refuses the new input value because it reads inputs
+                from the default branch, add a temporary
+                <code>push</code> trigger limited to this branch and to the
+                calibration job. Commit it, take the artifact, then remove the
+                trigger in the next commit. Say so in the PR.
+              </span>
+            </li>
+            <li>
+              <input type="checkbox" id="t8s3" /><span class="label">
+                <strong>Download the artifact and commit it.</strong>
+                <pre><code>gh run download &lt;run-id&gt; -n everyday-ceilings -D /tmp/ceil
+cp /tmp/ceil/ceilings-github-ubuntu-latest.json bench/budgets/
+git add bench/budgets/ceilings-github-ubuntu-latest.json
+git commit -m "chore(bench): commit the everyday-gate ceilings from a 10-run calibration"</code></pre>
+              </span>
+            </li>
+            <li>
+              <input type="checkbox" id="t8s4" /><span class="label">
+                <strong>Push and watch the gate pass</strong> on the PR. Record
+                the run URL for the PR body.
+              </span>
+            </li>
+          </ol>
+        </section>
+      </section>
+
+      <section class="block">
+        <h2>
+          Task 9: measure on the KVM machine, attribute each miss, document
+        </h2>
+        <section class="task">
+          <p class="files">
+            Modify
+            <code>bench/budgets/everyday.json</code> (<code>attribution</code>)
+            · Modify <code>bench/README.md</code> · Modify
+            <code>docs/agent-first-architecture.md</code> section 5
+          </p>
+          <ol class="steps">
+            <li>
+              <input type="checkbox" id="t9s1" /><span class="label">
+                <strong>Run the full method on this machine</strong>, quiet, on
+                the committed branch head:
+                <pre><code>cd bench &amp;&amp; sudo -v &amp;&amp; CI= bun src/cli.ts run --suite all \
+  --fixtures small,medium,stress --page-cache warm,dropped --repeats 10 --warmup 2 \
+  --only "$(bun src/cli.ts budget --case-ids)" --out out/kvm-everyday.json
+bun src/cli.ts budget out/kvm-everyday.json</code></pre>
+                Server cases on medium and stress record setup failures
+                (THA-21). That is a result, and it goes in the table as one.
+              </span>
+            </li>
+            <li>
+              <input type="checkbox" id="t9s2" /><span class="label">
+                <strong>Profile every missed line.</strong> For each thaddeus
+                command that misses, run it in the case's setup state from
+                source with
+                <code>bun --cpu-prof packages/cli/src/bin.ts &lt;cmd&gt;</code>.
+                Sum self time by function from the <code>.cpuprofile</code> with
+                a throwaway script under <code>.agents/ignore/</code>. Write
+                down the three largest costs with their share of the wall time.
+              </span>
+            </li>
+            <li>
+              <input type="checkbox" id="t9s3" /><span class="label">
+                <strong>Attribute each miss</strong> to one concrete fix and
+                record it in <code>attribution</code>, keyed by
+                <code>command/env</code>, as
+                <code
+                  >{ "owner": "THA-…", "cause": "…", "evidence": "…% of wall
+                  time in …" }</code
+                >. Name an existing issue where one covers the cause. Likely
+                candidates are THA-21 (op-log <code>conflicts()</code> and
+                <code>materialize()</code>), THA-70 (shared object caches),
+                THA-114 (selective materialization) and THA-13 (sparse sync).
+                When none covers the cause, set <code>owner</code> to
+                <code>null</code>, describe the fix, and list it in the PR for
+                the user to file. Do not create Linear issues without asking.
+              </span>
+            </li>
+            <li>
+              <input type="checkbox" id="t9s4" /><span class="label">
+                <strong>Document it.</strong> Add an "Everyday-command budgets"
+                section to <code>bench/README.md</code>: what each row times,
+                the agent and CI definitions, how the gate decides, how to
+                recalibrate (dispatch <code>mode: everyday-calibrate</code> when
+                a case version or the runner image changes), and why missed
+                targets do not fail the build. Add the rows to the table in
+                section 5 of the architecture contract with
+                <code>Measured: No</code> and the benchmark column naming the
+                case pair. Measured figures stay out of committed documents
+                until the post-merge record exists.
+              </span>
+            </li>
+            <li>
+              <input type="checkbox" id="t9s5" /><span class="label">
+                <strong>Run the verification baseline</strong>:
+                <code>moon run root:format root:lint</code>,
+                <code>moonx bench:typecheck</code>,
+                <code>moonx bench:test</code>,
+                <code>moonx bench:test-slow</code>.
+              </span>
+            </li>
+            <li>
+              <input type="checkbox" id="t9s6" /><span class="label">
+                <strong>Commit</strong> as
+                <code
+                  >docs(bench): attribute each everyday-command miss and
+                  document the gate</code
+                >.
+              </span>
+            </li>
+          </ol>
+        </section>
+      </section>
+
+      <section class="block">
+        <h2>Sequencing</h2>
+        <p class="legend">
+          <span><span class="tier tier-s">S</span> do first</span>
+          <span><span class="tier tier-a">A</span> after S lands</span>
+          <span><span class="tier tier-b">B</span> after A</span>
+        </p>
+        <div class="table-scroll">
+          <table>
+            <thead>
+              <tr>
+                <th>#</th>
+                <th>Task</th>
+                <th>Tier</th>
+                <th>Why it lands here</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td class="num">1</td>
+                <td><span class="name">git replay</span></td>
+                <td><span class="tier tier-s">S</span></td>
+                <td>Every git case reads the bare repository it builds.</td>
+              </tr>
+              <tr>
+                <td class="num">2</td>
+                <td><span class="name">fixture working copy</span></td>
+                <td><span class="tier tier-s">S</span></td>
+                <td>Independent of Task 1, so it can run in parallel.</td>
+              </tr>
+              <tr>
+                <td class="num">3</td>
+                <td><span class="name">local cases</span></td>
+                <td><span class="tier tier-a">A</span></td>
+                <td>
+                  Needs Tasks 1 and 2, and adds the suite wiring Task 4 uses.
+                </td>
+              </tr>
+              <tr>
+                <td class="num">4</td>
+                <td><span class="name">server cases</span></td>
+                <td><span class="tier tier-a">A</span></td>
+                <td>Adds to the registry Task 3 creates.</td>
+              </tr>
+              <tr>
+                <td class="num">5</td>
+                <td><span class="name">budgets</span></td>
+                <td><span class="tier tier-a">A</span></td>
+                <td>
+                  Pure code against <code>BenchRun</code>. It can be written
+                  alongside Tasks 3 and 4 with hand-built runs.
+                </td>
+              </tr>
+              <tr>
+                <td class="num">6</td>
+                <td><span class="name">gate</span></td>
+                <td><span class="tier tier-b">B</span></td>
+                <td>
+                  Builds on <code>budget.ts</code>, and its manual proof needs
+                  every case.
+                </td>
+              </tr>
+              <tr>
+                <td class="num">7</td>
+                <td><span class="name">CI job</span></td>
+                <td><span class="tier tier-b">B</span></td>
+                <td>Calls the commands from Tasks 5 and 6.</td>
+              </tr>
+              <tr>
+                <td class="num">8</td>
+                <td><span class="name">calibration</span></td>
+                <td><span class="tier tier-b">B</span></td>
+                <td>Needs the workflow on the pushed branch.</td>
+              </tr>
+              <tr>
+                <td class="num">9</td>
+                <td><span class="name">measure and attribute</span></td>
+                <td><span class="tier tier-b">B</span></td>
+                <td>
+                  Needs the final cases, and runs while Task 8's calibration
+                  runs on GitHub.
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section class="block">
+        <h2>Risks</h2>
+        <div class="table-scroll">
+          <table>
+            <thead>
+              <tr>
+                <th>Risk</th>
+                <th>What happens</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>The gate is slow</td>
+                <td>
+                  Server cases cost about 20 s of setup per sample on small,
+                  because setup clones. If the gate job goes past 30 minutes,
+                  move <code>e2e.pull</code> and <code>git.pull</code> to
+                  report-only rows. The README and the PR must say so. They must
+                  not quietly drop out of the gate.
+                </td>
+              </tr>
+              <tr>
+                <td>The gate flags unchanged PRs</td>
+                <td>
+                  The 1% bound is nominal, the same caveat as the THA-5
+                  thresholds. A flaky required check blocks every PR, so the
+                  README gives the recalibration command and the PR names the
+                  bound.
+                </td>
+              </tr>
+              <tr>
+                <td>The working copy from the fixture differs from a clone</td>
+                <td>
+                  Task 2's test checks that <code>status</code> on it is clean
+                  and that its files match. The README notes that the local
+                  store holds every fixture view, while a clone pulls main only.
+                </td>
+              </tr>
+              <tr>
+                <td>git on <code>file://</code> has no network</td>
+                <td>
+                  thaddeus pushes over HTTP on loopback, while git pushes
+                  through a local <code>git-receive-pack</code>. That favours
+                  git, so it can only make a thaddeus multiple look worse. The
+                  case notes say so.
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <p class="progress">
+        <b><span id="done">0</span></b> of <span id="total">0</span> steps
+        complete
+      </p>
+    </div>
+    <script>
+      var boxes = document.querySelectorAll('ol.steps input[type=checkbox]');
+      var doneEl = document.getElementById('done');
+      document.getElementById('total').textContent = String(boxes.length);
+      function refresh() {
+        var n = 0;
+        boxes.forEach(function (b) {
+          if (b.checked) n++;
+        });
+        doneEl.textContent = String(n);
+      }
+      boxes.forEach(function (b) {
+        b.addEventListener('change', refresh);
+      });
+      refresh();
+    </script>
+  </body>
+</html>
