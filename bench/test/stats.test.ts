@@ -1,6 +1,13 @@
 import { expect, test } from 'bun:test';
 
-import { cv, fitExponent, median, percentile, summarize } from '../src/stats';
+import {
+  cv,
+  fitExponent,
+  median,
+  normalQuantile,
+  percentile,
+  summarize,
+} from '../src/stats';
 
 const oneToHundred = Array.from({ length: 100 }, (_, i) => i + 1);
 
@@ -53,4 +60,22 @@ test('summarize reports p50, p95 and cv, and nulls for no samples', () => {
   expect(s.p95Ms).toBeCloseTo(95.05, 6);
   expect(s.cv).toBeGreaterThan(0);
   expect(summarize([])).toEqual({ p50Ms: null, p95Ms: null, cv: null });
+});
+
+test('normalQuantile matches known standard normal quantiles', () => {
+  expect(normalQuantile(0.5)).toBeCloseTo(0, 9);
+  expect(normalQuantile(0.975)).toBeCloseTo(1.959964, 6);
+  expect(normalQuantile(0.99)).toBeCloseTo(2.326348, 6);
+  expect(normalQuantile(0.9999)).toBeCloseTo(3.719016, 6);
+  // Ten-digit reference values, to 1e-7: inside Acklam's ~1e-9 error.
+  expect(normalQuantile(0.975)).toBeCloseTo(1.9599639845, 7);
+  expect(normalQuantile(0.9999)).toBeCloseTo(3.7190164855, 7);
+  expect(normalQuantile(0.01)).toBeCloseTo(-2.326347874, 7);
+  expect(normalQuantile(0.001)).toBeCloseTo(-3.0902323062, 7);
+  expect(normalQuantile(0.02)).toBeCloseTo(-2.0537489106, 7);
+});
+
+test('normalQuantile rejects probabilities outside (0, 1)', () => {
+  expect(() => normalQuantile(0)).toThrow(RangeError);
+  expect(() => normalQuantile(1)).toThrow(RangeError);
 });

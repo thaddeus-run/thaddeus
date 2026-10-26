@@ -20,21 +20,27 @@ on:
 permissions:
   contents: read
 
-# A newer push to the same PR makes the older comparison moot.
+# A newer push to the same PR makes the older comparison moot. A noise study
+# runs for hours and is never cancelled by a later dispatch (that one waits).
 concurrency:
-  group: bench-${{ github.ref }}
-  cancel-in-progress: true
+  group: bench-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
   AGENT: 1
-  # Library cases the PR check and the noise study leave out, so that ten
-  # suite runs (five rounds of base and head) fit the 45-minute job. Each
-  # still runs in `bench:record`. A glob that matches no case is logged.
+  # Library cases both jobs leave out. Each still runs in `bench:record`.
+  #   reputation.*.10000: export and import each hit the 120 s `run` budget
+  #     on small (about 30 s per sample), so they only ever report `exceeded`
+  #   open.cold.root-1000: its 1,000-repository root takes about 20 s to build
+  #     per tree and the case about 15 s per run, time the PR job lacks
+  # A glob that matches no case is logged.
+  BENCH_EXCLUDE: reputation.*.10000,open.cold.root-1000
+  # Cases only the noise study leaves out, to fit 200 suite runs in GitHub's
+  # 6-hour job limit. The PR job still runs them: they show "no threshold"
+  # and fail the check only on a status change (ok to exceeded, oom, error).
   #   oplog.conflicts.*: about 10 s per sample on small, 40 s per run each
   #   codedb.callers: about 13 s per sample on small, 52 s per run
-  #   reputation.*.10000: about 30 s per run each (export and import)
-  #   open.cold.root-1000: its 1,000-repository root takes about 20 s to build
-  BENCH_EXCLUDE: oplog.conflicts.*,codedb.callers,reputation.*.10000,open.cold.root-1000
+  BENCH_NOISE_EXCLUDE: oplog.conflicts.*,codedb.callers
 
 jobs:
   compare:
@@ -64,13 +70,14 @@ jobs:
           sed -i 's/^minimumReleaseAge = .*/minimumReleaseAge = 0/' bunfig.toml
           bun install --frozen-lockfile
 
-      # Each side runs its own bench/, so the base gets its own worktree.
+      # Each side runs its own bench/, so the base gets its own worktree. On
+      # pull_request the checkout is the PR merged into its base branch, so
+      # the merge commit's first parent is exactly the base it was merged
+      # onto, and the two sides differ by the PR's changes only.
       - name: Check out the base commit
         id: base
-        env:
-          BASE_SHA: ${{ github.event.pull_request.base.sha }}
         run: |
-          git worktree add ../base "$BASE_SHA"
+          git worktree add ../base "$(git rev-parse HEAD^1)"
           if [ -d ../base/bench ]; then
             echo "has_bench=true" >> "$GITHUB_OUTPUT"
           else
@@ -131,13 +138,15 @@ jobs:
 
   # The A/A noise study: 20 pairs of five interleaved rounds of main against
   # itself. Commit the uploaded thresholds file to
-  # bench/thresholds/github-ubuntu-latest.json.
+  # bench/thresholds/github-ubuntu-latest.json. The file is rewritten after
+  # every pair, so a study cut off by the time limit still uploads the pairs
+  # it finished (`pairs` in the file says how many).
   noise:
     name: Benchmark noise study
     if:
       ${{ github.event_name == 'workflow_dispatch' && inputs.mode == 'noise' }}
     runs-on: ubuntu-latest
-    # 200 suite runs; GitHub's limit for a hosted job is 360 minutes.
+    # GitHub's limit for a hosted job is 360 minutes.
     timeout-minutes: 360
     steps:
       - uses: actions/checkout@v4
@@ -160,13 +169,19 @@ jobs:
 
       # The same suite, fixture, method and exclusions as the compare job:
       # thresholds only hold for the method they were measured with.
+      # The step's own limit, under the job's, makes a long study fail this
+      # step rather than the job, so the upload below still runs.
       - name: Run the A/A noise study
+        timeout-minutes: 340
         run: |
           bun bench/src/cli.ts noise --rounds 5 --pairs 20 --suite library \
-            --fixtures small --repeats 3 --warmup 1 --exclude "$BENCH_EXCLUDE"
+            --fixtures small --repeats 3 --warmup 1 \
+            --exclude "$BENCH_EXCLUDE,$BENCH_NOISE_EXCLUDE"
 
       - name: Upload the thresholds
+        if: ${{ !cancelled() }}
         uses: actions/upload-artifact@v4
         with:
           name: bench-thresholds
           path: bench/thresholds/github-ubuntu-latest.json
+          if-no-files-found: error
