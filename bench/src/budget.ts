@@ -8,7 +8,16 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import schema from '../schema/budgets.schema.json';
+import type { BenchCase } from './case';
+import {
+  type PageCacheMode,
+  registryFor,
+  type SuiteName,
+  type SuiteOptions,
+} from './record';
 import type { BenchRun, CaseResult } from './result';
+import { effectiveRepeats } from './runner';
+import { logMeanStdev, tQuantile } from './stats';
 
 // The committed budgets of the everyday commands.
 export const BUDGETS_FILE = join(
@@ -16,6 +25,15 @@ export const BUDGETS_FILE = join(
   '..',
   'budgets',
   'everyday.json'
+);
+
+// The ceilings the CI gate holds the thaddeus/git ratios to, calibrated on
+// the GitHub runner.
+export const CEILINGS_FILE = join(
+  dirname(fileURLToPath(import.meta.url)),
+  '..',
+  'budgets',
+  'ceilings-github-ubuntu-latest.json'
 );
 
 // One command in one environment. A measured row names the thaddeus case
@@ -357,4 +375,408 @@ export function renderBudgets(lines: readonly BudgetLine[]): string {
     }
   }
   return `${out.join('\n')}\n`;
+}
+
+// What the CI gate measures: every case a budget row names, on small, with
+// 3 repeats and 1 warm-up. Server cases cannot seed medium until THA-21, so
+// small is the largest fixture the gate can run today. Both page-cache modes
+// run, because the ci-checkout row is a dropped-cache row; `only` is not
+// part of it, because it comes from the budgets file (see `gateOptions`).
+export const GATE_METHOD = {
+  suite: 'all' as const,
+  fixtures: ['small'],
+  sweeps: false,
+  pageCache: ['warm', 'dropped'] as PageCacheMode[],
+  repeats: 3,
+  warmup: 1,
+  budgetMs: 300_000,
+};
+
+// The suite options of one gate measurement: `GATE_METHOD` over exactly the
+// cases the budgets name. `gate-run` (what CI runs) and `calibrate` both
+// call this, so the method a ceiling was calibrated with is the method the
+// gate measures with. `pageCache` narrows the modes (a machine that cannot
+// drop its page cache passes `['warm']`).
+export function gateOptions(
+  budgets: Budgets,
+  pageCache: PageCacheMode[] = GATE_METHOD.pageCache
+): SuiteOptions {
+  return {
+    ...GATE_METHOD,
+    fixtures: [...GATE_METHOD.fixtures],
+    pageCache,
+    only: budgetCaseIds(budgets),
+  };
+}
+
+// What one ratio key's ceiling rests on: the thaddeus p50 (ms) of its row
+// over `n` calibration runs, as the geometric mean and the standard deviation
+// of the logs, and the Student-t quantile `t` that sets the ceiling
+// exp(log(geoMeanMs) + t * logSd).
+export interface P50Ceiling {
+  ceilingMs: number;
+  n: number;
+  t: number;
+  geoMeanMs: number;
+  logSd: number;
+}
+
+// The result of a calibration study: for each ratio key (see `ratioKey`),
+// the largest thaddeus p50 that host and runner noise plausibly produce. The
+// gate holds the thaddeus p50 to it; the multiple of git is only reported,
+// because git's median drifts between runs more than thaddeus's own.
+export interface Ceilings {
+  studiedAt: string;
+  runnerImage: string;
+  /** How many calibration runs the ceilings rest on. */
+  runs: number;
+  /** The page-cache modes the study measured; the gate requires only those. */
+  pageCache: PageCacheMode[];
+  /** Every gated case id and the version the study measured, so a changed case invalidates its ceilings. */
+  caseVersions: Record<string, number>;
+  method: 'lognormal-family-wise-t-p50';
+  /** How many keys got a ceiling (N in the Bonferroni split). */
+  familySize: number;
+  p50Ceilings: Record<string, P50Ceiling>;
+}
+
+// The family-wise error rate the ceilings allow: the chance that an
+// unchanged PR fails the gate on noise alone.
+const FAMILY_WISE_ALPHA = 0.01;
+
+// A key needs at least this many runs for a standard deviation that means
+// anything.
+const MIN_RUNS = 3;
+
+// The gate's ceiling for each ratio key: the largest thaddeus p50 that
+// host and runner noise plausibly produce, from a calibration study over
+// many runs (ideally on many hosts, since hosts differ in speed). The p50s
+// of a key are modelled as lognormal: with mu and sigma the mean and sample
+// standard deviation of their logs, the ceiling is exp(mu + t * sigma). t is
+// the Student-t quantile of 1 - 0.01 / N at n - 1 degrees of freedom, for the
+// N keys that get a ceiling: a Bonferroni split that puts the chance of any
+// false alarm in a PR at nominally about 1%. Student's t rather than the
+// normal, because sigma is estimated from only n runs. A key with fewer than
+// three p50s gets no ceiling.
+export function deriveCeilings(
+  p50s: Record<string, number[]>,
+  meta: Omit<Ceilings, 'method' | 'familySize' | 'p50Ceilings'>
+): Ceilings {
+  const studied = Object.entries(p50s).filter(([, r]) => r.length >= MIN_RUNS);
+  const p50Ceilings: Record<string, P50Ceiling> = {};
+  for (const [key, r] of studied) {
+    const t = tQuantile(1 - FAMILY_WISE_ALPHA / studied.length, r.length - 1);
+    const { mu, sigma } = logMeanStdev(r);
+    p50Ceilings[key] = {
+      ceilingMs: Math.exp(mu + t * sigma),
+      n: r.length,
+      t,
+      geoMeanMs: Math.exp(mu),
+      logSd: sigma,
+    };
+  }
+  return {
+    ...meta,
+    method: 'lognormal-family-wise-t-p50',
+    familySize: studied.length,
+    p50Ceilings,
+  };
+}
+
+// The thaddeus p50 of every line that finished `ok`, by ratio key. A line
+// that did not finish contributes nothing, so a calibration run that lost a
+// case simply has one fewer p50 for it.
+export function linesP50(lines: readonly BudgetLine[]): Record<string, number> {
+  const p50s: Record<string, number> = {};
+  for (const line of lines) {
+    if (line.status === 'ok' && line.thaddeusP50 !== null) {
+      p50s[ratioKey(line)] = line.thaddeusP50;
+    }
+  }
+  return p50s;
+}
+
+// The version of every gated case that has a result in a run. The versions
+// of one suite version do not differ between results of the same case.
+export function gatedCaseVersions(
+  run: BenchRun,
+  budgets: Budgets
+): Record<string, number> {
+  const gated = new Set(budgetCaseIds(budgets));
+  const versions: Record<string, number> = {};
+  for (const c of run.cases) {
+    if (gated.has(c.id)) versions[c.id] = c.version;
+  }
+  return versions;
+}
+
+// The repeats and warm-ups each gated case records when measured with
+// `GATE_METHOD`: the method's, raised or capped by the case's own
+// `minRepeats`, `maxRepeats` and `maxWarmup`. Read from the case registries,
+// so a case that changes its limits changes what the gate expects.
+export async function gateMethods(
+  budgets: Budgets,
+  lookup: (suite: SuiteName) => string | null = registryFor
+): Promise<Record<string, { repeats: number; warmup: number }>> {
+  const gated = new Set(budgetCaseIds(budgets));
+  const methods: Record<string, { repeats: number; warmup: number }> = {};
+  for (const suite of ['e2e', 'everyday'] as const) {
+    const registry = lookup(suite);
+    if (registry === null) continue;
+    const mod = (await import(registry)) as { default: readonly BenchCase[] };
+    for (const benchCase of mod.default) {
+      if (gated.has(benchCase.id)) {
+        methods[benchCase.id] = effectiveRepeats(benchCase, GATE_METHOD);
+      }
+    }
+  }
+  return methods;
+}
+
+// Why results of gated cases were not measured with the gate method: one
+// message per result whose recorded repeats or warm-ups differ from what
+// `gateMethods` expects for its case. A p50 of 10 repeats is not comparable
+// with ceilings calibrated on 3.
+export function methodMismatches(
+  run: BenchRun,
+  budgets: Budgets,
+  methods: Record<string, { repeats: number; warmup: number }>
+): { name: string; why: string }[] {
+  const gated = new Set(budgetCaseIds(budgets));
+  const found: { name: string; why: string }[] = [];
+  for (const c of run.cases) {
+    if (!gated.has(c.id)) continue;
+    const expected = methods[c.id];
+    const name = `${c.id} ${c.fixture}${c.pageCache === undefined ? '' : ` ${c.pageCache}`}`;
+    if (expected === undefined) {
+      found.push({
+        name,
+        why: 'no registered case to take the gate method from',
+      });
+    } else if (c.repeats !== expected.repeats || c.warmup !== expected.warmup) {
+      found.push({
+        name,
+        why: `not measured with the gate method: ${c.repeats} repeats and ${c.warmup} warm-ups, where the gate takes ${expected.repeats} and ${expected.warmup}`,
+      });
+    }
+  }
+  return found;
+}
+
+// The page-cache modes a set of runs measured: `warm` for any result that
+// ran warm or has no mode, and `dropped` for a dropped-cache result.
+function measuredModes(
+  runs: readonly BenchRun[],
+  budgets: Budgets
+): PageCacheMode[] {
+  const gated = new Set(budgetCaseIds(budgets));
+  const modes = new Set<PageCacheMode>();
+  for (const run of runs) {
+    for (const c of run.cases) {
+      if (gated.has(c.id)) modes.add(c.pageCache ?? 'warm');
+    }
+  }
+  return (['warm', 'dropped'] as const).filter((m) => modes.has(m));
+}
+
+// Derives the ceilings file from runs of the gate method, one run per file.
+// Used by `bench ceilings` (runs gathered on many hosts) and by `bench
+// calibrate` (runs of one host in a loop), so both derive the same way. Throws
+// an Error when two runs measured different case versions, because their p50s
+// are not of the same work.
+export function ceilingsFromRuns(
+  runs: readonly { name: string; run: BenchRun }[],
+  budgets: Budgets,
+  meta: { studiedAt: string; runnerImage: string }
+): Ceilings {
+  if (runs.length === 0) throw new Error('no runs to derive ceilings from');
+  const caseVersions = gatedCaseVersions(runs[0].run, budgets);
+  for (const { name, run } of runs.slice(1)) {
+    const versions = gatedCaseVersions(run, budgets);
+    const differing = [
+      ...new Set([...Object.keys(caseVersions), ...Object.keys(versions)]),
+    ].filter((id) => caseVersions[id] !== versions[id]);
+    if (differing.length > 0) {
+      throw new Error(
+        `${name} has other case versions than ${runs[0].name} (${differing.join(', ')}); ceilings need runs of one set of case versions`
+      );
+    }
+  }
+  const p50s: Record<string, number[]> = {};
+  for (const { run } of runs) {
+    for (const [key, p50] of Object.entries(
+      linesP50(evaluateBudgets(run, budgets))
+    )) {
+      (p50s[key] ??= []).push(p50);
+    }
+  }
+  return deriveCeilings(p50s, {
+    ...meta,
+    runs: runs.length,
+    pageCache: measuredModes(
+      runs.map((r) => r.run),
+      budgets
+    ),
+    caseVersions,
+  });
+}
+
+// Reads a ceilings file. A file that does not exist is `null`, which the gate
+// fails on; one that exists but is not a ceilings file throws an Error naming
+// the path, which the CLI reports as a bad input file.
+export function readCeilings(path: string): Ceilings | null {
+  let text: string;
+  try {
+    text = readFileSync(path, 'utf8');
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null;
+    throw new Error(`${path}: ${(error as Error).message}`);
+  }
+  let value: unknown;
+  try {
+    value = JSON.parse(text);
+  } catch (error) {
+    throw new Error(`${path}: ${(error as Error).message}`);
+  }
+  const c = value as Partial<Ceilings> | null;
+  const positive = (v: unknown): boolean => typeof v === 'number' && v > 0;
+  const valid =
+    typeof c?.studiedAt === 'string' &&
+    typeof c.runnerImage === 'string' &&
+    typeof c.runs === 'number' &&
+    Array.isArray(c.pageCache) &&
+    c.pageCache.every((m) => m === 'warm' || m === 'dropped') &&
+    c.method === 'lognormal-family-wise-t-p50' &&
+    typeof c.familySize === 'number' &&
+    typeof c.caseVersions === 'object' &&
+    c.caseVersions !== null &&
+    Object.values(c.caseVersions).every(positive) &&
+    typeof c.p50Ceilings === 'object' &&
+    c.p50Ceilings !== null &&
+    Object.values(c.p50Ceilings).every(
+      (k) =>
+        positive(k.ceilingMs) &&
+        positive(k.geoMeanMs) &&
+        positive(k.t) &&
+        typeof k.logSd === 'number' &&
+        typeof k.n === 'number' &&
+        k.n >= MIN_RUNS
+    );
+  if (!valid) throw new Error(`${path} is not a ceilings file`);
+  return value as Ceilings;
+}
+
+// A line's name in gate output: its ratio key when it has a fixture, else
+// the row alone (a row with no result on any fixture).
+function lineName(line: BudgetLine): string {
+  return line.fixture === null
+    ? `${line.command}/${line.env}${line.pageCache === null ? '' : ` ${line.pageCache}`}`
+    : ratioKey(line);
+}
+
+function msText(value: number): string {
+  return `${value.toFixed(1)} ms`;
+}
+
+// The gate: sets a run against the ceilings and says whether the build may
+// pass. It checks the thaddeus p50 of every measured row, not its multiple of
+// git: git's median drifts between runs, thaddeus's does not. It passes only
+// when the ceilings were calibrated on the same case versions, every gated
+// result was measured with the gate method (`methods`, from `gateMethods`),
+// every measured row has results that finished `ok`, and every p50 is at or
+// below its ceiling. A verdict it cannot reach (no ceilings file, a
+// ceiling-less key) is a failure, never a pass. Unmeasured rows are ignored,
+// and neither a missed absolute target nor the multiple of git fails the
+// gate; the multiple is printed for information. A row of a page-cache mode
+// the calibration did not measure is skipped only when the run has no result
+// for it at all. `lines` is one line per checked key: `ok`, `regression` or
+// `not ok`.
+export function checkGate(
+  run: BenchRun,
+  budgets: Budgets,
+  ceilings: Ceilings | null,
+  methods: Record<string, { repeats: number; warmup: number }>
+): { failed: boolean; lines: string[] } {
+  if (ceilings === null) {
+    return {
+      failed: true,
+      lines: [
+        'not ok no ceilings file; run `bench calibrate` or `bench ceilings` to create one before gating',
+      ],
+    };
+  }
+  const have = gatedCaseVersions(run, budgets);
+  const stale = Object.entries(have)
+    .filter(([id, version]) => ceilings.caseVersions[id] !== version)
+    .map(
+      ([id, version]) =>
+        `${id} is v${version} in the run and ${ceilings.caseVersions[id] === undefined ? 'absent' : `v${ceilings.caseVersions[id]}`} in the ceilings`
+    );
+  if (stale.length > 0) {
+    return {
+      failed: true,
+      lines: [
+        `not ok ceilings were calibrated on other case versions (${stale.join('; ')}); re-run calibration`,
+      ],
+    };
+  }
+
+  const lines: string[] = [];
+  let failed = false;
+  const fail = (name: string, why: string): void => {
+    failed = true;
+    lines.push(`not ok ${name}: ${why}`);
+  };
+  for (const { name, why } of methodMismatches(run, budgets, methods)) {
+    fail(name, why);
+  }
+  let checked = 0;
+  for (const line of evaluateBudgets(run, budgets)) {
+    if (line.status === 'unmeasured') continue;
+    if (
+      line.status === 'missing' &&
+      line.fixture === null &&
+      line.pageCache !== null &&
+      !ceilings.pageCache.includes(line.pageCache)
+    ) {
+      continue;
+    }
+    checked++;
+    const name = lineName(line);
+    if (line.status !== 'ok') {
+      fail(
+        name,
+        `${line.status}${line.cause === null ? '' : ` (${line.cause})`}`
+      );
+      continue;
+    }
+    if (line.thaddeusP50 === null) {
+      fail(name, 'the thaddeus case recorded no p50');
+      continue;
+    }
+    const ceiling = ceilings.p50Ceilings[ratioKey(line)];
+    if (ceiling === undefined) {
+      fail(name, 'no ceiling; re-run calibration');
+      continue;
+    }
+    const multiple =
+      line.multiple === null
+        ? 'no multiple of git'
+        : `${line.multiple.toFixed(1)}x git`;
+    if (line.thaddeusP50 > ceiling.ceilingMs) {
+      failed = true;
+      lines.push(
+        `regression ${name}: p50 ${msText(line.thaddeusP50)} is above its ceiling ${msText(ceiling.ceilingMs)} (${multiple})`
+      );
+    } else {
+      lines.push(
+        `ok ${name}: p50 ${msText(line.thaddeusP50)} <= ceiling ${msText(ceiling.ceilingMs)} (${multiple})`
+      );
+    }
+  }
+  if (checked === 0) {
+    failed = true;
+    lines.push('not ok the budgets name no measured row to gate');
+  }
+  return { failed, lines };
 }

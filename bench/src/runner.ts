@@ -366,14 +366,26 @@ function childPlan(
   ];
 }
 
-// The run options with the timed repeats and warm-ups capped at the case's
-// `maxRepeats` and `maxWarmup`.
-function capRepeats(benchCase: BenchCase, opts: RunOptions): RunOptions {
+// The timed repeats and warm-ups a case actually takes when a run asks for
+// `requested`: the repeats raised to the case's `minRepeats` and then capped
+// at its `maxRepeats`, the warm-ups capped at its `maxWarmup`. The gate uses
+// it to know what a result of the gate method records.
+export function effectiveRepeats(
+  benchCase: BenchCase,
+  requested: { repeats: number; warmup: number }
+): { repeats: number; warmup: number } {
   return {
-    ...opts,
-    repeats: Math.min(opts.repeats, benchCase.maxRepeats ?? Infinity),
-    warmup: Math.min(opts.warmup, benchCase.maxWarmup ?? Infinity),
+    repeats: Math.min(
+      Math.max(requested.repeats, benchCase.minRepeats ?? 0),
+      benchCase.maxRepeats ?? Infinity
+    ),
+    warmup: Math.min(requested.warmup, benchCase.maxWarmup ?? Infinity),
   };
+}
+
+// The run options with the repeats and warm-ups a case actually takes.
+function capRepeats(benchCase: BenchCase, opts: RunOptions): RunOptions {
+  return { ...opts, ...effectiveRepeats(benchCase, opts) };
 }
 
 // The fields every result of `benchCase` on `fixture` carries, whatever its
@@ -440,9 +452,9 @@ export async function setupFailure(
 // Runs one case on one fixture in fresh Bun subprocesses and returns its
 // result. A timeout, OOM or crash is a result, not an exception. It throws
 // on an unknown case id or fixture name, and rejects with `Interrupted` when
-// the parent gets SIGINT, SIGTERM or SIGHUP mid-case. A case's `maxRepeats`
-// and `maxWarmup` cap the repeats and warm-ups, and the result says how many
-// ran.
+// the parent gets SIGINT, SIGTERM or SIGHUP mid-case. A case's `minRepeats`
+// raises the repeats, and its `maxRepeats` and `maxWarmup` cap the repeats and
+// warm-ups; the result says how many ran.
 export async function runCase(
   id: string,
   fixture: string,

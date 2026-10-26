@@ -1,0 +1,373 @@
+import { afterAll, expect, test } from 'bun:test';
+import {
+  existsSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+
+import {
+  budgetCaseIds,
+  BUDGETS_FILE,
+  type Ceilings,
+  readBudgets,
+} from '../src/budget';
+import { run } from '../src/cli';
+import { defaultHost, type Host, type SuiteOptions } from '../src/record';
+import type { BenchRun } from '../src/result';
+import { logMeanStdev, tQuantile } from '../src/stats';
+import { ceilingsOf, gateRun } from './fixtures/gate-run';
+
+const scratch = mkdtempSync(join(tmpdir(), 'bench-cli-gate-test-'));
+afterAll(() => rmSync(scratch, { recursive: true, force: true }));
+
+const budgets = readBudgets(BUDGETS_FILE);
+
+// A Host whose suite runs return canned runs (and remember their options),
+// so the gate commands can be tested without timing anything.
+function hostOf(
+  runs: (call: number) => BenchRun,
+  logs: string[],
+  over: Partial<Host> = {}
+): { host: Host; seen: SuiteOptions[] } {
+  const seen: SuiteOptions[] = [];
+  const host: Host = {
+    ...defaultHost(),
+    machineId: undefined,
+    dirtyPaths: () => [],
+    sudoOk: () => true,
+    commit: () => ({ sha: 'c'.repeat(40), short: 'ccccccc' }),
+    runSuite: (opts) => {
+      seen.push(opts);
+      return Promise.resolve(runs(seen.length - 1));
+    },
+    outDir: scratch,
+    log: (line) => logs.push(line),
+    env: {},
+    ...over,
+  };
+  return { host, seen };
+}
+
+function writeJson(name: string, value: unknown): string {
+  const path = join(scratch, name);
+  writeFileSync(path, `${JSON.stringify(value)}\n`);
+  return path;
+}
+
+// Runs a CLI command and captures what it writes to stdout.
+async function cli(
+  argv: string[],
+  host: Host
+): Promise<{ code: number; out: string }> {
+  const write = process.stdout.write.bind(process.stdout);
+  const out: string[] = [];
+  process.stdout.write = ((chunk: string) => {
+    out.push(chunk);
+    return true;
+  }) as typeof process.stdout.write;
+  try {
+    return { code: await run(argv, host), out: out.join('') };
+  } finally {
+    process.stdout.write = write;
+  }
+}
+
+test('calibrate --runs 3 runs the gate method each time and rewrites the file after every run', async () => {
+  const out = join(scratch, 'ceilings-calibrate.json');
+  const logs: string[] = [];
+  // The thaddeus p50 of status/developer is 1500, 1600, 1700 over the runs.
+  const filesBefore: (number | null)[] = [];
+  const { host, seen } = hostOf((call) => {
+    filesBefore.push(
+      existsSync(out)
+        ? (JSON.parse(readFileSync(out, 'utf8')) as Ceilings).runs
+        : null
+    );
+    return gateRun(budgets, {
+      dropped: true,
+      p50s: { 'status/developer': 1500 + call * 100 },
+    });
+  }, logs);
+  const { code } = await cli(['calibrate', '--runs', '3', '--out', out], host);
+  expect(code).toBe(0);
+  // Before each run the file holds every run done so far.
+  expect(filesBefore).toEqual([null, 1, 2]);
+  expect(seen).toHaveLength(3);
+  for (const opts of seen) {
+    expect(opts).toMatchObject({
+      suite: 'all',
+      fixtures: ['small'],
+      pageCache: ['warm', 'dropped'],
+      repeats: 3,
+      warmup: 1,
+      budgetMs: 300_000,
+      only: budgetCaseIds(budgets),
+    });
+  }
+  const c = JSON.parse(readFileSync(out, 'utf8')) as Ceilings;
+  expect(c.runs).toBe(3);
+  expect(c.method).toBe('lognormal-family-wise-t-p50');
+  expect(c.pageCache).toEqual(['warm', 'dropped']);
+  expect(c.familySize).toBe(8);
+  expect(Object.keys(c.p50Ceilings)).toContain(
+    'ci-checkout/ci small-serial dropped'
+  );
+  expect(c.caseVersions['e2e.pull']).toBe(1);
+  const key = c.p50Ceilings['status/developer small-serial null'];
+  const { mu, sigma } = logMeanStdev([1500, 1600, 1700]);
+  expect(key.n).toBe(3);
+  expect(key.ceilingMs).toBeCloseTo(
+    Math.exp(mu + tQuantile(1 - 0.01 / 8, 2) * sigma),
+    6
+  );
+  expect(
+    c.p50Ceilings['pull/developer small-serial null'].ceilingMs
+  ).toBeCloseTo(200, 6);
+  // Only the third run has the three p50s a ceiling needs.
+  expect(
+    logs.filter((l) => l.startsWith('ceilings: status/developer'))
+  ).toHaveLength(1);
+});
+
+test('calibrate leaves a case that did not finish out of that run only', async () => {
+  const out = join(scratch, 'ceilings-partial.json');
+  const logs: string[] = [];
+  const { host } = hostOf(
+    (call) =>
+      gateRun(budgets, {
+        caseOver: (c) =>
+          call === 1 && c.id === 'e2e.pull'
+            ? { status: 'exceeded', p50Ms: null, samplesMs: [] }
+            : {},
+      }),
+    logs
+  );
+  expect(
+    (
+      await cli(
+        ['calibrate', '--runs', '4', '--out', out, '--page-cache', 'warm'],
+        host
+      )
+    ).code
+  ).toBe(0);
+  const c = JSON.parse(readFileSync(out, 'utf8')) as Ceilings;
+  // The pull row has three p50s and the others four.
+  expect(c.p50Ceilings['pull/developer small-serial null'].n).toBe(3);
+  expect(c.p50Ceilings['status/developer small-serial null'].n).toBe(4);
+  // The run that lost a case says so; the warm-only study does not report the
+  // dropped-cache row it never asked for.
+  expect(logs).toContain(
+    'calibrate: run 2/4 done, 6 p50s, not ok: pull/developer exceeded'
+  );
+  expect(logs.join('\n')).not.toContain('ci-checkout');
+});
+
+test('calibrate needs --runs, and the dropped mode needs sudo', async () => {
+  const logs: string[] = [];
+  const { host, seen } = hostOf(() => gateRun(budgets), logs, {
+    sudoOk: () => false,
+  });
+  expect((await cli(['calibrate'], host)).code).toBe(2);
+  const noSudo = await cli(
+    ['calibrate', '--runs', '3', '--out', join(scratch, 'x.json')],
+    host
+  );
+  expect(noSudo.code).toBe(1);
+  expect(logs.join('\n')).toContain('--page-cache warm');
+  expect(seen).toHaveLength(0);
+});
+
+test('gate-run measures the gate method over the budgeted cases and writes the run', async () => {
+  const out = join(scratch, 'gate-run.json');
+  const { host, seen } = hostOf(() => gateRun(budgets), []);
+  const { code } = await cli(
+    ['gate-run', '--page-cache', 'warm', '--out', out],
+    host
+  );
+  expect(code).toBe(0);
+  expect(seen).toHaveLength(1);
+  expect(seen[0]).toMatchObject({
+    suite: 'all',
+    fixtures: ['small'],
+    sweeps: false,
+    pageCache: ['warm'],
+    repeats: 3,
+    warmup: 1,
+    budgetMs: 300_000,
+    only: budgetCaseIds(budgets),
+  });
+  expect(
+    (JSON.parse(readFileSync(out, 'utf8')) as BenchRun).cases
+  ).not.toHaveLength(0);
+});
+
+test('gate-run defaults to both page-cache modes and refuses without sudo', async () => {
+  const { host, seen } = hostOf(() => gateRun(budgets), [], {});
+  await cli(['gate-run', '--out', join(scratch, 'gate-run-2.json')], host);
+  expect(seen[0].pageCache).toEqual(['warm', 'dropped']);
+  const logs: string[] = [];
+  const noSudo = hostOf(() => gateRun(budgets), logs, { sudoOk: () => false });
+  expect((await cli(['gate-run'], noSudo.host)).code).toBe(1);
+  expect(noSudo.seen).toHaveLength(0);
+  expect(logs.join('\n')).toContain('sudo -n');
+});
+
+test('ceilings derives the file from gate-run result files and logs what each ceiling rests on', async () => {
+  const files = [180, 190, 200, 210, 220].map((p50, i) =>
+    writeJson(`cei-run-${i}.json`, gateRun(budgets, { p50 }))
+  );
+  const out = join(scratch, 'ceilings-from-files.json');
+  const logs: string[] = [];
+  const { host, seen } = hostOf(() => gateRun(budgets), logs);
+  const { code } = await cli(['ceilings', ...files, '--out', out], host);
+  expect(code).toBe(0);
+  // It derives; it measures nothing.
+  expect(seen).toHaveLength(0);
+  const c = JSON.parse(readFileSync(out, 'utf8')) as Ceilings;
+  expect(c.runs).toBe(5);
+  expect(c.pageCache).toEqual(['warm']);
+  expect(c.familySize).toBe(7);
+  const { mu, sigma } = logMeanStdev([180, 190, 200, 210, 220]);
+  const k = c.p50Ceilings['status/developer small-serial null'];
+  expect(k.n).toBe(5);
+  expect(k.ceilingMs).toBeCloseTo(
+    Math.exp(mu + tQuantile(1 - 0.01 / 7, 4) * sigma),
+    6
+  );
+  expect(
+    logs.some((l) =>
+      l.startsWith('ceilings: status/developer small-serial null: n 5')
+    )
+  ).toBe(true);
+  // A file derived this way gates a run of the same method.
+  const fresh = writeJson('cei-fresh.json', gateRun(budgets, { p50: 200 }));
+  expect((await cli(['gate', fresh, '--ceilings', out], host)).code).toBe(0);
+});
+
+test('ceilings refuses files of other case versions, files not measured with the gate method, and no files', async () => {
+  const good = writeJson('cei-good.json', gateRun(budgets));
+  const newer = writeJson(
+    'cei-newer.json',
+    gateRun(budgets, {
+      caseOver: (c) => (c.id === 'wc.diff' ? { version: 2 } : {}),
+    })
+  );
+  const logs: string[] = [];
+  const { host } = hostOf(() => gateRun(budgets), logs);
+  const out = join(scratch, 'ceilings-refused.json');
+  expect((await cli(['ceilings', good, newer, '--out', out], host)).code).toBe(
+    1
+  );
+  expect(logs.join('\n')).toContain(
+    'cei-newer.json has other case versions than'
+  );
+  expect(existsSync(out)).toBe(false);
+
+  const tenRepeats = writeJson(
+    'cei-ten.json',
+    gateRun(budgets, {
+      caseOver: (c) => (c.id === 'wc.status' ? { repeats: 10 } : {}),
+    })
+  );
+  logs.length = 0;
+  expect(
+    (await cli(['ceilings', good, tenRepeats, '--out', out], host)).code
+  ).toBe(1);
+  expect(logs.join('\n')).toContain('not measured with the gate method');
+  expect(existsSync(out)).toBe(false);
+
+  expect((await cli(['ceilings'], host)).code).toBe(2);
+});
+
+test('gate exits 0 on a run within its ceilings and appends the lines to the step summary', async () => {
+  const r = gateRun(budgets);
+  const file = writeJson('gate-pass-run.json', r);
+  const ceilings = writeJson(
+    'gate-pass-ceilings.json',
+    ceilingsOf(budgets, r, 200)
+  );
+  const summary = join(scratch, 'gate-summary.md');
+  writeFileSync(summary, 'earlier step\n');
+  const { host } = hostOf(() => r, [], {
+    env: { GITHUB_STEP_SUMMARY: summary },
+  });
+  const { code, out } = await cli(['gate', file, '--ceilings', ceilings], host);
+  expect(code).toBe(0);
+  expect(out).toContain('ok status/developer small-serial null: p50 200.0 ms');
+  const written = readFileSync(summary, 'utf8');
+  expect(written.startsWith('earlier step\n')).toBe(true);
+  expect(written).toContain('ok status/developer small-serial null');
+});
+
+test('gate exits 1 on a regression, a result not measured with the gate method, a missing ceilings file and a bad one', async () => {
+  const slow = gateRun(budgets, { p50s: { 'status/developer': 500 } });
+  const ceilings = writeJson(
+    'gate-fail-ceilings.json',
+    ceilingsOf(budgets, gateRun(budgets), 250)
+  );
+  const file = writeJson('gate-fail-run.json', slow);
+  const { host } = hostOf(() => slow, []);
+  const regressed = await cli(['gate', file, '--ceilings', ceilings], host);
+  expect(regressed.code).toBe(1);
+  expect(regressed.out).toContain(
+    'regression status/developer small-serial null: p50 500.0 ms is above its ceiling 250.0 ms'
+  );
+
+  const tenRepeats = writeJson(
+    'gate-ten-run.json',
+    gateRun(budgets, {
+      caseOver: (c) => (c.id === 'wc.status' ? { repeats: 10 } : {}),
+    })
+  );
+  const method = await cli(['gate', tenRepeats, '--ceilings', ceilings], host);
+  expect(method.code).toBe(1);
+  expect(method.out).toContain('not measured with the gate method');
+
+  const missing = await cli(
+    ['gate', file, '--ceilings', join(scratch, 'absent.json')],
+    host
+  );
+  expect(missing.code).toBe(1);
+  expect(missing.out).toContain('no ceilings file');
+
+  const logs: string[] = [];
+  const bad = writeJson('gate-bad-ceilings.json', { nope: true });
+  const { host: quiet } = hostOf(() => slow, logs);
+  expect((await cli(['gate', file, '--ceilings', bad], quiet)).code).toBe(1);
+  expect(logs.join('\n')).toContain('is not a ceilings file');
+});
+
+test('gate takes exactly one run file', async () => {
+  const { host } = hostOf(() => gateRun(budgets), []);
+  expect((await cli(['gate'], host)).code).toBe(2);
+});
+
+test('a calibrated file gates a fresh run of the same method', async () => {
+  const out = join(scratch, 'ceilings-roundtrip.json');
+  const { host } = hostOf(
+    (call) =>
+      gateRun(budgets, {
+        p50: 200 + call * 10,
+        p50s: { 'status/developer': 1500 + call * 50 },
+      }),
+    []
+  );
+  await cli(
+    ['calibrate', '--runs', '4', '--out', out, '--page-cache', 'warm'],
+    host
+  );
+  const fresh = writeJson(
+    'roundtrip-run.json',
+    gateRun(budgets, { p50: 215, p50s: { 'status/developer': 1560 } })
+  );
+  expect((await cli(['gate', fresh, '--ceilings', out], host)).code).toBe(0);
+  const slow = writeJson(
+    'roundtrip-slow.json',
+    gateRun(budgets, { p50: 215, p50s: { 'status/developer': 4000 } })
+  );
+  expect((await cli(['gate', slow, '--ceilings', out], host)).code).toBe(1);
+});

@@ -69,6 +69,7 @@ type Command = (state: CopyState, dir: string) => Promise<number>;
 function everydayCase(c: {
   id: string;
   needs: 'fixture' | 'git';
+  minRepeats?: number;
   copies: number;
   note: string;
   setup: (ctx: CaseContext, copies: number) => Promise<CopyState>;
@@ -82,6 +83,7 @@ function everydayCase(c: {
     variant: 'serial',
     isolation: 'per-case',
     needs: [c.needs],
+    ...(c.minRepeats !== undefined && { minRepeats: c.minRepeats }),
     note: c.note,
     setup: (ctx) => c.setup(ctx, c.copies),
     run: (s) =>
@@ -124,6 +126,13 @@ const git =
   (s, dir) =>
     timeGit(args, { home: s.home, cwd: dir });
 
+// Every git case takes at least this many timed samples. A git command takes
+// a few milliseconds, and the median of the run's usual 3 samples moves by
+// tens of percent between runs; it is the denominator of every gated ratio,
+// so that noise would hide a real slowdown of the thaddeus side. At
+// milliseconds per sample, 25 samples cost little.
+const GIT_MIN_REPEATS = 25;
+
 const AGENT_NOTE = '8 concurrent copies on one host; the sample is the slowest';
 
 // One working-copy case: `thaddeus <command>` in a clone-shaped working copy
@@ -147,6 +156,7 @@ function gitCase(command: 'status' | 'diff', agents: boolean) {
   return everydayCase({
     id: `git.${command}${agents ? `.agents${AGENTS}` : ''}`,
     needs: 'git',
+    minRepeats: GIT_MIN_REPEATS,
     copies: agents ? AGENTS : 1,
     note: agents
       ? `git ${command} in each of ${AGENTS} clones with a ten-file edit; ${AGENT_NOTE}`
@@ -208,6 +218,7 @@ function gitServerCase<S extends RemoteState>(c: {
     variant: 'serial',
     isolation: 'per-sample',
     needs: ['git'],
+    minRepeats: GIT_MIN_REPEATS,
     ...(c.cold === true && { cold: true }),
     note: c.note,
     setup: async (ctx) => c.setup(await gitRemote(ctx)),

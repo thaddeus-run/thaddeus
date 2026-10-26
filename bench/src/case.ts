@@ -54,6 +54,13 @@ export interface BenchCase<S = unknown> {
   /** The case takes part in the history-length sweep. */
   sweep?: boolean;
   /**
+   * Raises the timed repeats to at least this many, whatever the run asks
+   * for, for a case so cheap per sample (a few milliseconds) that the run's
+   * repeats would leave its median too noisy to divide by. `maxRepeats`
+   * still applies afterwards. The result records the effective count.
+   */
+  minRepeats?: number;
+  /**
    * Caps the timed repeats, whatever the run asks for, for a case that a
    * server limit would otherwise refuse partway (e.g. the hourly
    * repository-creation limit). The result records the capped count.

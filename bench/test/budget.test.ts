@@ -8,15 +8,22 @@ import {
   type BudgetLine,
   type Budgets,
   BUDGETS_FILE,
+  ceilingsFromRuns,
+  checkGate,
+  deriveCeilings,
   evaluateBudgets,
+  gateOptions,
   ratioKey,
   readBudgets,
+  readCeilings,
   renderBudgets,
   validateBudgets,
 } from '../src/budget';
 import { run } from '../src/cli';
 import { defaultHost } from '../src/record';
 import type { BenchRun, CaseResult, Machine } from '../src/result';
+import { tQuantile } from '../src/stats';
+import { ceilingsOf, gateRun, METHODS } from './fixtures/gate-run';
 
 const scratch = mkdtempSync(join(tmpdir(), 'bench-budget-test-'));
 afterAll(() => rmSync(scratch, { recursive: true, force: true }));
@@ -516,4 +523,367 @@ test('bench budget exits 1 on a budgets file that is not JSON', async () => {
 test('bench budget with no run files is a usage error', async () => {
   const { code } = await cli(['budget']);
   expect(code).toBe(2);
+});
+
+// The gate: ceilings from a calibration study, and the check of a run
+// against them.
+
+const smallKey = (command: string, env: string) =>
+  `${command}/${env} small-serial null`;
+
+const meta = {
+  studiedAt: '2026-10-26T00:00:00.000Z',
+  runnerImage: 'unknown',
+  runs: 3,
+  pageCache: ['warm' as const],
+  caseVersions: { 'wc.status': 1 },
+};
+
+test('deriveCeilings is exp(mu + t * sigma) of the log p50s and records what it rests on', () => {
+  const key = 'status/developer small-serial null';
+  const c = deriveCeilings({ [key]: [1500, 1600, 1700] }, meta);
+  const logs = [1500, 1600, 1700].map(Math.log);
+  const mu = logs.reduce((a, b) => a + b) / 3;
+  const sigma = Math.sqrt(logs.reduce((a, x) => a + (x - mu) ** 2, 0) / 2);
+  expect(c.method).toBe('lognormal-family-wise-t-p50');
+  expect(c.familySize).toBe(1);
+  // Three runs: two degrees of freedom, t(0.99, 2) = 6.965 (table value).
+  expect(c.p50Ceilings[key].t).toBeCloseTo(6.965, 2);
+  expect(c.p50Ceilings[key].t).toBeCloseTo(tQuantile(0.99, 2), 12);
+  expect(c.p50Ceilings[key].n).toBe(3);
+  expect(c.p50Ceilings[key].logSd).toBeCloseTo(sigma, 12);
+  expect(c.p50Ceilings[key].geoMeanMs).toBeCloseTo(Math.exp(mu), 9);
+  expect(c.p50Ceilings[key].ceilingMs).toBeCloseTo(
+    Math.exp(mu + tQuantile(0.99, 2) * sigma),
+    9
+  );
+  expect(c).toMatchObject(meta);
+});
+
+test('deriveCeilings gives a key with two runs no ceiling and splits alpha over the keys that got one', () => {
+  const c = deriveCeilings(
+    { a: [100, 110, 120], b: [200, 210, 220], few: [300, 310] },
+    meta
+  );
+  expect(Object.keys(c.p50Ceilings).sort()).toEqual(['a', 'b']);
+  expect(c.familySize).toBe(2);
+  // The family of two splits alpha: each key's t is at 1 - 0.01 / 2, with n - 1
+  // degrees of freedom; a key of four runs gets a smaller t than one of three.
+  expect(c.p50Ceilings.a.t).toBeCloseTo(tQuantile(1 - 0.01 / 2, 2), 12);
+  const four = deriveCeilings({ a: [100, 110, 120, 115] }, meta);
+  expect(four.p50Ceilings.a.n).toBe(4);
+  expect(four.p50Ceilings.a.t).toBeCloseTo(tQuantile(0.99, 3), 12);
+  expect(four.p50Ceilings.a.t).toBeLessThan(c.p50Ceilings.a.t);
+  const none = deriveCeilings({ few: [300, 310] }, meta);
+  expect(none.p50Ceilings).toEqual({});
+  expect(none.familySize).toBe(0);
+});
+
+test('a ceiling is a time, so a faster thaddeus keeps its headroom instead of being floored', () => {
+  const c = deriveCeilings({ k: [0.4, 0.41, 0.42] }, meta);
+  expect(c.p50Ceilings.k.ceilingMs).toBeLessThan(1);
+});
+
+test('checkGate passes a run whose p50s are at or below their ceilings and prints the multiple of git', () => {
+  const r = gateRun(budgets);
+  const result = checkGate(r, budgets, ceilingsOf(budgets, r, 200), METHODS);
+  expect(result.failed).toBe(false);
+  expect(result.lines).toHaveLength(7);
+  expect(result.lines.every((l) => l.startsWith('ok '))).toBe(true);
+  expect(result.lines[0]).toBe(
+    'ok status/developer small-serial null: p50 200.0 ms <= ceiling 200.0 ms (2.0x git)'
+  );
+});
+
+test('checkGate reports a regression on the key above its ceiling and fails', () => {
+  const r = gateRun(budgets, { p50s: { 'status/developer': 260 } });
+  const ceilings = ceilingsOf(budgets, gateRun(budgets), 250);
+  const result = checkGate(r, budgets, ceilings, METHODS);
+  expect(result.failed).toBe(true);
+  expect(result.lines.filter((l) => l.startsWith('regression'))).toEqual([
+    'regression status/developer small-serial null: p50 260.0 ms is above its ceiling 250.0 ms (2.6x git)',
+  ]);
+  expect(result.lines.filter((l) => l.startsWith('ok '))).toHaveLength(6);
+});
+
+test('the multiple of git never fails the gate, whatever it is', () => {
+  // Git is 1000x faster than thaddeus here, and 50 ms slower: both in bounds
+  // for the thaddeus p50, so both pass.
+  const r = gateRun(budgets, { gitP50: 0.2 });
+  const ceilings = ceilingsOf(budgets, gateRun(budgets), 250);
+  const fast = checkGate(r, budgets, ceilings, METHODS);
+  expect(fast.failed).toBe(false);
+  expect(fast.lines[0]).toContain('(1000.0x git)');
+  const slowGit = checkGate(
+    gateRun(budgets, { gitP50: 5000 }),
+    budgets,
+    ceilings,
+    METHODS
+  );
+  expect(slowGit.failed).toBe(false);
+  // A zero git median leaves no multiple, and still passes.
+  const zero = gateRun(budgets, {
+    caseOver: (c) =>
+      c.id === 'git.status' ? { p50Ms: 0, samplesMs: [0, 0, 0] } : {},
+  });
+  const zeroResult = checkGate(zero, budgets, ceilings, METHODS);
+  expect(zeroResult.failed).toBe(false);
+  expect(zeroResult.lines[0]).toContain('(no multiple of git)');
+});
+
+test('checkGate fails on a null ceilings file, naming calibration', () => {
+  const result = checkGate(gateRun(budgets), budgets, null, METHODS);
+  expect(result.failed).toBe(true);
+  expect(result.lines.join('\n')).toContain('no ceilings file');
+});
+
+test('checkGate fails when a gated case is not ok, whatever the p50', () => {
+  const ceilings = ceilingsOf(budgets, gateRun(budgets), 100_000);
+  for (const status of ['exceeded', 'oom', 'error'] as const) {
+    const r = gateRun(budgets, {
+      caseOver: (c) =>
+        c.id === 'e2e.pull'
+          ? { status, p50Ms: null, samplesMs: [], note: 'it broke' }
+          : {},
+    });
+    const result = checkGate(r, budgets, ceilings, METHODS);
+    expect(result.failed).toBe(true);
+    expect(result.lines).toContain(
+      `not ok pull/developer small-serial null: ${status} (it broke)`
+    );
+  }
+  // A git baseline that does not finish fails its row too.
+  const gitFailed = gateRun(budgets, {
+    caseOver: (c) =>
+      c.id === 'git.pull'
+        ? { status: 'error', p50Ms: null, samplesMs: [], note: 'git broke' }
+        : {},
+  });
+  expect(checkGate(gitFailed, budgets, ceilings, METHODS).failed).toBe(true);
+});
+
+test('checkGate fails when a measured row has no result at all', () => {
+  const full = gateRun(budgets);
+  const r = {
+    ...full,
+    cases: full.cases.filter((c) => c.id !== 'git.pull' && c.id !== 'e2e.pull'),
+  };
+  const result = checkGate(
+    r,
+    budgets,
+    ceilingsOf(budgets, full, 100_000),
+    METHODS
+  );
+  expect(result.failed).toBe(true);
+  expect(result.lines.join('\n')).toContain('not ok pull/developer: missing');
+});
+
+test('checkGate fails on a p50 with no ceiling', () => {
+  const r = gateRun(budgets);
+  const ceilings = ceilingsOf(budgets, r, 100_000);
+  delete ceilings.p50Ceilings[smallKey('diff', 'developer')];
+  const result = checkGate(r, budgets, ceilings, METHODS);
+  expect(result.failed).toBe(true);
+  expect(result.lines).toContain(
+    'not ok diff/developer small-serial null: no ceiling; re-run calibration'
+  );
+});
+
+test('checkGate fails a result not measured with the gate method', () => {
+  const ceilings = ceilingsOf(budgets, gateRun(budgets), 100_000);
+  // The thaddeus case ran 10 repeats, as a plain `bench run` would.
+  const tenRepeats = gateRun(budgets, {
+    caseOver: (c) => (c.id === 'wc.status' ? { repeats: 10 } : {}),
+  });
+  const a = checkGate(tenRepeats, budgets, ceilings, METHODS);
+  expect(a.failed).toBe(true);
+  expect(a.lines.join('\n')).toContain(
+    `not ok wc.status small-serial: not measured with the gate method: 10 repeats and ${METHODS['wc.status'].warmup} warm-ups, where the gate takes ${METHODS['wc.status'].repeats} and ${METHODS['wc.status'].warmup}`
+  );
+  // A git case with the run's 3 repeats instead of its minimum of 25.
+  const threeGit = gateRun(budgets, {
+    caseOver: (c) => (c.id === 'git.status' ? { repeats: 3 } : {}),
+  });
+  expect(checkGate(threeGit, budgets, ceilings, METHODS).failed).toBe(true);
+  // A different warm-up.
+  const noWarmup = gateRun(budgets, {
+    caseOver: (c) => (c.id === 'wc.status' ? { warmup: 0 } : {}),
+  });
+  expect(checkGate(noWarmup, budgets, ceilings, METHODS).failed).toBe(true);
+});
+
+test('gateMethods gives the git cases their minimum and leaves the others at the gate method', () => {
+  expect(METHODS['git.status']).toEqual({ repeats: 25, warmup: 1 });
+  expect(METHODS['git.clone']).toEqual({ repeats: 25, warmup: 1 });
+  expect(METHODS['wc.status']).toEqual({ repeats: 3, warmup: 1 });
+  expect(METHODS['e2e.push.10']).toEqual({ repeats: 3, warmup: 1 });
+  // e2e.pull takes no warm-up of its own (its maxWarmup is 0).
+  expect(METHODS['e2e.pull']).toEqual({ repeats: 3, warmup: 0 });
+  expect(Object.keys(METHODS).sort()).toEqual(budgetCaseIds(budgets));
+});
+
+test('checkGate fails when the ceilings were calibrated on other case versions', () => {
+  const r = gateRun(budgets);
+  const ceilings = ceilingsOf(budgets, r, 100_000);
+  ceilings.caseVersions['e2e.pull'] = 2;
+  const result = checkGate(r, budgets, ceilings, METHODS);
+  expect(result.failed).toBe(true);
+  expect(result.lines).toHaveLength(1);
+  expect(result.lines[0]).toContain(
+    'e2e.pull is v1 in the run and v2 in the ceilings'
+  );
+  expect(result.lines[0]).toContain('re-run calibration');
+
+  const withoutVersion = ceilingsOf(budgets, r, 100_000);
+  delete withoutVersion.caseVersions['wc.diff'];
+  expect(checkGate(r, budgets, withoutVersion, METHODS).failed).toBe(true);
+});
+
+test('checkGate gates the dropped row when the ceilings measured it, and skips it when they did not', () => {
+  const dropped = gateRun(budgets, { dropped: true });
+  const both = ceilingsOf(budgets, dropped, 200, ['warm', 'dropped']);
+  const ok = checkGate(dropped, budgets, both, METHODS);
+  expect(ok.failed).toBe(false);
+  expect(ok.lines).toContain(
+    'ok ci-checkout/ci small-serial dropped: p50 200.0 ms <= ceiling 200.0 ms (2.0x git)'
+  );
+  // Warm-only ceilings with a run that has no dropped results pass...
+  const warm = gateRun(budgets);
+  expect(
+    checkGate(warm, budgets, ceilingsOf(budgets, warm, 200), METHODS).failed
+  ).toBe(false);
+  // ...but ceilings that did measure dropped fail a run that has none.
+  const missing = checkGate(warm, budgets, both, METHODS);
+  expect(missing.failed).toBe(true);
+  expect(missing.lines).toContain(
+    'not ok ci-checkout/ci dropped: missing (no e2e.checkout.cold or git.clone result)'
+  );
+});
+
+test('checkGate ignores unmeasured rows and a missed absolute target', () => {
+  // 10 s for status is far over its 50 ms target, but under its ceiling.
+  const r = gateRun(budgets, { p50s: { 'status/developer': 10_000 } });
+  const result = checkGate(r, budgets, ceilingsOf(budgets, r, 20_000), METHODS);
+  expect(result.failed).toBe(false);
+  expect(result.lines.join('\n')).not.toContain('rebase');
+});
+
+test('checkGate fails a run that has results only on a fixture without ceilings', () => {
+  const r = gateRun(budgets);
+  const onMedium = {
+    ...r,
+    cases: r.cases.map((c) => ({ ...c, fixture: 'medium-serial' })),
+  };
+  const result = checkGate(
+    onMedium,
+    budgets,
+    ceilingsOf(budgets, r, 100_000),
+    METHODS
+  );
+  expect(result.failed).toBe(true);
+  expect(result.lines.every((l) => l.startsWith('not ok'))).toBe(true);
+});
+
+test('ceilingsFromRuns pools the p50 of each key over runs and takes the page-cache modes they measured', () => {
+  const runs = [190, 200, 210, 205].map((p50, i) => ({
+    name: `run-${i}.json`,
+    run: gateRun(budgets, { p50, dropped: true }),
+  }));
+  const c = ceilingsFromRuns(runs, budgets, {
+    studiedAt: 's',
+    runnerImage: 'r',
+  });
+  expect(c.runs).toBe(4);
+  expect(c.pageCache).toEqual(['warm', 'dropped']);
+  expect(c.caseVersions['e2e.pull']).toBe(1);
+  expect(c.familySize).toBe(8);
+  const k = c.p50Ceilings[smallKey('status', 'developer')];
+  expect(k.n).toBe(4);
+  expect(k.geoMeanMs).toBeCloseTo(
+    Math.exp([190, 200, 210, 205].reduce((a, x) => a + Math.log(x), 0) / 4),
+    9
+  );
+  expect(k.t).toBeCloseTo(tQuantile(1 - 0.01 / 8, 3), 12);
+  expect(c.p50Ceilings['ci-checkout/ci small-serial dropped'].n).toBe(4);
+  // Warm-only runs measure only warm.
+  const warm = ceilingsFromRuns(
+    [0, 1, 2].map((i) => ({ name: `w${i}`, run: gateRun(budgets) })),
+    budgets,
+    { studiedAt: 's', runnerImage: 'r' }
+  );
+  expect(warm.pageCache).toEqual(['warm']);
+});
+
+test('ceilingsFromRuns refuses runs of other case versions and a run lost by one case only thins that key', () => {
+  const a = { name: 'a.json', run: gateRun(budgets) };
+  const newer = {
+    name: 'b.json',
+    run: gateRun(budgets, {
+      caseOver: (c) => (c.id === 'wc.diff' ? { version: 2 } : {}),
+    }),
+  };
+  expect(() =>
+    ceilingsFromRuns([a, newer], budgets, { studiedAt: 's', runnerImage: 'r' })
+  ).toThrow('b.json has other case versions than a.json (wc.diff)');
+  expect(() =>
+    ceilingsFromRuns([], budgets, { studiedAt: 's', runnerImage: 'r' })
+  ).toThrow('no runs');
+  const lost = {
+    name: 'lost.json',
+    run: gateRun(budgets, {
+      caseOver: (c) =>
+        c.id === 'e2e.pull'
+          ? { status: 'exceeded', p50Ms: null, samplesMs: [] }
+          : {},
+    }),
+  };
+  const c = ceilingsFromRuns(
+    [
+      a,
+      lost,
+      { name: 'c', run: gateRun(budgets) },
+      { name: 'd', run: gateRun(budgets) },
+    ],
+    budgets,
+    { studiedAt: 's', runnerImage: 'r' }
+  );
+  expect(c.p50Ceilings[smallKey('pull', 'developer')].n).toBe(3);
+  expect(c.p50Ceilings[smallKey('status', 'developer')].n).toBe(4);
+});
+
+test('readCeilings reads a ceilings file, returns null for a missing one and throws on a bad one', () => {
+  const ceilings = ceilingsOf(budgets, gateRun(budgets), 200);
+  const path = writeJson('ceilings-ok.json', ceilings);
+  expect(readCeilings(path)).toEqual(ceilings);
+  expect(readCeilings(join(scratch, 'nope.json'))).toBeNull();
+  const key = smallKey('status', 'developer');
+  const bad = writeJson('ceilings-bad.json', {
+    ...ceilings,
+    p50Ceilings: { [key]: { ...ceilings.p50Ceilings[key], ceilingMs: 'x' } },
+  });
+  expect(() => readCeilings(bad)).toThrow('is not a ceilings file');
+  // A file of an earlier method (ratio ceilings) is not this format.
+  const old = writeJson('ceilings-old.json', {
+    ...ceilings,
+    method: 'lognormal-family-wise-t',
+  });
+  expect(() => readCeilings(old)).toThrow('is not a ceilings file');
+  const notJson = join(scratch, 'ceilings-notjson.json');
+  writeFileSync(notJson, '{ nope');
+  expect(() => readCeilings(notJson)).toThrow('ceilings-notjson.json');
+});
+
+test('gateOptions is the gate method over exactly the budgeted cases', () => {
+  const opts = gateOptions(budgets);
+  expect(opts).toMatchObject({
+    suite: 'all',
+    fixtures: ['small'],
+    sweeps: false,
+    pageCache: ['warm', 'dropped'],
+    repeats: 3,
+    warmup: 1,
+    budgetMs: 300_000,
+  });
+  expect(opts.only).toEqual(budgetCaseIds(budgets));
+  expect(gateOptions(budgets, ['warm']).pageCache).toEqual(['warm']);
 });

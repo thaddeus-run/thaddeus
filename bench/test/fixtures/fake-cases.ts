@@ -155,6 +155,14 @@ const fakes: readonly BenchCase[] = [
         : Promise.resolve(),
     run: () => Promise.resolve(),
   }),
+  // minRepeats raises the timed repeats to 7; with maxRepeats 4 as well the
+  // cap wins.
+  fake('fake.min', { minRepeats: 7, run: () => Promise.resolve() }),
+  fake('fake.minmax', {
+    minRepeats: 7,
+    maxRepeats: 4,
+    run: () => Promise.resolve(),
+  }),
 ];
 
 export default fakes;

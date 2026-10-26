@@ -12,10 +12,21 @@ import { parseArgs } from 'node:util';
 
 import {
   budgetCaseIds,
+  type Budgets,
   BUDGETS_FILE,
+  type Ceilings,
+  CEILINGS_FILE,
+  ceilingsFromRuns,
+  checkGate,
   combineBudgetLines,
   evaluateBudgets,
+  GATE_METHOD,
+  gateMethods,
+  gateOptions,
+  linesP50,
+  methodMismatches,
   readBudgets,
+  readCeilings,
   renderBudgets,
 } from './budget';
 import {
@@ -65,6 +76,17 @@ const USAGE = `usage:
                      even when a target is missed
   bun src/cli.ts budget --case-ids [--budgets file]
                      print the comma-joined ids of the cases the budgets measure
+  bun src/cli.ts gate-run [--out file] [--page-cache warm|warm,dropped]
+                     measure the budgeted cases with the gate's method (what CI runs)
+  bun src/cli.ts gate <run.json> [--ceilings file] [--budgets file]
+                     hold the thaddeus p50 of each budgeted row to its calibrated
+                     ceiling; exit 1 on a regression, a case that is not ok, a
+                     result not measured with the gate method or a missing ceiling
+  bun src/cli.ts ceilings <run.json>... [--out file] [--budgets file]
+                     derive the ceilings file from gate-run result files
+  bun src/cli.ts calibrate --runs K [--out file] [--page-cache warm|warm,dropped]
+                     run the gate's method K times on this host and write the
+                     ceilings file
   bun src/cli.ts noise [--rounds R] [--pairs P] [--suite ...] [--fixtures ...]
                      [--repeats N] [--warmup N] [--exclude glob,...] [--only glob,...]
                      [--out file]
@@ -77,6 +99,9 @@ const RUN_DEFAULTS = { repeats: 10, warmup: 2, budgetMs: 120_000 };
 // defaults to it, because thresholds only hold for the method they were
 // measured with.
 const PR_METHOD = { repeats: 3, warmup: 1, rounds: 5, pairs: 20 };
+
+// The default `--page-cache` of `gate-run` and `calibrate`: the gate's modes.
+const GATE_PAGE_CACHE = GATE_METHOD.pageCache.join(',');
 
 // The machine id of a `run` without BENCH_MACHINE.
 const LOCAL_MACHINE = 'local';
@@ -114,6 +139,18 @@ function suiteFlags(defaults: { repeats: number; warmup: number }) {
     exclude: { type: 'string', default: '' },
     only: { type: 'string', default: '' },
   } as const;
+}
+
+// Parses a `--page-cache` value into modes, or throws a UsageError on an
+// unknown one.
+function pageCacheOf(value: string): PageCacheMode[] {
+  const modes = list(value);
+  for (const mode of modes) {
+    if (mode !== 'warm' && mode !== 'dropped') {
+      throw new UsageError(`unknown page-cache mode ${mode}`);
+    }
+  }
+  return modes as PageCacheMode[];
 }
 
 // Turns parsed suite flags into suite options (warm, no sweeps; `run` adds
@@ -202,12 +239,7 @@ async function runCommand(
       1
     );
   }
-  const pageCache = list(values['page-cache']);
-  for (const mode of pageCache) {
-    if (mode !== 'warm' && mode !== 'dropped') {
-      throw new UsageError(`unknown page-cache mode ${mode}`);
-    }
-  }
+  const pageCache = pageCacheOf(values['page-cache']);
   if (pageCache.includes('dropped') && !host.sudoOk()) {
     host.log(
       'bench run: --page-cache dropped needs sudo -n to drop the page cache; run sudo -v first'
@@ -221,7 +253,7 @@ async function runCommand(
     {
       ...opts,
       sweeps: values.sweeps,
-      pageCache: pageCache as PageCacheMode[],
+      pageCache,
     },
     target.env
   );
@@ -283,6 +315,14 @@ function writeThresholds(path: string, thresholds: Thresholds): void {
   mkdirSync(dirname(path), { recursive: true });
   const tmp = `${path}.tmp`;
   writeFileSync(tmp, `${JSON.stringify(thresholds, null, 2)}\n`);
+  renameSync(tmp, path);
+}
+
+// Writes a ceilings file the way `writeThresholds` writes thresholds.
+function writeCeilings(path: string, ceilings: Ceilings): void {
+  mkdirSync(dirname(path), { recursive: true });
+  const tmp = `${path}.tmp`;
+  writeFileSync(tmp, `${JSON.stringify(ceilings, null, 2)}\n`);
   renameSync(tmp, path);
 }
 
@@ -403,6 +443,241 @@ function budgetCommand(argv: readonly string[], host: Host): number {
   if (stepSummary !== undefined && stepSummary !== '') {
     appendFileSync(stepSummary, report);
   }
+  return 0;
+}
+
+// Reads the budgets file named by `--budgets` (default the committed one),
+// or throws a FileError naming it.
+function budgetsOf(path: string | undefined) {
+  try {
+    return readBudgets(path ?? BUDGETS_FILE);
+  } catch (error) {
+    throw new FileError((error as Error).message);
+  }
+}
+
+// The gate's measurement, shared by `gate-run` and `calibrate`: the gate
+// method over the cases the budgets name, with the dropped-cache check `run`
+// makes. Returns the options and environment, or an exit code.
+function gateTarget(
+  budgetsPath: string | undefined,
+  pageCacheFlag: string,
+  host: Host,
+  command: string
+) {
+  const pageCache = pageCacheOf(pageCacheFlag);
+  if (pageCache.length === 0) throw new UsageError('--page-cache is empty');
+  if (pageCache.includes('dropped') && !host.sudoOk()) {
+    host.log(
+      `bench ${command}: --page-cache dropped needs sudo -n to drop the page cache; run sudo -v first, or pass --page-cache warm`
+    );
+    return 1;
+  }
+  const target = suiteEnvOf(host);
+  if (typeof target === 'number') return target;
+  return {
+    opts: gateOptions(budgetsOf(budgetsPath), pageCache),
+    ...target,
+  };
+}
+
+// `bench gate-run [--out file] [--page-cache ...]`: runs the gate's method
+// (`GATE_METHOD` over the budgeted cases) and writes the run for `bench
+// gate`. Like `run` it has no preflight and records a dirty tree as dirty.
+async function gateRunCommand(
+  argv: readonly string[],
+  host: Host
+): Promise<number> {
+  const { values } = parseArgs({
+    args: [...argv],
+    options: {
+      out: { type: 'string' },
+      budgets: { type: 'string' },
+      'page-cache': {
+        type: 'string',
+        default: GATE_PAGE_CACHE,
+      },
+    },
+    strict: true,
+  });
+  const target = gateTarget(
+    values.budgets,
+    values['page-cache'],
+    host,
+    'gate-run'
+  );
+  if (typeof target === 'number') return target;
+  const run = await host.runSuite(target.opts, target.env);
+  const out =
+    values.out === undefined
+      ? join(
+          host.outDir,
+          `${run.recordedAt.slice(0, 10)}-${target.short}-gate.json`
+        )
+      : resolve(values.out);
+  writeRun(out, run);
+  host.log(`wrote ${out}`);
+  return 0;
+}
+
+// `bench gate <run.json> [--ceilings file]`: sets a `gate-run` against the
+// calibrated ceilings, prints one line per checked key, appends them to
+// $GITHUB_STEP_SUMMARY when that is set and exits 1 when `checkGate` fails.
+// The gate holds each row's thaddeus p50 to its ceiling; the multiple of git
+// is printed and never fails it. A ceilings file that does not exist fails
+// the gate rather than being skipped.
+async function gateCommand(
+  argv: readonly string[],
+  host: Host
+): Promise<number> {
+  const { values, positionals } = parseArgs({
+    args: [...argv],
+    options: { ceilings: { type: 'string' }, budgets: { type: 'string' } },
+    allowPositionals: true,
+    strict: true,
+  });
+  const [runPath, ...extra] = positionals;
+  if (runPath === undefined || extra.length > 0) {
+    throw new UsageError('gate takes one run file');
+  }
+  const budgets = budgetsOf(values.budgets);
+  let ceilings: Ceilings | null;
+  try {
+    ceilings = readCeilings(values.ceilings ?? CEILINGS_FILE);
+  } catch (error) {
+    throw new FileError((error as Error).message);
+  }
+  const result = checkGate(
+    readRun(runPath),
+    budgets,
+    ceilings,
+    await gateMethods(budgets)
+  );
+  const report = `${result.lines.join('\n')}\n`;
+  process.stdout.write(report);
+  const stepSummary = (host.env ?? process.env).GITHUB_STEP_SUMMARY;
+  if (stepSummary !== undefined && stepSummary !== '') {
+    appendFileSync(stepSummary, `\`\`\`\n${report}\`\`\`\n`);
+  }
+  return result.failed ? 1 : 0;
+}
+
+// Writes the ceilings derived from `runs` to `out` and logs what each key's
+// ceiling rests on.
+function publishCeilings(
+  out: string,
+  runs: { name: string; run: BenchRun }[],
+  budgets: Budgets,
+  host: Host,
+  studiedAt: string
+): void {
+  let ceilings: Ceilings;
+  try {
+    ceilings = ceilingsFromRuns(runs, budgets, {
+      studiedAt,
+      runnerImage: runnerImage(host.env ?? process.env),
+    });
+  } catch (error) {
+    throw new FileError(`ceilings: ${(error as Error).message}`);
+  }
+  writeCeilings(out, ceilings);
+  for (const [key, k] of Object.entries(ceilings.p50Ceilings)) {
+    host.log(
+      `ceilings: ${key}: n ${k.n}, geometric mean ${k.geoMeanMs.toFixed(1)} ms, log-sd ${k.logSd.toFixed(3)}, t ${k.t.toFixed(2)}, ceiling ${k.ceilingMs.toFixed(1)} ms`
+    );
+  }
+}
+
+// `bench ceilings <run.json>... [--out file]`: derives the ceilings file from
+// existing `gate-run` result files, one run per file (the CI matrix runs the
+// gate on many hosts, and this job pools their files). A file measured with
+// another method, or on other case versions than the first, is refused.
+async function ceilingsCommand(
+  argv: readonly string[],
+  host: Host
+): Promise<number> {
+  const { values, positionals } = parseArgs({
+    args: [...argv],
+    options: { out: { type: 'string' }, budgets: { type: 'string' } },
+    allowPositionals: true,
+    strict: true,
+  });
+  if (positionals.length === 0)
+    throw new UsageError('ceilings takes run files');
+  const budgets = budgetsOf(values.budgets);
+  const methods = await gateMethods(budgets);
+  const runs = positionals.map((path) => ({ name: path, run: readRun(path) }));
+  const refused = runs.flatMap(({ name, run }) =>
+    methodMismatches(run, budgets, methods).map(
+      (m) => `${name}: ${m.name}: ${m.why}`
+    )
+  );
+  if (refused.length > 0) {
+    throw new FileError(`ceilings: ${refused.join('\n  ')}`);
+  }
+  const out = values.out === undefined ? CEILINGS_FILE : resolve(values.out);
+  publishCeilings(out, runs, budgets, host, new Date().toISOString());
+  host.log(`wrote ${out} from ${runs.length} runs`);
+  return 0;
+}
+
+// `bench calibrate --runs K [--out file]`: the calibration study on one
+// host. Runs the gate's method K times and derives the ceilings the gate
+// holds each row's thaddeus p50 to, the way `bench ceilings` does from
+// result files (see `ceilingsFromRuns`). Rewrites the ceilings file (by
+// default the committed one) after every run, so a study cut off by the job's
+// time limit still leaves the ceilings of the runs it finished. One host's
+// runs miss the variance between hosts; the CI calibration pools runs from
+// many hosts with `bench ceilings` instead.
+async function calibrateCommand(
+  argv: readonly string[],
+  host: Host
+): Promise<number> {
+  const { values } = parseArgs({
+    args: [...argv],
+    options: {
+      runs: { type: 'string' },
+      out: { type: 'string' },
+      budgets: { type: 'string' },
+      'page-cache': { type: 'string', default: GATE_PAGE_CACHE },
+    },
+    strict: true,
+  });
+  if (values.runs === undefined) throw new UsageError('calibrate needs --runs');
+  const runs = count('runs', values.runs, 1);
+  const target = gateTarget(
+    values.budgets,
+    values['page-cache'],
+    host,
+    'calibrate'
+  );
+  if (typeof target === 'number') return target;
+  const budgets = budgetsOf(values.budgets);
+  const out = values.out === undefined ? CEILINGS_FILE : resolve(values.out);
+  const studiedAt = new Date().toISOString();
+  const measured: { name: string; run: BenchRun }[] = [];
+  for (let n = 1; n <= runs; n++) {
+    host.log(`calibrate: run ${n}/${runs}`);
+    const run = await host.runSuite(target.opts, target.env);
+    measured.push({ name: `run ${n}`, run });
+    const lines = evaluateBudgets(run, budgets);
+    // A dropped-cache row of a warm-only study is not a failure to report.
+    const unfinished = lines.filter(
+      (l) =>
+        l.status !== 'ok' &&
+        l.status !== 'unmeasured' &&
+        (l.pageCache === null || target.opts.pageCache.includes(l.pageCache))
+    );
+    host.log(
+      `calibrate: run ${n}/${runs} done, ${Object.keys(linesP50(lines)).length} p50s` +
+        (unfinished.length === 0
+          ? ''
+          : `, not ok: ${unfinished.map((l) => `${l.command}/${l.env} ${l.status}`).join(', ')}`)
+    );
+    // Rewritten after every run (see above).
+    publishCeilings(out, measured, budgets, host, studiedAt);
+  }
+  host.log(`wrote ${out}`);
   return 0;
 }
 
@@ -530,6 +805,10 @@ export async function run(
     if (command === 'merge') return mergeCommand(rest, host);
     if (command === 'compare') return compareCommand(rest, host);
     if (command === 'budget') return budgetCommand(rest, host);
+    if (command === 'gate-run') return await gateRunCommand(rest, host);
+    if (command === 'gate') return await gateCommand(rest, host);
+    if (command === 'ceilings') return await ceilingsCommand(rest, host);
+    if (command === 'calibrate') return await calibrateCommand(rest, host);
     if (command === 'noise') return await noiseCommand(rest, host);
     throw new UsageError(
       command === undefined ? 'no command' : `unknown command ${command}`

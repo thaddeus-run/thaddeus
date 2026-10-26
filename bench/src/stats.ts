@@ -132,3 +132,90 @@ export function logMeanStdev(xs: readonly number[]): {
     logs.reduce((a, x) => a + (x - mu) ** 2, 0) / (logs.length - 1);
   return { mu, sigma: Math.sqrt(variance) };
 }
+
+// The natural log of the gamma function for x >= 0.5 (Lanczos approximation,
+// g = 7, about 15 digits). The incomplete beta function below needs it.
+function logGamma(x: number): number {
+  const c = [
+    0.99999999999980993, 676.5203681218851, -1259.1392167224028,
+    771.32342877765313, -176.61502916214059, 12.507343278686905,
+    -0.13857109526572012, 9.9843695780195716e-6, 1.5056327351493116e-7,
+  ];
+  const y = x - 1;
+  let a = c[0];
+  for (let i = 1; i < c.length; i++) a += c[i] / (y + i);
+  const t = y + 7.5;
+  return (
+    0.5 * Math.log(2 * Math.PI) + (y + 0.5) * Math.log(t) - t + Math.log(a)
+  );
+}
+
+// The continued fraction of the incomplete beta function (modified Lentz
+// method), valid where `regularizedBeta` calls it.
+function betaContinuedFraction(a: number, b: number, x: number): number {
+  const tiny = 1e-30;
+  const clamp = (v: number) => (Math.abs(v) < tiny ? tiny : v);
+  let c = 1;
+  let d = 1 / clamp(1 - ((a + b) * x) / (a + 1));
+  let h = d;
+  for (let m = 1; m <= 500; m++) {
+    const m2 = 2 * m;
+    let term = (m * (b - m) * x) / ((a - 1 + m2) * (a + m2));
+    d = 1 / clamp(1 + term * d);
+    c = clamp(1 + term / c);
+    h *= d * c;
+    term = (-(a + m) * (a + b + m) * x) / ((a + m2) * (a + 1 + m2));
+    d = 1 / clamp(1 + term * d);
+    c = clamp(1 + term / c);
+    const delta = d * c;
+    h *= delta;
+    if (Math.abs(delta - 1) < 1e-15) break;
+  }
+  return h;
+}
+
+// The regularized incomplete beta function I_x(a, b), for 0 <= x <= 1.
+function regularizedBeta(x: number, a: number, b: number): number {
+  if (x <= 0) return 0;
+  if (x >= 1) return 1;
+  const front = Math.exp(
+    logGamma(a + b) -
+      logGamma(a) -
+      logGamma(b) +
+      a * Math.log(x) +
+      b * Math.log(1 - x)
+  );
+  return x < (a + 1) / (a + b + 2)
+    ? (front * betaContinuedFraction(a, b, x)) / a
+    : 1 - (front * betaContinuedFraction(b, a, 1 - x)) / b;
+}
+
+// P(T > t) for Student's t with `df` degrees of freedom and t >= 0.
+function tUpperTail(t: number, df: number): number {
+  return 0.5 * regularizedBeta(df / (df + t * t), df / 2, 0.5);
+}
+
+// The Student-t quantile: the t with P(T <= t) = p for `df` degrees of
+// freedom. Found by bisection on the exact t distribution function (through
+// the incomplete beta function), so it holds at the 2 degrees of freedom of a
+// 3-sample estimate, where a series expansion from the normal quantile does
+// not. The calibration study needs it because a standard deviation estimated
+// from a handful of ratios has a heavier tail than the normal.
+export function tQuantile(p: number, df: number): number {
+  if (!(p > 0 && p < 1)) {
+    throw new RangeError(`tQuantile needs 0 < p < 1, got ${p}`);
+  }
+  if (!(df > 0)) throw new RangeError(`tQuantile needs df > 0, got ${df}`);
+  if (p === 0.5) return 0;
+  const tail = Math.min(p, 1 - p);
+  let hi = 1;
+  while (tUpperTail(hi, df) > tail) hi *= 2;
+  let lo = 0;
+  for (let i = 0; i < 200 && hi - lo > 1e-13 * hi; i++) {
+    const mid = (lo + hi) / 2;
+    if (tUpperTail(mid, df) > tail) lo = mid;
+    else hi = mid;
+  }
+  const t = (lo + hi) / 2;
+  return p > 0.5 ? t : -t;
+}

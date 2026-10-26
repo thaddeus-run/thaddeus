@@ -7,6 +7,7 @@ import {
   normalQuantile,
   percentile,
   summarize,
+  tQuantile,
 } from '../src/stats';
 
 const oneToHundred = Array.from({ length: 100 }, (_, i) => i + 1);
@@ -78,4 +79,42 @@ test('normalQuantile matches known standard normal quantiles', () => {
 test('normalQuantile rejects probabilities outside (0, 1)', () => {
   expect(() => normalQuantile(0)).toThrow(RangeError);
   expect(() => normalQuantile(1)).toThrow(RangeError);
+});
+
+test('tQuantile matches table values of the Student-t distribution', () => {
+  const table: [number, number, number][] = [
+    [0.975, 1, 12.706],
+    [0.975, 2, 4.303],
+    [0.975, 9, 2.262],
+    [0.995, 9, 3.25],
+    [0.999, 4, 7.173],
+    [0.95, 7, 1.895],
+    [0.975, 30, 2.042],
+    [0.999, 7, 4.785],
+  ];
+  for (const [p, df, expected] of table) {
+    expect(Math.abs(tQuantile(p, df) / expected - 1)).toBeLessThan(0.001);
+  }
+});
+
+test('tQuantile has exact forms at 1 and 2 degrees of freedom, is odd, and tends to the normal', () => {
+  // df = 1 is the Cauchy distribution: tan(pi * (p - 1/2)).
+  expect(tQuantile(0.9, 1)).toBeCloseTo(Math.tan(Math.PI * 0.4), 9);
+  // df = 2: (2p - 1) / sqrt(2 p (1 - p)). The deep tail is what a 3-ratio
+  // ceiling uses: far past the normal's 2.98.
+  const p = 1 - 0.01 / 7;
+  expect(tQuantile(p, 2)).toBeCloseTo(
+    (2 * p - 1) / Math.sqrt(2 * p * (1 - p)),
+    8
+  );
+  expect(tQuantile(p, 2)).toBeGreaterThan(15);
+  expect(tQuantile(0.025, 9)).toBeCloseTo(-tQuantile(0.975, 9), 9);
+  expect(tQuantile(0.5, 5)).toBe(0);
+  expect(tQuantile(0.99, 100000)).toBeCloseTo(normalQuantile(0.99), 3);
+});
+
+test('tQuantile rejects a probability outside (0, 1) and df below or at 0', () => {
+  expect(() => tQuantile(0, 3)).toThrow(RangeError);
+  expect(() => tQuantile(1, 3)).toThrow(RangeError);
+  expect(() => tQuantile(0.9, 0)).toThrow(RangeError);
 });

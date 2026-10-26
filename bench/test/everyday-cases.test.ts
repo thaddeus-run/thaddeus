@@ -76,6 +76,12 @@ test('the git baselines of server commands say their transport is local', () => 
   expect(byId('git.clone').note).toContain('cold');
 });
 
+test('every git case takes at least 25 timed samples and no thaddeus case sets a minimum', () => {
+  for (const c of everydayCases) {
+    expect(c.minRepeats).toBe(c.id.startsWith('git.') ? 25 : undefined);
+  }
+});
+
 test('working-copy cases need the fixture cache and git cases the git cache', () => {
   for (const c of everydayCases) {
     expect(c.needs).toEqual(c.id.startsWith('git.') ? ['git'] : ['fixture']);

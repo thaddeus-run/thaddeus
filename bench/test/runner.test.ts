@@ -316,6 +316,28 @@ test(
 );
 
 test(
+  'minRepeats raises the repeats of a small request, leaves a larger one alone, and maxRepeats still caps',
+  async () => {
+    const raised = await runCase('fake.min', 'small', o);
+    expect(raised.status).toBe('ok');
+    expect(raised.repeats).toBe(7);
+    expect(raised.samplesMs).toHaveLength(7);
+
+    const larger = await runCase('fake.min', 'small', { ...o, repeats: 9 });
+    expect(larger.repeats).toBe(9);
+    expect(larger.samplesMs).toHaveLength(9);
+
+    const capped = await runCase('fake.minmax', 'small', o);
+    expect(capped.repeats).toBe(4);
+    expect(capped.samplesMs).toHaveLength(4);
+
+    const ordinary = await runCase('fake.ok', 'small', o);
+    expect(ordinary.repeats).toBe(5);
+  },
+  SLOW
+);
+
+test(
   'serveFlags reach every result, maxRepeats and maxWarmup cap, note marks ok results',
   async () => {
     const ok = await runCase('fake.flags', 'small', o);
