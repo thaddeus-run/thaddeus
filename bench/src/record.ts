@@ -92,7 +92,7 @@ export class UsageError extends Error {
 export interface PreflightEnv {
   loadAvg1: number;
   memAvailableBytes: number;
-  /** Uncommitted paths under packages/ and bench/. */
+  /** Uncommitted paths in the checkout, bench/results aside. */
   dirtyPaths: string[];
   sudoOk: boolean;
   /** Whether the run drops the page cache, which needs `sudo -n`. */
@@ -120,7 +120,7 @@ export function preflight(env: PreflightEnv): string | null {
     const more =
       env.dirtyPaths.length > 5 ? ` and ${env.dirtyPaths.length - 5} more` : '';
     reasons.push(
-      `uncommitted changes under packages/ or bench/ (${shown}${more}); commit or stash them so the result names the commit it measured`
+      `uncommitted changes (${shown}${more}); commit or stash them so the result names the commit it measured`
     );
   }
   if (env.needSudo && !env.sudoOk) {
@@ -572,7 +572,7 @@ export interface Host {
   machineId: string | undefined;
   probe: MachineProbe;
   machinesDir: string;
-  /** Uncommitted paths under packages/ and bench/ (results excluded). */
+  /** Uncommitted paths in the checkout (bench/results excluded). */
   dirtyPaths(): string[];
   /** Whether `sudo -n` works without a password prompt. */
   sudoOk(): boolean;
@@ -597,10 +597,10 @@ export const THRESHOLDS_FILE = join(
   'github-ubuntu-latest.json'
 );
 
-// Runs git in the repository root and returns its stdout, throwing on a
-// non-zero exit.
-function git(args: string[]): string {
-  const result = Bun.spawnSync(['git', '-C', REPO_ROOT, ...args], {
+// Runs git in the repository root (or `root`) and returns its stdout,
+// throwing on a non-zero exit.
+function git(args: string[], root = REPO_ROOT): string {
+  const result = Bun.spawnSync(['git', '-C', root, ...args], {
     stdout: 'pipe',
     stderr: 'pipe',
   });
@@ -612,18 +612,17 @@ function git(args: string[]): string {
   return result.stdout.toString();
 }
 
-// Uncommitted or untracked paths under packages/ and bench/, the code a run
-// measures. bench/results is left out: a result file written by an earlier
-// record changes nothing that is measured.
-function gitDirtyPaths(): string[] {
-  const out = git([
-    'status',
-    '--porcelain',
-    '--',
-    'packages',
-    'bench',
-    ':(exclude)bench/results',
-  ]);
+// Uncommitted or untracked paths anywhere in the checkout at `root`. The
+// whole tree counts, not just packages/ and bench/: bun.lock, the root
+// package.json, patches/ and tsconfig.options.json all change what a run
+// measures. bench/results is left out, because a result file written by an
+// earlier record changes nothing that is measured. Gitignored paths (the
+// fixture cache, bench/out, build output) are never listed by git.
+export function gitDirtyPaths(root = REPO_ROOT): string[] {
+  const out = git(
+    ['status', '--porcelain', '--', '.', ':(exclude)bench/results'],
+    root
+  );
   return parsePorcelain(out);
 }
 
@@ -761,7 +760,7 @@ export async function record(
   const changed = host.dirtyPaths();
   if (changed.length > 0) {
     host.log(
-      `bench record: packages/ or bench/ changed during the run (${changed.slice(0, 5).join(', ')}); no result written`
+      `bench record: the checkout changed during the run (${changed.slice(0, 5).join(', ')}); no result written`
     );
     return 1;
   }

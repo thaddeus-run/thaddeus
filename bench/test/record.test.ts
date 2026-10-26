@@ -1,10 +1,12 @@
 import { afterAll, expect, test } from 'bun:test';
 import {
   existsSync,
+  mkdirSync,
   mkdtempSync,
   readdirSync,
   readFileSync,
   rmSync,
+  writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -15,6 +17,7 @@ import { generateFixture, manifestHash } from '../src/fixtures/plan';
 import { sweepSpec } from '../src/fixtures/spec';
 import {
   BENCH_ROOT,
+  gitDirtyPaths,
   type Host,
   parsePorcelain,
   preflight,
@@ -98,6 +101,69 @@ test('parsePorcelain keeps the path after the two-letter status', () => {
     parsePorcelain(' M bench/moon.yml\n?? bench/machines/\nM  a b.ts\n')
   ).toEqual(['bench/moon.yml', 'bench/machines/', 'a b.ts']);
   expect(parsePorcelain('')).toEqual([]);
+});
+
+// A throwaway git repository with one commit holding `files`.
+function gitRepo(files: string[]): string {
+  const root = mkdtempSync(join(scratch, 'git-'));
+  const git = (...args: string[]) => {
+    const r = Bun.spawnSync(['git', '-C', root, ...args], { stderr: 'pipe' });
+    if (r.exitCode !== 0) throw new Error(r.stderr.toString());
+  };
+  git('init', '-q');
+  for (const file of files) {
+    mkdirSync(join(root, file, '..'), { recursive: true });
+    writeFileSync(join(root, file), 'committed\n');
+  }
+  writeFileSync(join(root, '.gitignore'), 'bench/.cache/\n');
+  git('add', '.');
+  git(
+    '-c',
+    'user.name=bench',
+    '-c',
+    'user.email=bench@example.com',
+    'commit',
+    '-qm',
+    'init'
+  );
+  return root;
+}
+
+test('the dirty check covers the whole checkout except bench/results', () => {
+  const root = gitRepo([
+    'bun.lock',
+    'package.json',
+    'tsconfig.options.json',
+    'patches/x.patch',
+    'packages/log/src/oplog.ts',
+    'bench/src/cli.ts',
+    'bench/results/m/baseline.json',
+  ]);
+  expect(gitDirtyPaths(root)).toEqual([]);
+  for (const file of [
+    'bun.lock',
+    'package.json',
+    'tsconfig.options.json',
+    'patches/x.patch',
+    'packages/log/src/oplog.ts',
+    'bench/src/cli.ts',
+    'bench/results/m/baseline.json',
+  ]) {
+    writeFileSync(join(root, file), 'changed\n');
+  }
+  writeFileSync(join(root, 'bench/results/m/new.json'), '{}\n');
+  mkdirSync(join(root, 'bench/.cache'), { recursive: true });
+  writeFileSync(join(root, 'bench/.cache/x'), 'ignored\n');
+  writeFileSync(join(root, 'patches/new.patch'), 'untracked\n');
+  expect(gitDirtyPaths(root).sort()).toEqual([
+    'bench/src/cli.ts',
+    'bun.lock',
+    'package.json',
+    'packages/log/src/oplog.ts',
+    'patches/new.patch',
+    'patches/x.patch',
+    'tsconfig.options.json',
+  ]);
 });
 
 test('suiteVersion hashes the sorted id@version lines', () => {
