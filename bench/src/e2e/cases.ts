@@ -120,8 +120,11 @@ async function openBranch(
 
 const stopServe = (s: E2eState): Promise<void> => s.serve.stop();
 
-// The skeleton of one e2e case on all fixtures. `pushes` says whether the
-// case uploads history, which decides the limits it raises.
+// The skeleton of one e2e case on all fixtures, run on their serial
+// variants (`<fixture>-serial`): the shipped server refuses every land into
+// a main that holds a conflict, and the base plans land conflicts on
+// purpose. `pushes` says whether the case uploads history, which decides the
+// limits it raises.
 function e2eCase<S extends E2eState>(
   c: Omit<BenchCase<S>, 'version' | 'suite' | 'fixtures' | 'serveFlags'> & {
     pushes: boolean;
@@ -133,6 +136,7 @@ function e2eCase<S extends E2eState>(
     version: 1,
     suite: 'e2e',
     fixtures: FIXTURES,
+    variant: 'serial',
     serveFlags: (fixture) => [...fixtureLimits(fixture, pushes), ...extraFlags],
     teardown: stopServe,
     ...rest,
@@ -149,12 +153,15 @@ function serveFor(
 
 // Cold checkout: `thaddeus clone` of the seeded repository into an empty
 // directory, in a fresh process per sample (and, in the dropped mode, after
-// the page cache was dropped).
+// the page cache was dropped). The server opens a repository lazily on its
+// first request, so the timed clone includes that open; setup does not warm
+// it, because the page cache is dropped before setup.
 const checkoutCold: BenchCase<E2eState> = e2eCase({
   id: 'e2e.checkout.cold',
   isolation: 'per-sample',
   cold: true,
   pushes: false,
+  note: "includes the server's cold open of the repository: serve opens it on the first request, which is the timed clone",
   setup: (ctx) => serveFor(checkoutCold, ctx),
   run: async (s) => {
     await ownerClone(s, 'checkout');
@@ -297,6 +304,9 @@ const reposPerMinute: BenchCase<RpmState> = e2eCase({
   writes: true,
   pushes: false,
   extraFlags: CREATION_LIMITS,
+  // Each sample is a fixed-duration burst; warming up would only spend
+  // budget (four 30 s bursts are the whole `bench run` budget).
+  maxWarmup: 0,
   setup: async (ctx) => {
     const s = await serveFor(reposPerMinute, ctx);
     const homes = Array.from({ length: RPM_CLIENTS }, (_, i) => {

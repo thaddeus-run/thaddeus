@@ -17,7 +17,7 @@ import { join } from 'node:path';
 import { fixtureDir, linkCopy } from '../src/fixtures/cache';
 import { materializeFixture } from '../src/fixtures/materialize';
 import { generateFixture, manifestHash } from '../src/fixtures/plan';
-import { tinySpec } from '../src/fixtures/spec';
+import { FIXTURES, serialSpec, tinySpec } from '../src/fixtures/spec';
 
 let tmp: string;
 beforeAll(() => {
@@ -164,3 +164,15 @@ test('a refused land throws instead of being skipped', async () => {
   }
   expect(message).toContain('denied for the test');
 });
+
+test('serial variants materialize with no conflict anywhere', async () => {
+  for (const spec of [tinySpec(), FIXTURES.small]) {
+    const repo = await materializeFixture(
+      generateFixture(serialSpec(spec)),
+      new MemoryBackend()
+    );
+    expect(repo.log.ops()).toHaveLength(spec.ops);
+    expect(repo.conflicts('main')).toEqual([]);
+    expect(repo.conflicts()).toEqual([]);
+  }
+}, 120_000);

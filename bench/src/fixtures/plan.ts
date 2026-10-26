@@ -81,12 +81,42 @@ function timestamp(n: number): string {
   return new Date(EPOCH_MS + n * 1000).toISOString().replace('.000Z', 'Z');
 }
 
+// Draws the next op on `view` from the random stream: a remove of one of the
+// view's current paths (when it has any), otherwise a write, skewed toward
+// the hot paths. Updates `files` to match. Both plan shapes call this, so a
+// serial plan's ops are drawn exactly like a base plan's.
+function nextOp(
+  prng: ReturnType<typeof createPrng>,
+  spec: FixtureSpec,
+  paths: readonly string[],
+  hotCount: number,
+  view: string,
+  files: PathSet,
+  n: number
+): Step {
+  const author = prng.int(spec.authors);
+  const at = timestamp(n);
+  const wantsRemove = prng.next() < spec.removeRatio;
+  if (wantsRemove && files.size > 0) {
+    const path = files.at(prng.int(files.size));
+    files.delete(path);
+    return { kind: 'remove', view, path, author, at };
+  }
+  const hot = prng.next() < 0.8;
+  const path = paths[prng.int(hot ? hotCount : spec.files)];
+  const bytes = 200 + prng.int(7_801);
+  const contentSeed = prng.int(0x7fffffff);
+  files.add(path);
+  return { kind: 'write', view, path, author, contentSeed, bytes, at };
+}
+
 // Turns a spec into the full list of steps to replay: forks, writes, removes
 // and lands. It is pure (one seeded random stream, no crypto, no I/O), so the
 // same spec always yields the same plan. Ops are spread round-robin over the
 // views; a view forks from main just before its first op, and every
 // `landEvery` ops the next forked view lands into main so that main collects
-// several heads and the conflict path gets exercised.
+// several heads and the conflict path gets exercised. A `serial` spec has
+// another shape, see `serialSteps`.
 export function generateFixture(spec: FixtureSpec): FixturePlan {
   const prng = createPrng(spec.seed);
 
@@ -101,7 +131,22 @@ export function generateFixture(spec: FixtureSpec): FixturePlan {
   for (let v = 1; v < spec.views; v++) views.push(`v${v}`);
   const paths = Array.from({ length: spec.files }, (_, i) => `src/f${i}.ts`);
   const hotCount = Math.max(1, Math.floor(spec.files * spec.hotFileShare));
+  const draw = (view: string, files: PathSet, n: number) =>
+    nextOp(prng, spec, paths, hotCount, view, files, n);
 
+  const steps =
+    spec.variant === 'serial'
+      ? serialSteps(spec, views, draw)
+      : baseSteps(spec, views, draw);
+  return { spec, generatorVersion: GENERATOR_VERSION, authorSeeds, steps };
+}
+
+type Draw = (view: string, files: PathSet, n: number) => Step;
+
+// The base plan: round-robin ops over every view, with periodic lands of
+// views that kept working while main moved on, so main collects concurrent
+// writes to the same paths (conflicts).
+function baseSteps(spec: FixtureSpec, views: string[], draw: Draw): Step[] {
   const state = new Map<string, PathSet>([['main', new PathSet()]]);
   const steps: Step[] = [];
   let nextLand = 1;
@@ -114,22 +159,7 @@ export function generateFixture(spec: FixtureSpec): FixturePlan {
       files = state.get('main')!.clone();
       state.set(view, files);
     }
-
-    const author = prng.int(spec.authors);
-    const at = timestamp(n);
-    const wantsRemove = prng.next() < spec.removeRatio;
-    if (wantsRemove && files.size > 0) {
-      const path = files.at(prng.int(files.size));
-      files.delete(path);
-      steps.push({ kind: 'remove', view, path, author, at });
-    } else {
-      const hot = prng.next() < 0.8;
-      const path = paths[prng.int(hot ? hotCount : spec.files)];
-      const bytes = 200 + prng.int(7_801);
-      const contentSeed = prng.int(0x7fffffff);
-      files.add(path);
-      steps.push({ kind: 'write', view, path, author, contentSeed, bytes, at });
-    }
+    steps.push(draw(view, files, n));
 
     if (views.length > 1 && (n + 1) % spec.landEvery === 0) {
       const from = views[nextLand];
@@ -141,8 +171,39 @@ export function generateFixture(spec: FixtureSpec): FixturePlan {
       }
     }
   }
+  return steps;
+}
 
-  return { spec, generatorVersion: GENERATOR_VERSION, authorSeeds, steps };
+// The serial plan, for the end-to-end suite: the shipped server refuses any
+// land into a view holding a conflict, so main must never get one. The ops
+// come in intervals of `landEvery`. Each interval goes to the next view in
+// turn (v1, v2, ... and round again), which forks from the current main,
+// takes the interval's ops and lands into main before the next view forks.
+// Main itself gets no writes, so nothing is ever concurrent with an open
+// view, and after each land main holds exactly the view's paths. With one
+// view, every op goes to main and nothing forks or lands.
+function serialSteps(spec: FixtureSpec, views: string[], draw: Draw): Step[] {
+  let main = new PathSet();
+  const steps: Step[] = [];
+  if (views.length === 1) {
+    for (let n = 0; n < spec.ops; n++) steps.push(draw('main', main, n));
+    return steps;
+  }
+  let files = main;
+  for (let n = 0; n < spec.ops; n++) {
+    const interval = Math.floor(n / spec.landEvery);
+    const view = views[1 + (interval % (views.length - 1))];
+    if (n % spec.landEvery === 0) {
+      steps.push({ kind: 'fork', view, from: 'main' });
+      files = main.clone();
+    }
+    steps.push(draw(view, files, n));
+    if ((n + 1) % spec.landEvery === 0 || n === spec.ops - 1) {
+      steps.push({ kind: 'land', from: view, into: 'main' });
+      main = files.clone();
+    }
+  }
+  return steps;
 }
 
 // JSON with object keys sorted, so the same data always serializes to the same

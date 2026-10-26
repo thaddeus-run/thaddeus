@@ -15,6 +15,11 @@ export interface FixtureSpec {
   removeRatio: number;
   /** Share of paths (from the start of the path list) that take most writes. */
   hotFileShare: number;
+  /**
+   * `serial`: the conflict-free plan shape of `serialSpec`. Absent for the
+   * base shape, so base specs (and their manifest hashes) are unchanged.
+   */
+  variant?: 'serial';
 }
 
 export const FIXTURES: Record<FixtureName, FixtureSpec> = {
@@ -83,10 +88,34 @@ export function tinySpec(): FixtureSpec {
   };
 }
 
+// The conflict-free variant of `spec`, named `<name>-serial`: same files,
+// ops, authors, views and land interval, but each view forks from the
+// current main and lands before the next one forks (see `serialSteps` in
+// plan.ts). The end-to-end suite runs on it, because the shipped server
+// refuses every land into a main that holds a conflict. The name keeps its
+// results apart from the base fixture's.
+export function serialSpec(spec: FixtureSpec): FixtureSpec {
+  return { ...spec, name: `${spec.name}-serial`, variant: 'serial' };
+}
+
 // Maps a fixture name, as stored in results and passed to the runner, back to
-// its spec: `small`, `medium`, `stress`, `tiny` or `sweep-<ops>`. Throws on
-// any other name so a typo fails loudly instead of measuring the wrong input.
+// its spec: `small`, `medium`, `stress`, `tiny` or `sweep-<ops>`, each also
+// as `<name>-serial`. Throws on any other name so a typo fails loudly
+// instead of measuring the wrong input.
 export function resolveFixture(name: string): FixtureSpec {
+  const serial = /^(.+)-serial$/.exec(name);
+  if (serial !== null) {
+    let base: FixtureSpec | undefined;
+    try {
+      base = resolveFixture(serial[1]);
+    } catch {
+      // Reported below under the full name.
+    }
+    if (base === undefined || base.variant !== undefined) {
+      throw new Error(`unknown fixture ${name}`);
+    }
+    return serialSpec(base);
+  }
   if (Object.hasOwn(FIXTURES, name)) return FIXTURES[name as FixtureName];
   if (name === 'tiny') return tinySpec();
   const sweep = /^sweep-([1-9]\d*)$/.exec(name);

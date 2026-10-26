@@ -60,6 +60,21 @@ export interface BenchCase<S = unknown> {
    */
   maxRepeats?: number;
   /**
+   * Caps the warm-ups the same way, for a case whose every repeat is long
+   * by design (a fixed-duration burst) and gains nothing from warming up.
+   */
+  maxWarmup?: number;
+  /**
+   * Suite runs give this case the `<fixture>-serial` variant of each fixture
+   * it lists (see `serialSpec`), so its results name that fixture.
+   */
+  variant?: 'serial';
+  /**
+   * A fixed remark on what the timing includes, copied into the `note` of
+   * every ok result. Failed results keep their failure note instead.
+   */
+  note?: string;
+  /**
    * The exact flags the case passes to `thaddeus serve` on `fixture`, copied
    * verbatim into every result as `serveFlags`. The case starts its server
    * with the same function, so the two cannot disagree.

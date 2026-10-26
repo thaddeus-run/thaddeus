@@ -141,10 +141,13 @@ const fakes: readonly BenchCase[] = [
       );
     },
   }),
-  // Declares its serve flags and caps its timed repeats at 2; also fails in
-  // setup when FAKE_FAIL_SETUP is set, to check a failure keeps the flags.
+  // Declares its serve flags and a note, caps its timed repeats at 2 and its
+  // warm-ups at 0; fails in setup when FAKE_FAIL_SETUP is set, to check that
+  // a failure keeps the flags and its own note.
   fake('fake.flags', {
     maxRepeats: 2,
+    maxWarmup: 0,
+    note: 'a fixed remark',
     serveFlags: (fixture) => ['--fixture', fixture],
     setup: () =>
       process.env.FAKE_FAIL_SETUP === '1'

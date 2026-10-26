@@ -6,7 +6,7 @@ import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
 
 import type { BenchCase } from './case';
-import { resolveFixture, sweepSpec } from './fixtures/spec';
+import { resolveFixture, serialSpec, sweepSpec } from './fixtures/spec';
 import {
   detectMachine,
   hostProbe,
@@ -399,9 +399,10 @@ function describe(job: Job, result: CaseResult | SweepResult): string {
 }
 
 // Runs a suite and returns the run, unvalidated and unwritten. Each case runs
-// on the fixtures it supports among `opts.fixtures`, in that order; a cold
-// case runs once per page-cache mode, others once. With `sweeps`, every sweep
-// case also runs the history-length sweep, warm only. Rejects with the
+// on the fixtures it supports among `opts.fixtures`, in that order (a
+// `serial` case on their `-serial` variants); a cold case runs once per
+// page-cache mode, others once. With `sweeps`, every sweep case also runs
+// the history-length sweep, warm only. Rejects with the
 // runner's `Interrupted` when the process is signalled mid-case.
 export async function runSuite(
   opts: SuiteOptions,
@@ -429,8 +430,12 @@ export async function runSuite(
     const mod = (await import(registry)) as { default: readonly BenchCase[] };
     for (const benchCase of mod.default) {
       allCases.push(benchCase);
-      for (const fixture of opts.fixtures) {
-        if (!benchCase.fixtures.includes(fixture)) continue;
+      for (const requested of opts.fixtures) {
+        if (!benchCase.fixtures.includes(requested)) continue;
+        const fixture =
+          benchCase.variant === 'serial'
+            ? serialSpec(resolveFixture(requested)).name
+            : requested;
         const modes = benchCase.cold === true ? opts.pageCache : [undefined];
         for (const pageCache of modes) {
           jobs.push({ kind: 'case', registry, benchCase, fixture, pageCache });

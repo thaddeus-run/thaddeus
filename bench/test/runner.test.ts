@@ -316,13 +316,15 @@ test(
 );
 
 test(
-  'serveFlags reach every result verbatim and maxRepeats caps the repeats',
+  'serveFlags reach every result, maxRepeats and maxWarmup cap, note marks ok results',
   async () => {
     const ok = await runCase('fake.flags', 'small', o);
     expect(ok.status).toBe('ok');
     expect(ok.serveFlags).toEqual(['--fixture', 'small']);
     expect(ok.repeats).toBe(2);
+    expect(ok.warmup).toBe(0);
     expect(ok.samplesMs).toHaveLength(2);
+    expect(ok.note).toBe('a fixed remark');
 
     process.env.FAKE_FAIL_SETUP = '1';
     try {
@@ -330,6 +332,7 @@ test(
       expect(failed.status).toBe('error');
       expect(failed.phase).toBe('setup');
       expect(failed.serveFlags).toEqual(['--fixture', 'small']);
+      expect(failed.note).toContain('setup failed');
     } finally {
       delete process.env.FAKE_FAIL_SETUP;
     }

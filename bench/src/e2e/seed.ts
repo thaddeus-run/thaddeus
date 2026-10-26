@@ -3,7 +3,7 @@ import { Client, reachablePids, reshareObjects } from '@thaddeus.run/client';
 import { type Identity, ready } from '@thaddeus.run/identity';
 import type { Op } from '@thaddeus.run/log';
 import { FileBackend } from '@thaddeus.run/persist';
-import { allowAll, Platform, type Repo } from '@thaddeus.run/platform';
+import { Platform, type Repo } from '@thaddeus.run/platform';
 import { createServer, signRequest } from '@thaddeus.run/server';
 import { mkdir, mkdtemp, rm } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
@@ -24,6 +24,9 @@ import { type FixturePlan, manifestHash } from '../fixtures/plan';
 // ops with the wall clock and cannot replay a plan.
 
 const REPO = 'bench';
+
+// Where FileBackend keeps signed-request nonces under its root.
+const REPLAY_NONCE_DIR = '.replay-nonces-v1';
 
 // The largest value the server accepts for each quota. The seeding server
 // takes a whole history in one go; `thaddeus serve` later runs with its
@@ -100,9 +103,15 @@ function sliceOf(repo: Repo, ops: readonly Op[]): Repo {
 //      in (lamport, id) order, so each slice's parents are already there);
 //   4. every fixture view other than main is registered as a branch at its
 //      heads, and the owner lands main's heads into main.
-// The server uses `allowAll`, because the fixture's main holds the conflicts
-// the generator lands on purpose. The plan is replayed by `fixtureDir` and
-// read from a hard-link copy, so the fixture cache is never written.
+// The server lands under its shipped default policy, `blockOnConflict`, so a
+// plan whose main holds a conflict (any base plan with several views) is
+// refused and the seed throws: only a root `thaddeus serve` could really
+// hold gets built. The e2e suite seeds `serialSpec` plans for that reason.
+// Finally the seed's replay nonces are deleted: they expired at SEED_NOW,
+// and a server would otherwise load and unlink them all on the first signed
+// request, inside the first timed command. The plan is replayed by
+// `fixtureDir` and read from a hard-link copy, so the fixture cache is never
+// written.
 export async function seedServerRoot(
   plan: FixturePlan,
   root: string
@@ -116,7 +125,6 @@ export async function seedServerRoot(
   await linkCopy(await fixtureDir(plan), scratch);
   const srv = createServer({
     backend: new FileBackend(root),
-    policy: allowAll,
     maxRequestBodyBytes: 1 << 30,
     quotas: UNLIMITED_QUOTAS,
     now: () => SEED_NOW,
@@ -181,18 +189,25 @@ export async function seedServerRoot(
     await srv.close();
     await rm(dirname(scratch), { recursive: true, force: true });
   }
+  await rm(join(root, REPLAY_NONCE_DIR), { recursive: true, force: true });
 }
 
-// The cached server data root of `plan`: `bench/.cache/<hash>-server/`,
-// built by `seedServerRoot` with the same temporary directory, `.complete`
-// marker and publish rule as the fixture cache.
+// Bump whenever `seedServerRoot` changes what it writes, together with the
+// version of every e2e case, so stale seeded roots are rebuilt and results
+// from a different seed are not compared with new ones.
+const SEED_VERSION = 1;
+
+// The cached server data root of `plan`:
+// `bench/.cache/<hash>-server-v<SEED_VERSION>/`, built by `seedServerRoot`
+// with the same temporary directory, `.complete` marker and publish rule as
+// the fixture cache.
 export function seededRoot(
   plan: FixturePlan,
   opts: { cacheRoot?: string } = {}
 ): Promise<string> {
   const hash = manifestHash(plan);
   return cachedBuild(
-    `${hash}-server`,
+    `${hash}-server-v${SEED_VERSION}`,
     hash,
     (tmp) => seedServerRoot(plan, tmp),
     opts
