@@ -141,6 +141,17 @@ const fakes: readonly BenchCase[] = [
       );
     },
   }),
+  // Declares its serve flags and caps its timed repeats at 2; also fails in
+  // setup when FAKE_FAIL_SETUP is set, to check a failure keeps the flags.
+  fake('fake.flags', {
+    maxRepeats: 2,
+    serveFlags: (fixture) => ['--fixture', fixture],
+    setup: () =>
+      process.env.FAKE_FAIL_SETUP === '1'
+        ? Promise.reject(new Error('setup failed'))
+        : Promise.resolve(),
+    run: () => Promise.resolve(),
+  }),
 ];
 
 export default fakes;

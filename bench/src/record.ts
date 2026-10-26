@@ -42,15 +42,15 @@ const CLI = join(BENCH_ROOT, 'src', 'cli.ts');
 export type SuiteName = 'library' | 'e2e';
 export type PageCacheMode = 'warm' | 'dropped';
 
-// Registry module of each suite. The end-to-end suite has none yet, so it is
-// skipped with a note.
+// Registry module of each suite.
 const REGISTRIES: Record<SuiteName, string | null> = {
   library: join(BENCH_ROOT, 'src', 'cases', 'index.ts'),
-  e2e: null,
+  e2e: join(BENCH_ROOT, 'src', 'e2e', 'cases.ts'),
 };
 
 // The registry module path of `suite`, or null when the suite does not exist
-// yet. Suite runs look registries up only through here.
+// (test registries may leave one out). Suite runs look registries up only
+// through here.
 export function registryFor(suite: SuiteName): string | null {
   return REGISTRIES[suite];
 }
@@ -155,8 +155,11 @@ export interface SuiteEnv {
   registryFor?: (suite: SuiteName) => string | null;
   /** Test seam: replaces SWEEP_SIZES. */
   sweepSizes?: readonly number[];
-  /** Test seam: the command that pre-builds one fixture cache. */
-  buildCommand?: (fixture: string, repos: number) => string[];
+  /**
+   * Test seam: the command that pre-builds one fixture cache, or with
+   * `server` the seeded server root of the e2e suite.
+   */
+  buildCommand?: (fixture: string, repos: number, server: boolean) => string[];
 }
 
 type Job =
@@ -185,26 +188,62 @@ interface BuildFailure {
 // Pre-build failures keyed by `fixtureKey`.
 type BuildFailures = Map<string, BuildFailure>;
 
-function fixtureKey(fixture: string, repos: number): string {
-  return `${fixture}:${repos}`;
+// One cache a job needs: the fixture root with `repos` repositories, or with
+// `server` the e2e suite's seeded server root (which is built from the
+// fixture root).
+interface CacheNeed {
+  fixture: string;
+  repos: number;
+  server: boolean;
 }
 
-// The command that builds one fixture cache: `cli.ts fixture` in a child.
-function defaultBuildCommand(fixture: string, repos: number): string[] {
-  return [process.execPath, CLI, 'fixture', fixture, '--repos', String(repos)];
+function fixtureKey(need: CacheNeed): string {
+  return `${need.fixture}:${need.server ? 'server' : need.repos}`;
 }
 
-// Builds one fixture cache in a child process under the case budget, so a
-// build that runs out of memory or time is classified the way a case child
-// is (`spawnBudgeted` and `classify`) instead of taking the suite run down
-// or hanging it. Returns null on success.
-async function buildFixture(
+// The caches `benchCase` opens on `fixture`, in build order: its fixture
+// root, the extra roots of `open.cold.root-<n>`, and for an e2e case the
+// seeded server root.
+function cachesOf(benchCase: BenchCase, fixture: string): CacheNeed[] {
+  return [
+    ...[1, ...extraRootsOf(benchCase)].map((repos) => ({
+      fixture,
+      repos,
+      server: false,
+    })),
+    ...(benchCase.suite === 'e2e' ? [{ fixture, repos: 1, server: true }] : []),
+  ];
+}
+
+// The command that builds one cache: `cli.ts fixture` in a child.
+function defaultBuildCommand(
   fixture: string,
   repos: number,
+  server: boolean
+): string[] {
+  return [
+    process.execPath,
+    CLI,
+    'fixture',
+    fixture,
+    ...(server ? ['--server'] : ['--repos', String(repos)]),
+  ];
+}
+
+// Builds one cache in a child process under the case budget, so a build
+// that runs out of memory or time is classified the way a case child is
+// (`spawnBudgeted` and `classify`) instead of taking the suite run down or
+// hanging it. Returns null on success.
+async function buildFixture(
+  need: CacheNeed,
   budgetMs: number,
-  command: (fixture: string, repos: number) => string[]
+  command: NonNullable<SuiteEnv['buildCommand']>
 ): Promise<BuildFailure | null> {
-  const outcome = await spawnBudgeted(command(fixture, repos), budgetMs);
+  const { fixture, repos, server } = need;
+  const outcome = await spawnBudgeted(
+    command(fixture, repos, server),
+    budgetMs
+  );
   const status = classify(outcome, true);
   if (status === 'ok') return null;
   const reason = failureNote(
@@ -230,13 +269,13 @@ async function prebuildFixtures(
   jobs: readonly Job[],
   sweepSizes: readonly number[],
   budgetMs: number,
-  command: (fixture: string, repos: number) => string[],
+  command: NonNullable<SuiteEnv['buildCommand']>,
   log: (line: string) => void
 ): Promise<BuildFailures> {
-  const wanted = new Map<string, { fixture: string; repos: number }>();
+  const wanted = new Map<string, CacheNeed>();
   const want = (fixture: string, benchCase: BenchCase) => {
-    for (const repos of [1, ...extraRootsOf(benchCase)]) {
-      wanted.set(fixtureKey(fixture, repos), { fixture, repos });
+    for (const need of cachesOf(benchCase, fixture)) {
+      wanted.set(fixtureKey(need), need);
     }
   };
   for (const job of jobs) {
@@ -244,10 +283,19 @@ async function prebuildFixtures(
     else for (const n of sweepSizes) want(sweepSpec(n).name, job.benchCase);
   }
   const failures: BuildFailures = new Map();
-  for (const [key, { fixture, repos }] of wanted) {
-    const name = `${fixture}${repos > 1 ? ` with ${repos} repositories` : ''}`;
+  for (const [key, need] of wanted) {
+    // A seeded server root is built from the fixture root, so it cannot be
+    // built when that failed.
+    const base = failures.get(fixtureKey({ ...need, server: false }));
+    if (need.server && base !== undefined) {
+      failures.set(key, base);
+      continue;
+    }
+    const name = need.server
+      ? `${need.fixture} server root`
+      : `${need.fixture}${need.repos > 1 ? ` with ${need.repos} repositories` : ''}`;
     log(`fixture ${name}`);
-    const failure = await buildFixture(fixture, repos, budgetMs, command);
+    const failure = await buildFixture(need, budgetMs, command);
     if (failure === null) continue;
     log(`fixture ${name}: ${failure.status}, ${failure.note}`);
     failures.set(key, failure);
@@ -261,8 +309,8 @@ function failedBuildOf(
   benchCase: BenchCase,
   fixture: string
 ): BuildFailure | undefined {
-  for (const repos of [1, ...extraRootsOf(benchCase)]) {
-    const failure = failures.get(fixtureKey(fixture, repos));
+  for (const need of cachesOf(benchCase, fixture)) {
+    const failure = failures.get(fixtureKey(need));
     if (failure !== undefined) return failure;
   }
   return undefined;

@@ -315,6 +315,31 @@ test(
   SLOW
 );
 
+test(
+  'serveFlags reach every result verbatim and maxRepeats caps the repeats',
+  async () => {
+    const ok = await runCase('fake.flags', 'small', o);
+    expect(ok.status).toBe('ok');
+    expect(ok.serveFlags).toEqual(['--fixture', 'small']);
+    expect(ok.repeats).toBe(2);
+    expect(ok.samplesMs).toHaveLength(2);
+
+    process.env.FAKE_FAIL_SETUP = '1';
+    try {
+      const failed = await runCase('fake.flags', 'small', o);
+      expect(failed.status).toBe('error');
+      expect(failed.phase).toBe('setup');
+      expect(failed.serveFlags).toEqual(['--fixture', 'small']);
+    } finally {
+      delete process.env.FAKE_FAIL_SETUP;
+    }
+
+    const ordinary = await runCase('fake.ok', 'small', o);
+    expect(ordinary.serveFlags).toBeUndefined();
+  },
+  SLOW
+);
+
 test('an unknown case id or fixture name throws', async () => {
   const missing = await runCase('fake.missing', 'small', o).catch(String);
   expect(missing).toContain('no case fake.missing');

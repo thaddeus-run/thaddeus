@@ -2,6 +2,7 @@ import { constants } from 'node:os';
 import { join, resolve } from 'node:path';
 import { parseArgs } from 'node:util';
 
+import { seededRoot } from './e2e/seed';
 import { fixtureDir } from './fixtures/cache';
 import { generateFixture } from './fixtures/plan';
 import { resolveFixture } from './fixtures/spec';
@@ -21,7 +22,8 @@ const USAGE = `usage:
   bun src/cli.ts run [--suite library|e2e|all] [--fixtures small,medium] [--sweeps]
                      [--repeats N] [--warmup N] [--page-cache warm,dropped] [--out file]
   BENCH_MACHINE=<id> bun src/cli.ts record [--baseline]
-  bun src/cli.ts fixture <name> [--repos N]   build a fixture cache, print its path`;
+  bun src/cli.ts fixture <name> [--repos N | --server]
+                     build a fixture cache (or the e2e seeded server root), print its path`;
 
 // `run` defaults for the method. The budget is a fifth of `record`'s.
 const RUN_DEFAULTS = { repeats: 10, warmup: 2, budgetMs: 120_000 };
@@ -128,13 +130,17 @@ async function runCommand(
   return 0;
 }
 
-// `bench fixture <name> [--repos N]`: builds the cached FileBackend root of a
-// fixture (with N - 1 filler repositories) and prints its path. Suite runs
-// call it in a child process to build fixtures before timing anything.
+// `bench fixture <name> [--repos N | --server]`: builds the cached
+// FileBackend root of a fixture (with N - 1 filler repositories), or with
+// `--server` the e2e suite's seeded server root, and prints its path. Suite
+// runs call it in a child process to build caches before timing anything.
 async function fixtureCommand(argv: readonly string[]): Promise<number> {
   const { values, positionals } = parseArgs({
     args: [...argv],
-    options: { repos: { type: 'string', default: '1' } },
+    options: {
+      repos: { type: 'string', default: '1' },
+      server: { type: 'boolean', default: false },
+    },
     allowPositionals: true,
     strict: true,
   });
@@ -149,7 +155,13 @@ async function fixtureCommand(argv: readonly string[]): Promise<number> {
     throw new UsageError(String((error as Error).message));
   }
   const repos = count('repos', values.repos, 1);
-  const dir = await fixtureDir(generateFixture(spec), { repos });
+  if (values.server && repos !== 1) {
+    throw new UsageError('--server takes no --repos');
+  }
+  const plan = generateFixture(spec);
+  const dir = values.server
+    ? await seededRoot(plan)
+    : await fixtureDir(plan, { repos });
   process.stdout.write(`${dir}\n`);
   return 0;
 }

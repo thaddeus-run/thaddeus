@@ -14,11 +14,13 @@ import libraryCases from '../src/cases/index';
 import { run } from '../src/cli';
 import { detectMachine, type MachineProbe } from '../src/machine';
 import {
+  BENCH_ROOT,
   defaultHost,
   type Host,
   parsePorcelain,
   preflight,
   record,
+  registryFor,
   runSuite,
   type SuiteEnv,
   type SuiteOptions,
@@ -29,6 +31,7 @@ import { childrenRunning } from '../src/runner';
 import suiteCases from './fixtures/suite-cases';
 
 const SUITE_FAKES = join(import.meta.dir, 'fixtures', 'suite-cases.ts');
+const E2E_SUITE_FAKES = join(import.meta.dir, 'fixtures', 'e2e-suite-cases.ts');
 const CLI = join(import.meta.dir, '..', 'src', 'cli.ts');
 
 // The full library suite on tiny, and the first build of the sweep fixtures,
@@ -483,14 +486,75 @@ test('run rejects an unknown suite with the usage', async () => {
   expect(lines.join('\n')).toContain('usage');
 });
 
-test('run --suite e2e says the suite is not available yet', async () => {
+test('run --suite e2e runs the e2e suite', async () => {
   const out = join(scratch, 'e2e.json');
-  const { host, lines } = fakeHost({ runSuite });
+  const { host, calls } = fakeHost();
   expect(await run(['run', '--suite', 'e2e', '--out', out], host)).toBe(0);
-  expect(lines).toContain('e2e suite not available yet');
-  const written = JSON.parse(readFileSync(out, 'utf8')) as BenchRun;
-  expect(written.cases).toEqual([]);
+  expect(calls.map((c) => c.opts.suite)).toEqual(['e2e']);
 });
+
+test('the e2e suite has a registry', () => {
+  expect(registryFor('e2e')).toBe(join(BENCH_ROOT, 'src', 'e2e', 'cases.ts'));
+});
+
+// Runs the fake e2e suite on tiny with `buildCommand` standing in for every
+// pre-build, and returns the run and the (fixture, repos, server) of each
+// build in order.
+async function e2eSuiteWithBuilds(
+  command: (server: boolean) => string[]
+): Promise<{ run: BenchRun; builds: [string, number, boolean][] }> {
+  const builds: [string, number, boolean][] = [];
+  const result = await runSuite(
+    {
+      suite: 'e2e',
+      fixtures: ['tiny'],
+      sweeps: false,
+      pageCache: ['warm'],
+      repeats: 1,
+      warmup: 0,
+      budgetMs: 60_000,
+    },
+    suiteEnv({
+      registryFor: (suite) => (suite === 'e2e' ? E2E_SUITE_FAKES : null),
+      buildCommand: (fixture, repos, server) => {
+        builds.push([fixture, repos, server]);
+        return command(server);
+      },
+    })
+  );
+  return { run: result, builds };
+}
+
+test(
+  'an e2e case pre-builds its fixture, then its seeded server root',
+  async () => {
+    const { run: result, builds } = await e2eSuiteWithBuilds(() => ['true']);
+    expect(builds).toEqual([
+      ['tiny', 1, false],
+      ['tiny', 1, true],
+    ]);
+    expect(result.cases.map((c) => [c.id, c.status])).toEqual([
+      ['suite.e2e', 'ok'],
+    ]);
+  },
+  SLOW
+);
+
+test(
+  'a failed fixture pre-build skips the seeded root and fails the e2e case in setup',
+  async () => {
+    const { run: result, builds } = await e2eSuiteWithBuilds(() => [
+      'sh',
+      '-c',
+      'echo no fixture >&2; exit 1',
+    ]);
+    expect(builds).toEqual([['tiny', 1, false]]);
+    expect(result.cases.map((c) => [c.id, c.status, c.phase, c.note])).toEqual([
+      ['suite.e2e', 'error', 'setup', 'fixture pre-build failed: no fixture'],
+    ]);
+  },
+  SLOW
+);
 
 test(
   'run writes a schema-valid file',

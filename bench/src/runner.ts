@@ -366,8 +366,17 @@ function childPlan(
   ];
 }
 
+// The run options with the timed repeats capped at the case's `maxRepeats`.
+function capRepeats(benchCase: BenchCase, opts: RunOptions): RunOptions {
+  const cap = benchCase.maxRepeats;
+  return cap === undefined || opts.repeats <= cap
+    ? opts
+    : { ...opts, repeats: cap };
+}
+
 // The fields every result of `benchCase` on `fixture` carries, whatever its
-// status: identity, method, and the durability and page-cache labels.
+// status: identity, method, and the durability, page-cache and serve-flag
+// labels.
 function resultFrame(
   benchCase: BenchCase,
   fixture: string,
@@ -388,6 +397,9 @@ function resultFrame(
     flags: {
       ...(benchCase.writes === true && { durability: FILEBACKEND_DURABILITY }),
       ...(benchCase.cold === true && { pageCache: opts.pageCache ?? 'warm' }),
+      ...(benchCase.serveFlags !== undefined && {
+        serveFlags: benchCase.serveFlags(fixture),
+      }),
     },
   };
 }
@@ -404,7 +416,12 @@ export async function setupFailure(
 ): Promise<CaseResult> {
   const benchCase = await loadCase(resolve(opts.registry), id);
   const spec = resolveFixture(fixture);
-  const { base, flags } = resultFrame(benchCase, fixture, spec, opts);
+  const { base, flags } = resultFrame(
+    benchCase,
+    fixture,
+    spec,
+    capRepeats(benchCase, opts)
+  );
   return {
     ...base,
     status: failure.status,
@@ -421,14 +438,16 @@ export async function setupFailure(
 // Runs one case on one fixture in fresh Bun subprocesses and returns its
 // result. A timeout, OOM or crash is a result, not an exception. It throws
 // on an unknown case id or fixture name, and rejects with `Interrupted` when
-// the parent gets SIGINT, SIGTERM or SIGHUP mid-case.
+// the parent gets SIGINT, SIGTERM or SIGHUP mid-case. A case's `maxRepeats`
+// caps the timed repeats, and the result says how many ran.
 export async function runCase(
   id: string,
   fixture: string,
-  opts: RunOptions
+  requested: RunOptions
 ): Promise<CaseResult> {
-  const registry = resolve(opts.registry);
+  const registry = resolve(requested.registry);
   const benchCase = await loadCase(registry, id);
+  const opts = capRepeats(benchCase, requested);
   const spec = resolveFixture(fixture);
   const pageCache = opts.pageCache ?? 'warm';
   const { base, flags } = resultFrame(benchCase, fixture, spec, opts);
