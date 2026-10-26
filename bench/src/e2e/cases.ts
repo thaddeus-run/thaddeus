@@ -5,6 +5,7 @@ import { join } from 'node:path';
 
 import type { BenchCase, CaseContext } from '../case';
 import { COMPLETE, linkCopy } from '../fixtures/cache';
+import { resolveFixture, FIXTURES as SPECS } from '../fixtures/spec';
 import { cliCommand, timeCli, writeCliHome } from './home';
 import { seededRoot } from './seed';
 import { type RunningServe, startServe } from './serve';
@@ -23,12 +24,17 @@ const ONE_GIB = '1073741824';
 // The shipped serve limits a fixture is too big for. Every push uploads the
 // whole history reachable from the pushed heads, so on medium (about 100 MB)
 // and stress a push is over the 16 MiB default request body. Stress also
-// holds more than the default 100,000 objects per owner.
+// holds more than the default 100,000 objects per owner. Decided from the
+// resolved spec's history length, not the name, because suite runs pass the
+// serial names (`medium-serial`), which share their base's sizes.
 function fixtureLimits(fixture: string, pushes: boolean): string[] {
-  const body = pushes ? ['--max-request-body-bytes', ONE_GIB] : [];
-  if (fixture === 'stress') return ['--max-objects', '10000000', ...body];
-  if (fixture === 'medium') return body;
-  return [];
+  const { ops } = resolveFixture(fixture);
+  const body =
+    pushes && ops >= SPECS.medium.ops
+      ? ['--max-request-body-bytes', ONE_GIB]
+      : [];
+  if (ops >= SPECS.stress.ops) return ['--max-objects', '10000000', ...body];
+  return body;
 }
 
 // Repository-count limits raised for repos per minute only: the default
@@ -155,13 +161,15 @@ function serveFor(
 // directory, in a fresh process per sample (and, in the dropped mode, after
 // the page cache was dropped). The server opens a repository lazily on its
 // first request, so the timed clone includes that open; setup does not warm
-// it, because the page cache is dropped before setup.
+// it, because the page cache is dropped before setup. Setup's `cp -al` of
+// the seeded root does run after the drop, so directory entries and inodes
+// are warm again; file contents are not.
 const checkoutCold: BenchCase<E2eState> = e2eCase({
   id: 'e2e.checkout.cold',
   isolation: 'per-sample',
   cold: true,
   pushes: false,
-  note: "includes the server's cold open of the repository: serve opens it on the first request, which is the timed clone",
+  note: "includes the server's cold open of the repository: serve opens it on the first request, which is the timed clone. In the dropped mode, setup's hard-link copy (cp -al) of the seeded root runs after the drop and re-warms its directory entries and inodes, but not file contents",
   setup: (ctx) => serveFor(checkoutCold, ctx),
   run: async (s) => {
     await ownerClone(s, 'checkout');
@@ -195,6 +203,15 @@ function pushCase(files: number): BenchCase<PushState> {
   return benchCase;
 }
 
+// How many timed samples `e2e.pull` and `e2e.land` take, with no warm-up.
+// Each sample's setup lands a push on the server, and every server land runs
+// `conflicts()`, which is slow on today's op-log (THA-21); `e2e.land` then
+// lands again in the timed command. Ten repeats plus two warm-ups do not fit
+// `record`'s 600 s budget even on small, so the case would record a bare
+// `exceeded`. Three samples give a median that fits, and the result records
+// the capped counts.
+const LAND_MAX_REPEATS = 3;
+
 interface PullState extends E2eState {
   readerHome: string;
   readerClone: string;
@@ -204,11 +221,14 @@ interface PullState extends E2eState {
 // <reader>`, which delegates write access and shares a key to every object,
 // as a real owner invites a collaborator. The reader clones, then the owner
 // pushes a 10-file change set to main. The timed command is the reader's
-// `thaddeus pull` of that change.
+// `thaddeus pull` of that change. Capped at LAND_MAX_REPEATS samples and no
+// warm-up, because each sample's setup lands on the server.
 const pull: BenchCase<PullState> = e2eCase({
   id: 'e2e.pull',
   isolation: 'per-sample',
   pushes: true,
+  maxRepeats: LAND_MAX_REPEATS,
+  maxWarmup: 0,
   setup: async (ctx) => {
     const s = await serveFor(pull, ctx);
     const seed = benchSeed('reader');
@@ -238,11 +258,15 @@ interface LandState extends E2eState {
 // Land: the owner opens branch `bench-land`, pushes a 10-file change set to
 // it (uploaded and landed on the branch), and the timed command is
 // `thaddeus land bench-land` from the main clone, landing it into main.
+// Capped at LAND_MAX_REPEATS samples and no warm-up: setup lands the branch
+// push and the timed command lands again, each running `conflicts()`.
 const land: BenchCase<LandState> = e2eCase({
   id: 'e2e.land',
   isolation: 'per-sample',
   writes: true,
   pushes: true,
+  maxRepeats: LAND_MAX_REPEATS,
+  maxWarmup: 0,
   setup: async (ctx) => {
     const s = await serveFor(land, ctx);
     const clone = await ownerClone(s, 'clone');
@@ -286,6 +310,11 @@ const RPM_CLIENTS = 8;
 // does not set `durationMs`.
 const RPM_DEFAULT_DURATION_MS = 30_000;
 
+// At most this many bursts. `bench run` cannot set `durationMs`, so its ten
+// default repeats would be ten 30 s bursts, past the 120 s `run` budget.
+// Three bursts (90 s) fit it with room for setup.
+const RPM_MAX_REPEATS = 3;
+
 interface RpmState extends E2eState {
   homes: string[];
   durationMs: number;
@@ -306,6 +335,7 @@ const reposPerMinute: BenchCase<RpmState> = e2eCase({
   extraFlags: CREATION_LIMITS,
   // Each sample is a fixed-duration burst; warming up would only spend
   // budget (four 30 s bursts are the whole `bench run` budget).
+  maxRepeats: RPM_MAX_REPEATS,
   maxWarmup: 0,
   setup: async (ctx) => {
     const s = await serveFor(reposPerMinute, ctx);
