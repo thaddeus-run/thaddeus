@@ -1,6 +1,6 @@
 {
   "extends": "../tsconfig.options.json",
-  "include": ["src/**/*.ts", "test/**/*.ts"],
+  "include": ["src/**/*.ts", "test/**/*.ts", "test-slow/**/*.ts"],
   "exclude": ["node_modules"],
   "compilerOptions": {
     "noEmit": true,

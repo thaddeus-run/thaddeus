@@ -4,6 +4,27 @@ language: 'typescript'
 layer: 'application'
 
 tasks:
+  # The fast unit tests only (test/), so the required CI's `moon run :test`
+  # stays quick. Pass test/ as a path (`./test`): a bare `test` would be a
+  # filter that also matches test-slow/.
+  test:
+    command: 'bun test ./test'
+
+  # The slow real-process tests (test-slow/): real fixture builds, the
+  # library cases, the e2e CLI and server, and full suite runs. Several
+  # minutes. Run by the report-only Benchmarks workflow, not by ci-passed.
+  test-slow:
+    command: 'bun test ./test-slow'
+    deps:
+      - '^:build'
+
+  # Builds the workspace packages bench imports, and nothing else, for the
+  # Benchmarks workflow. `moon run :build` would also build docs and landing.
+  build-deps:
+    command: 'noop'
+    deps:
+      - '^:build'
+
   # A suite run with no preflight, for development and the PR check (which
   # calls the script directly). Pass flags after `--`, e.g.
   # `CI= moonx bench:run -- --fixtures small --repeats 3 --out out/x.json`.
