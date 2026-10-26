@@ -19,6 +19,7 @@ import {
   type Thresholds,
 } from './compare';
 import { seededRoot } from './e2e/seed';
+import { gitFixture } from './everyday/git';
 import { fixtureDir } from './fixtures/cache';
 import { generateFixture } from './fixtures/plan';
 import { resolveFixture } from './fixtures/spec';
@@ -39,18 +40,20 @@ import { type BenchRun, validateRun } from './result';
 import { childrenRunning, Interrupted } from './runner';
 
 const USAGE = `usage:
-  bun src/cli.ts run [--suite library|e2e|all] [--fixtures small,medium] [--sweeps]
+  bun src/cli.ts run [--suite library|e2e|everyday|all] [--fixtures small,medium] [--sweeps]
                      [--repeats N] [--warmup N] [--page-cache warm,dropped]
-                     [--exclude glob,...] [--out file]
+                     [--exclude glob,...] [--only glob,...] [--out file]
   BENCH_MACHINE=<id> bun src/cli.ts record [--baseline]
-  bun src/cli.ts fixture <name> [--repos N | --server]
-                     build a fixture cache (or the e2e seeded server root), print its path
+  bun src/cli.ts fixture <name> [--repos N | --server | --git]
+                     build a fixture cache (or the e2e seeded server root, or the
+                     everyday suite's bare git repository), print its path
   bun src/cli.ts merge <round.json>... --out file
                      merge round files of one commit into one run
   bun src/cli.ts compare <base.json> <head.json> [--thresholds file]
                      print a base/head summary; exit 1 on a regression
   bun src/cli.ts noise [--rounds R] [--pairs P] [--suite ...] [--fixtures ...]
-                     [--repeats N] [--warmup N] [--exclude glob,...] [--out file]
+                     [--repeats N] [--warmup N] [--exclude glob,...] [--only glob,...]
+                     [--out file]
                      A/A noise study of this commit; writes the thresholds file`;
 
 // `run` defaults for the method. The budget is a fifth of `record`'s.
@@ -95,6 +98,7 @@ function suiteFlags(defaults: { repeats: number; warmup: number }) {
     repeats: { type: 'string', default: String(defaults.repeats) },
     warmup: { type: 'string', default: String(defaults.warmup) },
     exclude: { type: 'string', default: '' },
+    only: { type: 'string', default: '' },
   } as const;
 }
 
@@ -106,9 +110,15 @@ function suiteOptionsOf(values: {
   repeats: string;
   warmup: string;
   exclude: string;
+  only: string;
 }): SuiteOptions {
   const suite = values.suite;
-  if (suite !== 'library' && suite !== 'e2e' && suite !== 'all') {
+  if (
+    suite !== 'library' &&
+    suite !== 'e2e' &&
+    suite !== 'everyday' &&
+    suite !== 'all'
+  ) {
     throw new UsageError(`unknown suite ${suite}`);
   }
   return {
@@ -120,6 +130,7 @@ function suiteOptionsOf(values: {
     warmup: count('warmup', values.warmup, 0),
     budgetMs: RUN_DEFAULTS.budgetMs,
     exclude: list(values.exclude),
+    only: list(values.only),
   };
 }
 
@@ -379,9 +390,10 @@ async function noiseCommand(
   return 0;
 }
 
-// `bench fixture <name> [--repos N | --server]`: builds the cached
+// `bench fixture <name> [--repos N | --server | --git]`: builds the cached
 // FileBackend root of a fixture (with N - 1 filler repositories), or with
-// `--server` the e2e suite's seeded server root, and prints its path. Suite
+// `--server` the e2e suite's seeded server root, or with `--git` the everyday
+// suite's bare git repository of the same plan, and prints its path. Suite
 // runs call it in a child process to build caches before timing anything.
 async function fixtureCommand(argv: readonly string[]): Promise<number> {
   const { values, positionals } = parseArgs({
@@ -389,6 +401,7 @@ async function fixtureCommand(argv: readonly string[]): Promise<number> {
     options: {
       repos: { type: 'string', default: '1' },
       server: { type: 'boolean', default: false },
+      git: { type: 'boolean', default: false },
     },
     allowPositionals: true,
     strict: true,
@@ -407,10 +420,15 @@ async function fixtureCommand(argv: readonly string[]): Promise<number> {
   if (values.server && repos !== 1) {
     throw new UsageError('--server takes no --repos');
   }
+  if (values.git && (values.server || repos !== 1)) {
+    throw new UsageError('--git takes no --repos or --server');
+  }
   const plan = generateFixture(spec);
-  const dir = values.server
-    ? await seededRoot(plan)
-    : await fixtureDir(plan, { repos });
+  const dir = values.git
+    ? await gitFixture(plan)
+    : values.server
+      ? await seededRoot(plan)
+      : await fixtureDir(plan, { repos });
   process.stdout.write(`${dir}\n`);
   return 0;
 }

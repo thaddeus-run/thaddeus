@@ -26,7 +26,7 @@ export interface Machine {
 export interface CaseResult {
   id: string;
   version: number;
-  suite: 'library' | 'e2e';
+  suite: 'library' | 'e2e' | 'everyday';
   fixture: string;
   manifestHash: string;
   status: CaseStatus;

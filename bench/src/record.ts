@@ -39,13 +39,14 @@ export const BENCH_ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const REPO_ROOT = join(BENCH_ROOT, '..');
 const CLI = join(BENCH_ROOT, 'src', 'cli.ts');
 
-export type SuiteName = 'library' | 'e2e';
+export type SuiteName = 'library' | 'e2e' | 'everyday';
 export type PageCacheMode = 'warm' | 'dropped';
 
 // Registry module of each suite.
 const REGISTRIES: Record<SuiteName, string | null> = {
   library: join(BENCH_ROOT, 'src', 'cases', 'index.ts'),
   e2e: join(BENCH_ROOT, 'src', 'e2e', 'cases.ts'),
+  everyday: join(BENCH_ROOT, 'src', 'everyday', 'cases.ts'),
 };
 
 // The registry module path of `suite`, or null when the suite does not exist
@@ -155,6 +156,12 @@ export interface SuiteOptions {
    * Excluded cases still count towards the suite version.
    */
   exclude?: string[];
+  /**
+   * Globs over case ids of the only cases to run; every other case is left
+   * out the way `exclude` leaves one out, so none of them pre-build a fixture.
+   * Empty or absent runs every case. `exclude` still applies inside it.
+   */
+  only?: string[];
 }
 
 // What a suite run records about where it ran, and the hooks it calls.
@@ -171,9 +178,15 @@ export interface SuiteEnv {
   sweepSizes?: readonly number[];
   /**
    * Test seam: the command that pre-builds one fixture cache, or with
-   * `server` the seeded server root of the e2e suite.
+   * `server` the seeded server root of the e2e suite, or with `git` the bare
+   * git repository of the everyday suite.
    */
-  buildCommand?: (fixture: string, repos: number, server: boolean) => string[];
+  buildCommand?: (
+    fixture: string,
+    repos: number,
+    server: boolean,
+    git: boolean
+  ) => string[];
 }
 
 type Job =
@@ -204,28 +217,36 @@ type BuildFailures = Map<string, BuildFailure>;
 
 // One cache a job needs: the fixture root with `repos` repositories, or with
 // `server` the e2e suite's seeded server root (which is built from the
-// fixture root).
+// fixture root), or with `git` the everyday suite's bare git repository (which
+// is built from the plan alone).
 interface CacheNeed {
   fixture: string;
   repos: number;
   server: boolean;
+  git: boolean;
 }
 
 function fixtureKey(need: CacheNeed): string {
-  return `${need.fixture}:${need.server ? 'server' : need.repos}`;
+  const kind = need.git ? 'git' : need.server ? 'server' : need.repos;
+  return `${need.fixture}:${kind}`;
 }
 
 // The caches `benchCase` opens on `fixture`, in build order: its fixture
-// root, the extra roots of `open.cold.root-<n>`, and for an e2e case the
-// seeded server root.
+// root, the extra roots of `open.cold.root-<n>`, the seeded server root and
+// the git repository. A case that declares `needs` gets exactly those; one
+// that does not gets the fixture root, and for an e2e case the server root.
 function cachesOf(benchCase: BenchCase, fixture: string): CacheNeed[] {
+  const needs = benchCase.needs ?? [
+    'fixture',
+    ...(benchCase.suite === 'e2e' ? (['server'] as const) : []),
+  ];
+  const base = { fixture, repos: 1, server: false, git: false };
   return [
-    ...[1, ...extraRootsOf(benchCase)].map((repos) => ({
-      fixture,
-      repos,
-      server: false,
-    })),
-    ...(benchCase.suite === 'e2e' ? [{ fixture, repos: 1, server: true }] : []),
+    ...(needs.includes('fixture')
+      ? [1, ...extraRootsOf(benchCase)].map((repos) => ({ ...base, repos }))
+      : []),
+    ...(needs.includes('server') ? [{ ...base, server: true }] : []),
+    ...(needs.includes('git') ? [{ ...base, git: true }] : []),
   ];
 }
 
@@ -233,15 +254,15 @@ function cachesOf(benchCase: BenchCase, fixture: string): CacheNeed[] {
 function defaultBuildCommand(
   fixture: string,
   repos: number,
-  server: boolean
+  server: boolean,
+  git: boolean
 ): string[] {
-  return [
-    process.execPath,
-    CLI,
-    'fixture',
-    fixture,
-    ...(server ? ['--server'] : ['--repos', String(repos)]),
-  ];
+  const kind = git
+    ? ['--git']
+    : server
+      ? ['--server']
+      : ['--repos', String(repos)];
+  return [process.execPath, CLI, 'fixture', fixture, ...kind];
 }
 
 // Builds one cache in a child process under the pre-build budget, so a build
@@ -253,9 +274,9 @@ async function buildFixture(
   budgetMs: number,
   command: NonNullable<SuiteEnv['buildCommand']>
 ): Promise<BuildFailure | null> {
-  const { fixture, repos, server } = need;
+  const { fixture, repos, server, git } = need;
   const outcome = await spawnBudgeted(
-    command(fixture, repos, server),
+    command(fixture, repos, server, git),
     budgetMs
   );
   const status = classify(outcome, true);
@@ -339,9 +360,11 @@ async function buildAll(
       failures.set(key, base);
       continue;
     }
-    const name = need.server
-      ? `${need.fixture} server root`
-      : `${need.fixture}${need.repos > 1 ? ` with ${need.repos} repositories` : ''}`;
+    const name = need.git
+      ? `${need.fixture} git repository`
+      : need.server
+        ? `${need.fixture} server root`
+        : `${need.fixture}${need.repos > 1 ? ` with ${need.repos} repositories` : ''}`;
     log(`fixture ${name}`);
     const failure = await buildFixture(need, budgetMs, command);
     if (failure === null) continue;
@@ -485,11 +508,29 @@ export async function runSuite(
     return hit;
   };
 
+  const onlys = (opts.only ?? []).map((pattern) => ({
+    pattern,
+    glob: new Bun.Glob(pattern),
+    matched: false,
+  }));
+  // Whether `id` is left out by `only`: it matches none of the globs. Marks
+  // every glob that matches it. With no globs, nothing is left out.
+  const notOnly = (id: string) => {
+    if (onlys.length === 0) return false;
+    let hit = false;
+    for (const o of onlys) {
+      if (!o.glob.match(id)) continue;
+      o.matched = true;
+      hit = true;
+    }
+    return !hit;
+  };
+
   const allCases: BenchCase[] = [];
   const jobs: Job[] = [];
   const sweepJobs: Job[] = [];
   const suites: SuiteName[] =
-    opts.suite === 'all' ? ['library', 'e2e'] : [opts.suite];
+    opts.suite === 'all' ? ['library', 'e2e', 'everyday'] : [opts.suite];
   for (const suite of suites) {
     const registry = lookup(suite);
     if (registry === null) {
@@ -499,7 +540,9 @@ export async function runSuite(
     const mod = (await import(registry)) as { default: readonly BenchCase[] };
     for (const benchCase of mod.default) {
       allCases.push(benchCase);
-      if (excluded(benchCase.id)) continue;
+      // Both run for every case, so each glob learns whether it matched.
+      const skipped = [notOnly(benchCase.id), excluded(benchCase.id)];
+      if (skipped.includes(true)) continue;
       for (const requested of opts.fixtures) {
         if (!benchCase.fixtures.includes(requested)) continue;
         const fixture =
@@ -517,10 +560,14 @@ export async function runSuite(
     }
   }
   jobs.push(...sweepJobs);
-  // A glob that matches nothing is most likely a typo or a renamed case, and
-  // the case it meant to leave out is now running.
+  // A glob that matches nothing is most likely a typo or a renamed case: the
+  // case an `exclude` meant to leave out is now running, and the case an
+  // `only` meant to run is missing.
   for (const e of excludes) {
     if (!e.matched) env.log(`--exclude ${e.pattern} matched no case`);
+  }
+  for (const o of onlys) {
+    if (!o.matched) env.log(`--only ${o.pattern} matched no case`);
   }
 
   const prebuildBudgetMs = opts.prebuildBudgetMs ?? opts.budgetMs;

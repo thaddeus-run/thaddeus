@@ -39,7 +39,7 @@ export function addExtra(total: RunExtra, extra: void | RunExtra): void {
 export interface BenchCase<S = unknown> {
   id: string;
   version: number;
-  suite: 'library' | 'e2e';
+  suite: 'library' | 'e2e' | 'everyday';
   fixtures: readonly string[];
   /**
    * `per-case`: one child runs setup once, then the warm-ups, then every timed
@@ -64,6 +64,14 @@ export interface BenchCase<S = unknown> {
    * by design (a fixed-duration burst) and gains nothing from warming up.
    */
   maxWarmup?: number;
+  /**
+   * The fixture caches a suite run pre-builds for this case before it times
+   * anything: `fixture` is the FileBackend root, `server` the e2e suite's
+   * seeded server root, `git` the bare git repository of the same plan.
+   * When absent, the case needs the fixture root, and for the e2e suite the
+   * server root too.
+   */
+  needs?: readonly ('fixture' | 'server' | 'git')[];
   /**
    * Suite runs give this case the `<fixture>-serial` variant of each fixture
    * it lists (see `serialSpec`), so its results name that fixture.

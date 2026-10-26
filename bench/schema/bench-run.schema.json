@@ -89,7 +89,7 @@
       "properties": {
         "id": { "type": "string" },
         "version": { "type": "integer", "minimum": 1 },
-        "suite": { "enum": ["library", "e2e"] },
+        "suite": { "enum": ["library", "e2e", "everyday"] },
         "fixture": { "type": "string" },
         "manifestHash": { "type": "string" },
         "status": { "$ref": "#/$defs/status" },
