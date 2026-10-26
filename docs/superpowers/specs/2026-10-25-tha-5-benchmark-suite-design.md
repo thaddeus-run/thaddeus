@@ -84,12 +84,19 @@ A new private moon project at `bench/` (next to `integration/`), package
 | Objects            | `encrypt`/`decrypt` throughput by object size; `MemoryStore.put` and `ingest` on `FileBackend`; `get` with capability check |
 | Op-log             | durable `write` (append), `ingest`, `materialize`, `heads`, `conflicts` per fixture and across the sweep                    |
 | Cold open          | `Platform.openDurable` per fixture; also on a server root holding 1, 100 and 1,000 repositories                             |
-| Repository         | repository creation, ready to push                                                                                          |
+| Repository         | repository creation, ready to push (`repo.create`, see below)                                                               |
 | Query and graph    | coarse only: `SymbolGraph` `resolve`/`callersOf` and `CodeDB` `why`/`touchedSince`/`callers`, once per fixture size         |
 | Reputation archive | `archive` + `encodeReputationArchive`; `decodeReputationArchive` + `ingestArchive`, by contribution count                   |
 
 Query and graph get a coarse baseline only because ADR 0005 replaces the current
 `SymbolGraph` with a projection rebuilt from the change journal.
+
+_Changed during build:_ `repo.create` times `Platform.createDurable` plus the
+bootstrap of the owner's signed genesis head (`headRecords.bootstrap`: verify
+the head, then a durable write of the head record). This is what the server does
+for a new repository, and a repository is only ready to push once its head
+exists. The head is signed in setup, as the client signs it before sending. The
+server-only `meta/repo` record is left to `e2e.repo.create`.
 
 **End-to-end suite** (benchmark machine only): the compiled `thaddeus` binary
 against `thaddeus serve` over loopback on the same host. Only end-to-end numbers
@@ -100,11 +107,29 @@ The CLI cannot replay a fixture (one signing identity, wall-clock `at`,
 owner-held signed heads), so setup and measurement are split:
 
 1. **Seed, untimed.** The fixture generator writes the repository into the
-   server's `FileBackend` data root through the library, in-process, with the
-   same manifest hash as the library suite.
+   server's `FileBackend` data root through the library, in-process.
+
+   _Changed during build:_ the e2e suite seeds a conflict-free "serial" variant
+   of each fixture, not the library suite's plan, so it does not share the
+   library suite's manifest hash. The shipped server refuses every land into a
+   `main` that holds a conflict (`blockOnConflict` is the default policy), and
+   the base plans land conflicts on purpose, so the base plan cannot be seeded
+   through the shipped policy. In the serial plan each view forks from the
+   current `main`, takes its share of the ops and lands before the next view
+   forks. File, op, author and view counts are unchanged. The variant is part of
+   the hashed spec and appears in the result as the fixture name
+   (`small-serial`), so its results are a separate history from the library
+   suite's. This keeps the determinism the shared hash was for, and keeps to the
+   anti-goal of publishing no number from a repository that real use cannot
+   produce.
+
 2. **Serve.** Start `thaddeus serve` on that root.
 3. **Measure, timed, real CLI only:**
    - cold checkout: `clone` of the seeded repository into an empty directory
+     (_changed during build:_ the timed clone includes the server's first cold
+     open of the repository, because the server opens a repository on its first
+     request and warming it in setup would re-cache pages after the page-cache
+     drop; the result says so in a note)
    - `push`: a fixed, deterministic change set (10 and 100 files) from that
      clone
    - `pull`: a second identity pulls that change
@@ -135,6 +160,11 @@ emits a manifest whose hash covers the plaintext tree and the op sequence; a run
 records that hash and refuses to compare results whose hashes differ. Ciphertext
 and object ids still differ per run because nonces and content keys are random,
 which is correct.
+
+_Changed during build:_ when the generator writes a fixture, it grants the owner
+a capability on every write by a non-owner. The CLI reshares keys to all members
+before an upload, so an owner's graph sees the whole tree only if it can read
+every write. Granting only the owner keeps the stress build affordable.
 
 | Fixture | Files  | Ops     | Authors | Views | Use                    |
 | ------- | ------ | ------- | ------- | ----- | ---------------------- |
@@ -171,7 +201,9 @@ variation across repeats.
   `durability: "none (FileBackend renames atomically, no fsync)"`. No write-path
   number is published until a durable mode exists.
 - The machine block names this host as a shared, virtualized guest: KVM, 4 vCPU
-  AMD EPYC Rome, 7 GB RAM.
+  AMD EPYC Rome, 7 GB RAM. _Changed during build:_ the result carries the
+  machine id `kvm-epyc-rome-4vcpu`, described in the committed
+  `bench/machines/kvm-epyc-rome-4vcpu.json`, and never the host's name.
 
 ### Targets
 
@@ -180,7 +212,7 @@ measures it:
 
 | §5 target                               | Benchmark                               |
 | --------------------------------------- | --------------------------------------- |
-| Cold install or checkout, sub-second    | e2e cold checkout                       |
+| Cold install or checkout, sub-second    | e2e cold checkout, page cache dropped   |
 | Repository creation, single-digit ms    | library repository creation (and e2e)   |
 | Query over history, milliseconds        | library `CodeDB` history queries        |
 | About 15,000 repos/min under agent load | e2e repos/min (a floor, not agent load) |
@@ -192,8 +224,12 @@ thresholds.
 
 ### Benchmark machine and recording
 
-The benchmark machine is this host (`kvm.tailfc5d30.ts.net`). Results from it
-may be published, because the result names the machine and shows the spread.
+The benchmark machine is this host. Results from it may be published, because
+the result names the machine and shows the spread.
+
+_Changed during build:_ the repository is public, so neither the spec nor a
+result names the host's private network name. The machine id is
+`kvm-epyc-rome-4vcpu`, and `bench:record` takes it from `BENCH_MACHINE`.
 
 Recording is manual: `moonx bench:record`. It refuses to start when the 1-minute
 load average is above 0.5 or less than 2 GB of memory is available, and it
@@ -214,11 +250,30 @@ the commit the result names, and committed in a small follow-up PR.
    runner noise. Each commit runs its own `bench/`. Every case carries an id and
    a version. Results are compared only when id, version and manifest hash all
    match. Anything else is listed as "new or changed, not compared". If the base
-   has no `bench/` at all, the check reports that and passes.
+   has no `bench/` at all, the check reports that and passes. A status change
+   counts whatever the threshold: base `ok` with head `exceeded`, `oom` or
+   `error` is a regression, and base `exceeded` with head `ok` is an
+   improvement.
 2. The threshold per benchmark comes from a committed **noise study**: base
-   against base (A/A) many times, taking the 99th percentile of the head/base
-   median ratio. The thresholds file records the study date, runner image and
-   suite version. It is re-derived when the runner image or the suite changes.
+   against base (A/A) many times, using the head/base median ratio of each pair.
+   The thresholds file records the study date, runner image and suite version.
+   It is re-derived when the runner image or the suite changes.
+
+   _Changed during build:_ the threshold is a family-wise lognormal bound and
+   not the raw 99th percentile of each case's ratios. For each case, the natural
+   logs of its A/A ratios give a mean and a sample standard deviation, and the
+   threshold is the exponential of the mean plus z times the standard deviation,
+   floored at 1. z is the normal quantile at 1 minus 0.01 divided by N, where N
+   is the number of cases with a threshold (a Bonferroni split). The target is a
+   nominal 1% chance per pull request that a PR with no change is flagged on
+   noise, in any case. A per-case 99th percentile would not do that: over about
+   two dozen cases the check would be red on most PRs, which blocks the path to
+   a required check, and 20 pairs make a 99th percentile about the maximum,
+   which a new draw beats about 5% of the time per case. The nominal figure
+   rests on the lognormal assumption and on estimates from a limited number of
+   pairs, so it is not a guarantee. A case with fewer than three ratios gets no
+   threshold. The file records N, z and the number of pairs.
+
 3. Output goes to the GitHub job summary as a table, and the JSON goes up as an
    artifact. No PR comment, because fork PRs get a read-only token and
    `pull_request_target` would run fork code with write access.

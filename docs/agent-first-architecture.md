@@ -161,13 +161,20 @@ observed in a named benchmark environment with a recorded method. Documents in
 this repository may cite a target only with the word "target" next to it. They
 may cite a measurement only with a link to the run that produced it.
 
-| Target                                          | Value                                                | Measured | Owner                                    |
-| ----------------------------------------------- | ---------------------------------------------------- | -------- | ---------------------------------------- |
-| Cold install or checkout                        | Sub-second on any OS                                 | No       | THA-117 defines it, THA-5 measures it    |
-| Repository or scope creation, ready to push     | Single-digit milliseconds                            | No       | THA-117, THA-5                           |
-| Query over repository history                   | Milliseconds                                         | No       | THA-117, THA-5                           |
-| Repository creation throughput under agent load | About 15,000 per minute, sustained, with no downtime | No       | THA-117, THA-5                           |
-| Simultaneous agents on one repository           | 1,000 or more                                        | No       | THA-117 defines it, THA-130 qualifies it |
+| Target                                          | Value                                                | Measured | Owner                                    | Benchmark                                                              |
+| ----------------------------------------------- | ---------------------------------------------------- | -------- | ---------------------------------------- | ---------------------------------------------------------------------- |
+| Cold install or checkout                        | Sub-second on any OS                                 | No       | THA-117 defines it, THA-5 measures it    | `e2e.checkout.cold` with `pageCache: "dropped"`, on the serial fixture |
+| Repository or scope creation, ready to push     | Single-digit milliseconds                            | No       | THA-117, THA-5                           | `repo.create` and `e2e.repo.create`                                    |
+| Query over repository history                   | Milliseconds                                         | No       | THA-117, THA-5                           | `codedb.touchedSince` and `codedb.why`                                 |
+| Repository creation throughput under agent load | About 15,000 per minute, sustained, with no downtime | No       | THA-117, THA-5                           | `e2e.repos-per-minute`, a floor, not agent load                        |
+| Simultaneous agents on one repository           | 1,000 or more                                        | No       | THA-117 defines it, THA-130 qualifies it | not measured here (THA-130)                                            |
+
+The website follows the same rule as repository documents. A measured figure on
+the website links to a committed file under `bench/results/` that names the
+machine, commit, fixture, method and repeat count. Anything not measured carries
+the word "target". The benchmark suite in [`bench/`](../bench/README.md)
+produces those files, and the Benchmark column above names the case that
+measures each target.
 
 Cold and warm paths get separate reports. One hot repository and many
 independent repositories are separate workloads with separate benchmarks. An
