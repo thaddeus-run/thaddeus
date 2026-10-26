@@ -1,0 +1,172 @@
+# A report-only benchmark check. On a pull request it runs the library suite
+# on the small fixture for the PR's base and its head, interleaved on one
+# runner, and writes the comparison to the job summary. It is not a merge
+# gate: it is not in `ci-passed` and not in branch protection, and it posts no
+# PR comment (fork PRs get a read-only token). Dispatched with `mode: noise`,
+# it runs the A/A noise study on main that the thresholds come from.
+name: Benchmarks
+
+on:
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: 'noise: run the A/A noise study on main'
+        type: choice
+        options: [noise]
+        default: noise
+        required: true
+
+permissions:
+  contents: read
+
+# A newer push to the same PR makes the older comparison moot.
+concurrency:
+  group: bench-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  AGENT: 1
+  # Library cases the PR check and the noise study leave out, so that ten
+  # suite runs (five rounds of base and head) fit the 45-minute job. Each
+  # still runs in `bench:record`. A glob that matches no case is logged.
+  #   oplog.conflicts.*: about 10 s per sample on small, 40 s per run each
+  #   codedb.callers: about 13 s per sample on small, 52 s per run
+  #   reputation.*.10000: about 30 s per run each (export and import)
+  #   open.cold.root-1000: its 1,000-repository root takes about 20 s to build
+  BENCH_EXCLUDE: oplog.conflicts.*,codedb.callers,reputation.*.10000,open.cold.root-1000
+
+jobs:
+  compare:
+    name: Benchmarks (report only)
+    if: ${{ github.event_name == 'pull_request' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # The base commit is checked out from this clone, so it needs the
+          # full history.
+          fetch-depth: 0
+
+      # proto installs the pinned bun/node/moon/gh from .prototools.
+      - name: Install proto toolchain
+        uses: moonrepo/setup-toolchain@v0
+        with:
+          auto-install: true
+
+      - name: Install dependencies
+        run: |
+          # bunfig's minimumReleaseAge is a dev-machine supply-chain gate.
+          # Against a frozen, reviewed lockfile it only risks blocking freshly
+          # published pinned tool versions and producing a partial install on
+          # the clean CI runner, so disable it for CI (GNU sed on the runner).
+          sed -i 's/^minimumReleaseAge = .*/minimumReleaseAge = 0/' bunfig.toml
+          bun install --frozen-lockfile
+
+      # Each side runs its own bench/, so the base gets its own worktree.
+      - name: Check out the base commit
+        id: base
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          git worktree add ../base "$BASE_SHA"
+          if [ -d ../base/bench ]; then
+            echo "has_bench=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "base has no bench suite; nothing compared"
+            echo "base has no bench suite; nothing compared" >> "$GITHUB_STEP_SUMMARY"
+            echo "has_bench=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Install and build the base
+        if: ${{ steps.base.outputs.has_bench == 'true' }}
+        run: |
+          cd ../base
+          sed -i 's/^minimumReleaseAge = .*/minimumReleaseAge = 0/' bunfig.toml
+          bun install --frozen-lockfile
+          moon run :build
+
+      - name: Build the head
+        if: ${{ steps.base.outputs.has_bench == 'true' }}
+        run: moon run :build
+
+      # Base, then head, five times over, so drift on the runner hits both
+      # sides alike. Fixture caches are built in the first round of each side.
+      - name: Run base and head in interleaved rounds
+        if: ${{ steps.base.outputs.has_bench == 'true' }}
+        run: |
+          mkdir -p out
+          for k in 1 2 3 4 5; do
+            for side in base head; do
+              if [ "$side" = base ]; then tree=../base; else tree=.; fi
+              (cd "$tree" && bun bench/src/cli.ts run --suite library \
+                --fixtures small --repeats 3 --warmup 1 \
+                --exclude "$BENCH_EXCLUDE" \
+                --out "$GITHUB_WORKSPACE/out/$side-$k.json")
+            done
+          done
+
+      - name: Merge the rounds of each side
+        if: ${{ steps.base.outputs.has_bench == 'true' }}
+        run: |
+          (cd ../base && bun bench/src/cli.ts merge \
+            "$GITHUB_WORKSPACE"/out/base-*.json --out "$GITHUB_WORKSPACE/out/base.json")
+          bun bench/src/cli.ts merge out/head-*.json --out out/head.json
+
+      # Reads the committed bench/thresholds/github-ubuntu-latest.json, or
+      # compares without thresholds while there is none. Exits 1 on a
+      # regression, which marks this report-only job red.
+      - name: Compare base and head
+        if: ${{ steps.base.outputs.has_bench == 'true' }}
+        run: bun bench/src/cli.ts compare out/base.json out/head.json
+
+      - name: Upload the runs
+        if: ${{ !cancelled() && steps.base.outputs.has_bench == 'true' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: bench-runs
+          path: out/
+          if-no-files-found: ignore
+
+  # The A/A noise study: 20 pairs of five interleaved rounds of main against
+  # itself. Commit the uploaded thresholds file to
+  # bench/thresholds/github-ubuntu-latest.json.
+  noise:
+    name: Benchmark noise study
+    if:
+      ${{ github.event_name == 'workflow_dispatch' && inputs.mode == 'noise' }}
+    runs-on: ubuntu-latest
+    # 200 suite runs; GitHub's limit for a hosted job is 360 minutes.
+    timeout-minutes: 360
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+
+      - name: Install proto toolchain
+        uses: moonrepo/setup-toolchain@v0
+        with:
+          auto-install: true
+
+      - name: Install dependencies
+        run: |
+          # See the compare job: minimumReleaseAge is a dev-machine gate.
+          sed -i 's/^minimumReleaseAge = .*/minimumReleaseAge = 0/' bunfig.toml
+          bun install --frozen-lockfile
+
+      - name: Build
+        run: moon run :build
+
+      # The same suite, fixture, method and exclusions as the compare job:
+      # thresholds only hold for the method they were measured with.
+      - name: Run the A/A noise study
+        run: |
+          bun bench/src/cli.ts noise --rounds 5 --pairs 20 --suite library \
+            --fixtures small --repeats 3 --warmup 1 --exclude "$BENCH_EXCLUDE"
+
+      - name: Upload the thresholds
+        uses: actions/upload-artifact@v4
+        with:
+          name: bench-thresholds
+          path: bench/thresholds/github-ubuntu-latest.json
