@@ -166,6 +166,14 @@ a capability on every write by a non-owner. The CLI reshares keys to all members
 before an upload, so an owner's graph sees the whole tree only if it can read
 every write. Granting only the owner keeps the stress build affordable.
 
+_Changed during build:_ the generator lands a view by re-pointing `main` to the
+merged heads, which is exactly what `Repo.land` with `allowAll` persists,
+instead of calling `Repo.land`. `Repo.land` always runs `conflicts()` on the
+merged view, so the build paid the cost under measurement and grew about as n⁴
+with history length. Fixture pre-builds also get their own budget, recorded as
+`method.prebuildBudgetMs` (30 minutes in `bench:record`), apart from the case
+budget.
+
 | Fixture | Files  | Ops     | Authors | Views | Use                    |
 | ------- | ------ | ------- | ------- | ----- | ---------------------- |
 | small   | 100    | 1,000   | 1       | 1     | PR check, seconds      |
@@ -198,8 +206,9 @@ variation across repeats.
 ### Honesty labels in every result
 
 - Write, push and land results carry
-  `durability: "none (FileBackend renames atomically, no fsync)"`. No write-path
-  number is published until a durable mode exists.
+  `durability: "none (FileBackend renames atomically, no fsync)"`, and so do
+  sweeps of writing cases. No write-path number is published until a durable
+  mode exists.
 - The machine block names this host as a shared, virtualized guest: KVM, 4 vCPU
   AMD EPYC Rome, 7 GB RAM. _Changed during build:_ the result carries the
   machine id `kvm-epyc-rome-4vcpu`, described in the committed
@@ -290,9 +299,10 @@ These were my calls. Override any of them in review:
   (`process.resourceUsage().maxRSS` or equivalent) belongs to that case alone.
 - **Result schema:** a JSON Schema file in `bench/`, with results validated
   against it.
-- **Reputation archive sizes:** `decodeReputationArchive` rejects archives over
-  4,096 contributions by default, so the sweep passes explicit limits and
-  records them.
+- **Reputation archive sizes:** `decodeReputationArchive` has no count limit
+  unless the caller passes one. The server passes its
+  `DEFAULT_MAX_REPUTATION_CONTRIBUTIONS` (4,096) and rejects larger archives, so
+  the sweep passes explicit limits and records them.
 - **Repeat counts, warm-up, budgets and the noise study size:** set them so that
   small finishes in about a minute per commit on a GitHub runner. Record them in
   each result.

@@ -33,24 +33,39 @@ give a rough baseline and not a fine-grained one.
 against `thaddeus serve` over loopback. Client and server share one host, and
 the result says so. Only these numbers are candidates for the website.
 
-| Case id                | What one sample does                                                                  |
-| ---------------------- | ------------------------------------------------------------------------------------- |
-| `e2e.checkout.cold`    | `thaddeus clone` of the seeded repository into an empty directory                     |
-| `e2e.push.10`, `.100`  | `thaddeus push --no-land` of a 10-file or 100-file change set                         |
-| `e2e.pull`             | a second identity runs `thaddeus pull` for a 10-file change                           |
-| `e2e.land`             | `thaddeus land` of a branch holding a 10-file change into `main`                      |
-| `e2e.repo.create`      | `thaddeus create`, one after another                                                  |
-| `e2e.repos-per-minute` | 8 concurrent clients, each its own identity, create repositories for a fixed duration |
+| Case id                | What one sample does                                                            |
+| ---------------------- | ------------------------------------------------------------------------------- |
+| `e2e.checkout.cold`    | `thaddeus clone` of the seeded repository into an empty directory               |
+| `e2e.push.10`, `.100`  | `thaddeus push --no-land` of a 10-file or 100-file change set                   |
+| `e2e.pull`             | a second identity runs `thaddeus pull` for a 10-file change                     |
+| `e2e.land`             | `thaddeus land` of a branch holding a 10-file change into `main`                |
+| `e2e.repo.create`      | `thaddeus create`, one after another                                            |
+| `e2e.repos-per-minute` | 8 concurrent clients, each its own identity, create repositories for 30 seconds |
 
 Each e2e case starts its own server on a hard-link copy of a seeded data root,
 so the cached fixture is never changed. Setup does everything the timed command
 needs, which leaves the timed part as one CLI invocation (or, for repositories
 per minute, one burst of them).
 
+Four cases cap their samples whatever the run asks for, and the result records
+the capped `repeats` and `warmup`:
+
+- `e2e.pull` and `e2e.land` take at most 3 samples and no warm-up. Each sample's
+  setup lands a push on the server, and every server land runs `conflicts()`,
+  which is slow on today's op-log (THA-21). Ten repeats and two warm-ups would
+  not fit even the 600 second `record` budget on small.
+- `e2e.repos-per-minute` takes at most 3 bursts and no warm-up. `bench run`
+  cannot shorten a burst, and ten 30 second bursts would not fit the 120 second
+  `run` budget.
+- `e2e.repo.create` takes at most 15 samples, under the shipped limit of 20
+  repository creations per owner per hour.
+
 The e2e suite uses the shipped `serve` defaults and raises only the limits a
 case hits: the request body size for pushes on medium and stress, the object cap
 on stress, and the repository count and creation limits for repositories per
-minute. The exact flags are in each result's `serveFlags`.
+minute. The limits follow the fixture's size, so `medium-serial` and
+`stress-serial` raise the same ones as `medium` and `stress`. The exact flags
+are in each result's `serveFlags`.
 
 ### The e2e suite runs on a serial fixture
 
@@ -73,6 +88,11 @@ server's first cold open of the repository. Warming the server in setup would
 read the repository back into the page cache after the dropped-cache step, so
 the case does not do it. Its result carries a note that says this.
 
+In the dropped mode the drop comes before setup, and setup's hard-link copy
+(`cp -al`) of the seeded root then walks the whole tree. That re-warms the
+directory entries and inodes, though not the file contents. The note says this
+too.
+
 ## Fixtures
 
 A fixture is a versioned generator and not committed bytes. The inputs are
@@ -92,9 +112,13 @@ plan and not the stored bytes.
 
 The op mix has writes, removes, forks and lands into `main`. Lands matter
 because writes and forks alone leave every view a straight chain, and
-`conflicts()` has nothing to do without several heads. Edits favor a small set
-of hot files. In every fixture the owner is granted read access on every write,
-so a graph built by the owner sees the whole tree.
+`conflicts()` has nothing to do without several heads. The generator lands a
+view by re-pointing `main` to the merged heads, which is exactly what
+`Repo.land` with `allowAll` persists. It does not call `Repo.land`, because that
+always runs `conflicts()`, the cost the suite measures, and fixture builds would
+grow about as n⁴ with history length. Edits favor a small set of hot files. In
+every fixture the owner is granted read access on every write, so a graph built
+by the owner sees the whole tree.
 
 The **sweep** doubles the history length (1,000 ops, 2,000, 4,000 and so on) for
 four cases: `open.cold`, `oplog.write`, `oplog.materialize.frontier` and
@@ -106,8 +130,11 @@ Fixture caches live under `bench/.cache/` (gitignored). A cache is built in a
 temporary directory and renamed into place together with a `.complete` marker
 that holds the manifest hash, so a build that was killed halfway is never
 trusted by a later run. Before anything is timed, a suite run builds every cache
-it needs in a child process under the case budget, so a fixture that cannot be
-built is recorded once as a setup failure.
+it needs in a child process, so a fixture that cannot be built is recorded once
+as a setup failure. A pre-build has its own budget, `method.prebuildBudgetMs` in
+the result: 1,800,000 ms (30 minutes) under `record`, and the case budget under
+`run`. Sweep fixtures are built smallest first, and after the first size that
+fails, the larger sizes are not built at all.
 
 ## Running the suite
 
@@ -132,7 +159,7 @@ first.
 
 The e2e suite needs the compiled binary. `bench:run` depends on the build of the
 packages, and `bench:record` also depends on `cli:compile`. Compile the CLI
-first (`moonx cli:compile`) before running the e2e suite with `bench:run`.
+first (`CI= moonx cli:compile`) before running the e2e suite with `bench:run`.
 
 Each case runs in its own subprocess. That gives every case its own peak memory
 reading and lets the runner enforce its time budget. Other commands, which have
@@ -158,11 +185,12 @@ BENCH_MACHINE=kvm-epyc-rome-4vcpu CI= moonx bench:record -- --baseline
 ```
 
 `record` refuses to start, before any case runs, when the 1-minute load average
-is above 0.5, when less than 2 GiB of memory is available, when `packages/` or
-`bench/` has uncommitted changes (so the file never names a commit it did not
-measure), or when `sudo -n` does not work. It records the load and the available
-memory in the result, and it checks again after the run that the tree has not
-changed.
+is above 0.5, when less than 2 GiB of memory is available, when the checkout has
+uncommitted or untracked changes anywhere outside `bench/results` (so the file
+never names a commit it did not measure; `bun.lock`, the root `package.json`,
+`patches/` and `tsconfig.options.json` count too), or when `sudo -n` does not
+work. It records the load and the available memory in the result, and it checks
+again after the run that the tree has not changed.
 
 The result goes to `bench/results/<machine>/<date>-<short-commit>.json`, and
 `--baseline` also copies it to `bench/results/<machine>/baseline.json`. The file
@@ -187,18 +215,22 @@ The fields that need an explanation:
 - **`status`** is one of `ok`, `exceeded`, `oom` and `error`. Only `ok` results
   have a median and can be compared.
 - **`exceeded`** means the case ran past its time budget and the runner killed
-  it. The result says `exceeded <budget> at n = X`, where n is the history
-  length (ops) of the fixture. It is a result and not a skipped case. It tells
-  you the case is slower than the budget on that input.
+  it. The result says `exceeded <budget> ms at n = X`, where the budget is in
+  milliseconds and n is the history length (ops) of the fixture. It is a result
+  and not a skipped case. It tells you the case is slower than the budget on
+  that input.
 - **`oom`** means the case ran out of memory (the kernel killed it, or the
   runtime reported an allocation failure). It is recorded as `oom at n = X`.
 - **`phase`** is `setup` when the failure happened while building the input, for
   example while building a stress fixture on a 7 GB host, and not in the timed
   part. The run continues either way.
 - **`durability`** appears on every write, push and land result and reads
-  `none (FileBackend renames atomically, no fsync)`. `FileBackend` replaces
-  files by rename but never calls fsync, so these numbers are not durable-commit
-  latency. Do not publish a write-path figure as one.
+  `none (FileBackend renames atomically, no fsync)`. The library cases that
+  carry it are `oplog.write`, `oplog.ingest`, `store.put`, `store.ingest` and
+  `repo.create`; the e2e cases are `e2e.push.10`, `e2e.push.100`, `e2e.land`,
+  `e2e.repo.create` and `e2e.repos-per-minute`. `FileBackend` replaces files by
+  rename but never calls fsync, so these numbers are not durable-commit latency.
+  Do not publish a write-path figure as one.
 - **`pageCache`** appears on cold cases (`open.cold*` and `e2e.checkout.cold`)
   and is `warm` or `dropped`. In the dropped mode the runner flushes and drops
   the kernel page cache (`echo 3 > /proc/sys/vm/drop_caches`) before every
@@ -208,9 +240,13 @@ The fields that need an explanation:
   defaults, so a figure can say, for example, "server with creation limit
   raised".
 
-A sweep result lists the median at each history length together with the fitted
-exponent and its R². A low R² means the line is a poor fit and the exponent
-should not be quoted.
+A sweep result lists the median and the fixture's manifest hash at each history
+length, together with the fitted exponent and its R². A low R² means the line is
+a poor fit and the exponent should not be quoted. A sweep of a writing case
+(`oplog.write`) carries `durability` as well. A sweep that stopped early has
+`failedAtN` and a `note`: the failing size's case note, or
+`fixture pre-build failed: ...` when it was the fixture that could not be built
+and the case never ran.
 
 ### Results to expect on today's code
 
@@ -219,21 +255,28 @@ broken run:
 
 - `open.cold` on the stress fixture. Opening a stress repository from a cold
   start takes longer than the budget allows for the full set of repeats.
-- `e2e.pull` and `e2e.land` under the `run` defaults. Each land runs
-  `conflicts()` twice, which is slow on the current op-log (THA-21), so ten
-  repeats do not fit in the 120 second budget. They may also be `exceeded` under
-  `record`, for the same reason.
+- `e2e.pull` and `e2e.land` may still exceed the 120 second `run` budget, even
+  capped at 3 samples. Each land runs `conflicts()`, which is slow on the
+  current op-log (THA-21). The cap is set so that `record` gets a median on
+  small.
+- Every e2e case on medium and stress. Seeding the server root replays the
+  fixture through the real server, whose land runs `conflicts()` on 20,000 or
+  more ops (THA-21), so the seeded-root pre-build is expected to exceed its
+  budget and each e2e case records a setup failure. There are no medium or
+  stress e2e figures until THA-21 lands.
 - `reputation.export.10000` and `reputation.import.10000` exceed the `run`
   budget even on small.
 
-The two e2e cases have no published land or pull figure until THA-21 lands.
+`e2e.pull` and `e2e.land` have no published figure until THA-21 lands.
 
 ## The PR check
 
 `.github/workflows/bench.yml` runs on every pull request. It is not part of
 `ci-passed`, it is not a required check, and it posts no PR comment (fork pull
 requests get a read-only token). It writes a job summary and uploads the runs as
-an artifact.
+an artifact. Each side builds only the packages bench imports
+(`bench:build-deps`), not the whole workspace. A second job in the same workflow
+runs `bench:test-slow` (see [Tests](#tests)).
 
 The job checks out the PR's merge commit and its first parent, which is the base
 the PR was merged onto. Each side runs its own `bench/`. It runs the library
@@ -303,6 +346,16 @@ re-versioning a case changes it. Dispatch the `Benchmarks` workflow with
 `mode: noise` on `main`; it runs 20 pairs of 5 rounds, rewrites the thresholds
 file after every pair, and uploads it as an artifact. Commit that file to
 `bench/thresholds/github-ubuntu-latest.json`.
+
+## Tests
+
+`moonx bench:test` runs the fast unit tests in `test/` (statistics, comparison,
+schema, plan, machine, the runner on fake cases, and the suite builder with
+stand-in fixture builds). It is part of the required CI and takes about 15
+seconds. `moonx bench:test-slow` runs the tests in `test-slow/`, which start
+real processes: fixture builds, the library cases, the e2e CLI and server, and
+full suite runs. It takes several minutes and runs in the Benchmarks workflow
+only.
 
 ## Changing a case
 

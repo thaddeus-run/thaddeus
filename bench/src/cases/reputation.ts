@@ -16,9 +16,11 @@ import type { BenchCase, RunExtra } from '../case';
 // fixture names are `tiny` and `small` only so the smoke tests can run them
 // cheaply. The size is part of the case id, not the fixture.
 
-// Archive sizes in contributions. The last one is above the decoder's default
-// limit of 4,096, so import passes `maxContributions` explicitly, as a server
-// that accepts big archives would.
+// Archive sizes in contributions. `decodeReputationArchive` itself has no
+// count limit unless one is passed; the server passes its
+// DEFAULT_MAX_REPUTATION_CONTRIBUTIONS (4,096), which the last size is above.
+// Import passes `maxContributions` explicitly, as a server that accepts big
+// archives would, so the limit check is part of the timed decode.
 const ARCHIVE_SIZES = [100, 1_000, 10_000] as const;
 
 const FIXTURES = ['tiny', 'small'] as const;
