@@ -16,8 +16,8 @@ export interface ThresholdStudy {
 
 // The result of an A/A noise study: for each case (`id@version`), the
 // largest head/base p50 ratio noise plausibly produces on this runner image.
-// The bounds hold for the whole family of cases at once: with every case
-// unchanged, all of them stay under their thresholds in 99% of PRs.
+// The bounds are set for the whole family of cases at once: with every case
+// unchanged, nominally about 1% of PRs see any case over its threshold.
 export interface Thresholds extends ThresholdStudy {
   method: 'lognormal-family-wise';
   /** How many cases got a threshold (N in the Bonferroni split). */
@@ -76,7 +76,8 @@ export interface Comparison {
 // lognormal: with mu and sigma the mean and sample standard deviation of a
 // case's log ratios, its threshold is exp(mu + z * sigma). z is the normal
 // quantile of 1 - 0.01 / N for the N cases that get a threshold, a
-// Bonferroni split that keeps the chance of any false alarm in a PR at 1%.
+// Bonferroni split that puts the chance of any false alarm in a PR at
+// nominally about 1%.
 // (An empirical 99th percentile over 20 pairs is about each case's maximum,
 // which a new draw beats ~5% of the time per case.) A threshold below 1
 // would flag a case that did not slow down at all, so thresholds are floored
@@ -317,7 +318,7 @@ export function renderSummary(cmp: Comparison): string {
   if (cmp.thresholds === 'current' && study !== undefined) {
     lines.push(
       `Thresholds from the A/A noise study of ${study.studiedAt.slice(0, 10)} on ${study.runnerImage} (${plural(study.pairs, 'pair')}): ` +
-        `each is exp(mean + z × stdev) of the case's log A/A ratios, with z = ${study.z?.toFixed(2) ?? '–'} so that all ${study.familySize} studied cases together raise a false alarm in at most 1% of PRs. ` +
+        `each is exp(mean + z × stdev) of the case's log A/A ratios, with z = ${study.z?.toFixed(2) ?? '–'} so that all ${study.familySize} studied cases together raise a false alarm in nominally about 1% of PRs. ` +
         'A case without a threshold is checked for status changes only.'
     );
   } else if (cmp.thresholds === 'stale' && study !== undefined) {
