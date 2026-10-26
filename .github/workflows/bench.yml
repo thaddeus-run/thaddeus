@@ -1,9 +1,10 @@
-# A report-only benchmark check. On a pull request it runs the library suite
-# on the small fixture for the PR's base and its head, interleaved on one
-# runner, and writes the comparison to the job summary. It is not a merge
-# gate: it is not in `ci-passed` and not in branch protection, and it posts no
-# PR comment (fork PRs get a read-only token). Dispatched with `mode: noise`,
-# it runs the A/A noise study on main that the thresholds come from.
+# A report-only benchmark check. On a pull request it runs bench's slow tests
+# (`bench:test-slow`), and it runs the library suite on the small fixture for
+# the PR's base and its head, interleaved on one runner, and writes the
+# comparison to the job summary. It is not a merge gate: it is not in
+# `ci-passed` and not in branch protection, and it posts no PR comment (fork
+# PRs get a read-only token). Dispatched with `mode: noise`, it runs the A/A
+# noise study on main that the thresholds come from.
 name: Benchmarks
 
 on:
@@ -43,6 +44,35 @@ env:
   BENCH_NOISE_EXCLUDE: oplog.conflicts.*,codedb.callers
 
 jobs:
+  # bench's slow real-process tests: real fixture builds, the library cases,
+  # the e2e CLI and server, and full suite runs. They are kept out of
+  # `bench:test`, and so out of ci-passed, because they take several minutes.
+  slow-tests:
+    name: Benchmark suite slow tests
+    if: ${{ github.event_name == 'pull_request' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # moon detects CI and compares against the pull request's base
+          # branch, so the checkout needs full history and refs.
+          fetch-depth: 0
+
+      - name: Install proto toolchain
+        uses: moonrepo/setup-toolchain@v0
+        with:
+          auto-install: true
+
+      - name: Install dependencies
+        run: |
+          # See the compare job: minimumReleaseAge is a dev-machine gate.
+          sed -i 's/^minimumReleaseAge = .*/minimumReleaseAge = 0/' bunfig.toml
+          bun install --frozen-lockfile
+
+      - name: Run the slow bench tests
+        run: moon run bench:test-slow
+
   compare:
     name: Benchmarks (report only)
     if: ${{ github.event_name == 'pull_request' }}
@@ -92,11 +122,13 @@ jobs:
           cd ../base
           sed -i 's/^minimumReleaseAge = .*/minimumReleaseAge = 0/' bunfig.toml
           bun install --frozen-lockfile
-          moon run :build
+          moon run bench:build-deps
 
+      # Only the packages bench imports (cli among them); `moon run :build`
+      # would also build docs and landing, which bench never touches.
       - name: Build the head
         if: ${{ steps.base.outputs.has_bench == 'true' }}
-        run: moon run :build
+        run: moon run bench:build-deps
 
       # Base, then head, five times over, so drift on the runner hits both
       # sides alike. Fixture caches are built in the first round of each side.
@@ -165,7 +197,7 @@ jobs:
           bun install --frozen-lockfile
 
       - name: Build
-        run: moon run :build
+        run: moon run bench:build-deps
 
       # The same suite, fixture, method and exclusions as the compare job:
       # thresholds only hold for the method they were measured with.

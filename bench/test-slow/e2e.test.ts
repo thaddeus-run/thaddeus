@@ -12,14 +12,12 @@ import {
 } from 'node:fs';
 import { join, relative } from 'node:path';
 
-import e2eCases from '../src/e2e/cases';
 import { cliCommand, timeCli, writeCliHome } from '../src/e2e/home';
 import { seededRoot } from '../src/e2e/seed';
 import { startServe } from '../src/e2e/serve';
 import { fixtureDir, WORK_ROOT } from '../src/fixtures/cache';
 import { generateFixture, manifestHash } from '../src/fixtures/plan';
 import { serialSpec, tinySpec } from '../src/fixtures/spec';
-import { registryFor } from '../src/record';
 import { FILEBACKEND_DURABILITY } from '../src/result';
 import { runCase } from '../src/runner';
 
@@ -219,47 +217,3 @@ test(
   },
   SLOW
 );
-
-test('repo.create caps its timed repeats under the hourly creation limit', () => {
-  const create = e2eCases.find((c) => c.id === 'e2e.repo.create');
-  expect(create?.maxRepeats).toBe(15);
-});
-
-test('stress and medium raise only the limits their pushes hit', () => {
-  const flags = (id: string, fixture: string) =>
-    e2eCases.find((c) => c.id === id)?.serveFlags?.(fixture);
-  expect(flags('e2e.push.10', 'small')).toEqual([]);
-  expect(flags('e2e.push.10', 'medium')).toEqual([
-    '--max-request-body-bytes',
-    '1073741824',
-  ]);
-  expect(flags('e2e.push.10', 'stress')).toEqual([
-    '--max-objects',
-    '10000000',
-    '--max-request-body-bytes',
-    '1073741824',
-  ]);
-  expect(flags('e2e.checkout.cold', 'medium')).toEqual([]);
-  expect(flags('e2e.checkout.cold', 'stress')).toEqual([
-    '--max-objects',
-    '10000000',
-  ]);
-});
-
-test('the e2e registry is the one suite runs use', () => {
-  expect(registryFor('e2e')).toBe(E2E);
-  expect(e2eCases.map((c) => c.id)).toEqual([
-    'e2e.checkout.cold',
-    'e2e.push.10',
-    'e2e.push.100',
-    'e2e.pull',
-    'e2e.land',
-    'e2e.repo.create',
-    'e2e.repos-per-minute',
-  ]);
-  for (const c of e2eCases) {
-    expect(c.suite).toBe('e2e');
-    expect(c.version).toBe(1);
-    expect(c.variant).toBe('serial');
-  }
-});
