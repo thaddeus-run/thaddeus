@@ -245,7 +245,14 @@ test('ceilings derives the file from gate-run result files and logs what each ce
   ).toBe(true);
   // A file derived this way gates a run of the same method.
   const fresh = writeJson('cei-fresh.json', gateRun(budgets, { p50: 200 }));
-  expect((await cli(['gate', fresh, '--ceilings', out], host)).code).toBe(0);
+  expect(
+    (
+      await cli(
+        ['gate', fresh, '--ceilings', out, '--page-cache', 'warm'],
+        host
+      )
+    ).code
+  ).toBe(0);
 });
 
 test('ceilings refuses files of other case versions, files not measured with the gate method, and no files', async () => {
@@ -295,7 +302,10 @@ test('gate exits 0 on a run within its ceilings and appends the lines to the ste
   const { host } = hostOf(() => r, [], {
     env: { GITHUB_STEP_SUMMARY: summary },
   });
-  const { code, out } = await cli(['gate', file, '--ceilings', ceilings], host);
+  const { code, out } = await cli(
+    ['gate', file, '--ceilings', ceilings, '--page-cache', 'warm'],
+    host
+  );
   expect(code).toBe(0);
   expect(out).toContain('ok status/developer small-serial null: p50 200.0 ms');
   const written = readFileSync(summary, 'utf8');
@@ -311,7 +321,10 @@ test('gate exits 1 on a regression, a result not measured with the gate method, 
   );
   const file = writeJson('gate-fail-run.json', slow);
   const { host } = hostOf(() => slow, []);
-  const regressed = await cli(['gate', file, '--ceilings', ceilings], host);
+  const regressed = await cli(
+    ['gate', file, '--ceilings', ceilings, '--page-cache', 'warm'],
+    host
+  );
   expect(regressed.code).toBe(1);
   expect(regressed.out).toContain(
     'regression status/developer small-serial null: p50 500.0 ms is above its ceiling 250.0 ms'
@@ -323,7 +336,10 @@ test('gate exits 1 on a regression, a result not measured with the gate method, 
       caseOver: (c) => (c.id === 'wc.status' ? { repeats: 10 } : {}),
     })
   );
-  const method = await cli(['gate', tenRepeats, '--ceilings', ceilings], host);
+  const method = await cli(
+    ['gate', tenRepeats, '--ceilings', ceilings, '--page-cache', 'warm'],
+    host
+  );
   expect(method.code).toBe(1);
   expect(method.out).toContain('not measured with the gate method');
 
@@ -339,6 +355,59 @@ test('gate exits 1 on a regression, a result not measured with the gate method, 
   const { host: quiet } = hostOf(() => slow, logs);
   expect((await cli(['gate', file, '--ceilings', bad], quiet)).code).toBe(1);
   expect(logs.join('\n')).toContain('is not a ceilings file');
+});
+
+test('gate refuses ceilings that do not cover the gate page-cache modes unless --page-cache names the run modes', async () => {
+  const warmOnly = gateRun(budgets);
+  const run = writeJson('gate-modes-run.json', warmOnly);
+  const warmCeilings = writeJson(
+    'gate-modes-warm.json',
+    ceilingsOf(budgets, warmOnly, 250)
+  );
+  const logs: string[] = [];
+  const { host } = hostOf(() => warmOnly, logs);
+
+  // The gate method measures warm and dropped, so warm-only ceilings would
+  // leave the ci-checkout row ungated: refuse them, and say how to proceed.
+  const refused = await cli(['gate', run, '--ceilings', warmCeilings], host);
+  expect(refused.code).toBe(1);
+  expect(refused.out).toBe('');
+  expect(logs.join('\n')).toContain(
+    'ceilings cover page-cache warm but the gate checks warm,dropped'
+  );
+  expect(logs.join('\n')).toContain('--page-cache warm');
+
+  // Naming the modes the run used (warm only) lets the same files gate.
+  const named = await cli(
+    ['gate', run, '--ceilings', warmCeilings, '--page-cache', 'warm'],
+    host
+  );
+  expect(named.code).toBe(0);
+
+  // Naming a mode the ceilings lack is refused too.
+  logs.length = 0;
+  const both = await cli(
+    ['gate', run, '--ceilings', warmCeilings, '--page-cache', 'warm,dropped'],
+    host
+  );
+  expect(both.code).toBe(1);
+  expect(logs.join('\n')).toContain(
+    'ceilings cover page-cache warm but the gate checks warm,dropped'
+  );
+
+  // Ceilings that cover both modes gate a warm and dropped run with no flag.
+  const full = gateRun(budgets, { dropped: true });
+  const fullRun = writeJson('gate-modes-full-run.json', full);
+  const fullCeilings = writeJson(
+    'gate-modes-full.json',
+    ceilingsOf(budgets, full, 250, ['warm', 'dropped'])
+  );
+  expect(
+    (await cli(['gate', fullRun, '--ceilings', fullCeilings], host)).code
+  ).toBe(0);
+
+  // An unknown mode is a usage error.
+  expect((await cli(['gate', run, '--page-cache', 'hot'], host)).code).toBe(2);
 });
 
 test('gate takes exactly one run file', async () => {
@@ -364,10 +433,20 @@ test('a calibrated file gates a fresh run of the same method', async () => {
     'roundtrip-run.json',
     gateRun(budgets, { p50: 215, p50s: { 'status/developer': 1560 } })
   );
-  expect((await cli(['gate', fresh, '--ceilings', out], host)).code).toBe(0);
+  expect(
+    (
+      await cli(
+        ['gate', fresh, '--ceilings', out, '--page-cache', 'warm'],
+        host
+      )
+    ).code
+  ).toBe(0);
   const slow = writeJson(
     'roundtrip-slow.json',
     gateRun(budgets, { p50: 215, p50s: { 'status/developer': 4000 } })
   );
-  expect((await cli(['gate', slow, '--ceilings', out], host)).code).toBe(1);
+  expect(
+    (await cli(['gate', slow, '--ceilings', out, '--page-cache', 'warm'], host))
+      .code
+  ).toBe(1);
 });

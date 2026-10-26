@@ -79,9 +79,12 @@ const USAGE = `usage:
   bun src/cli.ts gate-run [--out file] [--page-cache warm|warm,dropped]
                      measure the budgeted cases with the gate's method (what CI runs)
   bun src/cli.ts gate <run.json> [--ceilings file] [--budgets file]
+                     [--page-cache warm|warm,dropped]
                      hold the thaddeus p50 of each budgeted row to its calibrated
                      ceiling; exit 1 on a regression, a case that is not ok, a
-                     result not measured with the gate method or a missing ceiling
+                     result not measured with the gate method or a missing ceiling;
+                     refuses ceilings that skip a page-cache mode the gate method
+                     measures unless --page-cache names the modes the run used
   bun src/cli.ts ceilings <run.json>... [--out file] [--budgets file]
                      derive the ceilings file from gate-run result files
   bun src/cli.ts calibrate --runs K [--out file] [--page-cache warm|warm,dropped]
@@ -525,14 +528,21 @@ async function gateRunCommand(
 // $GITHUB_STEP_SUMMARY when that is set and exits 1 when `checkGate` fails.
 // The gate holds each row's thaddeus p50 to its ceiling; the multiple of git
 // is printed and never fails it. A ceilings file that does not exist fails
-// the gate rather than being skipped.
+// the gate rather than being skipped, and so does one whose page-cache modes
+// leave out a mode the run was meant to measure (`--page-cache`, default the
+// gate method's): otherwise a warm-only calibration would silently skip the
+// dropped-cache row in CI.
 async function gateCommand(
   argv: readonly string[],
   host: Host
 ): Promise<number> {
   const { values, positionals } = parseArgs({
     args: [...argv],
-    options: { ceilings: { type: 'string' }, budgets: { type: 'string' } },
+    options: {
+      ceilings: { type: 'string' },
+      budgets: { type: 'string' },
+      'page-cache': { type: 'string', default: GATE_PAGE_CACHE },
+    },
     allowPositionals: true,
     strict: true,
   });
@@ -540,12 +550,23 @@ async function gateCommand(
   if (runPath === undefined || extra.length > 0) {
     throw new UsageError('gate takes one run file');
   }
+  const runModes = pageCacheOf(values['page-cache']);
+  if (runModes.length === 0) throw new UsageError('--page-cache is empty');
   const budgets = budgetsOf(values.budgets);
   let ceilings: Ceilings | null;
   try {
     ceilings = readCeilings(values.ceilings ?? CEILINGS_FILE);
   } catch (error) {
     throw new FileError((error as Error).message);
+  }
+  if (
+    ceilings !== null &&
+    runModes.some((m) => !ceilings.pageCache.includes(m))
+  ) {
+    const have = ceilings.pageCache.join(',');
+    throw new FileError(
+      `gate: ceilings cover page-cache ${have} but the gate checks ${runModes.join(',')} (the gate method's modes unless --page-cache says otherwise); recalibrate with those modes, or pass --page-cache ${have} if the run measured only those`
+    );
   }
   const result = checkGate(
     readRun(runPath),
