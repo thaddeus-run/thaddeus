@@ -1,5 +1,5 @@
 import { FileBackend, MemoryBackend } from '@thaddeus.run/persist';
-import { Platform } from '@thaddeus.run/platform';
+import { allowAll, Platform } from '@thaddeus.run/platform';
 import { afterAll, beforeAll, expect, test } from 'bun:test';
 import {
   existsSync,
@@ -176,3 +176,54 @@ test('serial variants materialize with no conflict anywhere', async () => {
     expect(repo.conflicts()).toEqual([]);
   }
 }, 120_000);
+
+// What a durable repository holds once reopened from `root`, with every op
+// id replaced by the op's `at` and path. Op ids cover the object ids, which
+// differ from build to build (random nonces and content keys), while each
+// op's `at` is unique within a plan, so two builds of one plan compare equal
+// exactly when they persisted the same ops, views and heads.
+async function persistedShape(root: string) {
+  const backend = new FileBackend(root);
+  const repo = await new Platform().openDurable('bench', backend);
+  const byId = new Map(repo.log.ops().map((op) => [op.id, op]));
+  const key = (id: string) => {
+    const op = byId.get(id);
+    return op === undefined ? `missing ${id}` : `${op.at} ${op.path}`;
+  };
+  const views = Object.fromEntries(
+    repo.log.views().map((v) => [v, repo.log.heads(v).map(key).sort()])
+  );
+  const tree = Object.fromEntries(
+    [...repo.log.materialize('main')].map(([path, e]) => [path, key(e.op.id)])
+  );
+  const prefixes: Record<string, number> = {};
+  for (const k of await backend.list('')) {
+    const prefix = k.split('/')[0];
+    prefixes[prefix] = (prefixes[prefix] ?? 0) + 1;
+  }
+  return { ops: byId.size, views, tree, prefixes };
+}
+
+test('a direct land persists what Repo.land with allowAll persists', async () => {
+  const plan = generateFixture({
+    ...tinySpec(),
+    ops: 300,
+    files: 30,
+    authors: 3,
+    views: 6,
+    landEvery: 20,
+  });
+  expect(plan.steps.filter((s) => s.kind === 'land').length).toBeGreaterThan(5);
+  const direct = join(tmp, 'land-direct');
+  const viaLand = join(tmp, 'land-via-repo');
+  await materializeFixture(plan, new FileBackend(direct));
+  await materializeFixture(plan, new FileBackend(viaLand), 'bench', {
+    policy: allowAll,
+  });
+  const a = await persistedShape(direct);
+  const b = await persistedShape(viaLand);
+  // The plan lands conflicts, so main has several heads to compare.
+  expect(a.views.main.length).toBeGreaterThan(1);
+  expect(Object.keys(a.views).some((v) => v.startsWith('land/'))).toBe(false);
+  expect(a).toEqual(b);
+});

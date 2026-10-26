@@ -51,11 +51,19 @@ export interface CaseResult {
 export interface SweepResult {
   id: string;
   version: number;
-  points: { n: number; p50Ms: number }[];
+  /** One per history length that came back ok, with its fixture's hash. */
+  points: { n: number; p50Ms: number; manifestHash: string }[];
   exponent: number | null;
   r2: number | null;
   status: CaseStatus;
   failedAtN?: number;
+  /** As on case results: set on sweeps of cases that write. */
+  durability?: string;
+  /**
+   * Why the sweep stopped at `failedAtN`: the failing size's case note, or
+   * `fixture pre-build failed: ...` when that size's fixture never built.
+   */
+  note?: string;
 }
 
 export interface BenchRun {
@@ -69,6 +77,12 @@ export interface BenchRun {
     repeats: number;
     warmup: number;
     budgetMs: number;
+    /**
+     * The budget of each fixture pre-build, separate from the case budget
+     * because building a large fixture can take longer than timing a case
+     * on it. Absent in runs merged from files that predate it.
+     */
+    prebuildBudgetMs?: number;
     isolation: 'subprocess';
   };
   cases: CaseResult[];

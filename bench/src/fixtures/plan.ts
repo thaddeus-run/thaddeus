@@ -10,7 +10,7 @@ import type { FixtureSpec } from './spec';
 // not the contentFor algorithm or how the plan is replayed (for example which
 // capabilities the store holds). The golden test in plan.test.ts catches
 // content changes; materialize.ts changes need a deliberate bump here.
-export const GENERATOR_VERSION = 3;
+export const GENERATOR_VERSION = 4;
 
 export type Step =
   | {

@@ -117,7 +117,9 @@ test('resolveFixture rejects names it does not know', () => {
 });
 
 // The base plans' hashes, pinned: adding the serial variant must not change
-// a single base plan (it would orphan every cache and stored result).
+// a single base plan (it would orphan every cache and stored result). They
+// cover GENERATOR_VERSION, so a deliberate bump updates them (4: lands
+// re-point main directly instead of going through Repo.land).
 test('base plans keep their manifest hashes', () => {
   const hashes = Object.fromEntries(
     ['tiny', 'small', 'medium', 'stress'].map((name) => [
@@ -126,10 +128,10 @@ test('base plans keep their manifest hashes', () => {
     ])
   );
   expect(hashes).toEqual({
-    tiny: '0d92e879013c810053c3c51b5ce74eeef66956e20383da2282ad87ce27a3ffd6',
-    small: '2089381e4d20f272fd88eb6f4f4299fe1187d1c0302cf86d132fbbc243f3de64',
-    medium: '5c21d4fdd1fcaca5b88a7ec654ee9fb658aa29bc60ac4227a54a12d4d3ce8f46',
-    stress: '6a902980d64162903720662820a937c5d5665c827ec00490729ee1d3bcefb04b',
+    tiny: '53577af06d832477da1a875612d9203b6cb72134cf8ef7182d9b6f4b785f2b49',
+    small: '67bcc7fe2bdd924383ca279e23314ed366e7ccfb2557006c6766a8cf8c0b26b3',
+    medium: '270e91b04da8af705f90139c69b74154056ff8b2f973381d22c316441b289b29',
+    stress: '40ef49bc1a7ecc08a57d3a6339c14937dcbce396d850807dbacc43cf7e9b5d2e',
   });
 });
 

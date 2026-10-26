@@ -528,25 +528,35 @@ export async function runCase(
 
 // Runs a case at each history length in `sizes` (fixture `sweep-<n>`) and
 // fits t = c * n^exponent over the median times. Stops at the first size that
-// does not come back ok and records it as `failedAtN`, because a larger size
-// would only fail the same way more slowly.
+// does not come back ok and records it as `failedAtN`, with that size's
+// failure note, because a larger size would only fail the same way more
+// slowly. Each point carries its fixture's manifest hash, and a sweep of a
+// writing case carries the durability label, as case results do.
 export async function runSweep(
   id: string,
   sizes: readonly number[],
   opts: RunOptions
 ): Promise<SweepResult> {
   const benchCase = await loadCase(resolve(opts.registry), id);
-  const points: { n: number; p50Ms: number }[] = [];
+  const points: SweepResult['points'] = [];
   let status: CaseStatus = 'ok';
   let failedAtN: number | undefined;
+  let note: string | undefined;
   for (const n of sizes) {
     const result = await runCase(id, sweepSpec(n).name, opts);
     if (result.status !== 'ok') {
       status = result.status;
       failedAtN = n;
+      note = result.note;
       break;
     }
-    if (result.p50Ms !== null) points.push({ n, p50Ms: result.p50Ms });
+    if (result.p50Ms !== null) {
+      points.push({
+        n,
+        p50Ms: result.p50Ms,
+        manifestHash: result.manifestHash,
+      });
+    }
   }
   // A median of exactly 0 ms has no logarithm; fit over the rest.
   const fit = fitExponent(
@@ -560,5 +570,7 @@ export async function runSweep(
     r2: fit?.r2 ?? null,
     status,
     ...(failedAtN !== undefined && { failedAtN }),
+    ...(benchCase.writes === true && { durability: FILEBACKEND_DURABILITY }),
+    ...(note !== undefined && { note }),
   };
 }

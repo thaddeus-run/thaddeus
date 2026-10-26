@@ -45,8 +45,8 @@ const validRun: BenchRun = {
       id: 'sweep.history',
       version: 1,
       points: [
-        { n: 1000, p50Ms: 1 },
-        { n: 2000, p50Ms: 2 },
+        { n: 1000, p50Ms: 1, manifestHash: 'h1000' },
+        { n: 2000, p50Ms: 2, manifestHash: 'h2000' },
       ],
       exponent: null,
       r2: null,
@@ -81,6 +81,30 @@ test('a case with every optional field passes, including null statistics', () =>
     note: 'killed at budget',
   };
   expect(validateRun({ ...validRun, cases: [full] })).toEqual([]);
+});
+
+test('a sweep with every optional field passes, and a method with a pre-build budget', () => {
+  const sweep = {
+    ...validRun.sweeps[0],
+    status: 'exceeded',
+    failedAtN: 4000,
+    durability: FILEBACKEND_DURABILITY,
+    note: 'fixture pre-build failed: exceeded 1800000 ms at n = 4000',
+  };
+  const method = { ...validRun.method, prebuildBudgetMs: 1_800_000 };
+  expect(validateRun({ ...validRun, method, sweeps: [sweep] })).toEqual([]);
+});
+
+test('a sweep point without its manifest hash, or with an unknown field, is rejected', () => {
+  const point = { n: 1000, p50Ms: 1 };
+  const missing = { ...validRun.sweeps[0], points: [point] };
+  expect(
+    validateRun({ ...validRun, sweeps: [missing] }).length
+  ).toBeGreaterThan(0);
+  const extra = { ...validRun.sweeps[0], pageCache: 'warm' };
+  expect(validateRun({ ...validRun, sweeps: [extra] }).length).toBeGreaterThan(
+    0
+  );
 });
 
 test('a missing machine yields an error', () => {
