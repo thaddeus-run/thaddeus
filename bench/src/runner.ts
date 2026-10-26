@@ -6,7 +6,7 @@ import { addExtra, type BenchCase, loadCase, type RunExtra } from './case';
 import type { ChildReport, ChildRequest } from './child';
 import { WORK_ROOT } from './fixtures/cache';
 import { generateFixture, manifestHash } from './fixtures/plan';
-import { resolveFixture, sweepSpec } from './fixtures/spec';
+import { type FixtureSpec, resolveFixture, sweepSpec } from './fixtures/spec';
 import {
   type CaseResult,
   type CaseStatus,
@@ -172,19 +172,35 @@ function jsonLineParser(onLine: (line: Record<string, unknown>) => void): {
   };
 }
 
-// Spawns one child in its own process group and waits for it, killing the
-// whole group with SIGKILL once `budgetMs` passes. Classifies the exit:
-// our kill is `exceeded`; a SIGKILL we did not send (the kernel OOM killer)
-// or an out-of-memory message is `oom`; any other failure is `error`. A kill
-// from signal forwarding throws `Interrupted` instead. After the child exits
-// the group is killed regardless, so a leftover grandchild cannot keep
-// running, and the pipes are read for at most DRAIN_AFTER_EXIT_MS more.
-async function spawnChild(
-  req: ChildRequest,
-  budgetMs: number
-): Promise<ChildOutcome> {
+// What a budgeted child process did, before it is classified.
+export interface SpawnOutcome {
+  /** The budget ran out and the parent killed the child's group. */
+  killedByBudget: boolean;
+  exitCode: number | null;
+  signalCode: NodeJS.Signals | null;
+  /** The last STDERR_TAIL_BYTES of stderr. */
+  stderrTail: string;
+  /** Whether the full stderr looked like an out-of-memory death. */
+  oomMessage: boolean;
+  /** The child's own peak RSS, from the kernel's resource usage. */
+  maxRssBytes: number;
+  elapsedMs: number;
+}
+
+// Spawns `argv` in its own process group and waits for it, killing the whole
+// group with SIGKILL once `budgetMs` passes. After the child exits the group
+// is killed regardless, so a leftover grandchild cannot keep running, and the
+// pipes are read for at most DRAIN_AFTER_EXIT_MS more. Stdout goes to
+// `onStdout`. A kill from signal forwarding throws `Interrupted`. Used for
+// case children and for fixture pre-builds, which need the same budget,
+// cleanup and interrupt handling.
+export async function spawnBudgeted(
+  argv: string[],
+  budgetMs: number,
+  onStdout: (chunk: Uint8Array) => void = () => {}
+): Promise<SpawnOutcome> {
   const started = performance.now();
-  const proc = Bun.spawn([process.execPath, CHILD, JSON.stringify(req)], {
+  const proc = Bun.spawn(argv, {
     stdin: 'ignore',
     stdout: 'pipe',
     stderr: 'pipe',
@@ -195,13 +211,7 @@ async function spawnChild(
   if (liveGroups.size === 0) trackSignals();
   liveGroups.add(proc.pid);
 
-  let phase: 'setup' | 'run' = 'setup';
-  let report: ChildReport | undefined;
-  const lines = jsonLineParser((line) => {
-    if (line.phase === 'setup' || line.phase === 'run') phase = line.phase;
-    if (Array.isArray(line.samplesMs)) report = line as unknown as ChildReport;
-  });
-  const stdout = drain(proc.stdout, lines.push);
+  const stdout = drain(proc.stdout, onStdout);
   const stderrChunks: Uint8Array[] = [];
   const stderrDrain = drain(proc.stderr, (chunk) => stderrChunks.push(chunk));
 
@@ -226,50 +236,92 @@ async function spawnChild(
   clearTimeout(drainTimer);
   stdout.cancel();
   stderrDrain.cancel();
-  lines.end();
 
   const signal = interruptedBy.get(proc.pid);
   interruptedBy.delete(proc.pid);
   if (signal !== undefined) throw new Interrupted(signal);
 
   const stderrBytes = Buffer.concat(stderrChunks);
-  const stderr = stderrBytes.toString('utf8');
-  const childRss = (proc.resourceUsage()?.maxRSS ?? 0) * 1024;
-  const peakRssBytes = Math.max(report?.peakRssBytes ?? 0, childRss);
-
-  let status: CaseStatus;
-  if (killedByBudget) status = 'exceeded';
-  else if (proc.exitCode === 0 && report !== undefined) status = 'ok';
-  else if (proc.signalCode === 'SIGKILL' || OOM_STDERR.test(stderr))
-    status = 'oom';
-  else status = 'error';
-
   return {
-    status,
+    killedByBudget,
+    exitCode: proc.exitCode,
+    signalCode: proc.signalCode,
+    stderrTail: stderrBytes.subarray(-STDERR_TAIL_BYTES).toString('utf8'),
+    oomMessage: OOM_STDERR.test(stderrBytes.toString('utf8')),
+    maxRssBytes: (proc.resourceUsage()?.maxRSS ?? 0) * 1024,
+    elapsedMs: performance.now() - started,
+  };
+}
+
+// Whether any budgeted child is running right now. While one is, the runner
+// owns SIGINT, SIGTERM and SIGHUP: it kills the child and rejects with
+// `Interrupted`, so a CLI should let that happen instead of exiting itself.
+export function childrenRunning(): boolean {
+  return liveGroups.size > 0;
+}
+
+// Classifies a budgeted child's exit: our kill is `exceeded`; a clean exit
+// that `succeeded` is `ok`; a SIGKILL we did not send (the kernel OOM killer)
+// or an out-of-memory message is `oom`; any other failure is `error`.
+export function classify(
+  outcome: SpawnOutcome,
+  succeeded: boolean
+): CaseStatus {
+  if (outcome.killedByBudget) return 'exceeded';
+  if (outcome.exitCode === 0 && succeeded) return 'ok';
+  if (outcome.signalCode === 'SIGKILL' || outcome.oomMessage) return 'oom';
+  return 'error';
+}
+
+// Runs one case child (see `spawnBudgeted`) and reads its phase
+// announcements and final report from stdout.
+async function spawnChild(
+  req: ChildRequest,
+  budgetMs: number
+): Promise<ChildOutcome> {
+  let phase: 'setup' | 'run' = 'setup';
+  let report: ChildReport | undefined;
+  const lines = jsonLineParser((line) => {
+    if (line.phase === 'setup' || line.phase === 'run') phase = line.phase;
+    if (Array.isArray(line.samplesMs)) report = line as unknown as ChildReport;
+  });
+  const outcome = await spawnBudgeted(
+    [process.execPath, CHILD, JSON.stringify(req)],
+    budgetMs,
+    lines.push
+  );
+  lines.end();
+  return {
+    status: classify(outcome, report !== undefined),
     phase,
     ...(report !== undefined && { report }),
-    stderr: stderrBytes.subarray(-STDERR_TAIL_BYTES).toString('utf8'),
-    exitCode: proc.exitCode,
-    peakRssBytes,
-    elapsedMs: performance.now() - started,
+    stderr: outcome.stderrTail,
+    exitCode: outcome.exitCode,
+    peakRssBytes: Math.max(report?.peakRssBytes ?? 0, outcome.maxRssBytes),
+    elapsedMs: outcome.elapsedMs,
   };
 }
 
 // The note stored with a failed case: where the budget or memory ran out, or
 // for an error the end of the child's stderr.
-function failureNote(
-  outcome: ChildOutcome,
+export function failureNote(
+  failure: {
+    status: CaseStatus;
+    stderr: string;
+    exitCode: number | null;
+    reported: boolean;
+  },
   budgetMs: number,
   n: number
 ): string {
-  if (outcome.status === 'exceeded')
+  if (failure.status === 'exceeded')
     return `exceeded ${budgetMs} ms at n = ${n}`;
-  if (outcome.status === 'oom') return `oom at n = ${n}`;
-  const tail = outcome.stderr.trim();
+  if (failure.status === 'oom') return `oom at n = ${n}`;
+  const tail = failure.stderr.trim();
   if (tail.length > 0) return tail;
-  return outcome.report === undefined
-    ? `child exited with code ${outcome.exitCode} without a result`
-    : `child exited with code ${outcome.exitCode}`;
+  return failure.reported
+    ? `child exited with code ${failure.exitCode}`
+    : `child exited with code ${failure.exitCode} without a result`;
 }
 
 // Converts the summed extra over the summed timed milliseconds into the one
@@ -314,6 +366,58 @@ function childPlan(
   ];
 }
 
+// The fields every result of `benchCase` on `fixture` carries, whatever its
+// status: identity, method, and the durability and page-cache labels.
+function resultFrame(
+  benchCase: BenchCase,
+  fixture: string,
+  spec: FixtureSpec,
+  opts: RunOptions
+) {
+  return {
+    base: {
+      id: benchCase.id,
+      version: benchCase.version,
+      suite: benchCase.suite,
+      fixture,
+      manifestHash: manifestHash(generateFixture(spec)),
+      budgetMs: opts.budgetMs,
+      repeats: opts.repeats,
+      warmup: opts.warmup,
+    },
+    flags: {
+      ...(benchCase.writes === true && { durability: FILEBACKEND_DURABILITY }),
+      ...(benchCase.cold === true && { pageCache: opts.pageCache ?? 'warm' }),
+    },
+  };
+}
+
+// The result of a case that never got to run because something the parent
+// does first failed: a fixture pre-build or a page-cache drop. It carries
+// the same identity and labels as a `runCase` result, `phase: "setup"`, no
+// samples, and `note`. Nothing is spawned.
+export async function setupFailure(
+  id: string,
+  fixture: string,
+  opts: RunOptions,
+  failure: { status: Exclude<CaseStatus, 'ok'>; note: string }
+): Promise<CaseResult> {
+  const benchCase = await loadCase(resolve(opts.registry), id);
+  const spec = resolveFixture(fixture);
+  const { base, flags } = resultFrame(benchCase, fixture, spec, opts);
+  return {
+    ...base,
+    status: failure.status,
+    phase: 'setup',
+    ...(failure.status !== 'error' && { failedAtN: spec.ops }),
+    samplesMs: [],
+    ...summarize([]),
+    peakRssBytes: 0,
+    ...flags,
+    note: failure.note,
+  };
+}
+
 // Runs one case on one fixture in fresh Bun subprocesses and returns its
 // result. A timeout, OOM or crash is a result, not an exception. It throws
 // on an unknown case id or fixture name, and rejects with `Interrupted` when
@@ -327,20 +431,7 @@ export async function runCase(
   const benchCase = await loadCase(registry, id);
   const spec = resolveFixture(fixture);
   const pageCache = opts.pageCache ?? 'warm';
-  const base = {
-    id,
-    version: benchCase.version,
-    suite: benchCase.suite,
-    fixture,
-    manifestHash: manifestHash(generateFixture(spec)),
-    budgetMs: opts.budgetMs,
-    repeats: opts.repeats,
-    warmup: opts.warmup,
-  };
-  const flags = {
-    ...(benchCase.writes === true && { durability: FILEBACKEND_DURABILITY }),
-    ...(benchCase.cold === true && { pageCache }),
-  };
+  const { base, flags } = resultFrame(benchCase, fixture, spec, opts);
 
   const samplesMs: number[] = [];
   const extra: RunExtra = {};
@@ -386,7 +477,11 @@ export async function runCase(
         peakRssBytes,
         ...(diskBytes !== undefined && { diskBytes }),
         ...flags,
-        note: failureNote(outcome, opts.budgetMs, spec.ops),
+        note: failureNote(
+          { ...outcome, reported: outcome.report !== undefined },
+          opts.budgetMs,
+          spec.ops
+        ),
       };
     }
     if (child.timed && outcome.report !== undefined) {

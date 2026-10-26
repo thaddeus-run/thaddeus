@@ -15,7 +15,7 @@ import {
   UsageError,
   writeRun,
 } from './record';
-import { Interrupted } from './runner';
+import { childrenRunning, Interrupted } from './runner';
 
 const USAGE = `usage:
   bun src/cli.ts run [--suite library|e2e|all] [--fixtures small,medium] [--sweeps]
@@ -185,13 +185,13 @@ export async function run(
   }
 }
 
-// While a case's child runs, the runner listens for these signals too: it
-// kills the child, removes its work directory and rejects with `Interrupted`,
-// which `run` turns into the exit code. With no child running (between
-// cases, or while a fixture builds) nothing else would stop the process, so
-// this listener exits at once.
+// While a case child or a fixture build runs, the runner listens for these
+// signals too: it kills the child, removes its work directory and rejects
+// with `Interrupted`, which `run` turns into the exit code. With no child
+// running (between cases) nothing else would stop the process, so this
+// listener exits at once.
 function onSignal(signal: NodeJS.Signals): void {
-  if (process.listenerCount(signal) > 1) return;
+  if (childrenRunning()) return;
   process.stderr.write(`bench: interrupted by ${signal}; no result written\n`);
   process.exit(exitCodeFor(signal));
 }

@@ -1,5 +1,11 @@
 import { afterAll, expect, test } from 'bun:test';
-import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import {
+  existsSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -19,6 +25,7 @@ import {
   suiteVersion,
 } from '../src/record';
 import { type BenchRun, validateRun } from '../src/result';
+import { childrenRunning } from '../src/runner';
 import suiteCases from './fixtures/suite-cases';
 
 const SUITE_FAKES = join(import.meta.dir, 'fixtures', 'suite-cases.ts');
@@ -162,6 +169,160 @@ test(
   SLOW
 );
 
+// Runs the fake suite on tiny, warm and dropped, with sweeps, while every
+// fixture pre-build runs `buildCommand` instead of the real build. Returns
+// the run, the log, how often the cache was dropped and which case children
+// started.
+async function suiteWithFailingBuilds(
+  buildCommand: () => string[],
+  budgetMs: number
+): Promise<{
+  run: BenchRun;
+  lines: string[];
+  drops: number;
+  spawned: string[];
+}> {
+  const probeDir = mkdtempSync(join(scratch, 'probe-'));
+  process.env.SUITE_PROBE_DIR = probeDir;
+  const lines: string[] = [];
+  let drops = 0;
+  try {
+    const result = await runSuite(
+      {
+        suite: 'library',
+        fixtures: ['tiny'],
+        sweeps: true,
+        pageCache: ['warm', 'dropped'],
+        repeats: 2,
+        warmup: 0,
+        budgetMs,
+      },
+      suiteEnv({
+        log: (line) => lines.push(line),
+        buildCommand,
+        dropPageCache: () => {
+          drops += 1;
+          return Promise.resolve();
+        },
+      })
+    );
+    return { run: result, lines, drops, spawned: readdirSync(probeDir) };
+  } finally {
+    delete process.env.SUITE_PROBE_DIR;
+  }
+}
+
+test(
+  'a pre-build that overruns the budget becomes a setup result per job',
+  async () => {
+    const {
+      run: result,
+      lines,
+      drops,
+      spawned,
+    } = await suiteWithFailingBuilds(() => ['sleep', '30'], 300);
+    expect(validateRun(result)).toEqual([]);
+    expect(
+      result.cases.map((c) => [
+        c.id,
+        c.pageCache,
+        c.status,
+        c.phase,
+        c.failedAtN,
+        c.note,
+      ])
+    ).toEqual([
+      [
+        'suite.cold',
+        'warm',
+        'exceeded',
+        'setup',
+        20,
+        'fixture pre-build failed: exceeded 300 ms at n = 20',
+      ],
+      [
+        'suite.cold',
+        'dropped',
+        'exceeded',
+        'setup',
+        20,
+        'fixture pre-build failed: exceeded 300 ms at n = 20',
+      ],
+    ]);
+    expect(result.cases.every((c) => c.samplesMs.length === 0)).toBe(true);
+    // The sweep stops at its first size, whose fixture never got built.
+    expect(result.sweeps).toEqual([
+      expect.objectContaining({
+        id: 'suite.sweep',
+        status: 'exceeded',
+        failedAtN: 1_000,
+        points: [],
+      }),
+    ]);
+    // No case child ran, so nothing dropped the cache or left a probe.
+    expect(drops).toBe(0);
+    expect(spawned).toEqual([]);
+    expect(lines).toContain(
+      'fixture tiny: exceeded, fixture pre-build failed: exceeded 300 ms at n = 20'
+    );
+    expect(childrenRunning()).toBe(false);
+  },
+  SLOW
+);
+
+test(
+  'a pre-build that fails records its stderr as the note',
+  async () => {
+    const { run: result, spawned } = await suiteWithFailingBuilds(
+      () => ['sh', '-c', 'echo disk full >&2; exit 1'],
+      60_000
+    );
+    expect(result.cases.map((c) => [c.status, c.failedAtN, c.note])).toEqual([
+      ['error', undefined, 'fixture pre-build failed: disk full'],
+      ['error', undefined, 'fixture pre-build failed: disk full'],
+    ]);
+    expect(result.sweeps.map((s) => [s.status, s.failedAtN])).toEqual([
+      ['error', 1_000],
+    ]);
+    expect(spawned).toEqual([]);
+  },
+  SLOW
+);
+
+test(
+  'a page-cache drop that throws fails only its own job',
+  async () => {
+    const result = await runSuite(
+      {
+        suite: 'library',
+        fixtures: ['tiny'],
+        sweeps: false,
+        pageCache: ['dropped', 'warm'],
+        repeats: 1,
+        warmup: 0,
+        budgetMs: 60_000,
+      },
+      suiteEnv({
+        dropPageCache: () =>
+          Promise.reject(new Error('sudo: a password is required')),
+      })
+    );
+    expect(validateRun(result)).toEqual([]);
+    expect(
+      result.cases.map((c) => [c.pageCache, c.status, c.phase, c.note])
+    ).toEqual([
+      [
+        'dropped',
+        'error',
+        'setup',
+        'dropping the page cache failed: sudo: a password is required',
+      ],
+      ['warm', 'ok', undefined, undefined],
+    ]);
+  },
+  SLOW
+);
+
 test('a suite run asking for dropped needs a way to drop the cache', async () => {
   const opts: SuiteOptions = {
     suite: 'library',
@@ -259,6 +420,18 @@ test('record runs everything and writes <machine>/<date>-<sha>.json', async () =
   expect(readFileSync(join(dir, 'baseline.json'), 'utf8')).toBe(
     readFileSync(file, 'utf8')
   );
+});
+
+test('record writes nothing when the tree changed during the run', async () => {
+  let checks = 0;
+  const { host, calls, lines } = fakeHost({
+    dirtyPaths: () => (checks++ === 0 ? [] : ['packages/log/src/oplog.ts']),
+  });
+  expect(await record(['--baseline'], host)).toBe(1);
+  expect(calls).toHaveLength(1);
+  expect(lines.join('\n')).toContain('changed during the run');
+  expect(lines.join('\n')).toContain('packages/log/src/oplog.ts');
+  expect(existsSync(join(host.resultsDir, 'kvm-epyc-rome-4vcpu'))).toBe(false);
 });
 
 test('record without --baseline leaves baseline.json alone', async () => {
