@@ -43,9 +43,12 @@ const SLOW = 300_000;
 const scratch = mkdtempSync(join(tmpdir(), 'bench-everyday-test-'));
 afterAll(() => rmSync(scratch, { recursive: true, force: true }));
 
-// Runs `bun src/cli.ts <args>` and returns its exit code and output.
+// Runs `bun src/cli.ts <args>` and returns its exit code and output. The
+// environment is passed explicitly: without `env`, Bun.spawn uses the
+// environment the test process started with, which lacks BENCH_CLI.
 async function bench(args: string[]) {
   const proc = Bun.spawn([process.execPath, CLI, ...args], {
+    env: { ...process.env },
     stdout: 'pipe',
     stderr: 'pipe',
   });
@@ -106,8 +109,12 @@ test(
     for (const c of run.cases) expect(c.durability).toBeUndefined();
     expect(byId('git.clone')?.pageCache).toBe('warm');
     expect(byId('git.worktree')?.pageCache).toBeUndefined();
+    // Git cases take at least their minRepeats samples whatever --repeats
+    // asks for.
     for (const id of ['git.commit', 'git.worktree', 'git.pull', 'git.clone']) {
-      expect(byId(id)?.samplesMs).toHaveLength(1);
+      const minRepeats = everydayCases.find((c) => c.id === id)?.minRepeats;
+      expect(minRepeats).toBeGreaterThan(1);
+      expect(byId(id)?.samplesMs).toHaveLength(minRepeats ?? 0);
     }
   },
   SLOW
