@@ -468,27 +468,51 @@ failure when:
 
 - a p50 is above its ceiling;
 - a gated case did not finish `ok`;
-- the run was not measured with the gate method (fixture, repeats, warm-up,
-  page-cache modes);
+- the run was not measured with the gate method. Repeats and warm-up are checked
+  as the method. A wrong fixture or page-cache mode is not checked as the
+  method: it fails as "no ceiling" or "missing";
 - a row has no ceiling;
-- the ceilings were calibrated for other case versions or other page-cache
-  modes. The gate refuses stale ceilings and says why.
+- the ceilings are stale: they were calibrated for other case versions, other
+  page-cache modes, or other fixtures (the ceilings file records the manifest
+  hash each gated case ran on, and the gate compares it with the run's). The
+  gate refuses stale ceilings and says why.
+
+A change to what a case measures makes its ceilings stale, and the version and
+hash checks are how the gate learns of it. Bump a case's `version` whenever the
+case changes. That rule covers the seeding too: a change to what
+`GIT_SEED_VERSION` (the git repository the git cases clone) or the working-copy
+builder writes bumps the version of every case that uses them. A change to the
+generated fixture plan changes its manifest hash without a bump, and the gate
+then fails as stale until the ceilings are recalibrated.
 
 A missed target and the multiple of git are in the job summary. They never fail
 the job. Today's numbers miss most targets, and a gate that is red on every pull
-request would be switched off. The gate catches a pull request that makes a
-command slower than it is on `main`, not one that leaves it slow.
+request would be switched off. The gate holds each command to a ceiling from the
+committed calibration. It does not compare a pull request with `main`, so
+slowdowns that each stay under the ceiling can add up over several pull
+requests.
+
+### When the gate is red on a pull request that did not cause it
+
+1. Re-run the job. A different runner may draw a different CPU model, and the
+   first line of the job summary's gate output names the group the gate used.
+2. Check whether `main` fails on the same CPU model: dispatch the gate on `main`
+   or look at the last run on `main`.
+3. If `main` fails too, the runner image or the hardware moved. Dispatch the
+   `Benchmarks` workflow with `mode: everyday-calibrate` and commit the new
+   ceilings in their own pull request.
 
 ### Why the gate does not hold the multiple of git
 
 An earlier design held the thaddeus-over-git ratio to a ceiling. It was dropped
-because git's own median moves too much. In local experiments (not committed),
-the median of `git status` drifted by a few milliseconds from run to run even at
-25 samples. Against a git time of a few milliseconds that is a large share of
-the ratio, and a deliberate 200 ms slowdown of thaddeus (about 12%) stayed
-inside a ratio ceiling. The thaddeus p50 is much steadier relative to its size,
-so the gate holds that alone. `bench budget` and the gate output still report
-the multiple.
+because git's own median moves too much. In the calibration run linked under
+[How the ceilings are set](#how-the-ceilings-are-set), the median of
+`git.status` on `small-serial` ranged from 1.65 to 3.60 ms across the 40 runs
+(five CPU models), and it moved by tens of percent between runs even at 25
+samples. That is more than the thaddeus slowdowns the gate must catch, so a
+ratio ceiling would have to be wider than them. The thaddeus p50 is much
+steadier relative to its size, so the gate holds that alone. `bench budget` and
+the gate output still report the multiple.
 
 ### How the ceilings are set
 
@@ -508,30 +532,41 @@ it used and why.
 
 The committed ceilings come from the calibration run at
 <https://github.com/thaddeus-run/thaddeus/actions/runs/40365833192>: 20 hosts, 2
-runs each. Five CPU models turned up. In that run, a ceiling was this far above
-the group's typical p50 (the geometric mean of its runs):
+runs each. Five CPU models turned up. `studiedAt` in the ceilings file is the
+newest `recordedAt` of those runs. The table gives, for each model, the ceiling
+the gate applies to it divided by that model's own geometric mean p50 (its
+typical p50) over the 40 runs, across the gated rows. For a model with its own
+group that is its own ceiling. For a model without one, the gate falls back to
+the pooled ceiling, so the pooled ceiling is divided by the model's geometric
+mean.
 
-| CPU model group           | Hosts | Ceiling over typical p50                             |
-| ------------------------- | ----: | ---------------------------------------------------- |
-| AMD EPYC 7763             |    10 | 1.08 to 1.16 times                                   |
-| AMD EPYC 9V45             |     3 | 1.10 to 1.33 times                                   |
-| AMD EPYC 9V74             |     3 | 1.74 to 2.19 times (one host was slow)               |
-| Intel Xeon Platinum 8573C |     2 | pooled group, about 2.0 to 2.2 times its typical p50 |
-| Intel Xeon 6973P-C        |     2 | pooled group, about 2.0 to 2.2 times its typical p50 |
+| CPU model                 | Hosts | Runs | Group the gate uses | Ceiling over the model's own typical p50 |
+| ------------------------- | ----: | ---: | ------------------- | ---------------------------------------- |
+| AMD EPYC 7763             |    10 |   20 | its own             | 1.08 to 1.16 times                       |
+| AMD EPYC 9V45             |     3 |    6 | its own             | 1.10 to 1.33 times                       |
+| AMD EPYC 9V74             |     3 |    6 | its own             | 1.74 to 2.19 times (one host was slow)   |
+| Intel Xeon Platinum 8573C |     2 |    4 | pooled              | 2.19 to 2.48 times                       |
+| Intel Xeon 6973P-C        |     2 |    4 | pooled              | 2.31 to 3.03 times                       |
 
-A slowdown smaller than that factor passes on that group. On the EPYC 7763 group
-the gate sees a slowdown of 8 to 16 percent, depending on the row. On a pooled
-runner the slowdown has to be about twice the typical time. The first gate run
-on this pull request passed:
+A slowdown smaller than that factor passes on that model. On the EPYC 7763 group
+the gate sees a slowdown of 8 to 16 percent, depending on the row. On a model
+that falls back to the pooled ceilings, a slowdown of 2.2 to 3 times passes.
+
+A model the calibration never saw uses the pooled ceilings too, and if it is
+fast it gets about 3 times its typical p50 before the gate fails. The pooled
+ceilings divided by the EPYC 9V45's own geometric mean give 3.03 to 3.45 times,
+and that model is the fastest of the five. The gate is blind to a moderate
+slowdown on such a runner until a recalibration adds its model. The first gate
+run on this pull request passed:
 <https://github.com/thaddeus-run/thaddeus/actions/runs/40772838975>.
 
 ### Recalibrating
 
-Recalibrate when a gated case's version changes, when the runner image changes
-enough to move the numbers, or when a row is added. Dispatch the `Benchmarks`
-workflow with `mode: everyday-calibrate`. It runs `gate-run` twice on each of 20
-hosted runners, derives the ceilings with `bench ceilings`, and uploads them as
-the `everyday-ceilings` artifact. Commit that file over
+Recalibrate when a gated case's version or fixture hash changes, when the runner
+image changes enough to move the numbers, or when a row is added. Dispatch the
+`Benchmarks` workflow with `mode: everyday-calibrate`. It runs `gate-run` twice
+on each of 20 hosted runners, derives the ceilings with `bench ceilings`, and
+uploads them as the `everyday-ceilings` artifact. Commit that file over
 `budgets/ceilings-github-ubuntu-latest.json`. `bench ceilings` warns about input
 files that are not named `run-<host>-<k>.json`, because it counts each such file
 as a host of its own. To calibrate on one machine, `bench calibrate --runs K`

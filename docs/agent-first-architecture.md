@@ -180,8 +180,8 @@ The everyday-command rows come from
 [`bench/budgets/everyday.json`](../bench/budgets/everyday.json), which also
 holds the agent variants and the fixture each target is about. A required CI
 job, the everyday-command latency gate, holds each case to a ceiling calibrated
-on CI runners. A ceiling stops a command from getting slower. It is not one of
-these targets. See
+on CI runners. A ceiling stops a command from getting slower than its calibrated
+ceiling on CI runners. It is not one of these targets. See
 [the benchmark README](../bench/README.md#everyday-command-budgets-and-the-ci-gate).
 
 The website follows the same rule as repository documents. A measured figure on

@@ -16,7 +16,7 @@ on:
       mode:
         description:
           'noise: run the A/A noise study on main; everyday-calibrate: run the
-          everyday-command gate on 10 runners and derive its ceilings'
+          everyday-command gate on 20 runners and derive its ceilings'
         type: choice
         options: [noise, everyday-calibrate]
         default: noise
@@ -26,8 +26,8 @@ permissions:
   contents: read
 
 # A newer push to the same PR makes the older comparison moot. A dispatched
-# study (noise or calibration) runs for hours and is never cancelled by a later
-# dispatch: each dispatch gets its own group, because a group holds one
+# study is never cancelled by a later dispatch (the noise study runs for hours,
+# a calibration for about 20 minutes per runner): each dispatch gets its own group, because a group holds one
 # running and one pending run and a third dispatch would cancel the pending
 # one. Studies only share the repository, not a runner, so they can overlap.
 concurrency:
