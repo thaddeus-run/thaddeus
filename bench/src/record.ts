@@ -590,7 +590,7 @@ export interface Host {
   thresholdsFile?: string;
 }
 
-// The committed thresholds of the PR check's runner, from the noise study.
+// The default thresholds file, which the noise study writes and compare reads.
 export const THRESHOLDS_FILE = join(
   BENCH_ROOT,
   'thresholds',
