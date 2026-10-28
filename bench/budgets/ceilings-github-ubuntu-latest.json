@@ -1,0 +1,405 @@
+{
+  "studiedAt": "2026-10-26T17:25:37.080Z",
+  "runnerImage": "ubuntu24-20261023.334.3",
+  "runs": 40,
+  "pageCache": ["warm", "dropped"],
+  "caseVersions": {
+    "e2e.checkout.cold": 1,
+    "e2e.push.10": 1,
+    "e2e.pull": 1,
+    "e2e.workspace": 1,
+    "wc.status": 1,
+    "wc.diff": 1,
+    "wc.status.agents8": 1,
+    "wc.diff.agents8": 1,
+    "git.status": 1,
+    "git.diff": 1,
+    "git.status.agents8": 1,
+    "git.diff.agents8": 1,
+    "git.commit": 1,
+    "git.worktree": 1,
+    "git.pull": 1,
+    "git.clone": 1
+  },
+  "method": "lognormal-family-wise-t-p50",
+  "pooled": {
+    "runs": 40,
+    "hosts": 20,
+    "familySize": 8,
+    "p50Ceilings": {
+      "status/developer small-serial null": {
+        "ceilingMs": 2505.093790728585,
+        "n": 40,
+        "t": 3.2321617945680146,
+        "geoMeanMs": 1167.6820846224707,
+        "logSd": 0.23615943886050755
+      },
+      "status/agent small-serial null": {
+        "ceilingMs": 9604.001479141192,
+        "n": 40,
+        "t": 3.2321617945680146,
+        "geoMeanMs": 4415.046370820876,
+        "logSd": 0.2404463466711902
+      },
+      "diff/developer small-serial null": {
+        "ceilingMs": 2528.4103682309456,
+        "n": 40,
+        "t": 3.2321617945680146,
+        "geoMeanMs": 1165.0448593915326,
+        "logSd": 0.2397253755756615
+      },
+      "diff/agent small-serial null": {
+        "ceilingMs": 9693.614852708044,
+        "n": 40,
+        "t": 3.2321617945680146,
+        "geoMeanMs": 4490.023757773841,
+        "logSd": 0.2381098045405855
+      },
+      "commit/developer small-serial null": {
+        "ceilingMs": 9904.107486384157,
+        "n": 40,
+        "t": 3.2321617945680146,
+        "geoMeanMs": 4868.974254113698,
+        "logSd": 0.2196877273999867
+      },
+      "checkout/developer small-serial null": {
+        "ceilingMs": 9823.858974772162,
+        "n": 40,
+        "t": 3.2321617945680146,
+        "geoMeanMs": 4616.989784299565,
+        "logSd": 0.23361178468906452
+      },
+      "pull/developer small-serial null": {
+        "ceilingMs": 11549.887286754583,
+        "n": 40,
+        "t": 3.2321617945680146,
+        "geoMeanMs": 5191.617089545541,
+        "logSd": 0.2473980272110495
+      },
+      "ci-checkout/ci small-serial dropped": {
+        "ceilingMs": 10757.65015992605,
+        "n": 40,
+        "t": 3.2321617945680146,
+        "geoMeanMs": 5384.228936042361,
+        "logSd": 0.21414244560140977
+      }
+    }
+  },
+  "byCpu": {
+    "AMD EPYC 9V74 80-Core Processor": {
+      "runs": 6,
+      "hosts": 3,
+      "familySize": 8,
+      "p50Ceilings": {
+        "status/developer small-serial null": {
+          "ceilingMs": 2041.3816534816076,
+          "n": 6,
+          "t": 5.604165478498317,
+          "geoMeanMs": 1081.8421680357205,
+          "logSd": 0.11330171511748041
+        },
+        "status/agent small-serial null": {
+          "ceilingMs": 8982.443306274217,
+          "n": 6,
+          "t": 5.604165478498317,
+          "geoMeanMs": 4202.838244010994,
+          "logSd": 0.13552630840090968
+        },
+        "diff/developer small-serial null": {
+          "ceilingMs": 2012.565374536634,
+          "n": 6,
+          "t": 5.604165478498317,
+          "geoMeanMs": 1090.3703215079056,
+          "logSd": 0.10936379971873929
+        },
+        "diff/agent small-serial null": {
+          "ceilingMs": 9334.423899233314,
+          "n": 6,
+          "t": 5.604165478498317,
+          "geoMeanMs": 4264.61514070345,
+          "logSd": 0.13978122591263525
+        },
+        "commit/developer small-serial null": {
+          "ceilingMs": 9202.38022826672,
+          "n": 6,
+          "t": 5.604165478498317,
+          "geoMeanMs": 4577.382753604527,
+          "logSd": 0.12460995131712949
+        },
+        "checkout/developer small-serial null": {
+          "ceilingMs": 8711.63665250517,
+          "n": 6,
+          "t": 5.604165478498317,
+          "geoMeanMs": 4339.4421292968955,
+          "logSd": 0.12435640643869891
+        },
+        "pull/developer small-serial null": {
+          "ceilingMs": 10389.921018501711,
+          "n": 6,
+          "t": 5.604165478498317,
+          "geoMeanMs": 4870.313546565047,
+          "logSd": 0.135199056488406
+        },
+        "ci-checkout/ci small-serial dropped": {
+          "ceilingMs": 9822.122701387822,
+          "n": 6,
+          "t": 5.604165478498317,
+          "geoMeanMs": 5653.2988392485095,
+          "logSd": 0.09856918430313918
+        }
+      }
+    },
+    "INTEL(R) XEON(R) PLATINUM 8573C": {
+      "runs": 4,
+      "hosts": 2,
+      "familySize": 8,
+      "p50Ceilings": {
+        "status/developer small-serial null": {
+          "ceilingMs": 1573.4328002620164,
+          "n": 4,
+          "t": 9.464899663536471,
+          "geoMeanMs": 1099.7210217500688,
+          "logSd": 0.03784543007562634
+        },
+        "status/agent small-serial null": {
+          "ceilingMs": 5964.781813545344,
+          "n": 4,
+          "t": 9.464899663536471,
+          "geoMeanMs": 4318.191595961413,
+          "logSd": 0.03412986782927386
+        },
+        "diff/developer small-serial null": {
+          "ceilingMs": 1877.7120314631422,
+          "n": 4,
+          "t": 9.464899663536471,
+          "geoMeanMs": 1096.9284706224857,
+          "logSd": 0.05679300104898539
+        },
+        "diff/agent small-serial null": {
+          "ceilingMs": 6284.559338998246,
+          "n": 4,
+          "t": 9.464899663536471,
+          "geoMeanMs": 4431.239939418255,
+          "logSd": 0.03691706177075075
+        },
+        "commit/developer small-serial null": {
+          "ceilingMs": 6712.056636930089,
+          "n": 4,
+          "t": 9.464899663536471,
+          "geoMeanMs": 4510.473726708245,
+          "logSd": 0.04199761584804986
+        },
+        "checkout/developer small-serial null": {
+          "ceilingMs": 7109.902325254449,
+          "n": 4,
+          "t": 9.464899663536471,
+          "geoMeanMs": 4180.063284421353,
+          "logSd": 0.05611914956412135
+        },
+        "pull/developer small-serial null": {
+          "ceilingMs": 8140.112817590381,
+          "n": 4,
+          "t": 9.464899663536471,
+          "geoMeanMs": 4666.452181495699,
+          "logSd": 0.05878614465760831
+        },
+        "ci-checkout/ci small-serial dropped": {
+          "ceilingMs": 8377.564805576507,
+          "n": 4,
+          "t": 9.464899663536471,
+          "geoMeanMs": 4879.072010929169,
+          "logSd": 0.05711653112024222
+        }
+      }
+    },
+    "AMD EPYC 7763 64-Core Processor": {
+      "runs": 20,
+      "hosts": 10,
+      "familySize": 8,
+      "p50Ceilings": {
+        "status/developer small-serial null": {
+          "ceilingMs": 1625.5606199834021,
+          "n": 20,
+          "t": 3.481150847255435,
+          "geoMeanMs": 1429.5132930209659,
+          "logSd": 0.0369184580124886
+        },
+        "status/agent small-serial null": {
+          "ceilingMs": 5856.17493896709,
+          "n": 20,
+          "t": 3.481150847255435,
+          "geoMeanMs": 5394.137610252157,
+          "logSd": 0.023608259784716198
+        },
+        "diff/developer small-serial null": {
+          "ceilingMs": 1658.484126945809,
+          "n": 20,
+          "t": 3.481150847255435,
+          "geoMeanMs": 1427.9181239386394,
+          "logSd": 0.04299913709625915
+        },
+        "diff/agent small-serial null": {
+          "ceilingMs": 5928.805775783292,
+          "n": 20,
+          "t": 3.481150847255435,
+          "geoMeanMs": 5468.161805384043,
+          "logSd": 0.02323378090808644
+        },
+        "commit/developer small-serial null": {
+          "ceilingMs": 6389.70594640253,
+          "n": 20,
+          "t": 3.481150847255435,
+          "geoMeanMs": 5842.565678915778,
+          "logSd": 0.025715122537343867
+        },
+        "checkout/developer small-serial null": {
+          "ceilingMs": 6307.102548743922,
+          "n": 20,
+          "t": 3.481150847255435,
+          "geoMeanMs": 5634.874872132183,
+          "logSd": 0.032374766345773166
+        },
+        "pull/developer small-serial null": {
+          "ceilingMs": 7044.676883363759,
+          "n": 20,
+          "t": 3.481150847255435,
+          "geoMeanMs": 6409.353529400974,
+          "logSd": 0.02715017859662073
+        },
+        "ci-checkout/ci small-serial dropped": {
+          "ceilingMs": 6870.772387460437,
+          "n": 20,
+          "t": 3.481150847255435,
+          "geoMeanMs": 6329.160261419113,
+          "logSd": 0.023586729021029363
+        }
+      }
+    },
+    "AMD EPYC 9V45 96-Core Processor": {
+      "runs": 6,
+      "hosts": 3,
+      "familySize": 8,
+      "p50Ceilings": {
+        "status/developer small-serial null": {
+          "ceilingMs": 966.5298598557844,
+          "n": 6,
+          "t": 5.604165478498317,
+          "geoMeanMs": 775.5759852534981,
+          "logSd": 0.03927546996205939
+        },
+        "status/agent small-serial null": {
+          "ceilingMs": 3886.862028492297,
+          "n": 6,
+          "t": 5.604165478498317,
+          "geoMeanMs": 3010.860831822107,
+          "logSd": 0.045568984013704114
+        },
+        "diff/developer small-serial null": {
+          "ceilingMs": 930.8942051114227,
+          "n": 6,
+          "t": 5.604165478498317,
+          "geoMeanMs": 766.9104383320418,
+          "logSd": 0.03457706772870798
+        },
+        "diff/agent small-serial null": {
+          "ceilingMs": 4066.073451633948,
+          "n": 6,
+          "t": 5.604165478498317,
+          "geoMeanMs": 3063.497729028905,
+          "logSd": 0.05051964812319012
+        },
+        "commit/developer small-serial null": {
+          "ceilingMs": 3551.4031109423704,
+          "n": 6,
+          "t": 5.604165478498317,
+          "geoMeanMs": 3230.5801733655853,
+          "logSd": 0.016894759253632565
+        },
+        "checkout/developer small-serial null": {
+          "ceilingMs": 3505.0305941981414,
+          "n": 6,
+          "t": 5.604165478498317,
+          "geoMeanMs": 3053.5424351666875,
+          "logSd": 0.02460613964757563
+        },
+        "pull/developer small-serial null": {
+          "ceilingMs": 3907.1031762369666,
+          "n": 6,
+          "t": 5.604165478498317,
+          "geoMeanMs": 3342.964244326622,
+          "logSd": 0.02782542961527899
+        },
+        "ci-checkout/ci small-serial dropped": {
+          "ceilingMs": 4271.363777320666,
+          "n": 6,
+          "t": 5.604165478498317,
+          "geoMeanMs": 3554.325353284889,
+          "logSd": 0.03279130345761316
+        }
+      }
+    },
+    "Intel(R) Xeon(R) 6973P-C": {
+      "runs": 4,
+      "hosts": 2,
+      "familySize": 8,
+      "p50Ceilings": {
+        "status/developer small-serial null": {
+          "ceilingMs": 1111.2666749401506,
+          "n": 4,
+          "t": 9.464899663536471,
+          "geoMeanMs": 933.9857804493606,
+          "logSd": 0.018362009604903702
+        },
+        "status/agent small-serial null": {
+          "ceilingMs": 3940.5566668644187,
+          "n": 4,
+          "t": 9.464899663536471,
+          "geoMeanMs": 3170.22904774907,
+          "logSd": 0.022981559972023058
+        },
+        "diff/developer small-serial null": {
+          "ceilingMs": 1032.4750685810288,
+          "n": 4,
+          "t": 9.464899663536471,
+          "geoMeanMs": 925.2383694991914,
+          "logSd": 0.011586258779178646
+        },
+        "diff/agent small-serial null": {
+          "ceilingMs": 4263.621898368072,
+          "n": 4,
+          "t": 9.464899663536471,
+          "geoMeanMs": 3255.428993412503,
+          "logSd": 0.02850478688042757
+        },
+        "commit/developer small-serial null": {
+          "ceilingMs": 4700.893960030452,
+          "n": 4,
+          "t": 9.464899663536471,
+          "geoMeanMs": 4288.327837052914,
+          "logSd": 0.009704890994518692
+        },
+        "checkout/developer small-serial null": {
+          "ceilingMs": 4849.043370878736,
+          "n": 4,
+          "t": 9.464899663536471,
+          "geoMeanMs": 3842.6258974174534,
+          "logSd": 0.024577701856066392
+        },
+        "pull/developer small-serial null": {
+          "ceilingMs": 5176.804081125523,
+          "n": 4,
+          "t": 9.464899663536471,
+          "geoMeanMs": 4289.785707984849,
+          "logSd": 0.01985769734677139
+        },
+        "ci-checkout/ci small-serial dropped": {
+          "ceilingMs": 5280.826541332746,
+          "n": 4,
+          "t": 9.464899663536471,
+          "geoMeanMs": 4587.528778781338,
+          "logSd": 0.014869797433057072
+        }
+      }
+    }
+  }
+}
