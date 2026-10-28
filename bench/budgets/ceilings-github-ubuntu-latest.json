@@ -1,5 +1,5 @@
 {
-  "studiedAt": "2026-10-26T17:25:37.080Z",
+  "studiedAt": "2026-10-26T17:17:15.827Z",
   "runnerImage": "ubuntu24-20261023.334.3",
   "runs": 40,
   "pageCache": ["warm", "dropped"],
@@ -20,6 +20,24 @@
     "git.worktree": 1,
     "git.pull": 1,
     "git.clone": 1
+  },
+  "manifestHashes": {
+    "e2e.checkout.cold": "9c0995f71020d3ee2d8c2c14311e982af17689b41a2cb976a9da5b8a20ff386b",
+    "e2e.push.10": "9c0995f71020d3ee2d8c2c14311e982af17689b41a2cb976a9da5b8a20ff386b",
+    "e2e.pull": "9c0995f71020d3ee2d8c2c14311e982af17689b41a2cb976a9da5b8a20ff386b",
+    "e2e.workspace": "9c0995f71020d3ee2d8c2c14311e982af17689b41a2cb976a9da5b8a20ff386b",
+    "wc.status": "9c0995f71020d3ee2d8c2c14311e982af17689b41a2cb976a9da5b8a20ff386b",
+    "wc.diff": "9c0995f71020d3ee2d8c2c14311e982af17689b41a2cb976a9da5b8a20ff386b",
+    "wc.status.agents8": "9c0995f71020d3ee2d8c2c14311e982af17689b41a2cb976a9da5b8a20ff386b",
+    "wc.diff.agents8": "9c0995f71020d3ee2d8c2c14311e982af17689b41a2cb976a9da5b8a20ff386b",
+    "git.status": "9c0995f71020d3ee2d8c2c14311e982af17689b41a2cb976a9da5b8a20ff386b",
+    "git.diff": "9c0995f71020d3ee2d8c2c14311e982af17689b41a2cb976a9da5b8a20ff386b",
+    "git.status.agents8": "9c0995f71020d3ee2d8c2c14311e982af17689b41a2cb976a9da5b8a20ff386b",
+    "git.diff.agents8": "9c0995f71020d3ee2d8c2c14311e982af17689b41a2cb976a9da5b8a20ff386b",
+    "git.commit": "9c0995f71020d3ee2d8c2c14311e982af17689b41a2cb976a9da5b8a20ff386b",
+    "git.worktree": "9c0995f71020d3ee2d8c2c14311e982af17689b41a2cb976a9da5b8a20ff386b",
+    "git.pull": "9c0995f71020d3ee2d8c2c14311e982af17689b41a2cb976a9da5b8a20ff386b",
+    "git.clone": "9c0995f71020d3ee2d8c2c14311e982af17689b41a2cb976a9da5b8a20ff386b"
   },
   "method": "lognormal-family-wise-t-p50",
   "pooled": {

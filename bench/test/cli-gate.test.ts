@@ -235,6 +235,9 @@ test('ceilings derives the file from gate-run result files and logs what each ce
   const c = JSON.parse(readFileSync(out, 'utf8')) as Ceilings;
   expect(c.runs).toBe(5);
   expect(c.pageCache).toEqual(['warm']);
+  expect(c.manifestHashes?.['git.status']).toBe('m1');
+  // Dated by the runs (their recordedAt), not by when it was derived.
+  expect(c.studiedAt).toBe('2026-10-26T00:00:00.000Z');
   expect(c.pooled.familySize).toBe(7);
   const { mu, sigma } = logMeanStdev([180, 190, 200, 210, 220]);
   const k = c.pooled.p50Ceilings['status/developer small-serial null'];

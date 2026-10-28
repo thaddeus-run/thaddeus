@@ -136,7 +136,7 @@ export function budgetCaseIds(budgets: Budgets): string[] {
   return [...ids].sort();
 }
 
-// The key a line's ratio goes by in the CI ceilings file: command and
+// The key a line goes by in the CI ceilings file (its row key): command and
 // environment, then the fixture and page-cache mode it was measured on.
 export function ratioKey(line: BudgetLine): string {
   return `${line.command}/${line.env} ${line.fixture} ${line.pageCache}`;
@@ -409,7 +409,7 @@ export function gateOptions(
   };
 }
 
-// What one ratio key's ceiling rests on: the thaddeus p50 (ms) of its row
+// What one row key's ceiling rests on: the thaddeus p50 (ms) of its row
 // over `n` calibration runs, as the geometric mean and the standard deviation
 // of the logs, and the Student-t quantile `t` that sets the ceiling
 // exp(log(geoMeanMs) + t * logSd).
@@ -422,7 +422,7 @@ export interface P50Ceiling {
 }
 
 // The ceilings of one group of calibration runs (one CPU model, or all of
-// them pooled): for each ratio key (see `ratioKey`), the largest thaddeus p50
+// them pooled): for each row key (see `ratioKey`), the largest thaddeus p50
 // that host noise plausibly produces within the group. `runs` and `hosts`
 // count what they rest on.
 export interface CeilingGroup {
@@ -451,6 +451,12 @@ export interface Ceilings {
   pageCache: PageCacheMode[];
   /** Every gated case id and the version the study measured, so a changed case invalidates its ceilings. */
   caseVersions: Record<string, number>;
+  /**
+   * Every gated case id and the manifest hash of the fixture the study
+   * measured it on, so a changed fixture invalidates the ceilings. A file
+   * without it (written before the field existed) is stale to the gate.
+   */
+  manifestHashes?: Record<string, string>;
   method: 'lognormal-family-wise-t-p50';
   pooled: CeilingGroup;
   /** By `machine.cpu` of the runs. */
@@ -485,7 +491,7 @@ const FAMILY_WISE_ALPHA = 0.01;
 const MIN_RUNS = 3;
 
 // The ceilings of one group: the largest thaddeus p50 that host and runner
-// noise plausibly produce for each ratio key, from the group's runs. The p50s
+// noise plausibly produce for each row key, from the group's runs. The p50s
 // of a key are modelled as lognormal: with mu and sigma the mean and sample
 // standard deviation of their logs, the ceiling is exp(mu + t * sigma). t is
 // the Student-t quantile of 1 - 0.01 / N at n - 1 degrees of freedom, for the
@@ -557,7 +563,7 @@ export function ceilingGroupFor(
   };
 }
 
-// The thaddeus p50 of every line that finished `ok`, by ratio key. A line
+// The thaddeus p50 of every line that finished `ok`, by row key. A line
 // that did not finish contributes nothing, so a calibration run that lost a
 // case simply has one fewer p50 for it.
 export function linesP50(lines: readonly BudgetLine[]): Record<string, number> {
@@ -582,6 +588,27 @@ export function gatedCaseVersions(
     if (gated.has(c.id)) versions[c.id] = c.version;
   }
   return versions;
+}
+
+// The manifest hash of every gated case in `run`, by case id. A case measured
+// on several fixtures gets its distinct hashes, sorted and joined by commas,
+// so any change among them shows. The hash covers the fixture's plan, so it
+// moves when the generated repository does.
+export function gatedManifestHashes(
+  run: BenchRun,
+  budgets: Budgets
+): Record<string, string> {
+  const gated = new Set(budgetCaseIds(budgets));
+  const seen: Record<string, Set<string>> = {};
+  for (const c of run.cases) {
+    if (gated.has(c.id)) (seen[c.id] ??= new Set()).add(c.manifestHash);
+  }
+  return Object.fromEntries(
+    Object.entries(seen).map(([id, hashes]) => [
+      id,
+      [...hashes].sort().join(','),
+    ])
+  );
 }
 
 // The repeats and warm-ups each gated case records when measured with
@@ -653,7 +680,7 @@ function measuredModes(
   return (['warm', 'dropped'] as const).filter((m) => modes.has(m));
 }
 
-// The p50 of every gated row in each of `runs`, by ratio key.
+// The p50 of every gated row in each of `runs`, by row key.
 function p50sOf(
   runs: readonly { run: BenchRun }[],
   budgets: Budgets
@@ -682,6 +709,7 @@ export function ceilingsFromRuns(
 ): Ceilings {
   if (runs.length === 0) throw new Error('no runs to derive ceilings from');
   const caseVersions = gatedCaseVersions(runs[0].run, budgets);
+  const manifestHashes = gatedManifestHashes(runs[0].run, budgets);
   for (const { name, run } of runs.slice(1)) {
     const versions = gatedCaseVersions(run, budgets);
     const differing = [
@@ -690,6 +718,15 @@ export function ceilingsFromRuns(
     if (differing.length > 0) {
       throw new Error(
         `${name} has other case versions than ${runs[0].name} (${differing.join(', ')}); ceilings need runs of one set of case versions`
+      );
+    }
+    const hashes = gatedManifestHashes(run, budgets);
+    const moved = Object.keys(manifestHashes).filter(
+      (id) => manifestHashes[id] !== hashes[id]
+    );
+    if (moved.length > 0) {
+      throw new Error(
+        `${name} has other fixture hashes than ${runs[0].name} (${moved.join(', ')}); ceilings need runs of one set of fixtures`
       );
     }
   }
@@ -710,6 +747,7 @@ export function ceilingsFromRuns(
       budgets
     ),
     caseVersions,
+    manifestHashes,
     method: 'lognormal-family-wise-t-p50',
     pooled: groupOf(runs),
     byCpu,
@@ -762,6 +800,10 @@ export function readCeilings(path: string): Ceilings | null {
     typeof c.caseVersions === 'object' &&
     c.caseVersions !== null &&
     Object.values(c.caseVersions).every(positive) &&
+    (c.manifestHashes === undefined ||
+      (typeof c.manifestHashes === 'object' &&
+        c.manifestHashes !== null &&
+        Object.values(c.manifestHashes).every((h) => typeof h === 'string'))) &&
     validGroup(c.pooled) &&
     typeof c.byCpu === 'object' &&
     c.byCpu !== null &&
@@ -770,7 +812,7 @@ export function readCeilings(path: string): Ceilings | null {
   return value as Ceilings;
 }
 
-// A line's name in gate output: its ratio key when it has a fixture, else
+// A line's name in gate output: its row key when it has a fixture, else
 // the row alone (a row with no result on any fixture).
 function lineName(line: BudgetLine): string {
   return line.fixture === null
@@ -823,6 +865,26 @@ export function checkGate(
       failed: true,
       lines: [
         `not ok ceilings were calibrated on other case versions (${stale.join('; ')}); re-run calibration`,
+      ],
+    };
+  }
+
+  const hashes = gatedManifestHashes(run, budgets);
+  const recorded = ceilings.manifestHashes;
+  const moved =
+    recorded === undefined
+      ? ['the ceilings file records no fixture hashes']
+      : Object.entries(hashes)
+          .filter(([id, hash]) => recorded[id] !== hash)
+          .map(
+            ([id]) =>
+              `${id} ran on another fixture than the one calibrated${recorded[id] === undefined ? ' (absent from the ceilings)' : ''}`
+          );
+  if (moved.length > 0) {
+    return {
+      failed: true,
+      lines: [
+        `not ok stale ceilings; re-run calibration (${moved.join('; ')})`,
       ],
     };
   }

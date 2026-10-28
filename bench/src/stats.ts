@@ -200,7 +200,7 @@ function tUpperTail(t: number, df: number): number {
 // the incomplete beta function), so it holds at the 2 degrees of freedom of a
 // 3-sample estimate, where a series expansion from the normal quantile does
 // not. The calibration study needs it because a standard deviation estimated
-// from a handful of ratios has a heavier tail than the normal.
+// from a handful of values has a heavier tail than the normal.
 export function tQuantile(p: number, df: number): number {
   if (!(p > 0 && p < 1)) {
     throw new RangeError(`tQuantile needs 0 < p < 1, got ${p}`);

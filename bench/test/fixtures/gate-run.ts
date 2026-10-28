@@ -94,7 +94,7 @@ export function gateRun(
 }
 
 // Ceilings that allow a thaddeus p50 up to `ceilingMs` on every key `run` has
-// a p50 for, calibrated on case version 1. The pooled group allows
+// a p50 for, calibrated on case version 1 and the run's fixture hashes. The pooled group allows
 // `groups.pooledMs` (default `ceilingMs`); the group of the run's CPU model
 // allows `ceilingMs` on `groups.own` runs and hosts (default 6 and 3, enough
 // for the gate to use it), or does not exist when `own` is null.
@@ -122,12 +122,16 @@ export function ceilingsOf(
   });
   const own = groups.own === undefined ? { runs: 6, hosts: 3 } : groups.own;
   const caseVersions = Object.fromEntries(run.cases.map((c) => [c.id, 1]));
+  const manifestHashes = Object.fromEntries(
+    run.cases.map((c) => [c.id, c.manifestHash])
+  );
   return {
     studiedAt: '2026-10-26T00:00:00.000Z',
     runnerImage: 'unknown',
     runs: 20,
     pageCache,
     caseVersions,
+    manifestHashes,
     method: 'lognormal-family-wise-t-p50',
     pooled: groupOf(groups.pooledMs ?? ceilingMs, 20, 10),
     byCpu:

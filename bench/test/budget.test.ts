@@ -752,6 +752,35 @@ test('checkGate fails when the ceilings were calibrated on other case versions',
   expect(checkGate(r, budgets, withoutVersion, METHODS).failed).toBe(true);
 });
 
+test('checkGate passes when every gated fixture hash matches the ceilings, and fails when one changed or the file records none', () => {
+  const r = gateRun(budgets);
+  const ceilings = ceilingsOf(budgets, r, 100_000);
+  expect(checkGate(r, budgets, ceilings, METHODS).failed).toBe(false);
+
+  const moved = gateRun(budgets, {
+    caseOver: (c) => (c.id === 'wc.status' ? { manifestHash: 'm2' } : {}),
+  });
+  const changed = checkGate(moved, budgets, ceilings, METHODS);
+  expect(changed.failed).toBe(true);
+  expect(changed.lines).toHaveLength(1);
+  expect(changed.lines[0]).toContain('stale ceilings; re-run calibration');
+  expect(changed.lines[0]).toContain('wc.status');
+
+  const without = ceilingsOf(budgets, r, 100_000);
+  delete without.manifestHashes;
+  const missing = checkGate(r, budgets, without, METHODS);
+  expect(missing.failed).toBe(true);
+  expect(missing.lines).toEqual([
+    'not ok stale ceilings; re-run calibration (the ceilings file records no fixture hashes)',
+  ]);
+
+  const lacking = ceilingsOf(budgets, r, 100_000);
+  delete lacking.manifestHashes?.['git.diff'];
+  const absent = checkGate(r, budgets, lacking, METHODS);
+  expect(absent.failed).toBe(true);
+  expect(absent.lines[0]).toContain('git.diff');
+});
+
 test('checkGate gates the dropped row when the ceilings measured it, and skips it when they did not', () => {
   const dropped = gateRun(budgets, { dropped: true });
   const both = ceilingsOf(budgets, dropped, 200, ['warm', 'dropped']);
@@ -878,6 +907,24 @@ test('ceilingsFromRuns refuses runs of other case versions and a run lost by one
   expect(() =>
     ceilingsFromRuns([a, newer], budgets, { studiedAt: 's', runnerImage: 'r' })
   ).toThrow('b.json has other case versions than a.json (wc.diff)');
+  const otherFixture = file(
+    'f.json',
+    gateRun(budgets, {
+      caseOver: (c) => (c.id === 'git.status' ? { manifestHash: 'm2' } : {}),
+    })
+  );
+  expect(() =>
+    ceilingsFromRuns([a, otherFixture], budgets, {
+      studiedAt: 's',
+      runnerImage: 'r',
+    })
+  ).toThrow('f.json has other fixture hashes than a.json (git.status)');
+  expect(
+    ceilingsFromRuns([a, file('g.json', gateRun(budgets))], budgets, {
+      studiedAt: 's',
+      runnerImage: 'r',
+    }).manifestHashes?.['git.status']
+  ).toBe('m1');
   expect(() =>
     ceilingsFromRuns([], budgets, { studiedAt: 's', runnerImage: 'r' })
   ).toThrow('no runs');

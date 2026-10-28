@@ -639,7 +639,8 @@ function publishCeilings(
 // host of its own. Ceilings are kept per CPU model and pooled, and the log
 // says per group how many runs and hosts it rests on and whether the gate
 // will use it. A file measured with another method, or on other case versions
-// than the first, is refused.
+// or fixtures than the first, is refused. The ceilings are dated by the newest
+// run's `recordedAt`.
 async function ceilingsCommand(
   argv: readonly string[],
   host: Host
@@ -678,7 +679,12 @@ async function ceilingsCommand(
     throw new FileError(`ceilings: ${refused.join('\n  ')}`);
   }
   const out = values.out === undefined ? CEILINGS_FILE : resolve(values.out);
-  publishCeilings(out, runs, budgets, host, new Date().toISOString());
+  // The study is dated by its newest run, so re-deriving the ceilings from the
+  // same files gives the same date instead of today's.
+  const studiedAt = runs
+    .map((r) => r.run.recordedAt)
+    .reduce((newest, at) => (at > newest ? at : newest));
+  publishCeilings(out, runs, budgets, host, studiedAt);
   host.log(`wrote ${out} from ${runs.length} runs`);
   return 0;
 }
