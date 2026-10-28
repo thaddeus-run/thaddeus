@@ -78,6 +78,11 @@ test(
     expect(code).toBe(0);
     const run = JSON.parse(readFileSync(out, 'utf8')) as BenchRun;
     expect(validateRun(run)).toEqual([]);
+    // A failed case's note says why, so print it rather than just "error".
+    const failed = run.cases
+      .filter((c) => c.status !== 'ok')
+      .map((c) => `${c.id}: ${c.note ?? '(no note)'}`);
+    expect(failed).toEqual([]);
     expect(run.cases.map((c) => [c.id, c.suite, c.fixture, c.status])).toEqual(
       [
         'wc.status',
