@@ -161,13 +161,28 @@ observed in a named benchmark environment with a recorded method. Documents in
 this repository may cite a target only with the word "target" next to it. They
 may cite a measurement only with a link to the run that produced it.
 
-| Target                                          | Value                                                | Measured | Owner                                    | Benchmark                                                              |
-| ----------------------------------------------- | ---------------------------------------------------- | -------- | ---------------------------------------- | ---------------------------------------------------------------------- |
-| Cold install or checkout                        | Sub-second on any OS                                 | No       | THA-117 defines it, THA-5 measures it    | `e2e.checkout.cold` with `pageCache: "dropped"`, on the serial fixture |
-| Repository or scope creation, ready to push     | Single-digit milliseconds                            | No       | THA-117, THA-5                           | `repo.create` and `e2e.repo.create`                                    |
-| Query over repository history                   | Milliseconds                                         | No       | THA-117, THA-5                           | `codedb.touchedSince` and `codedb.why`                                 |
-| Repository creation throughput under agent load | About 15,000 per minute, sustained, with no downtime | No       | THA-117, THA-5                           | `e2e.repos-per-minute`, a floor, not agent load                        |
-| Simultaneous agents on one repository           | 1,000 or more                                        | No       | THA-117 defines it, THA-130 qualifies it | not measured here (THA-130)                                            |
+| Target                                          | Value                                                                | Measured | Owner                                                                   | Benchmark                                                                              |
+| ----------------------------------------------- | -------------------------------------------------------------------- | -------- | ----------------------------------------------------------------------- | -------------------------------------------------------------------------------------- |
+| Cold install or checkout                        | Sub-second on any OS                                                 | No       | THA-117 defines it, THA-5 measures it                                   | `e2e.checkout.cold` with `pageCache: "dropped"`, on the serial fixture                 |
+| Repository or scope creation, ready to push     | Single-digit milliseconds                                            | No       | THA-117, THA-5                                                          | `repo.create` and `e2e.repo.create`                                                    |
+| Query over repository history                   | Milliseconds                                                         | No       | THA-117, THA-5                                                          | `codedb.touchedSince` and `codedb.why`                                                 |
+| Repository creation throughput under agent load | About 15,000 per minute, sustained, with no downtime                 | No       | THA-117, THA-5                                                          | `e2e.repos-per-minute`, a floor, not agent load                                        |
+| Simultaneous agents on one repository           | 1,000 or more                                                        | No       | THA-117 defines it, THA-130 qualifies it                                | not measured here (THA-130)                                                            |
+| Everyday `status`, 10 changed files             | 50 ms target, no slower than git (agents: 100 ms target, 8 at once)  | No       | THA-158 defines it, the owner in `bench/budgets/everyday.json` fixes it | `wc.status` against `git.status`, and `wc.status.agents8` against `git.status.agents8` |
+| Everyday `diff`, 10 changed files               | 100 ms target, no slower than git (agents: 200 ms target, 8 at once) | No       | THA-158 defines it, the owner in `bench/budgets/everyday.json` fixes it | `wc.diff` against `git.diff`, and `wc.diff.agents8` against `git.diff.agents8`         |
+| Everyday commit of 10 files                     | 1 s target, no slower than git                                       | No       | THA-158 defines it, the owner in `bench/budgets/everyday.json` fixes it | `e2e.push.10` against `git.commit`                                                     |
+| Everyday checkout of a branch                   | 1 s target, no slower than git                                       | No       | THA-158 defines it, the owner in `bench/budgets/everyday.json` fixes it | `e2e.workspace` against `git.worktree`                                                 |
+| Everyday pull or sync of a 10-file change       | 5 s target, no slower than git                                       | No       | THA-158 defines it, the owner in `bench/budgets/everyday.json` fixes it | `e2e.pull` against `git.pull`                                                          |
+| CI checkout, cold                               | 1 s target, no slower than git                                       | No       | THA-158 defines it, the owner in `bench/budgets/everyday.json` fixes it | `e2e.checkout.cold` with `pageCache: "dropped"` against `git.clone`                    |
+| Everyday rebase                                 | 2 s target, no slower than git                                       | No       | THA-158 defines it, the owner in `bench/budgets/everyday.json` fixes it | not measured here (THA-11, thaddeus has no rebase)                                     |
+
+The everyday-command rows come from
+[`bench/budgets/everyday.json`](../bench/budgets/everyday.json), which also
+holds the agent variants and the fixture each target is about. A required CI
+job, the everyday-command latency gate, holds each case to a ceiling calibrated
+on CI runners. A ceiling stops a command from getting slower. It is not one of
+these targets. See
+[the benchmark README](../bench/README.md#everyday-command-budgets-and-the-ci-gate).
 
 The website follows the same rule as repository documents. A measured figure on
 the website links to a committed file under `bench/results/` that names the

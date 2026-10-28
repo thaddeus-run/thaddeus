@@ -110,7 +110,18 @@ test('the committed budgets file has the thirteen rows and five unmeasured', () 
     'checkout/agent THA-118',
     'pull/agent THA-118',
   ]);
-  expect(budgets.attribution).toEqual({});
+  // Every measured row has an attribution that names an owner issue, a cause
+  // and its evidence, and nothing else is attributed.
+  const measuredRows = budgets.rows
+    .filter((r) => r.unmeasured === undefined)
+    .map((r) => `${r.command}/${r.env}`)
+    .sort();
+  expect(Object.keys(budgets.attribution).sort()).toEqual(measuredRows);
+  for (const entry of Object.values(budgets.attribution)) {
+    expect(entry.owner).toMatch(/^THA-\d+$/);
+    expect(entry.cause.length).toBeGreaterThan(0);
+    expect(entry.evidence.length).toBeGreaterThan(0);
+  }
 });
 
 test('budgetCaseIds is the sorted, unique set of measured case ids', () => {

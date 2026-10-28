@@ -94,6 +94,32 @@ In the dropped mode the drop comes before setup, and setup's hard-link copy
 directory entries and inodes, though not the file contents. The note says this
 too.
 
+### The everyday suite
+
+**Everyday suite** (`--suite everyday`). It times the commands a developer or an
+agent runs all day, in a working copy, against git on the same files. The cases
+need no server. Each working copy holds the fixture's `main` plus the same
+10-file edit, so `status` and `diff` have changes to report. The cases here are
+the working-copy ones and the git ones. The thaddeus side of the commit,
+checkout, pull and clone rows is the e2e suite. The rows these cases feed, and
+the targets they are held to, are in
+[Everyday-command budgets and the CI gate](#everyday-command-budgets-and-the-ci-gate).
+
+| Case id                                   | What one sample does                                              |
+| ----------------------------------------- | ----------------------------------------------------------------- |
+| `wc.status`, `git.status`                 | `thaddeus status` or `git status` in a working copy               |
+| `wc.diff`, `git.diff`                     | `thaddeus diff` or `git diff` in the same working copy            |
+| `wc.status.agents8`, `git.status.agents8` | 8 working copies run `status` at once, timed until the last exits |
+| `wc.diff.agents8`, `git.diff.agents8`     | 8 working copies run `diff` at once, timed until the last exits   |
+| `git.commit`                              | `git add`, `git commit` and `git push` of 10 files                |
+| `git.worktree`                            | `git worktree add`                                                |
+| `git.pull`                                | `git pull --ff-only` of a 10-file change                          |
+| `git.clone`                               | `git clone --depth 1 file://` into an empty directory             |
+
+Git's transport in these cases is a bare repository over a local path, not
+loopback HTTP, and git applies its own fsync settings. Its numbers are a floor
+for the same work, not a like-for-like protocol comparison.
+
 ## Fixtures
 
 A fixture is a versioned generator and not committed bytes. The inputs are
@@ -167,18 +193,22 @@ first (`CI= moonx cli:compile`) before running the e2e suite with `bench:run`.
 Each case runs in its own subprocess. That gives every case its own peak memory
 reading and lets the runner enforce its time budget. Other commands, which have
 no moon task, run from the `bench` directory with `bun src/cli.ts`:
-`fixture <name>` builds a cache and prints its path, `merge` joins round files
-of one commit, `compare <base> <head>` prints the comparison table, `noise` runs
-the A/A study, and `budget <run.json>...` reports runs against the
-everyday-command targets in `budgets/everyday.json` (it exits 0 when a target is
-missed; `budget --case-ids` prints the ids of the cases the budgets measure).
+`fixture <name>` builds a cache and prints its path (`--server` builds the e2e
+seeded server root, `--git` the everyday suite's bare git repository, which
+needs a serial fixture), `merge` joins round files of one commit,
+`compare <base> <head>` prints the comparison table, `noise` runs the A/A study,
+and `budget <run.json>...` reports runs against the everyday-command targets in
+`budgets/everyday.json` (it exits 0 when a target is missed; `budget --case-ids`
+prints the ids of the cases the budgets measure). `gate-run`, `gate`, `ceilings`
+and `calibrate` belong to the CI gate and are described under
+[Everyday-command budgets and the CI gate](#everyday-command-budgets-and-the-ci-gate).
 
 ## Recording a result
 
-`bench:record` produces the files that can be cited. It runs every case on the
-small, medium and stress fixtures with sweeps, 10 repeats, 2 warm-ups and a 600
-second budget per case, and runs each cold case twice: once with the page cache
-warm and once after dropping it.
+`bench:record` produces the files that can be cited. It runs every case of the
+library, e2e and everyday suites on the small, medium and stress fixtures with
+sweeps, 10 repeats, 2 warm-ups and a 600 second budget per case, and runs each
+cold case twice: once with the page cache warm and once after dropping it.
 
 1. Stop the dev servers and any other jobs on the machine.
 2. Run `sudo -v`. Dropping the page cache needs `sudo -n`, and `record` keeps
@@ -276,12 +306,16 @@ broken run:
 
 ## The PR check
 
-`.github/workflows/bench.yml` runs on every pull request. It is not part of
-`ci-passed`, it is not a required check, and it posts no PR comment (fork pull
-requests get a read-only token). It writes a job summary and uploads the runs as
-an artifact. Each side builds only the packages bench imports
-(`bench:build-deps`), not the whole workspace. A second job in the same workflow
-runs `bench:test-slow` (see [Tests](#tests)).
+`.github/workflows/bench.yml` runs on every pull request. This comparison of the
+library suite is report only: it is not part of `ci-passed`, it is not a
+required check, and it posts no PR comment (fork pull requests get a read-only
+token). It writes a job summary and uploads the runs as an artifact. The
+everyday-command latency gate is a different job, in `ci.yml`, and it is
+required (see
+[Everyday-command budgets and the CI gate](#everyday-command-budgets-and-the-ci-gate)).
+Each side builds only the packages bench imports (`bench:build-deps`), not the
+whole workspace. A second job in the same workflow runs `bench:test-slow` (see
+[Tests](#tests)).
 
 The job checks out the PR's merge commit and its first parent, which is the base
 the PR was merged onto. Each side runs its own `bench/`. It runs the library
@@ -351,6 +385,157 @@ re-versioning a case changes it. Dispatch the `Benchmarks` workflow with
 `mode: noise` on `main`; it runs 20 pairs of 5 rounds, rewrites the thresholds
 file after every pair, and uploads it as an artifact. Commit that file to
 `bench/thresholds/github-ubuntu-latest.json`.
+
+## Everyday-command budgets and the CI gate
+
+`budgets/everyday.json` lists the everyday commands and the target each one is
+held to, such as `status` in 50 ms and no slower than git. A row names a
+thaddeus case, a git case, a target in milliseconds (`targetMs`) and a target
+multiple of git (`targetMultiple`). The file is checked against
+`schema/budgets.schema.json`. Its `targetFixture` is `medium-serial`, a
+repository of 2,000 files and 20,000 ops, because that is the size the targets
+are about.
+
+Every number in `budgets/everyday.json` is a target and not a measurement. No
+run is committed under `bench/results` yet, so this file quotes no measured
+latency of its own. The only measured figures here are the ones that link to a
+CI run.
+
+### What each row times
+
+| Row          | thaddeus side                                                                                                | git side                                                                      |
+| ------------ | ------------------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------- |
+| status, diff | `thaddeus status`, `thaddeus diff` (`wc.status`, `wc.diff`)                                                  | `git status`, `git diff`                                                      |
+| commit       | `thaddeus push --no-land` of 10 files (`e2e.push.10`)                                                        | `git add`, `git commit` and `git push` to a bare repository over a local path |
+| checkout     | `thaddeus workspace` (`e2e.workspace`)                                                                       | `git worktree add`                                                            |
+| pull         | a second identity pulls a 10-file change (`e2e.pull`)                                                        | `git pull --ff-only`                                                          |
+| ci-checkout  | `thaddeus clone` into an empty directory, in a fresh home, with the page cache dropped (`e2e.checkout.cold`) | `git clone --depth 1 file://`                                                 |
+
+The environments are `developer` (one process on a machine to itself), `agent`
+and `ci`. In the agent environment, 8 working copies sit on one 4 vCPU host and
+run the command at once, and a sample lasts until the last of them exits. The
+agent rows exist for `status` and `diff` only. The rebase rows have no thaddeus
+command to time (thaddeus has no rebase, and updating a workspace base is
+THA-11), and the agent commit, checkout and pull rows need concurrent writers on
+one server, which waits for the replayable agent workload harness (THA-118).
+Those five rows read `unmeasured` in `bench budget` with their owner.
+
+The server rows (commit, checkout, pull and ci-checkout) run on `small-serial`
+today. On `medium-serial` and `stress-serial` the seeded server root cannot be
+built within the 30 minute pre-build budget, because every land runs
+`conflicts()` (THA-21). The working-copy rows run on any fixture. The stress
+fixture's thaddeus working copy has also not been built within that budget on
+the 4 vCPU development host. `bench budget` fills the "Target met" column only
+for rows measured on the target fixture, so `small-serial` rows show `-`.
+
+### `bench budget`
+
+`bun src/cli.ts budget <run.json>...` prints one table line per measured row and
+fixture, the thaddeus and git p50, the multiple, and whether the target and the
+multiple were met. Below the table it lists every missed line with its
+attribution, and every unmeasured row with its owner and reason. It exits 0
+whether or not a target is missed. A missed line with no entry in the
+`attribution` object of `budgets/everyday.json` prints as `unattributed`, so a
+new miss is visible until someone explains it.
+
+### Attribution
+
+The `attribution` object is keyed `<command>/<env>`. Each entry has an `owner`
+(the issue that fixes it), a `cause` and the `evidence` for it. The evidence
+comes from `bun --cpu-prof` of the CLI run from source
+(`packages/cli/src/bin.ts`) on the 4 vCPU development host, at commit `3d06d3b`.
+The percentages are inclusive shares of sampled time, so nested frames add up to
+more than their parent. They are profiles of the code at that commit, not run
+results. To reproduce one, run
+`bun --cpu-prof --cpu-prof-dir <dir> <repo>/packages/cli/src/bin.ts status`
+inside a working copy and open the `.cpuprofile` file in the Chrome DevTools
+profiler. Redo the profile when a fix lands. A target missed for a new reason
+needs a new entry.
+
+### The gate
+
+The `everyday-gate` job in `.github/workflows/ci.yml` is part of `ci-passed`,
+which branch protection requires. It builds the CLI, runs `bench gate-run`, then
+`bench budget` and `bench gate`. `gate-run` measures every budgeted case on
+`small-serial` with 3 repeats and 1 warm-up, in both page-cache modes, with a
+300 second budget per case. Git cases take at least 25 samples. They cost
+milliseconds each, and the extra samples steady the git median that the reported
+multiple divides by.
+
+`bench gate <run.json>` holds the thaddeus p50 of each measured row to a ceiling
+in `budgets/ceilings-github-ubuntu-latest.json`. It exits 1 and lists every
+failure when:
+
+- a p50 is above its ceiling;
+- a gated case did not finish `ok`;
+- the run was not measured with the gate method (fixture, repeats, warm-up,
+  page-cache modes);
+- a row has no ceiling;
+- the ceilings were calibrated for other case versions or other page-cache
+  modes. The gate refuses stale ceilings and says why.
+
+A missed target and the multiple of git are in the job summary. They never fail
+the job. Today's numbers miss most targets, and a gate that is red on every pull
+request would be switched off. The gate catches a pull request that makes a
+command slower than it is on `main`, not one that leaves it slow.
+
+### Why the gate does not hold the multiple of git
+
+An earlier design held the thaddeus-over-git ratio to a ceiling. It was dropped
+because git's own median moves too much. In local experiments (not committed),
+the median of `git status` drifted by a few milliseconds from run to run even at
+25 samples. Against a git time of a few milliseconds that is a large share of
+the ratio, and a deliberate 200 ms slowdown of thaddeus (about 12%) stayed
+inside a ratio ceiling. The thaddeus p50 is much steadier relative to its size,
+so the gate holds that alone. `bench budget` and the gate output still report
+the multiple.
+
+### How the ceilings are set
+
+A ceiling is `exp(mu + t * sigma)` over the logarithms of the thaddeus p50s of a
+group of calibration runs. Here `t` is the Student-t quantile at 1 minus 0.01
+divided by N with n minus 1 degrees of freedom, where n is the number of runs
+and N the number of gated rows. It is the same family-wise 1% split as the
+thresholds under [How the thresholds are set](#how-the-thresholds-are-set), with
+a t quantile because a calibration has few runs.
+
+Hosted runners differ in CPU model, and a slow model would otherwise raise the
+ceiling for everyone. The ceilings file keeps one group per CPU model (`byCpu`)
+and one `pooled` group over all runs. The gate uses the group of the runner's
+CPU model when the group has at least 6 runs from at least 3 hosts and the model
+is known. Otherwise it uses the pooled group. The gate output says which group
+it used and why.
+
+The committed ceilings come from the calibration run at
+<https://github.com/thaddeus-run/thaddeus/actions/runs/40365833192>: 20 hosts, 2
+runs each. Five CPU models turned up. In that run, a ceiling was this far above
+the group's typical p50 (the geometric mean of its runs):
+
+| CPU model group           | Hosts | Ceiling over typical p50                             |
+| ------------------------- | ----: | ---------------------------------------------------- |
+| AMD EPYC 7763             |    10 | 1.08 to 1.16 times                                   |
+| AMD EPYC 9V45             |     3 | 1.10 to 1.33 times                                   |
+| AMD EPYC 9V74             |     3 | 1.74 to 2.19 times (one host was slow)               |
+| Intel Xeon Platinum 8573C |     2 | pooled group, about 2.0 to 2.2 times its typical p50 |
+| Intel Xeon 6973P-C        |     2 | pooled group, about 2.0 to 2.2 times its typical p50 |
+
+A slowdown smaller than that factor passes on that group. On the EPYC 7763 group
+the gate sees a slowdown of 8 to 16 percent, depending on the row. On a pooled
+runner the slowdown has to be about twice the typical time. The first gate run
+on this pull request passed:
+<https://github.com/thaddeus-run/thaddeus/actions/runs/40772838975>.
+
+### Recalibrating
+
+Recalibrate when a gated case's version changes, when the runner image changes
+enough to move the numbers, or when a row is added. Dispatch the `Benchmarks`
+workflow with `mode: everyday-calibrate`. It runs `gate-run` twice on each of 20
+hosted runners, derives the ceilings with `bench ceilings`, and uploads them as
+the `everyday-ceilings` artifact. Commit that file over
+`budgets/ceilings-github-ubuntu-latest.json`. `bench ceilings` warns about input
+files that are not named `run-<host>-<k>.json`, because it counts each such file
+as a host of its own. To calibrate on one machine, `bench calibrate --runs K`
+runs the gate's method K times and writes the file.
 
 ## Tests
 

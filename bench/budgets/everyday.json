@@ -109,5 +109,46 @@
       "owner": "THA-118"
     }
   ],
-  "attribution": {}
+  "attribution": {
+    "status/developer": {
+      "owner": "THA-70",
+      "cause": "Every invocation re-verifies the signature of every op and re-reads every object record to open the store; no earlier run's verification is kept. Decoding the author DID again for every op is a third of that and needs only a memo (no issue yet). Process start alone is 0.14-0.17 s.",
+      "evidence": "medium-serial: OpLog.load 62% (verifyOp 56%, Identity.fromDid 28%), Store.open 26%; small-serial: OpLog.load 48%, Store.open 19%; comparing the tree on disk is under 1%"
+    },
+    "status/agent": {
+      "owner": "THA-70",
+      "cause": "Every invocation re-verifies the signature of every op and re-reads every object record to open the store; no earlier run's verification is kept. Decoding the author DID again for every op is a third of that and needs only a memo (no issue yet). Process start alone is 0.14-0.17 s. Eight such processes share 4 vCPU; on medium-serial they ran out of memory (exit 137) on the 7 GB host.",
+      "evidence": "medium-serial: OpLog.load 62% (verifyOp 56%, Identity.fromDid 28%), Store.open 26%; small-serial: OpLog.load 48%, Store.open 19%; comparing the tree on disk is under 1%; wc.status.agents8 medium-serial: error, thaddeus status exited with code 137"
+    },
+    "diff/developer": {
+      "owner": "THA-70",
+      "cause": "Every invocation re-verifies the signature of every op and re-reads every object record to open the store; no earlier run's verification is kept. Decoding the author DID again for every op is a third of that and needs only a memo (no issue yet). Process start alone is 0.14-0.17 s.",
+      "evidence": "medium-serial: OpLog.load 62% (verifyOp 56%, Identity.fromDid 28%), Store.open 26%; small-serial: OpLog.load 48%, Store.open 19%; comparing the tree on disk is under 1%"
+    },
+    "diff/agent": {
+      "owner": "THA-70",
+      "cause": "Every invocation re-verifies the signature of every op and re-reads every object record to open the store; no earlier run's verification is kept. Decoding the author DID again for every op is a third of that and needs only a memo (no issue yet). Process start alone is 0.14-0.17 s. Eight such processes share 4 vCPU; on medium-serial they ran out of memory (exit 137) on the 7 GB host.",
+      "evidence": "medium-serial: OpLog.load 62% (verifyOp 56%, Identity.fromDid 28%), Store.open 26%; small-serial: OpLog.load 48%, Store.open 19%; comparing the tree on disk is under 1%"
+    },
+    "commit/developer": {
+      "owner": "THA-13",
+      "cause": "push uploads every op and object reachable from the pushed heads, and the server re-ingests and re-verifies all of it; the client also re-verifies the whole history on open. On medium and stress the server root cannot be seeded within 30 minutes, because every land runs conflicts() (THA-21).",
+      "evidence": "small-serial: e2e.push.100 is only ~0.5 s slower than e2e.push.10; client OpLog.load 36%; server during the push: ingestBundle 19%, verifyCapability 19%, listGrants 12%"
+    },
+    "checkout/developer": {
+      "owner": "THA-70",
+      "cause": "thaddeus workspace pulls the branch into the shared store that already holds it, re-ingesting and re-verifying the branch's whole history before writing the files. Medium and stress cannot be seeded (THA-21).",
+      "evidence": "small-serial: verifyOp 34%, Store.ingest 27%, Identity.fromDid 24%"
+    },
+    "pull/developer": {
+      "owner": "THA-13",
+      "cause": "pull re-fetches and re-verifies the head chain and the operation closure instead of the ops the copy lacks. Medium and stress cannot be seeded (THA-21).",
+      "evidence": "small-serial: Store.ingest 33%, verifyCapability 31%, verifyOp 30%, Identity.fromDid 29%"
+    },
+    "ci-checkout/ci": {
+      "owner": "THA-120",
+      "cause": "clone fetches and verifies the whole history, while a CI job needs one revision (git clones depth 1).",
+      "evidence": "small-serial: Store.ingest 27%, verifyOp 24%, Identity.fromDid 22%, verifyCapability 20%"
+    }
+  }
 }
