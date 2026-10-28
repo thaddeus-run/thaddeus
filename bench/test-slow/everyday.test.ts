@@ -168,6 +168,10 @@ test(
     ]);
     expect(refused.code).toBe(2);
     expect(refused.stderr).toContain('--git takes no --repos or --server');
+    // A base fixture has conflicts, so the git replay refuses it up front.
+    const base = await bench(['fixture', 'tiny', '--git']);
+    expect(base.code).toBe(2);
+    expect(base.stderr).toContain('--git needs a serial fixture');
   },
   SLOW
 );

@@ -16,7 +16,9 @@ import {
   gateOptions,
   GROUP_MIN_HOSTS,
   GROUP_MIN_RUNS,
+  groupQualifies,
   hostOfFile,
+  isCalibrationFile,
   ratioKey,
   readBudgets,
   readCeilings,
@@ -917,6 +919,41 @@ test('ceilingGroupFor uses the CPU model group only with enough runs and hosts, 
   expect(unknown.note).toBe(
     'ceilings: using the pooled group (20 runs from 10 hosts); CPU model Unseen CPU was not calibrated'
   );
+});
+
+test('groupQualifies needs enough runs and hosts and a CPU model the host identified', () => {
+  const group = (runs: number, hosts: number) =>
+    ceilingsOf(budgets, gateRun(budgets), 200, ['warm'], {
+      own: { runs, hosts },
+    }).byCpu['Test CPU'];
+  expect(groupQualifies('Test CPU', group(6, 3))).toBe(true);
+  expect(groupQualifies('Test CPU', group(5, 3))).toBe(false);
+  expect(groupQualifies('Test CPU', group(10, 2))).toBe(false);
+  // Hosts that could not read their CPU all report these names, so a group
+  // under them mixes unrelated machines whatever its size.
+  expect(groupQualifies('unknown', group(20, 10))).toBe(false);
+  expect(groupQualifies('', group(20, 10))).toBe(false);
+});
+
+test('ceilingGroupFor never uses a group keyed unknown or empty, even a large one', () => {
+  const r = gateRun(budgets);
+  const base = ceilingsOf(budgets, r, 200, ['warm'], {
+    own: { runs: 20, hosts: 10 },
+  });
+  for (const cpu of ['unknown', '']) {
+    const ceilings = { ...base, byCpu: { [cpu]: base.byCpu['Test CPU'] } };
+    const chosen = ceilingGroupFor(ceilings, cpu);
+    expect(chosen.group).toBe(ceilings.pooled);
+    expect(chosen.note).toContain('using the pooled group');
+    expect(chosen.note).toContain('is not a CPU model the host identified');
+  }
+});
+
+test('isCalibrationFile accepts only run-<host>-<k>.json names', () => {
+  expect(isCalibrationFile('/tmp/calruns/run-3-2.json')).toBe(true);
+  expect(isCalibrationFile('run-abc-def-1.json')).toBe(true);
+  expect(isCalibrationFile('out/p50-run-1.json')).toBe(false);
+  expect(isCalibrationFile('other.json')).toBe(false);
 });
 
 test('checkGate holds a run on a calibrated CPU to that CPU group, so a regression inside the pooled ceiling still fails', () => {

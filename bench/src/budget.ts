@@ -27,8 +27,8 @@ export const BUDGETS_FILE = join(
   'everyday.json'
 );
 
-// The ceilings the CI gate holds the thaddeus/git ratios to, calibrated on
-// the GitHub runner.
+// The ceilings the CI gate holds the thaddeus p50 of each row to, calibrated
+// on the GitHub runner.
 export const CEILINGS_FILE = join(
   dirname(fileURLToPath(import.meta.url)),
   '..',
@@ -463,6 +463,19 @@ export interface Ceilings {
 export const GROUP_MIN_RUNS = 6;
 export const GROUP_MIN_HOSTS = 3;
 
+// Whether the gate may use the ceilings group of CPU model `cpu`. It needs
+// enough runs and hosts, and a model the runs actually identified: `unknown`
+// and the empty string are what a host reports when it could not read its
+// CPU, and unrelated hosts would share that group.
+export function groupQualifies(cpu: string, group: CeilingGroup): boolean {
+  return (
+    cpu !== 'unknown' &&
+    cpu !== '' &&
+    group.runs >= GROUP_MIN_RUNS &&
+    group.hosts >= GROUP_MIN_HOSTS
+  );
+}
+
 // The family-wise error rate the ceilings allow: the chance that an
 // unchanged PR fails the gate on noise alone.
 const FAMILY_WISE_ALPHA = 0.01;
@@ -500,30 +513,33 @@ export function deriveGroup(
   return { ...counts, familySize: studied.length, p50Ceilings };
 }
 
+// The file name `hostOfFile` reads a host from: `run-<host>-<k>.json`.
+const CALIBRATION_FILE = /^run-(.+)-\d+\.json$/;
+
 // The host a result file came from: the `<host>` of `run-<host>-<k>.json` (the
 // CI calibration names its files so), or the file name itself, which counts
 // the file as a host of its own.
 export function hostOfFile(name: string): string {
-  const base = name.slice(name.lastIndexOf('/') + 1);
-  const match = /^run-(.+)-\d+\.json$/.exec(base);
+  const match = CALIBRATION_FILE.exec(name.slice(name.lastIndexOf('/') + 1));
   return match === null ? name : match[1];
 }
 
+// Whether `name` is named `run-<host>-<k>.json`. Any other file counts as a
+// host of its own, which inflates the host count of its CPU group.
+export function isCalibrationFile(name: string): boolean {
+  return CALIBRATION_FILE.test(name.slice(name.lastIndexOf('/') + 1));
+}
+
 // The ceilings the gate uses for a run, and why: the group of the run's CPU
-// model when it rests on at least `GROUP_MIN_RUNS` runs from
-// `GROUP_MIN_HOSTS` hosts, else the pooled group. `note` is the one line
-// the gate prints about the choice.
+// model when it qualifies (see `groupQualifies`), else the pooled group.
+// `note` is the one line the gate prints about the choice.
 export function ceilingGroupFor(
   ceilings: Ceilings,
   cpu: string
 ): { group: CeilingGroup; note: string } {
   const own = ceilings.byCpu[cpu];
   const counted = (g: CeilingGroup) => `${g.runs} runs from ${g.hosts} hosts`;
-  if (
-    own !== undefined &&
-    own.runs >= GROUP_MIN_RUNS &&
-    own.hosts >= GROUP_MIN_HOSTS
-  ) {
+  if (own !== undefined && groupQualifies(cpu, own)) {
     return {
       group: own,
       note: `ceilings: using the group of CPU model ${cpu} (${counted(own)})`,
@@ -532,7 +548,9 @@ export function ceilingGroupFor(
   const why =
     own === undefined
       ? 'was not calibrated'
-      : `was calibrated on only ${counted(own)}, and a group needs ${GROUP_MIN_RUNS} runs from ${GROUP_MIN_HOSTS} hosts`;
+      : cpu === 'unknown' || cpu === ''
+        ? 'is not a CPU model the host identified'
+        : `was calibrated on only ${counted(own)}, and a group needs ${GROUP_MIN_RUNS} runs from ${GROUP_MIN_HOSTS} hosts`;
   return {
     group: ceilings.pooled,
     note: `ceilings: using the pooled group (${counted(ceilings.pooled)}); CPU model ${cpu} ${why}`,

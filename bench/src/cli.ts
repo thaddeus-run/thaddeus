@@ -26,7 +26,9 @@ import {
   gateOptions,
   GROUP_MIN_HOSTS,
   GROUP_MIN_RUNS,
+  groupQualifies,
   hostOfFile,
+  isCalibrationFile,
   linesP50,
   methodMismatches,
   readBudgets,
@@ -620,9 +622,11 @@ function publishCeilings(
     logGroup(
       `CPU model ${cpu}`,
       g,
-      g.runs >= GROUP_MIN_RUNS && g.hosts >= GROUP_MIN_HOSTS
+      groupQualifies(cpu, g)
         ? ', used by the gate'
-        : `, too thin for the gate (needs ${GROUP_MIN_RUNS} runs from ${GROUP_MIN_HOSTS} hosts), pooled applies`
+        : cpu === 'unknown' || cpu === ''
+          ? ', not a CPU model the host identified, pooled applies'
+          : `, too thin for the gate (needs ${GROUP_MIN_RUNS} runs from ${GROUP_MIN_HOSTS} hosts), pooled applies`
     );
   }
   logGroup('pooled', ceilings.pooled, ', used for any other CPU model');
@@ -650,6 +654,16 @@ async function ceilingsCommand(
     throw new UsageError('ceilings takes run files');
   const budgets = budgetsOf(values.budgets);
   const methods = await gateMethods(budgets);
+  // A file not named run-<host>-<k>.json counts as a host of its own, so a
+  // study that pools many runs of one host under odd names would look like
+  // many hosts. Say so rather than count them silently.
+  for (const path of positionals) {
+    if (!isCalibrationFile(path)) {
+      host.log(
+        `ceilings: warning: ${path} is not named run-<host>-<k>.json, so it counts as a host of its own`
+      );
+    }
+  }
   const runs = positionals.map((path) => ({
     name: path,
     host: hostOfFile(path),
@@ -827,6 +841,11 @@ async function fixtureCommand(argv: readonly string[]): Promise<number> {
   }
   if (values.git && (values.server || repos !== 1)) {
     throw new UsageError('--git takes no --repos or --server');
+  }
+  if (values.git && spec.variant !== 'serial') {
+    throw new UsageError(
+      `--git needs a serial fixture such as ${spec.name}-serial, got ${spec.name}`
+    );
   }
   const plan = generateFixture(spec);
   const dir = values.git

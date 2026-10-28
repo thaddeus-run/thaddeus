@@ -32,12 +32,17 @@ interface CopyState {
 
 // One sample of an agent case: AGENTS copies of the command at once, one
 // per working copy, timed until the last one exits. That is how long an
-// agent on a shared host waits when the others are busy too.
-async function together(
+// agent on a shared host waits when the others are busy too. It waits for
+// every command to finish even when one fails, and then rethrows the first
+// failure, so no child is still running when the sample ends.
+export async function together(
   dirs: readonly string[],
   one: (dir: string) => Promise<number>
 ): Promise<void> {
-  await Promise.all(dirs.map(one));
+  const settled = await Promise.allSettled(dirs.map(one));
+  for (const result of settled) {
+    if (result.status === 'rejected') throw result.reason;
+  }
 }
 
 // Builds `copies` working copies named `wc-0`, `wc-1`, ... under the case's
@@ -128,9 +133,10 @@ const git =
 
 // Every git case takes at least this many timed samples. A git command takes
 // a few milliseconds, and the median of the run's usual 3 samples moves by
-// tens of percent between runs; it is the denominator of every gated ratio,
-// so that noise would hide a real slowdown of the thaddeus side. At
-// milliseconds per sample, 25 samples cost little.
+// tens of percent between runs. The gate holds only the thaddeus p50 to a
+// ceiling, but `bench budget` and the gate output report the multiple of git,
+// and 25 samples steady that denominator. At milliseconds per sample, they
+// cost little.
 const GIT_MIN_REPEATS = 25;
 
 const AGENT_NOTE = '8 concurrent copies on one host; the sample is the slowest';

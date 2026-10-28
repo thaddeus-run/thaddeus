@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import { run } from '../src/cli';
-import everydayCases from '../src/everyday/cases';
+import everydayCases, { together } from '../src/everyday/cases';
 import { registryFor, runSuite, type SuiteOptions } from '../src/record';
 import { validateRun } from '../src/result';
 import { fakeHost, suiteEnv } from './fixtures/suite-env';
@@ -231,4 +231,21 @@ test('run rejects a budget that is not a positive integer', async () => {
     );
     expect(calls).toHaveLength(0);
   }
+});
+
+test('together waits for every command to finish before it rethrows the first failure', async () => {
+  const finished: string[] = [];
+  const one = async (dir: string): Promise<number> => {
+    if (dir === 'fails') throw new Error('first failure');
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    finished.push(dir);
+    return 0;
+  };
+  const error = await together(['fails', 'slow-a', 'slow-b'], one).then(
+    () => null,
+    (reason: unknown) => reason
+  );
+  expect(error).toEqual(new Error('first failure'));
+  // Promise.all would have rejected at once, with both slow commands still running.
+  expect(finished).toEqual(['slow-a', 'slow-b']);
 });

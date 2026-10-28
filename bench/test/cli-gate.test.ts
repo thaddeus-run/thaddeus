@@ -243,8 +243,14 @@ test('ceilings derives the file from gate-run result files and logs what each ce
     Math.exp(mu + tQuantile(1 - 0.01 / 7, 4) * sigma),
     6
   );
-  // Each file named other than run-<host>-<k>.json is a host of its own.
+  // Each file named other than run-<host>-<k>.json is a host of its own, and
+  // the log warns about each one.
   expect(c.pooled).toMatchObject({ runs: 5, hosts: 5 });
+  for (const file of files) {
+    expect(logs).toContain(
+      `ceilings: warning: ${file} is not named run-<host>-<k>.json, so it counts as a host of its own`
+    );
+  }
   expect(
     logs.some((l) =>
       l.startsWith('ceilings:   status/developer small-serial null: n 5')
@@ -292,6 +298,8 @@ test('ceilings counts hosts from run-<host>-<k>.json names and logs each CPU mod
   expect(c.byCpu.Fast).toMatchObject({ runs: 6, hosts: 3 });
   expect(c.byCpu.Slow).toMatchObject({ runs: 2, hosts: 1 });
   expect(c.pooled).toMatchObject({ runs: 8, hosts: 4 });
+  // Files named run-<host>-<k>.json draw no warning.
+  expect(logs.filter((l) => l.startsWith('ceilings: warning'))).toEqual([]);
   expect(logs).toContain(
     'ceilings: CPU model Fast: 6 runs from 3 hosts, used by the gate'
   );
