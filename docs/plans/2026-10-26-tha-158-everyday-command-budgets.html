@@ -351,6 +351,44 @@
         </p>
       </header>
 
+      <div class="callout">
+        <strong>Changed during build</strong>
+        <ul>
+          <li>
+            The gate checks each command's thaddeus p50, not the thaddeus/git
+            ratio. git's own median moved by tens of percent between runs, so a
+            ratio ceiling let a 200 ms slowdown of <code>status</code> through.
+            The git multiple is still reported and never gated.
+          </li>
+          <li>
+            Ceilings are kept per CPU model with a pooled fallback, and are
+            calibrated across 20 GitHub runners in a matrix (<code
+              >bench ceilings</code
+            >), not on one runner. GitHub hands out several CPU models, and
+            <code>status</code> on one runs about twice as fast as on another.
+          </li>
+          <li>
+            Ceilings use a Student-t quantile, and git cases take at least 25
+            samples (<code>BenchCase.minRepeats</code>).
+          </li>
+          <li>
+            <code>fastImportStream</code> became the generator
+            <code>fastImportChunks</code>, piped into
+            <code>git fast-import</code>, so the stress fixture builds in
+            bounded memory.
+          </li>
+          <li>
+            The fixture working copy writes the owner-signed head records a
+            clone holds and drops the fork views, so <code>status</code> opens
+            the same store shape as a clone.
+          </li>
+          <li>
+            <code>e2e.workspace</code> and <code>git.worktree</code> are warm
+            cases. Only <code>git.clone</code> is cold.
+          </li>
+        </ul>
+      </div>
+
       <section class="block">
         <h2>Goal and shape</h2>
         <p>
