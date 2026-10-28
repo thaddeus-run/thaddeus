@@ -508,11 +508,12 @@ An earlier design held the thaddeus-over-git ratio to a ceiling. It was dropped
 because git's own median moves too much. In the calibration run linked under
 [How the ceilings are set](#how-the-ceilings-are-set), the median of
 `git.status` on `small-serial` ranged from 1.65 to 3.60 ms across the 40 runs
-(five CPU models), and it moved by tens of percent between runs even at 25
-samples. That is more than the thaddeus slowdowns the gate must catch, so a
-ratio ceiling would have to be wider than them. The thaddeus p50 is much
-steadier relative to its size, so the gate holds that alone. `bench budget` and
-the gate output still report the multiple.
+(five CPU models). Between the two runs on one host, the `git.status` median
+usually differed by about 3%, but by more than 10% on 3 of the 20 hosts and by
+66% on one, even at 25 samples. The `wc.status` median never differed by more
+than 7.3%. A ratio ceiling has to allow git's worst swing, which is wider than
+the thaddeus slowdowns the gate must catch, so the gate holds the thaddeus p50
+alone. `bench budget` and the gate output still report the multiple.
 
 ### How the ceilings are set
 

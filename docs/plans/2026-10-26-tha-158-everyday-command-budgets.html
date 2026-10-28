@@ -356,10 +356,10 @@
         <ul>
           <li>
             The gate checks each command's thaddeus p50, not the thaddeus/git
-            ratio. git's own median moved by tens of percent between runs, more
-            than the thaddeus slowdowns the gate must catch, so a ratio ceiling
-            would have had to be wider than them. The git multiple is still
-            reported and never gated.
+            ratio. On some runners git's own median swung far more between two
+            runs than the thaddeus slowdowns the gate must catch, so a ratio
+            ceiling would have had to be wider than them. The git multiple is
+            still reported and never gated.
           </li>
           <li>
             Ceilings are kept per CPU model with a pooled fallback, and are
