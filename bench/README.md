@@ -477,6 +477,12 @@ failure when:
   hash each gated case ran on, and the gate compares it with the run's). The
   gate refuses stale ceilings and says why.
 
+To gate locally on a host without `sudo -n`, run
+`bench gate-run --page-cache warm` and then
+`bench gate <run.json> --page-cache warm`. The gate then skips the dropped
+`ci-checkout` row and prints a `skip` line for it. Without the flag the missing
+row fails, as it does in CI.
+
 A change to what a case measures makes its ceilings stale, and the version and
 hash checks are how the gate learns of it. Bump a case's `version` whenever the
 case changes. That rule covers the seeding too: a change to what

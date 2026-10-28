@@ -71,11 +71,26 @@ export function* fastImportChunks(plan: FixturePlan): Generator<Uint8Array> {
   }
 }
 
+// Variables that point git at another repository, worktree or index. git
+// exports them inside a hook or `git rebase --exec`, and every git command
+// here targets a repository of its own, so they are dropped.
+const REPO_REDIRECTS = [
+  'GIT_DIR',
+  'GIT_WORK_TREE',
+  'GIT_COMMON_DIR',
+  'GIT_INDEX_FILE',
+  'GIT_OBJECT_DIRECTORY',
+  'GIT_ALTERNATE_OBJECT_DIRECTORIES',
+  'GIT_PREFIX',
+];
+
 // Git with no system or user config, so a developer's ~/.gitconfig cannot
-// change what a case times.
+// change what a case times, and no inherited repository redirects.
 export function gitEnv(home: string): Record<string, string> {
+  const inherited = { ...process.env };
+  for (const name of REPO_REDIRECTS) delete inherited[name];
   return {
-    ...process.env,
+    ...inherited,
     HOME: home,
     GIT_CONFIG_NOSYSTEM: '1',
     GIT_CONFIG_GLOBAL: '/dev/null',

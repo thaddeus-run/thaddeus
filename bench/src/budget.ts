@@ -843,7 +843,8 @@ export function checkGate(
   run: BenchRun,
   budgets: Budgets,
   ceilings: Ceilings | null,
-  methods: Record<string, { repeats: number; warmup: number }>
+  methods: Record<string, { repeats: number; warmup: number }>,
+  modes?: readonly PageCacheMode[]
 ): { failed: boolean; lines: string[] } {
   if (ceilings === null) {
     return {
@@ -908,6 +909,22 @@ export function checkGate(
       line.pageCache !== null &&
       !ceilings.pageCache.includes(line.pageCache)
     ) {
+      continue;
+    }
+    // A row in a page-cache mode the run did not measure (a warm-only run
+    // on a host without `sudo -n`, named with --page-cache) is skipped, not
+    // failed, and the output says so. CI passes no flag, so the modes are
+    // the gate method's and nothing is skipped.
+    if (
+      line.status === 'missing' &&
+      line.fixture === null &&
+      line.pageCache !== null &&
+      modes !== undefined &&
+      !modes.includes(line.pageCache)
+    ) {
+      lines.push(
+        `skip ${line.command}/${line.env} ${line.pageCache}: the run did not measure page-cache ${line.pageCache}`
+      );
       continue;
     }
     checked++;

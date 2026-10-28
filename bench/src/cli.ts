@@ -578,7 +578,8 @@ async function gateCommand(
     readRun(runPath),
     budgets,
     ceilings,
-    await gateMethods(budgets)
+    await gateMethods(budgets),
+    runModes
   );
   const report = `${result.lines.join('\n')}\n`;
   process.stdout.write(report);

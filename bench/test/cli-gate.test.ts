@@ -484,6 +484,22 @@ test('gate refuses ceilings that do not cover the gate page-cache modes unless -
     (await cli(['gate', fullRun, '--ceilings', fullCeilings], host)).code
   ).toBe(0);
 
+  // A warm-only run (no sudo for dropping the cache) gates against ceilings
+  // that cover both modes when --page-cache says so: the dropped row is
+  // skipped and says why. Without the flag the missing row still fails.
+  const warmRun = writeJson('gate-modes-warm-run.json', warmOnly);
+  const skipped = await cli(
+    ['gate', warmRun, '--ceilings', fullCeilings, '--page-cache', 'warm'],
+    host
+  );
+  expect(skipped.code).toBe(0);
+  expect(skipped.out).toContain(
+    'skip ci-checkout/ci dropped: the run did not measure page-cache dropped'
+  );
+  expect(
+    (await cli(['gate', warmRun, '--ceilings', fullCeilings], host)).code
+  ).toBe(1);
+
   // An unknown mode is a usage error.
   expect((await cli(['gate', run, '--page-cache', 'hot'], host)).code).toBe(2);
 });
