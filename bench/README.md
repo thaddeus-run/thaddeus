@@ -103,12 +103,12 @@ are never compared. Ciphertext and object ids still differ from run to run,
 because the nonces and content keys are random. That is why the hash covers the
 plan and not the stored bytes.
 
-| Fixture | Files  | Ops     | Authors | Views | Use                             |
-| ------- | ------ | ------- | ------- | ----- | ------------------------------- |
-| tiny    | 10     | 20      | 2       | 2     | smoke tests and filler repos    |
-| small   | 100    | 1,000   | 1       | 1     | the PR check, a quick local run |
-| medium  | 2,000  | 20,000  | 10      | 50    | a real active repository        |
-| stress  | 20,000 | 200,000 | 100     | 500   | long history and a big tree     |
+| Fixture | Files  | Ops     | Authors | Views | Use                          |
+| ------- | ------ | ------- | ------- | ----- | ---------------------------- |
+| tiny    | 10     | 20      | 2       | 2     | smoke tests and filler repos |
+| small   | 100    | 1,000   | 1       | 1     | a quick local run            |
+| medium  | 2,000  | 20,000  | 10      | 50    | a real active repository     |
+| stress  | 20,000 | 200,000 | 100     | 500   | long history and a big tree  |
 
 The op mix has writes, removes, forks and lands into `main`. Lands matter
 because writes and forks alone leave every view a straight chain, and
@@ -235,7 +235,7 @@ The fields that need an explanation:
   and is `warm` or `dropped`. In the dropped mode the runner flushes and drops
   the kernel page cache (`echo 3 > /proc/sys/vm/drop_caches`) before every
   sample, so the sample reads from disk. A cold-checkout claim uses the
-  `dropped` result. The PR check runs warm only.
+  `dropped` result.
 - **`serveFlags`** lists the `serve` flags an e2e case raised above the shipped
   defaults, so a figure can say, for example, "server with creation limit
   raised".
@@ -269,34 +269,26 @@ broken run:
 
 `e2e.pull` and `e2e.land` have no published figure until THA-21 lands.
 
-## The PR check
+## Comparing two commits
 
-`.github/workflows/bench.yml` runs on every pull request. It is not part of
-`ci-passed`, it is not a required check, and it posts no PR comment (fork pull
-requests get a read-only token). It writes a job summary and uploads the runs as
-an artifact. Each side builds only the packages bench imports
-(`bench:build-deps`), not the whole workspace. A second job in the same workflow
-runs `bench:test-slow` (see [Tests](#tests)).
-
-The job checks out the PR's merge commit and its first parent, which is the base
-the PR was merged onto. Each side runs its own `bench/`. It runs the library
-suite on the small fixture, warm only, with 3 repeats and 1 warm-up, in five
-interleaved rounds (base, head, base, head, and so on) on one runner, so drift
-hits both sides alike. `compare` then reports each case.
+No workflow runs benchmarks. To compare two commits, run the same suite on each,
+ideally in interleaved rounds on one machine so drift hits both sides alike,
+`merge` the round files of each side, and run `compare <base> <head>`, which
+reports each case and exits 1 on a regression.
 
 - Results are compared only when the case id, case version and manifest hash all
   match. Anything else is listed as "new or changed, not compared".
 - A status change counts whatever the threshold: base `ok` with head `exceeded`,
   `oom` or `error` is a regression, and base `exceeded` with head `ok` is an
   improvement.
-- If the base has no `bench/` directory, the job says so and passes.
 
 ### How the thresholds are set
 
-Thresholds are not picked percentages. They come from an A/A noise study, in
-which `main` is measured against itself many times so that noise is all that
-separates the two sides. Each pair gives one head-over-base ratio of medians per
-case.
+Thresholds are not picked percentages. They come from an A/A noise study
+(`noise`), in which one commit is measured against itself many times so that
+noise is all that separates the two sides. Each pair gives one head-over-base
+ratio of medians per case. Thresholds only hold for the machine and method they
+were measured with.
 
 The threshold method is a family-wise lognormal bound. For each case, take the
 natural logarithm of its A/A ratios and compute their mean and sample standard
@@ -307,45 +299,19 @@ below 1, and a case with fewer than three ratios gets none. A case is flagged
 when its head/base ratio is above its threshold.
 
 Dividing the 1% by N is a Bonferroni split. The aim is a nominal 1% chance per
-pull request that a PR that changes nothing is flagged on noise in any case. A
-plain 99th percentile per case would not meet that aim: with a few dozen cases
-the check would be red on most PRs.
+comparison that a change that does nothing is flagged on noise in any case. A
+plain 99th percentile per case would flag most comparisons once there are a few
+dozen cases.
 
 That 1% is nominal. It holds if the A/A ratios really are lognormal, if the
 cases are independent enough for the split to work, and if the study's estimates
-of mean and spread are close to the truth. The study has a limited number of
-pairs, the runner image changes over time, and a real PR can meet different
-conditions from the study. Nothing here guarantees that the check will never
-flag a PR on noise. In the other direction, a slowdown smaller than a case's
-threshold passes.
+of mean and spread are close to the truth. In the other direction, a slowdown
+smaller than a case's threshold passes.
 
-The thresholds file is `thresholds/github-ubuntu-latest.json`. It records the
-study date, runner image, suite version, number of pairs, N and z. It does not
-exist until the first noise study has run, and `compare` runs without thresholds
-until then, so only status changes can fail. A thresholds file from another
-suite version is treated as stale and not used.
-
-### What the PR job and the noise job leave out
-
-Both jobs exclude `reputation.*.10000` and `open.cold.root-1000`. On small, the
-reputation export and import of 10,000 contributions each run past the `run`
-budget, so they could only ever report `exceeded`. The 1,000-repository root
-takes too long to build and open for a PR job. Both cases still run in
-`bench:record`.
-
-The noise study also excludes `oplog.conflicts.*` and `codedb.callers`. They are
-slow even on small, and 200 suite runs have to fit in GitHub's 6 hour job limit.
-The PR job still runs them. They show "no threshold" and fail the check only on
-a status change. They are THA-21's targets, so the PR job keeps watching them.
-
-### Re-running the noise study
-
-Run the study again when the suite version or the runner image changes. The
-suite version is a hash of every case id and version, so adding, removing or
-re-versioning a case changes it. Dispatch the `Benchmarks` workflow with
-`mode: noise` on `main`; it runs 20 pairs of 5 rounds, rewrites the thresholds
-file after every pair, and uploads it as an artifact. Commit that file to
-`bench/thresholds/github-ubuntu-latest.json`.
+`noise` writes `thresholds/github-ubuntu-latest.json` by default, and `compare`
+reads it when it exists (pass `--thresholds` for another file). Without one,
+`compare` runs without thresholds, so only status changes can fail. A thresholds
+file from another suite version is treated as stale and not used.
 
 ## Tests
 
@@ -354,8 +320,8 @@ schema, plan, machine, the runner on fake cases, and the suite builder with
 stand-in fixture builds). It is part of the required CI and takes about 15
 seconds. `moonx bench:test-slow` runs the tests in `test-slow/`, which start
 real processes: fixture builds, the library cases, the e2e CLI and server, and
-full suite runs. It takes several minutes and runs in the Benchmarks workflow
-only.
+full suite runs. It takes several minutes and no workflow runs it, so run it
+locally after changing bench.
 
 ## Changing a case
 

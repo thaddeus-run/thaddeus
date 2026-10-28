@@ -1,4 +1,4 @@
-// Base-against-head comparison for the PR check, the A/A noise study that
+// Base-against-head comparison of two commits, the A/A noise study that
 // sets its thresholds, and the merging of interleaved round files. All
 // functions here are pure; the CLI reads and writes the files.
 

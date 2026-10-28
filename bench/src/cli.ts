@@ -56,7 +56,7 @@ const USAGE = `usage:
 // `run` defaults for the method. The budget is a fifth of `record`'s.
 const RUN_DEFAULTS = { repeats: 10, warmup: 2, budgetMs: 120_000 };
 
-// The PR check's method (see .github/workflows/bench.yml). The noise study
+// The comparison method: interleaved rounds of a short run. The noise study
 // defaults to it, because thresholds only hold for the method they were
 // measured with.
 const PR_METHOD = { repeats: 3, warmup: 1, rounds: 5, pairs: 20 };
@@ -257,7 +257,7 @@ class FileError extends Error {
 }
 
 // `bench merge <round.json>... --out file`: merges the round files of one
-// commit (the PR check runs each side in interleaved rounds) into one run.
+// commit (a comparison runs each side in interleaved rounds) into one run.
 function mergeCommand(argv: readonly string[], host: Host): number {
   const { values, positionals } = parseArgs({
     args: [...argv],
@@ -315,7 +315,7 @@ function compareCommand(argv: readonly string[], host: Host): number {
 
 // `bench noise --rounds R --pairs P`: the A/A noise study. Each pair runs
 // this commit as "base" and again as "head", interleaved round by round the
-// way the PR check runs base and head, merges each side and records every
+// way a comparison runs base and head, merges each side and records every
 // case's head/base p50 ratio. Noise is all that separates the two sides, so
 // the ratios set each case's threshold (see `deriveThresholds`). Rewrites
 // the thresholds file (by default the committed one) after every pair.
