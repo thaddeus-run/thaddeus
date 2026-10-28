@@ -24,8 +24,7 @@ import {
   GATE_METHOD,
   gateMethods,
   gateOptions,
-  GROUP_MIN_HOSTS,
-  GROUP_MIN_RUNS,
+  groupFallbackReason,
   groupQualifies,
   hostOfFile,
   isCalibrationFile,
@@ -623,11 +622,9 @@ function publishCeilings(
     logGroup(
       `CPU model ${cpu}`,
       g,
-      groupQualifies(cpu, g)
+      groupQualifies(cpu, g, ceilings.pooled)
         ? ', used by the gate'
-        : cpu === 'unknown' || cpu === ''
-          ? ', not a CPU model the host identified, pooled applies'
-          : `, too thin for the gate (needs ${GROUP_MIN_RUNS} runs from ${GROUP_MIN_HOSTS} hosts), pooled applies`
+        : `, not used by the gate: it ${groupFallbackReason(cpu, g, ceilings.pooled)}; pooled applies`
     );
   }
   logGroup('pooled', ceilings.pooled, ', used for any other CPU model');
@@ -713,7 +710,9 @@ async function calibrateCommand(
     strict: true,
   });
   if (values.runs === undefined) throw new UsageError('calibrate needs --runs');
-  const runs = count('runs', values.runs, 1);
+  // Fewer than 3 runs give no row a ceiling (deriveGroup needs 3 p50s), so
+  // the file would gate nothing; refuse before anything runs or is written.
+  const runs = count('runs', values.runs, 3);
   const target = gateTarget(
     values.budgets,
     values['page-cache'],

@@ -694,7 +694,10 @@ test('checkGate fails when a measured row has no result at all', () => {
 test('checkGate fails on a p50 with no ceiling', () => {
   const r = gateRun(budgets);
   const ceilings = ceilingsOf(budgets, r, 100_000);
+  // Missing from both groups. The CPU group still covers every row pooled
+  // has, so the gate uses it, and that row has no ceiling.
   delete ceilings.byCpu['Test CPU'].p50Ceilings[smallKey('diff', 'developer')];
+  delete ceilings.pooled.p50Ceilings[smallKey('diff', 'developer')];
   const result = checkGate(r, budgets, ceilings, METHODS);
   expect(result.failed).toBe(true);
   expect(result.lines).toContain(
@@ -972,6 +975,16 @@ test('ceilingGroupFor uses the CPU model group only with enough runs and hosts, 
       `ceilings: using the pooled group (20 runs from 10 hosts); CPU model Test CPU was calibrated on only ${runs} runs from ${hosts} hosts, and a group needs 6 runs from 3 hosts`
     );
   }
+  // A group large enough but without a ceiling for one row would fail that
+  // row on every run of its CPU model, so the pooled group applies instead.
+  const holed = own(6, 3);
+  const missing = smallKey('pull', 'developer');
+  delete holed.byCpu['Test CPU'].p50Ceilings[missing];
+  const partial = ceilingGroupFor(holed, 'Test CPU');
+  expect(partial.group.runs).toBe(20);
+  expect(partial.note).toBe(
+    `ceilings: using the pooled group (20 runs from 10 hosts); CPU model Test CPU has no ceiling for ${missing}`
+  );
   const unknown = ceilingGroupFor(own(6, 3), 'Unseen CPU');
   expect(unknown.group.runs).toBe(20);
   expect(unknown.note).toBe(
@@ -980,17 +993,24 @@ test('ceilingGroupFor uses the CPU model group only with enough runs and hosts, 
 });
 
 test('groupQualifies needs enough runs and hosts and a CPU model the host identified', () => {
-  const group = (runs: number, hosts: number) =>
+  const of = (runs: number, hosts: number) =>
     ceilingsOf(budgets, gateRun(budgets), 200, ['warm'], {
       own: { runs, hosts },
-    }).byCpu['Test CPU'];
-  expect(groupQualifies('Test CPU', group(6, 3))).toBe(true);
-  expect(groupQualifies('Test CPU', group(5, 3))).toBe(false);
-  expect(groupQualifies('Test CPU', group(10, 2))).toBe(false);
+    });
+  const pooled = of(6, 3).pooled;
+  const group = (runs: number, hosts: number) =>
+    of(runs, hosts).byCpu['Test CPU'];
+  expect(groupQualifies('Test CPU', group(6, 3), pooled)).toBe(true);
+  expect(groupQualifies('Test CPU', group(5, 3), pooled)).toBe(false);
+  expect(groupQualifies('Test CPU', group(10, 2), pooled)).toBe(false);
+  // Every row the pooled group covers must have a ceiling in the CPU group.
+  const holed = group(6, 3);
+  delete holed.p50Ceilings[smallKey('status', 'developer')];
+  expect(groupQualifies('Test CPU', holed, pooled)).toBe(false);
   // Hosts that could not read their CPU all report these names, so a group
   // under them mixes unrelated machines whatever its size.
-  expect(groupQualifies('unknown', group(20, 10))).toBe(false);
-  expect(groupQualifies('', group(20, 10))).toBe(false);
+  expect(groupQualifies('unknown', group(20, 10), pooled)).toBe(false);
+  expect(groupQualifies('', group(20, 10), pooled)).toBe(false);
 });
 
 test('ceilingGroupFor never uses a group keyed unknown or empty, even a large one', () => {

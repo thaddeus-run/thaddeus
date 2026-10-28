@@ -470,15 +470,32 @@ export const GROUP_MIN_RUNS = 6;
 export const GROUP_MIN_HOSTS = 3;
 
 // Whether the gate may use the ceilings group of CPU model `cpu`. It needs
-// enough runs and hosts, and a model the runs actually identified: `unknown`
-// and the empty string are what a host reports when it could not read its
-// CPU, and unrelated hosts would share that group.
-export function groupQualifies(cpu: string, group: CeilingGroup): boolean {
+// enough runs and hosts, a model the runs actually identified (`unknown` and
+// the empty string are what a host reports when it could not read its CPU,
+// and unrelated hosts would share that group), and a ceiling for every row
+// the pooled group covers. A row a calibration run lost on this model would
+// otherwise fail every later run of it with "no ceiling".
+export function groupQualifies(
+  cpu: string,
+  group: CeilingGroup,
+  pooled: CeilingGroup
+): boolean {
   return (
     cpu !== 'unknown' &&
     cpu !== '' &&
     group.runs >= GROUP_MIN_RUNS &&
-    group.hosts >= GROUP_MIN_HOSTS
+    group.hosts >= GROUP_MIN_HOSTS &&
+    uncoveredRows(group, pooled).length === 0
+  );
+}
+
+// The rows the pooled group has a ceiling for and `group` does not.
+export function uncoveredRows(
+  group: CeilingGroup,
+  pooled: CeilingGroup
+): string[] {
+  return Object.keys(pooled.p50Ceilings).filter(
+    (key) => group.p50Ceilings[key] === undefined
   );
 }
 
@@ -536,6 +553,22 @@ export function isCalibrationFile(name: string): boolean {
   return CALIBRATION_FILE.test(name.slice(name.lastIndexOf('/') + 1));
 }
 
+// Why the gate cannot use the group of CPU model `cpu`, for the gate's note
+// and the ceilings log. Only called for a group that does not qualify.
+export function groupFallbackReason(
+  cpu: string,
+  group: CeilingGroup,
+  pooled: CeilingGroup
+): string {
+  if (cpu === 'unknown' || cpu === '') {
+    return 'is not a CPU model the host identified';
+  }
+  if (group.runs < GROUP_MIN_RUNS || group.hosts < GROUP_MIN_HOSTS) {
+    return `was calibrated on only ${group.runs} runs from ${group.hosts} hosts, and a group needs ${GROUP_MIN_RUNS} runs from ${GROUP_MIN_HOSTS} hosts`;
+  }
+  return `has no ceiling for ${uncoveredRows(group, pooled).join(', ')}`;
+}
+
 // The ceilings the gate uses for a run, and why: the group of the run's CPU
 // model when it qualifies (see `groupQualifies`), else the pooled group.
 // `note` is the one line the gate prints about the choice.
@@ -545,7 +578,7 @@ export function ceilingGroupFor(
 ): { group: CeilingGroup; note: string } {
   const own = ceilings.byCpu[cpu];
   const counted = (g: CeilingGroup) => `${g.runs} runs from ${g.hosts} hosts`;
-  if (own !== undefined && groupQualifies(cpu, own)) {
+  if (own !== undefined && groupQualifies(cpu, own, ceilings.pooled)) {
     return {
       group: own,
       note: `ceilings: using the group of CPU model ${cpu} (${counted(own)})`,
@@ -554,9 +587,7 @@ export function ceilingGroupFor(
   const why =
     own === undefined
       ? 'was not calibrated'
-      : cpu === 'unknown' || cpu === ''
-        ? 'is not a CPU model the host identified'
-        : `was calibrated on only ${counted(own)}, and a group needs ${GROUP_MIN_RUNS} runs from ${GROUP_MIN_HOSTS} hosts`;
+      : groupFallbackReason(cpu, own, ceilings.pooled);
   return {
     group: ceilings.pooled,
     note: `ceilings: using the pooled group (${counted(ceilings.pooled)}); CPU model ${cpu} ${why}`,

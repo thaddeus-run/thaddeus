@@ -177,6 +177,13 @@ test('calibrate needs --runs, and the dropped mode needs sudo', async () => {
     sudoOk: () => false,
   });
   expect((await cli(['calibrate'], host)).code).toBe(2);
+  // Fewer than 3 runs cannot give any row a ceiling, so it is refused before
+  // anything runs or is written.
+  const tooFew = join(scratch, 'too-few.json');
+  expect(
+    (await cli(['calibrate', '--runs', '2', '--out', tooFew], host)).code
+  ).toBe(2);
+  expect(existsSync(tooFew)).toBe(false);
   const noSudo = await cli(
     ['calibrate', '--runs', '3', '--out', join(scratch, 'x.json')],
     host
@@ -307,7 +314,7 @@ test('ceilings counts hosts from run-<host>-<k>.json names and logs each CPU mod
     'ceilings: CPU model Fast: 6 runs from 3 hosts, used by the gate'
   );
   expect(logs).toContain(
-    'ceilings: CPU model Slow: 2 runs from 1 hosts, too thin for the gate (needs 6 runs from 3 hosts), pooled applies'
+    'ceilings: CPU model Slow: 2 runs from 1 hosts, not used by the gate: it was calibrated on only 2 runs from 1 hosts, and a group needs 6 runs from 3 hosts; pooled applies'
   );
   expect(logs).toContain(
     'ceilings: pooled: 8 runs from 4 hosts, used for any other CPU model'
