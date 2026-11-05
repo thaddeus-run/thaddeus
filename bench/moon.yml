@@ -35,6 +35,18 @@ tasks:
       cache: false
       runInCI: 'skip'
 
+  # The seeded agent workload with faults (THA-118) against the compiled CLI.
+  # Pass flags after `--`, e.g.
+  # `CI= moonx bench:workload -- --agents 8 --rounds 4 --seed 7`.
+  workload:
+    command: 'bun src/cli.ts workload'
+    deps:
+      - '^:build'
+      - 'cli:compile'
+    options:
+      cache: false
+      runInCI: 'skip'
+
   # The recorded run on the benchmark machine: refuses a busy machine, a dirty
   # tree or a missing `sudo -n`, then runs everything and files the result
   # under results/<machine>/. Needs BENCH_MACHINE, e.g.

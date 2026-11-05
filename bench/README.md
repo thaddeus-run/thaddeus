@@ -313,15 +313,147 @@ reads it when it exists (pass `--thresholds` for another file). Without one,
 `compare` runs without thresholds, so only status changes can fail. A thresholds
 file from another suite version is treated as stale and not used.
 
+## The agent workload
+
+`workload` is the THA-118 harness. It runs the real `thaddeus` CLI as several
+agents at once against one real `thaddeus serve` and injects faults from a
+seeded schedule. When the agents finish, it checks that the server kept what it
+acknowledged. It measures the shipped CLI on one machine. It is not the
+1,000-agent qualification, which is THA-130, and its numbers are observations,
+not targets.
+
+```sh
+CI= moonx bench:workload -- --agents 8 --rounds 4 --seed 7
+```
+
+| Flag            | Default                              | Meaning                                                   |
+| --------------- | ------------------------------------ | --------------------------------------------------------- |
+| `--seed`        | 1                                    | Seeds the schedule, the identities and the request faults |
+| `--agents`      | 4                                    | Agents that work at once                                  |
+| `--rounds`      | 3                                    | Measured rounds per agent                                 |
+| `--shape`       | `hot`                                | `hot` (one shared repository) or `many` (one each)        |
+| `--start`       | `cold`                               | `cold` or `warm` (one extra unmeasured round first)       |
+| `--faults`      | `kill,storage,duplicate,delay,stale` | Any subset, or `none`                                     |
+| `--integrators` | 1                                    | Owner lands that run at once (hot shape)                  |
+| `--replay`      |                                      | Run the schedule stored in an earlier result file         |
+| `--out`         | `out/workload-<date>-<sha>-...json`  | Where the result goes                                     |
+
+The command exits 0 when every check passes and 1 when one fails. A failed run
+keeps its server data and working copies under `.cache/.work/` and prints the
+path.
+
+### What an agent does
+
+Each agent has its own identity and working copy and runs its rounds in order.
+All agents run at the same time. A round is a list of steps:
+
+| Step         | Command                                                                                                                                  |
+| ------------ | ---------------------------------------------------------------------------------------------------------------------------------------- |
+| sync         | `pull`, or a fresh `clone` when the last land said to re-clone. Round 0 starts from a fresh clone and skips it.                          |
+| save         | writes one to three files under `agents/a<i>/`, new or rewritten, then `push`                                                            |
+| integrate    | hot shape: the owner runs `land` from the agent's working copy, through a first-in, first-out queue of `--integrators` slots             |
+| query        | `query touched-since 2026-01-01`, about every other round                                                                                |
+| probe-scope  | hot shape: a save outside the agent's directory from a throwaway clone. The owner's land of it must be refused.                          |
+| probe-tenant | an identity with no grant clones another repository and pushes to it. The clone must hold no readable file and the push must be refused. |
+
+In the hot shape the owner grants each agent `--paths 'agents/a<i>/**'`. An
+agent's `push` uploads and exits 1 with "owner signature required", which is the
+shipped behaviour for a delegated agent. The owner's land publishes it. In the
+many shape each agent owns its repository, so its push publishes to main and
+nothing needs landing. Every run has at least one probe of each kind that
+applies to its shape.
+
+A failed attempt is retried up to five times. An agent whose working copy can no
+longer pull or push clones a fresh one, and its unlanded saves count as never
+acknowledged.
+
+### Faults
+
+| Fault       | What happens                                                                                                                                            |
+| ----------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `kill`      | SIGKILL the server after a scheduled number of measured actions, wait 300 ms, restart it on the same data root and port. About one kill per 40 actions. |
+| `storage`   | Make a quarter of the existing `FileBackend` record shards read-only for 1.5 s. Writes into them fail, reads still work.                                |
+| `duplicate` | The proxy replays 10% of signed writes after the original answered, as a retry or a network replay would.                                               |
+| `delay`     | The proxy holds 10% of requests for up to 300 ms, so later requests overtake them.                                                                      |
+| `stale`     | About 30% of rounds skip their opening pull, so the agent saves and lands from an old copy of main.                                                     |
+
+Kill and storage faults fire between 10% and 80% of the way through the measured
+actions. The CLI talks to the server through a proxy, so its address survives a
+restart. Running as root makes directory permissions useless, so a storage fault
+is then recorded as skipped.
+
+### Checks
+
+After the last agent finishes, the server is killed once more and restarted.
+Then:
+
+- **Durability.** A fresh clone of each repository's main is compared with what
+  the server acknowledged. A land that exited 0 in the hot shape, or a push that
+  published in the many shape, counts as acknowledged. Each acknowledged file
+  must hold its latest acknowledged content or a later write, because a write
+  whose answer was lost in a fault may still have landed.
+- **Authority.** Every land of an out-of-scope save was refused for the
+  delegated scope, and no such file is on main.
+- **Revision-bound writes.** The server refused every replayed signed write. A
+  stale land must not drop a land that was acknowledged earlier. The durability
+  check catches that case.
+- **Tenant isolation.** No identity without a grant could read a file or push to
+  another repository, and no file it tried to write is on main.
+
+### Reading a workload result
+
+A result file follows `schema/bench-workload.schema.json`. Its `workloadVersion`
+changes when the actions, the checks or the meaning of a number change. It
+holds:
+
+- the commit, the machine, the CLI command and the full `schedule`, so
+  `--replay` can run the same plan again. Only the interleaving of concurrent
+  agents and which requests the proxy picks depend on the machine.
+- `coverage`, which says for each action THA-118 names whether the run drives
+  it.
+- per action kind, the attempts by outcome (`ok`, `fault` when an injected fault
+  was active, `error` otherwise) and p50, p95, p99 and max over the ok attempts.
+- throughput, as ok actions and acknowledged writes per second.
+- `queueWait`: from an agent asking for integration to an integrator starting
+  its land.
+- `recovery`: per kill, the time until the server answered again (`restartMs`)
+  and until the first action after the restart succeeded (`recoveryMs`). Per
+  storage fault, the shard count and the attempts it failed.
+- `network`: request and response body bytes through the proxy, and replayed
+  writes by the status the server gave them.
+- `server`: peak and mean resident memory sampled every 250 ms from `/proc`
+  (null off Linux), data root size and restart count.
+- the four checks, the output of the first 20 failed attempts outside the
+  probes, and every failed attempt counted by action, outcome and last output
+  line.
+
+Latency includes the CLI process start, as in the e2e suite. Durability is
+FileBackend's: it renames atomically but never calls fsync. So a killed server
+process loses nothing the kernel already holds, and the result cannot speak for
+a machine crash. Cold and warm, and hot and many, are separate runs with
+separate results.
+
+### What the workload does not cover yet
+
+- Checkpoints and build requests. The CLI has neither, so `coverage` says "not
+  shipped".
+- Structured edits. `thaddeus rename` exists, but the workload does not drive
+  it.
+- Authority under the trusted service (THA-150). The authority check covers
+  today's delegated path scopes.
+- Scale. Every agent is a CLI process on one machine. THA-130 owns the
+  1,000-agent run.
+
 ## Tests
 
 `moonx bench:test` runs the fast unit tests in `test/` (statistics, comparison,
-schema, plan, machine, the runner on fake cases, and the suite builder with
-stand-in fixture builds). It is part of the required CI and takes about 15
-seconds. `moonx bench:test-slow` runs the tests in `test-slow/`, which start
-real processes: fixture builds, the library cases, the e2e CLI and server, and
-full suite runs. It takes several minutes and no workflow runs it, so run it
-locally after changing bench.
+schema, plan, machine, the runner on fake cases, the suite builder with stand-in
+fixture builds, and the workload's schedule, ledger, proxy and command). It is
+part of the required CI and takes about 15 seconds. `moonx bench:test-slow` runs
+the tests in `test-slow/`, which start real processes: fixture builds, the
+library cases, the e2e CLI and server, full suite runs and two small workload
+runs. It takes several minutes and no workflow runs it, so run it locally after
+changing bench.
 
 ## Changing a case
 

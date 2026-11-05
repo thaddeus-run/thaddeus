@@ -37,6 +37,7 @@ import {
 } from './record';
 import { type BenchRun, validateRun } from './result';
 import { childrenRunning, Interrupted } from './runner';
+import { WORKLOAD_USAGE, workloadCommand } from './workload/command';
 
 const USAGE = `usage:
   bun src/cli.ts run [--suite library|e2e|all] [--fixtures small,medium] [--sweeps]
@@ -51,7 +52,8 @@ const USAGE = `usage:
                      print a base/head summary; exit 1 on a regression
   bun src/cli.ts noise [--rounds R] [--pairs P] [--suite ...] [--fixtures ...]
                      [--repeats N] [--warmup N] [--exclude glob,...] [--out file]
-                     A/A noise study of this commit; writes the thresholds file`;
+                     A/A noise study of this commit; writes the thresholds file
+${WORKLOAD_USAGE}`;
 
 // `run` defaults for the method. The budget is a fifth of `record`'s.
 const RUN_DEFAULTS = { repeats: 10, warmup: 2, budgetMs: 120_000 };
@@ -430,6 +432,7 @@ export async function run(
     if (command === 'merge') return mergeCommand(rest, host);
     if (command === 'compare') return compareCommand(rest, host);
     if (command === 'noise') return await noiseCommand(rest, host);
+    if (command === 'workload') return await workloadCommand(rest, host);
     throw new UsageError(
       command === undefined ? 'no command' : `unknown command ${command}`
     );
