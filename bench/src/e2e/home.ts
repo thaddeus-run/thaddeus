@@ -54,17 +54,26 @@ export function writeCliHome(home: string, seed: Uint8Array): void {
   chmodSync(path, 0o600);
 }
 
+// What one CLI invocation did: its exit code, its combined output and its
+// wall-clock time in milliseconds, process start included.
+export interface CliOutcome {
+  code: number;
+  output: string;
+  ms: number;
+}
+
 // Runs one CLI command as the identity in `env.home`, in `env.cwd`, and
-// returns its wall-clock time in milliseconds, process start included,
-// because that is what a user waits for. Throws on a non-zero exit with the
-// end of the command's output, so a refused push or land is a case error and
-// never a fast sample. The child is a normal (non-detached) one, so a budget
-// kill of the case's process group takes it down too.
-export async function timeCli(
+// reports how it ended without judging it. The agent workload needs this,
+// because a delegated agent's push exits 1 by design and a refused land is
+// an expected answer there. With `timeoutMs`, a command still running then
+// is killed and its output ends with a note saying so. The child is a normal
+// (non-detached) one, so a budget kill of the case's process group takes it
+// down too.
+export async function runCli(
   cli: readonly string[],
   args: readonly string[],
-  env: { home: string; cwd: string }
-): Promise<number> {
+  env: { home: string; cwd: string; timeoutMs?: number }
+): Promise<CliOutcome> {
   const started = performance.now();
   const proc = Bun.spawn([...cli, ...args], {
     cwd: env.cwd,
@@ -73,17 +82,44 @@ export async function timeCli(
     stdout: 'pipe',
     stderr: 'pipe',
   });
+  let timedOut = false;
+  const timer =
+    env.timeoutMs === undefined
+      ? undefined
+      : setTimeout(() => {
+          timedOut = true;
+          proc.kill('SIGKILL');
+        }, env.timeoutMs);
   const [stdout, stderr, code] = await Promise.all([
     new Response(proc.stdout).text(),
     new Response(proc.stderr).text(),
     proc.exited,
   ]);
-  const elapsed = performance.now() - started;
+  clearTimeout(timer);
+  const note = timedOut ? `\n(killed after ${env.timeoutMs} ms)` : '';
+  return {
+    code,
+    output: `${stdout}${stderr}${note}`,
+    ms: performance.now() - started,
+  };
+}
+
+// Runs one CLI command as the identity in `env.home`, in `env.cwd`, and
+// returns its wall-clock time in milliseconds, process start included,
+// because that is what a user waits for. Throws on a non-zero exit with the
+// end of the command's output, so a refused push or land is a case error and
+// never a fast sample.
+export async function timeCli(
+  cli: readonly string[],
+  args: readonly string[],
+  env: { home: string; cwd: string }
+): Promise<number> {
+  const { code, output, ms } = await runCli(cli, args, env);
   if (code !== 0) {
-    const output = `${stdout}${stderr}`.trim().slice(-OUTPUT_TAIL_CHARS);
+    const tail = output.trim().slice(-OUTPUT_TAIL_CHARS);
     throw new Error(
-      `thaddeus ${args.join(' ')} exited with code ${code}: ${output}`
+      `thaddeus ${args.join(' ')} exited with code ${code}: ${tail}`
     );
   }
-  return elapsed;
+  return ms;
 }

@@ -1,0 +1,655 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://thaddeus.run/schemas/bench-workload.schema.json",
+  "title": "WorkloadResult",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "workloadVersion",
+    "commit",
+    "dirty",
+    "recordedAt",
+    "machine",
+    "cli",
+    "durability",
+    "schedule",
+    "coverage",
+    "durationMs",
+    "actions",
+    "throughput",
+    "queueWait",
+    "recovery",
+    "network",
+    "server",
+    "checks",
+    "errors",
+    "ok"
+  ],
+  "properties": {
+    "schemaVersion": {
+      "const": 1
+    },
+    "workloadVersion": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "commit": {
+      "type": "string"
+    },
+    "dirty": {
+      "type": "boolean"
+    },
+    "recordedAt": {
+      "type": "string"
+    },
+    "machine": {
+      "$ref": "#/$defs/machine"
+    },
+    "cli": {
+      "type": "string"
+    },
+    "durability": {
+      "type": "string"
+    },
+    "schedule": {
+      "$ref": "#/$defs/schedule"
+    },
+    "coverage": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["action", "status", "how"],
+        "properties": {
+          "action": {
+            "type": "string"
+          },
+          "status": {
+            "enum": ["covered", "not shipped", "not covered"]
+          },
+          "how": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "durationMs": {
+      "type": "number",
+      "minimum": 0
+    },
+    "actions": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/action"
+      }
+    },
+    "throughput": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["actionsPerSecond", "acknowledgedWritesPerSecond"],
+      "properties": {
+        "actionsPerSecond": {
+          "type": "number",
+          "minimum": 0
+        },
+        "acknowledgedWritesPerSecond": {
+          "type": "number",
+          "minimum": 0
+        }
+      }
+    },
+    "queueWait": {
+      "$ref": "#/$defs/percentiles"
+    },
+    "recovery": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kills", "storage"],
+      "properties": {
+        "kills": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["restartMs", "recoveryMs"],
+            "properties": {
+              "restartMs": {
+                "type": "number",
+                "minimum": 0
+              },
+              "recoveryMs": {
+                "type": ["number", "null"],
+                "minimum": 0
+              }
+            }
+          }
+        },
+        "storage": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["shards", "heldMs", "faultedAttempts"],
+            "properties": {
+              "shards": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "heldMs": {
+                "type": "number",
+                "minimum": 0
+              },
+              "faultedAttempts": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "skipped": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      }
+    },
+    "network": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "requests",
+        "requestBytes",
+        "responseBytes",
+        "delayed",
+        "duplicated",
+        "duplicateStatuses",
+        "unreachable"
+      ],
+      "properties": {
+        "requests": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "requestBytes": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "responseBytes": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "delayed": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "duplicated": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "duplicateStatuses": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "unreachable": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "server": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["peakRssBytes", "meanRssBytes", "diskBytes", "restarts"],
+      "properties": {
+        "peakRssBytes": {
+          "type": ["number", "null"],
+          "minimum": 0
+        },
+        "meanRssBytes": {
+          "type": ["number", "null"],
+          "minimum": 0
+        },
+        "diskBytes": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "restarts": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "checks": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "durability",
+        "authority",
+        "revisionBound",
+        "tenantIsolation"
+      ],
+      "properties": {
+        "durability": {
+          "$ref": "#/$defs/check"
+        },
+        "authority": {
+          "$ref": "#/$defs/check"
+        },
+        "revisionBound": {
+          "$ref": "#/$defs/check"
+        },
+        "tenantIsolation": {
+          "$ref": "#/$defs/check"
+        }
+      }
+    },
+    "errors": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["kind", "agent", "output"],
+        "properties": {
+          "kind": {
+            "enum": [
+              "clone",
+              "pull",
+              "save",
+              "land",
+              "query",
+              "probe-scope",
+              "probe-tenant"
+            ]
+          },
+          "agent": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "output": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "ok": {
+      "type": "boolean"
+    }
+  },
+  "$defs": {
+    "machine": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "description",
+        "cpu",
+        "vcpus",
+        "memoryBytes",
+        "virtualization",
+        "os",
+        "bun",
+        "loadAvg1",
+        "memAvailableBytes"
+      ],
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "description": {
+          "type": "string"
+        },
+        "cpu": {
+          "type": "string"
+        },
+        "vcpus": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "memoryBytes": {
+          "type": "number",
+          "minimum": 0
+        },
+        "virtualization": {
+          "type": "string"
+        },
+        "os": {
+          "type": "string"
+        },
+        "bun": {
+          "type": "string"
+        },
+        "loadAvg1": {
+          "type": "number",
+          "minimum": 0
+        },
+        "memAvailableBytes": {
+          "type": "number",
+          "minimum": 0
+        }
+      }
+    },
+    "config": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "seed",
+        "agents",
+        "rounds",
+        "shape",
+        "start",
+        "faults",
+        "integrators"
+      ],
+      "properties": {
+        "seed": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "agents": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "rounds": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "shape": {
+          "enum": ["hot", "many"]
+        },
+        "start": {
+          "enum": ["cold", "warm"]
+        },
+        "faults": {
+          "type": "array",
+          "items": {
+            "enum": ["kill", "storage", "duplicate", "delay", "stale"]
+          },
+          "uniqueItems": true
+        },
+        "integrators": {
+          "type": "integer",
+          "minimum": 1
+        }
+      }
+    },
+    "schedule": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "version",
+        "config",
+        "warmupRounds",
+        "agents",
+        "events",
+        "requests"
+      ],
+      "properties": {
+        "version": {
+          "const": 1
+        },
+        "config": {
+          "$ref": "#/$defs/config"
+        },
+        "warmupRounds": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "agents": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["agent", "rounds"],
+            "properties": {
+              "agent": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "rounds": {
+                "type": "array",
+                "items": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/$defs/step"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "events": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["kind", "afterActions"],
+            "properties": {
+              "kind": {
+                "enum": ["kill", "storage"]
+              },
+              "afterActions": {
+                "type": "integer",
+                "minimum": 1
+              }
+            }
+          }
+        },
+        "requests": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["duplicateRate", "delayRate", "maxDelayMs"],
+          "properties": {
+            "duplicateRate": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1
+            },
+            "delayRate": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1
+            },
+            "maxDelayMs": {
+              "type": "integer",
+              "minimum": 0
+            }
+          }
+        }
+      }
+    },
+    "step": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind"],
+          "properties": {
+            "kind": {
+              "const": "sync"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "edits"],
+          "properties": {
+            "kind": {
+              "const": "save"
+            },
+            "edits": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/edit"
+              }
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind"],
+          "properties": {
+            "kind": {
+              "const": "integrate"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind"],
+          "properties": {
+            "kind": {
+              "const": "query"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "token"],
+          "properties": {
+            "kind": {
+              "const": "probe-scope"
+            },
+            "token": {
+              "type": "integer",
+              "minimum": 0
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "target"],
+          "properties": {
+            "kind": {
+              "const": "probe-tenant"
+            },
+            "target": {
+              "type": "integer",
+              "minimum": -1
+            }
+          }
+        }
+      ]
+    },
+    "edit": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "token"],
+      "properties": {
+        "path": {
+          "type": "string"
+        },
+        "token": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "action": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "attempts",
+        "ok",
+        "fault",
+        "error",
+        "p50Ms",
+        "p95Ms",
+        "p99Ms",
+        "maxMs"
+      ],
+      "properties": {
+        "kind": {
+          "enum": [
+            "clone",
+            "pull",
+            "save",
+            "land",
+            "query",
+            "probe-scope",
+            "probe-tenant"
+          ]
+        },
+        "attempts": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "ok": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "fault": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "error": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "p50Ms": {
+          "type": ["number", "null"],
+          "minimum": 0
+        },
+        "p95Ms": {
+          "type": ["number", "null"],
+          "minimum": 0
+        },
+        "p99Ms": {
+          "type": ["number", "null"],
+          "minimum": 0
+        },
+        "maxMs": {
+          "type": ["number", "null"],
+          "minimum": 0
+        }
+      }
+    },
+    "percentiles": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["samples", "p50Ms", "p95Ms", "maxMs"],
+      "properties": {
+        "samples": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "p50Ms": {
+          "type": ["number", "null"],
+          "minimum": 0
+        },
+        "p95Ms": {
+          "type": ["number", "null"],
+          "minimum": 0
+        },
+        "maxMs": {
+          "type": ["number", "null"],
+          "minimum": 0
+        }
+      }
+    },
+    "check": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["checked", "violations"],
+      "properties": {
+        "checked": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "violations": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    }
+  }
+}

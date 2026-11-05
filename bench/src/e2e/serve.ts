@@ -14,7 +14,12 @@ const OUTPUT_TAIL_CHARS = 2_000;
 
 export interface RunningServe {
   url: string;
+  port: number;
+  /** The server's process id, for sampling its memory. */
+  pid: number;
   stop(): Promise<void>;
+  /** SIGKILL with no grace period, as a crash would end it. */
+  kill(): Promise<void>;
 }
 
 // A TCP port that was free a moment ago: bind port 0, read the port the
@@ -48,17 +53,20 @@ function tailOf(stream: ReadableStream<Uint8Array>): () => string {
   return () => tail;
 }
 
-// Starts `<cli> serve --data <root> --port <free port> ...flags` as a normal
+// Starts `<cli> serve --data <root> --port <port> ...flags` as a normal
 // child of this process (never detached, so the runner's group kill reaches
-// it) and resolves once GET /version answers. Rejects with the server's
-// output if it exits or does not answer within READY_TIMEOUT_MS. `stop`
-// sends SIGTERM, then SIGKILL after STOP_GRACE_MS, and waits for the exit.
+// it) and resolves once GET /version answers. The port is `opts.port`, so a
+// restarted server can keep its address, or a free one. Rejects with the
+// server's output if it exits or does not answer within READY_TIMEOUT_MS.
+// `stop` sends SIGTERM, then SIGKILL after STOP_GRACE_MS, and waits for the
+// exit.
 export async function startServe(opts: {
   cli: readonly string[];
   root: string;
   flags: readonly string[];
+  port?: number;
 }): Promise<RunningServe> {
-  const port = await freePort();
+  const port = opts.port ?? (await freePort());
   const proc = Bun.spawn(
     [
       ...opts.cli,
@@ -83,6 +91,12 @@ export async function startServe(opts: {
     clearTimeout(timer);
   };
 
+  const kill = async (): Promise<void> => {
+    if (proc.exitCode !== null || proc.signalCode !== null) return;
+    proc.kill('SIGKILL');
+    await proc.exited;
+  };
+
   const deadline = performance.now() + READY_TIMEOUT_MS;
   for (;;) {
     if (proc.exitCode !== null || proc.signalCode !== null) {
@@ -94,7 +108,7 @@ export async function startServe(opts: {
       const res = await fetch(`${url}/version`);
       if (res.ok) {
         await res.body?.cancel();
-        return { url, stop };
+        return { url, port, pid: proc.pid, stop, kill };
       }
       await res.body?.cancel();
     } catch {
