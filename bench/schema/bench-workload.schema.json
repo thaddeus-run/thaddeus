@@ -24,6 +24,7 @@
     "server",
     "checks",
     "errors",
+    "failures",
     "ok"
   ],
   "properties": {
@@ -269,6 +270,37 @@
           },
           "output": {
             "type": "string"
+          }
+        }
+      }
+    },
+    "failures": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["kind", "outcome", "message", "count"],
+        "properties": {
+          "kind": {
+            "enum": [
+              "clone",
+              "pull",
+              "save",
+              "land",
+              "query",
+              "probe-scope",
+              "probe-tenant"
+            ]
+          },
+          "outcome": {
+            "enum": ["fault", "error"]
+          },
+          "message": {
+            "type": "string"
+          },
+          "count": {
+            "type": "integer",
+            "minimum": 1
           }
         }
       }

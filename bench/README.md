@@ -423,7 +423,9 @@ holds:
   writes by the status the server gave them.
 - `server`: peak and mean resident memory sampled every 250 ms from `/proc`
   (null off Linux), data root size and restart count.
-- the four checks, and the output of the first failed attempts.
+- the four checks, the output of the first 20 failed attempts outside the
+  probes, and every failed attempt counted by action, outcome and last output
+  line.
 
 Latency includes the CLI process start, as in the e2e suite. Durability is
 FileBackend's: it renames atomically but never calls fsync. So a killed server

@@ -86,6 +86,9 @@ function fakeDrive(violations: string[] = [], seen: DriveOptions[] = []) {
         tenantIsolation: check(),
       },
       errors: [],
+      failures: [
+        { kind: 'save', outcome: 'fault', message: 'server is down', count: 1 },
+      ],
       ok: violations.length === 0,
     });
   };

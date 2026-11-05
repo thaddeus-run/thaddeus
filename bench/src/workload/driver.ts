@@ -64,6 +64,8 @@ const RSS_SAMPLE_MS = 250;
 // How many failed attempts the result keeps the output of.
 const MAX_ERRORS = 20;
 const ERROR_OUTPUT_CHARS = 600;
+// How much of a failure's last output line the failure counts keep.
+const FAILURE_MESSAGE_CHARS = 160;
 
 // The queries every agent runs: everything touched since the fixture epoch.
 const QUERY_SINCE = '2026-01-01';
@@ -699,7 +701,6 @@ export async function drive(opts: DriveOptions): Promise<DriveOutput> {
             (o) => (/uploaded \d+ op/.test(o.output) ? 'ok' : 'retry')
           );
           if (!pushed.ok) return;
-          checks.authority.checked++;
           const landed = await act(
             'probe-scope',
             i,
@@ -712,6 +713,9 @@ export async function drive(opts: DriveOptions): Promise<DriveOutput> {
                   ? 'refused'
                   : 'retry'
           );
+          // Only a definite answer counts; a land that kept failing for
+          // another reason checked nothing.
+          if (landed.ok || landed.last.code === 0) checks.authority.checked++;
           if (landed.last.code === 0) {
             checks.authority.violations.push(
               `land of ${path}, outside a${i}'s delegated scope, was accepted`
@@ -748,7 +752,12 @@ export async function drive(opts: DriveOptions): Promise<DriveOutput> {
                   ? 'refused'
                   : 'retry'
           );
-          if (pushed.last.code === 0 || /published/.test(pushed.last.output)) {
+          const accepted =
+            pushed.last.code === 0 || /published/.test(pushed.last.output);
+          // The clone's read check above always counts; the push counts only
+          // with a definite answer.
+          if (pushed.ok || accepted) checks.tenantIsolation.checked++;
+          if (accepted) {
             checks.tenantIsolation.violations.push(
               `${intruder.label}'s push to ${target} without a grant was accepted`
             );
@@ -859,6 +868,32 @@ export async function drive(opts: DriveOptions): Promise<DriveOutput> {
         output: t.output.trim().slice(-ERROR_OUTPUT_CHARS),
       }));
 
+    const failures = new Map<
+      string,
+      {
+        kind: ActionKind;
+        outcome: 'fault' | 'error';
+        message: string;
+        count: number;
+      }
+    >();
+    for (const t of attempts) {
+      if (t.outcome === 'ok') continue;
+      const message = (t.output.trim().split('\n').at(-1) ?? '').slice(
+        0,
+        FAILURE_MESSAGE_CHARS
+      );
+      const key = `${t.kind}\0${t.outcome}\0${message}`;
+      const entry = failures.get(key) ?? {
+        kind: t.kind,
+        outcome: t.outcome,
+        message,
+        count: 0,
+      };
+      entry.count++;
+      failures.set(key, entry);
+    }
+
     const allChecks = {
       durability,
       authority: checks.authority,
@@ -916,6 +951,7 @@ export async function drive(opts: DriveOptions): Promise<DriveOutput> {
       },
       checks: allChecks,
       errors,
+      failures: [...failures.values()].sort((a, b) => b.count - a.count),
       ok: Object.values(allChecks).every((c) => c.violations.length === 0),
     };
   } finally {

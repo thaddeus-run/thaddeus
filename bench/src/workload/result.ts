@@ -114,6 +114,16 @@ export interface WorkloadResult {
   };
   /** The first failed attempts outside the probes, with their output. */
   errors: { kind: ActionKind; agent: number; output: string }[];
+  /**
+   * Every failed attempt, fault or error, counted by action kind, outcome
+   * and the last line of its output, most frequent first.
+   */
+  failures: {
+    kind: ActionKind;
+    outcome: 'fault' | 'error';
+    message: string;
+    count: number;
+  }[];
   /** True when every check passed. */
   ok: boolean;
 }
