@@ -1,0 +1,907 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="color-scheme" content="dark" />
+    <title>THA-150 trusted-service authority plan</title>
+    <style>
+      :root {
+        /* Near-black editorial palette. Dark-only by design — do not add a light theme. */
+        --bg: #000000;
+        --surface: #0c0c0c; /* cards */
+        --rule: #232323; /* hairlines, card borders */
+        --fg: #ededed; /* body text */
+        --fg-strong: #ffffff; /* headings */
+        --muted: #8b8b8b; /* secondary text, table heads */
+        --code-bg: #242424; /* inline code chip */
+        --block-bg: #0e0e0e; /* pre blocks */
+        --accent: #6fdc8c; /* links, skill names, checked state */
+        --s: #5ee08a;
+        --a: #a8e05f;
+        --b: #e0c95e;
+        --c: #e0a35e;
+        --d: #e06f6f;
+        --x: #7a7a7a;
+      }
+      * {
+        box-sizing: border-box;
+      }
+      html {
+        -webkit-text-size-adjust: 100%;
+      }
+      body {
+        margin: 0;
+        background: var(--bg);
+        color: var(--fg);
+        font:
+          17px/1.7 system-ui,
+          -apple-system,
+          'Helvetica Neue',
+          'Segoe UI',
+          Arial,
+          sans-serif;
+        font-synthesis-weight: none;
+        -webkit-font-smoothing: antialiased;
+      }
+      .wrap {
+        max-width: 900px;
+        margin: 0 auto;
+        padding: 4rem 1.5rem 8rem;
+      }
+
+      /* ---------- Type ---------- */
+      h1,
+      h2,
+      h3 {
+        color: var(--fg-strong);
+        font-weight: 700;
+        letter-spacing: -0.021em;
+      }
+      h1 {
+        font-size: 2.25rem;
+        line-height: 1.15;
+        margin: 0 0 1rem;
+      }
+      h2 {
+        font-size: 1.4rem;
+        line-height: 1.25;
+        margin: 0 0 1.25rem;
+      }
+      h3 {
+        font-size: 1.05rem;
+        line-height: 1.4;
+        margin: 2rem 0 0.5rem;
+      }
+      p {
+        margin: 0 0 1.1rem;
+      }
+      a {
+        color: var(--accent);
+        text-decoration: none;
+      }
+      a:hover {
+        text-decoration: underline;
+      }
+      .lede {
+        color: var(--muted);
+        font-size: 1.05rem;
+        margin: 0;
+      }
+      .muted {
+        color: var(--muted);
+      }
+
+      /* Sections are separated by a hairline and a lot of air — no boxes around prose. */
+      section.block {
+        border-top: 1px solid var(--rule);
+        padding-top: 2.5rem;
+        margin-top: 2.5rem;
+      }
+      header {
+        padding-bottom: 1.75rem;
+      }
+
+      /* ---------- Code ---------- */
+      code {
+        font-family: ui-monospace, SFMono-Regular, 'SF Mono', Menlo, monospace;
+        font-size: 0.855em;
+        background: var(--code-bg);
+        color: #e8e8e8;
+        padding: 0.12em 0.42em;
+        border-radius: 4px;
+        white-space: nowrap;
+      }
+      pre {
+        background: var(--block-bg);
+        border: 1px solid var(--rule);
+        border-radius: 8px;
+        padding: 1rem 1.1rem;
+        overflow-x: auto;
+        font-size: 0.875rem;
+        line-height: 1.6;
+        margin: 0.9rem 0;
+      }
+      pre code {
+        background: none;
+        padding: 0;
+        font-size: inherit;
+        white-space: pre;
+        color: var(--fg);
+      }
+
+      /* ---------- Stat cards ---------- */
+      .stats {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
+        gap: 0.9rem;
+        margin: 1.75rem 0;
+      }
+      .stat {
+        background: var(--surface);
+        border: 1px solid var(--rule);
+        border-radius: 10px;
+        padding: 1.2rem 1.3rem 1.35rem;
+      }
+      .stat b {
+        display: block;
+        color: var(--fg-strong);
+        font-size: 2rem;
+        font-weight: 500;
+        letter-spacing: -0.02em;
+        line-height: 1.1;
+        margin-bottom: 0.5rem;
+      }
+      .stat span {
+        color: var(--muted);
+        font-size: 0.95rem;
+        line-height: 1.45;
+      }
+
+      /* ---------- Tables: uppercase muted heads, hairline rows, no vertical rules ---------- */
+      .table-scroll {
+        overflow-x: auto;
+        margin: 1.5rem 0;
+      }
+      table {
+        border-collapse: collapse;
+        width: 100%;
+      }
+      th {
+        text-align: left;
+        vertical-align: bottom;
+        color: var(--muted);
+        font-size: 0.74rem;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.1em;
+        padding: 0 1.5rem 0.8rem 0;
+        border-bottom: 1px solid var(--rule);
+        white-space: nowrap;
+      }
+      td {
+        text-align: left;
+        vertical-align: top;
+        padding: 0.95rem 1.5rem 0.95rem 0;
+        border-bottom: 1px solid var(--rule);
+      }
+      th:last-child,
+      td:last-child {
+        padding-right: 0;
+      }
+      tbody tr:last-child td {
+        border-bottom: 0;
+      }
+      td.num {
+        color: var(--muted);
+        font-variant-numeric: tabular-nums;
+      }
+
+      /* ---------- Tier / status legend ---------- */
+      .legend {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 1.25rem;
+        color: var(--muted);
+        font-size: 0.95rem;
+        margin: 0 0 0.75rem;
+      }
+      .tier {
+        font-weight: 700;
+      }
+      .tier-s {
+        color: var(--s);
+      }
+      .tier-a {
+        color: var(--a);
+      }
+      .tier-b {
+        color: var(--b);
+      }
+      .tier-c {
+        color: var(--c);
+      }
+      .tier-d {
+        color: var(--d);
+      }
+      .tier-x {
+        color: var(--x);
+      }
+      .name {
+        color: var(--accent);
+        font-weight: 600;
+      }
+
+      /* ---------- Callout ---------- */
+      .callout {
+        background: var(--surface);
+        border: 1px solid var(--rule);
+        border-radius: 10px;
+        padding: 1.15rem 1.35rem;
+        margin: 1.5rem 0;
+      }
+      .callout > :last-child {
+        margin-bottom: 0;
+      }
+      .callout strong {
+        color: var(--fg-strong);
+      }
+      .callout ul {
+        margin: 0.6rem 0 0;
+        padding-left: 1.15rem;
+      }
+      .callout li {
+        margin: 0.3rem 0;
+      }
+
+      /* ---------- Tasks ---------- */
+      section.task {
+        background: var(--surface);
+        border: 1px solid var(--rule);
+        border-radius: 10px;
+        padding: 1.4rem 1.6rem;
+        margin: 1.25rem 0;
+      }
+      .files {
+        font-size: 0.92rem;
+        color: var(--muted);
+        margin: 0 0 1rem;
+      }
+      .files code {
+        color: var(--fg);
+        white-space: normal;
+      }
+      .io {
+        margin: 0 0 1.25rem;
+        font-size: 0.95rem;
+      }
+      .io dt {
+        color: var(--muted);
+        font-size: 0.74rem;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.1em;
+      }
+      .io dd {
+        margin: 0.2rem 0 0.75rem;
+      }
+      ol.steps {
+        list-style: none;
+        padding: 0;
+        margin: 0;
+      }
+      ol.steps > li {
+        display: flex;
+        gap: 0.7rem;
+        align-items: flex-start;
+        padding: 0.7rem 0;
+        border-top: 1px solid var(--rule);
+      }
+      ol.steps > li:first-child {
+        border-top: 0;
+        padding-top: 0;
+      }
+      ol.steps input {
+        margin: 0.42rem 0 0;
+        flex: none;
+        width: 1rem;
+        height: 1rem;
+        accent-color: var(--accent);
+      }
+      ol.steps input:checked + .label {
+        color: var(--muted);
+      }
+      ol.steps input:checked + .label strong {
+        color: var(--muted);
+        text-decoration: line-through;
+      }
+      .label {
+        flex: 1;
+        min-width: 0;
+      }
+      .label strong {
+        color: var(--fg-strong);
+        font-weight: 600;
+      }
+
+      .progress {
+        color: var(--muted);
+        font-size: 0.95rem;
+        margin-top: 3rem;
+        border-top: 1px solid var(--rule);
+        padding-top: 1.5rem;
+      }
+      .progress b {
+        color: var(--accent);
+      }
+
+      @media (max-width: 620px) {
+        body {
+          font-size: 16px;
+        }
+        h1 {
+          font-size: 1.8rem;
+        }
+        .wrap {
+          padding: 2.5rem 1.1rem 5rem;
+        }
+        section.task {
+          padding: 1.1rem 1.15rem;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="wrap">
+      <header>
+        <h1>THA-150 trusted-service authority plan</h1>
+        <p class="lede">
+          How the trusted service decides whether a browser, an external agent
+          or an integration worker may read, edit, execute, review or integrate,
+          right now. Built on branch
+          <code
+            >feature/tha-150-007-core-trusted-service-authority-and-scoped-agent-sessions</code
+          >, first commit <code>bf6396b</code>. The contract itself lives in
+          <code
+            >docs/superpowers/specs/2026-11-06-tha-150-trusted-service-authority-design.md</code
+          >.
+        </p>
+      </header>
+
+      <section class="block">
+        <h2>Goal and shape</h2>
+        <p>
+          <strong>Goal:</strong> a public-core authorization contract with a
+          reference implementation that meets the four THA-150 acceptance
+          criteria, with no server routes yet.
+        </p>
+        <p>
+          <strong>Architecture:</strong> one new package,
+          <code>@thaddeus.run/authority</code>. An <code>Authority</code> keeps
+          each tenant's versioned policy in a <code>Backend</code>, issues
+          holder-bound credentials, and checks every use against the
+          credential's grants and the policy of that moment.
+          <code>KeyCustody</code> holds per-repository data keys wrapped by a
+          root key provider and is the only way plaintext moves. Shared history
+          advances into service-signed records that keep who asked apart from
+          who signed.
+        </p>
+        <p>
+          <strong>Tech stack:</strong> TypeScript on Bun,
+          <code>@thaddeus.run/identity</code> for Ed25519
+          <code>did:key</code> signatures, libsodium XChaCha20-Poly1305 for
+          wrapping and content, the existing durable nonce store and
+          <code>putIfAbsent</code> from <code>@thaddeus.run/store</code> and
+          <code>@thaddeus.run/persist</code>.
+        </p>
+
+        <div class="stats">
+          <div class="stat">
+            <b>6</b><span>tasks, all done on the branch</span>
+          </div>
+          <div class="stat">
+            <b>61</b
+            ><span
+              >tests in <code>authority:test</code>, one of them a real SIGKILL
+              and restart</span
+            >
+          </div>
+          <div class="stat"><b>0</b><span>new external dependencies</span></div>
+        </div>
+
+        <div class="callout">
+          <strong>Global constraints</strong>
+          <ul>
+            <li>
+              Public core only. ThadHub sign-in, routes and a KMS provider are
+              other issues.
+            </li>
+            <li>The shipped server stays keyless and unchanged.</li>
+            <li>
+              Single node, like the shipped server. Cross-node revocation is
+              THA-83.
+            </li>
+            <li>
+              A service record is never presented as an agent signature (ADR
+              0001, ADR 0003).
+            </li>
+          </ul>
+        </div>
+      </section>
+
+      <section class="block">
+        <h2>Decisions taken without a grill round</h2>
+        <p class="muted">
+          The issue ran under full send, so nobody answered planning questions.
+          These are the calls to review first.
+        </p>
+        <div class="table-scroll">
+          <table>
+            <thead>
+              <tr>
+                <th>#</th>
+                <th>Decision</th>
+                <th>Why</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td class="num">1</td>
+                <td>One new package and no server routes</td>
+                <td>
+                  THA-152, THA-148, THA-89 and THA-67 own the routes and are
+                  blocked on this contract.
+                </td>
+              </tr>
+              <tr>
+                <td class="num">2</td>
+                <td>
+                  Every credential is bound to a holder key, browsers included
+                </td>
+                <td>
+                  A stolen token alone does nothing, and replay protection is
+                  the same for every caller. Browsers hold a non-extractable
+                  Ed25519 WebCrypto key.
+                </td>
+              </tr>
+              <tr>
+                <td class="num">3</td>
+                <td>
+                  Effective authority is credential grants intersected with the
+                  current policy
+                </td>
+                <td>
+                  Narrowing a policy narrows live credentials at the next check,
+                  with no revocation step.
+                </td>
+              </tr>
+              <tr>
+                <td class="num">4</td>
+                <td>
+                  A member may issue agent sessions to other keys from its own
+                  grants
+                </td>
+                <td>
+                  1,000 agents should not need 1,000 policy edits. Revoking the
+                  member revokes them.
+                </td>
+              </tr>
+              <tr>
+                <td class="num">5</td>
+                <td>
+                  Lifetimes: agents and workers 15 min default, 1 h ceiling;
+                  humans 8 h default, 12 h ceiling
+                </td>
+                <td>
+                  Short-lived for agents, a working day for humans. Hosts may
+                  lower, never raise.
+                </td>
+              </tr>
+              <tr>
+                <td class="num">6</td>
+                <td>
+                  The service records advancements and journal entries; actor
+                  signatures are optional claims
+                </td>
+                <td>
+                  ADR 0006. Settles the question the semantic authority design
+                  left to THA-150.
+                </td>
+              </tr>
+              <tr>
+                <td class="num">7</td>
+                <td>Queued work re-checks at redemption and redeems once</td>
+                <td>
+                  Work never runs on authority that expired or was revoked while
+                  it waited.
+                </td>
+              </tr>
+              <tr>
+                <td class="num">8</td>
+                <td>
+                  One data key per repository, wrapped by a root key provider
+                </td>
+                <td>
+                  Simplest key layout that keeps tenants and repositories apart.
+                  Rotation is later work.
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section class="block">
+        <h2>Task 1: Scopes, paths and signed tokens</h2>
+        <section class="task">
+          <p class="files">
+            Create <code>packages/authority/src/scope.ts</code> ·
+            <code>src/codec.ts</code> · <code>src/token.ts</code> ·
+            <code>src/proof.ts</code> · <code>src/errors.ts</code> · package
+            scaffolding
+          </p>
+          <dl class="io">
+            <dt>Consumes</dt>
+            <dd>
+              <code>Identity</code>, <code>PublicIdentity</code> from
+              <code>@thaddeus.run/identity</code>.
+            </dd>
+            <dt>Produces</dt>
+            <dd>
+              <code>Scope</code>, <code>Grant</code>,
+              <code>patternCovers</code>, <code>grantsCover</code>,
+              <code>grantsSubsume</code>; <code>encodeCredential</code> /
+              <code>decodeCredential</code> (<code>thc1.</code> tokens);
+              <code>proveAction</code>, <code>proveIssue</code>,
+              <code>proveRevoke</code>; <code>AuthorityError</code> with stable
+              codes.
+            </dd>
+          </dl>
+          <ol class="steps">
+            <li>
+              <input type="checkbox" id="t1s1" checked /><span class="label">
+                <strong>Validate patterns</strong> <code>**</code>,
+                <code>dir/**</code> or an exact relative path; refuse
+                <code>.</code>, <code>..</code>, empty segments, backslashes and
+                control characters.
+              </span>
+            </li>
+            <li>
+              <input type="checkbox" id="t1s2" checked /><span class="label">
+                <strong>Sign the exact payload text</strong> tokens sign
+                <code>domain + "\n" + base64url(JSON)</code>, so verification
+                never re-serializes JSON.
+              </span>
+            </li>
+            <li>
+              <input type="checkbox" id="t1s3" checked /><span class="label">
+                <strong>Bind proofs to one token and one action</strong> the
+                holder signs a digest of the token, the canonical action, a
+                timestamp and a nonce.
+              </span>
+            </li>
+          </ol>
+        </section>
+      </section>
+      <section class="block">
+        <h2>Task 2: Authority: tenants, policy, issue, authorize, revoke</h2>
+        <section class="task">
+          <p class="files">
+            Create <code>packages/authority/src/authority.ts</code> ·
+            <code>src/policy.ts</code> · Test
+            <code>test/credentials.test.ts</code> ·
+            <code>test/tenants.test.ts</code> ·
+            <code>test/revocation.test.ts</code> ·
+            <code>test/replay.test.ts</code>
+          </p>
+          <dl class="io">
+            <dt>Consumes</dt>
+            <dd>
+              Task 1; <code>Backend</code> with <code>putIfAbsent</code> and
+              <code>consumeNonce</code>.
+            </dd>
+            <dt>Produces</dt>
+            <dd>
+              <code>Authority.open</code>, <code>createTenant</code>,
+              <code>changePolicy</code>, <code>issue</code>,
+              <code>authorize</code>, <code>check</code>, <code>revoke</code>,
+              <code>audit</code>; the <code>Authorization</code> class that only
+              the authority can mint.
+            </dd>
+          </dl>
+          <ol class="steps">
+            <li>
+              <input type="checkbox" id="t2s1" checked /><span class="label">
+                <strong>Version the policy</strong> each change names the
+                version it read and is created with <code>putIfAbsent</code>.
+              </span>
+            </li>
+            <li>
+              <input type="checkbox" id="t2s2" checked /><span class="label">
+                <strong>Check every use twice</strong> validate, consume the
+                nonce durably, validate again against the policy of that moment.
+              </span>
+            </li>
+            <li>
+              <input type="checkbox" id="t2s3" checked /><span class="label">
+                <strong>Serialize tenant changes</strong> policy changes,
+                revocations, advancements and redemptions for one tenant run in
+                call order.
+              </span>
+            </li>
+            <li>
+              <input type="checkbox" id="t2s4" checked /><span class="label">
+                <strong>Run the tests</strong>
+                <code>moonx authority:test</code> covers scopes, paths,
+                lifetimes, agent sessions, forged tokens, tenants, revocation
+                and replay, including after a restart.
+              </span>
+            </li>
+          </ol>
+        </section>
+      </section>
+      <section class="block">
+        <h2>Task 3: Key custody and audited plaintext</h2>
+        <section class="task">
+          <p class="files">
+            Create <code>packages/authority/src/custody.ts</code> · Test
+            <code>test/custody.test.ts</code>
+          </p>
+          <dl class="io">
+            <dt>Consumes</dt>
+            <dd>
+              <code>Authorization</code> and the internal audit writer from task
+              2.
+            </dd>
+            <dt>Produces</dt>
+            <dd>
+              <code>KeyCustody.seal</code> (edit) and <code>open</code> (read);
+              <code>RootKeyProvider</code>; <code>LocalRootKey</code>.
+            </dd>
+          </dl>
+          <ol class="steps">
+            <li>
+              <input type="checkbox" id="t3s1" checked /><span class="label">
+                <strong>Wrap data keys</strong> one XChaCha20-Poly1305 key per
+                repository, stored only wrapped, with tenant, repository and key
+                version bound into the wrap.
+              </span>
+            </li>
+            <li>
+              <input type="checkbox" id="t3s2" checked /><span class="label">
+                <strong>Bind content to its place</strong> associated data holds
+                tenant, repository, path and key version.
+              </span>
+            </li>
+            <li>
+              <input type="checkbox" id="t3s3" checked /><span class="label">
+                <strong>Audit before returning</strong>
+                <code>open</code> decrypts, writes the audit record, re-checks
+                the authorization, then returns.
+              </span>
+            </li>
+            <li>
+              <input type="checkbox" id="t3s4" checked /><span class="label">
+                <strong>Prove keys stay out of storage</strong> a test unwraps
+                the data key with the root key and searches every stored byte
+                for it.
+              </span>
+            </li>
+          </ol>
+        </section>
+      </section>
+      <section class="block">
+        <h2>Task 4: Service-authorized history advancement</h2>
+        <section class="task">
+          <p class="files">
+            Create <code>packages/authority/src/head.ts</code> · Modify
+            <code>src/authority.ts</code> · Test
+            <code>test/history.test.ts</code> ·
+            <code>test/concurrency.test.ts</code>
+          </p>
+          <dl class="io">
+            <dt>Consumes</dt>
+            <dd>
+              <code>Authorization</code> with scope <code>integrate</code>.
+            </dd>
+            <dt>Produces</dt>
+            <dd>
+              <code>Authority.advance</code>, <code>head</code>;
+              <code>ServiceHeadRecord</code>; <code>signActorClaim</code>,
+              <code>verifyHeadRecord</code>, <code>describeAttribution</code>.
+            </dd>
+          </dl>
+          <ol class="steps">
+            <li>
+              <input type="checkbox" id="t4s1" checked /><span class="label">
+                <strong>Keep who asked apart from who signed</strong>
+                <code>requestedBy</code> is recorded by the service;
+                <code>actorClaims</code> are verified signatures over the exact
+                content.
+              </span>
+            </li>
+            <li>
+              <input type="checkbox" id="t4s2" checked /><span class="label">
+                <strong>Advance atomically</strong> check the policy and the
+                expected version inside the tenant lock, then create the next
+                version with <code>putIfAbsent</code>.
+              </span>
+            </li>
+            <li>
+              <input type="checkbox" id="t4s3" checked /><span class="label">
+                <strong>Race it</strong> tests run two admins, two authorities
+                over one backend, and an advancement against a policy change in
+                both orders.
+              </span>
+            </li>
+          </ol>
+        </section>
+      </section>
+      <section class="block">
+        <h2>Task 5: Queued work and a real crash</h2>
+        <section class="task">
+          <p class="files">
+            Modify <code>packages/authority/src/authority.ts</code> · Test
+            <code>test/queue.test.ts</code> ·
+            <code>test/restart.test.ts</code> ·
+            <code>test/fixtures/service-process.ts</code>
+          </p>
+          <dl class="io">
+            <dt>Consumes</dt>
+            <dd>Tasks 2 to 4.</dd>
+            <dt>Produces</dt>
+            <dd>
+              <code>Authority.queue</code> and <code>redeem</code>; a crash and
+              recovery test across two processes.
+            </dd>
+          </dl>
+          <ol class="steps">
+            <li>
+              <input type="checkbox" id="t5s1" checked /><span class="label">
+                <strong>Re-check at redemption</strong> expired, revoked and
+                no-longer-granted work is refused and audited; a ticket redeems
+                once.
+              </span>
+            </li>
+            <li>
+              <input type="checkbox" id="t5s2" checked /><span class="label">
+                <strong>Kill the process</strong> one process does real work on
+                a <code>FileBackend</code> and dies by <code>SIGKILL</code>; a
+                second process opens the same directory.
+              </span>
+            </li>
+            <li>
+              <input type="checkbox" id="t5s3" checked /><span class="label">
+                <strong>Break each guard</strong> disabling nonce use,
+                revocation, the policy check, expiry, tenant binding, the
+                advance lock, the post-audit re-check or the holder signature
+                turns at least one test red.
+              </span>
+            </li>
+          </ol>
+        </section>
+      </section>
+      <section class="block">
+        <h2>Task 6: Documents</h2>
+        <section class="task">
+          <p class="files">
+            Create
+            <code>docs/adr/0006-the-service-records-actors-may-sign.md</code> ·
+            <code
+              >docs/superpowers/specs/2026-11-06-tha-150-trusted-service-authority-design.md</code
+            >
+            · <code>packages/authority/README.md</code> · Modify
+            <code>ARCHITECTURE.md</code> · <code>CONTEXT.md</code> ·
+            <code>CHANGELOG.md</code> ·
+            <code>docs/agent-first-architecture.md</code> · the semantic
+            authority design · <code>packages/server/README.md</code>
+          </p>
+          <dl class="io">
+            <dt>Consumes</dt>
+            <dd>Everything above.</dd>
+            <dt>Produces</dt>
+            <dd>
+              The contract in prose, the journal-signing decision, and glossary
+              terms: Tenant, Scope, Credential, Agent session, Service record,
+              Actor claim.
+            </dd>
+          </dl>
+          <ol class="steps">
+            <li>
+              <input type="checkbox" id="t6s1" checked /><span class="label">
+                <strong>Say what is shipped</strong> the server does not use the
+                package yet; revocation is single-node until THA-83.
+              </span>
+            </li>
+            <li>
+              <input type="checkbox" id="t6s2" checked /><span class="label">
+                <strong>Run the baseline</strong>
+                <code>moon run root:format root:lint</code> and
+                <code
+                  >moonx authority:typecheck authority:test authority:build
+                  root:version-check</code
+                >.
+              </span>
+            </li>
+          </ol>
+        </section>
+      </section>
+
+      <section class="block">
+        <h2>Left for later issues</h2>
+        <div class="table-scroll">
+          <table>
+            <thead>
+              <tr>
+                <th>Issue</th>
+                <th>What it adds on top</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td><span class="name">THA-151</span></td>
+                <td>
+                  Moves existing encrypted repositories into custody with owner
+                  consent.
+                </td>
+              </tr>
+              <tr>
+                <td><span class="name">THA-54 / THA-89</span></td>
+                <td>
+                  Human sign-in and the browser mutation boundary that issue and
+                  use sessions.
+                </td>
+              </tr>
+              <tr>
+                <td><span class="name">THA-67</span></td>
+                <td>
+                  Puts <code>advance</code> behind the server's landing path.
+                </td>
+              </tr>
+              <tr>
+                <td><span class="name">THA-152 / THA-148</span></td>
+                <td>
+                  Remote workspace and query routes that authorize through this
+                  package.
+                </td>
+              </tr>
+              <tr>
+                <td><span class="name">THA-83</span></td>
+                <td>Revocation that is consistent across nodes.</td>
+              </tr>
+              <tr>
+                <td><span class="name">THA-140</span></td>
+                <td>
+                  Scoped workload credentials and a KMS-backed root key in the
+                  hosted product.
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <p class="progress">
+        <b><span id="done">0</span></b> of <span id="total">0</span> steps
+        complete
+      </p>
+    </div>
+    <script>
+      // Progress counter. Inline only — external script src is rejected by postplan.
+      var boxes = document.querySelectorAll('ol.steps input[type=checkbox]');
+      var doneEl = document.getElementById('done');
+      document.getElementById('total').textContent = String(boxes.length);
+      function refresh() {
+        var n = 0;
+        boxes.forEach(function (b) {
+          if (b.checked) n++;
+        });
+        doneEl.textContent = String(n);
+      }
+      boxes.forEach(function (b) {
+        b.addEventListener('change', refresh);
+      });
+      refresh();
+    </script>
+  </body>
+</html>

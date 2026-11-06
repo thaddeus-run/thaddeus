@@ -213,10 +213,12 @@ the right ones, and `analyzer` names the version that made that judgement.
 Edit offsets are byte offsets into the stored file. The TypeScript language
 service reports UTF-16 offsets, and the language adapter converts them.
 
-The service records who submitted each entry. Whether an agent signs entries
-itself, or the service records them for a session, is for
-[THA-150](https://linear.app/thaddeus-run/issue/THA-150) to decide. Either way,
-a service-recorded entry is never presented as the agent's signature, as
+The service records who submitted each entry.
+[THA-150](https://linear.app/thaddeus-run/issue/THA-150) decided in
+[ADR 0006](../adr/0006-the-service-records-actors-may-sign.md) that the service
+records every entry for the credential that submitted it, and an agent may add
+its own signature over the entry. A service-recorded entry is never presented as
+the agent's signature, as
 [ADR 0003](../adr/0003-trusted-code-processing-service.md) requires.
 
 An entry carries content for every path it changes, so reading an entry needs

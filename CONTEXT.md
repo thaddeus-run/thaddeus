@@ -98,6 +98,33 @@ read repository plaintext for scoped requests while keeping storage encrypted
 and access audited. _Avoid_: Untrusted remote or mirror, which name the shipped
 keyless server; host-blind, which no longer describes the hosted path.
 
+**Tenant**: An isolation unit in a trusted service with its own versioned
+policy. Credentials, revocations, data keys, audit records and history belong to
+exactly one tenant. _Avoid_: Organization or account, which name product
+concepts.
+
+**Scope**: One of the five separate authorities a credential can carry: read,
+edit, execute, review and integrate. None implies another. _Avoid_: Role,
+permission level.
+
+**Credential**: A short-lived grant the trusted service signs, bound to one
+holder key, one tenant, and scopes over repositories and paths. Every use is
+signed by the holder and checked against the current policy. A human's
+credential is called a session. _Avoid_: Token or API key, which suggest a
+bearer secret.
+
+**Agent session**: A credential a member issues to an agent key it runs, cut
+from the member's own grants. Revoking the member revokes it. _Avoid_:
+Delegation, which names the shipped signed grant for uploads.
+
+**Service record**: A record the trusted service signs about what it did and for
+whom, such as a history advancement. It names who asked but is never that
+actor's signature. _Avoid_: Attestation by the agent, signed by the agent.
+
+**Actor claim**: An actor's own signature over the exact content of a service
+record. Only actor claims are presented as signatures by the actor. _Avoid_:
+Service record.
+
 **Performance target**: A number a build is held to, as distinct from a
 measurement, which names the environment and the run that observed it. _Avoid_:
 Capability, result or benchmark when no run is linked.
