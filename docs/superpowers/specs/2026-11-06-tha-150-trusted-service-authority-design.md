@@ -2,7 +2,9 @@
 
 **Date:** 2026-11-06 **Status:** Implemented in `@thaddeus.run/authority`
 **Issue:** [THA-150](https://linear.app/thaddeus-run/issue/THA-150) (GitHub
-#219)
+#219) **Plan:**
+[`docs/plans/2026-11-06-tha-150-trusted-service-authority.html`](../../plans/2026-11-06-tha-150-trusted-service-authority.html),
+published at <https://ea0fevnsubpn.postplan.dev>
 
 ## Intent
 
