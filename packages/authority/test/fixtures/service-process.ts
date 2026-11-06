@@ -56,6 +56,7 @@ async function credential(
   scopes: string[]
 ) {
   const request = {
+    service: authority.did,
     tenant: TENANT,
     principal: who.did,
     subject: who.did,
@@ -112,7 +113,12 @@ if (mode === 'crash') {
       integrate,
       proveAction(worker, workerToken, integrate)
     ),
-    { view: 'main', expectedVersion: null, revision: 'rev-1' }
+    {
+      view: 'main',
+      expectedVersion: null,
+      revision: 'rev-1',
+      changedPaths: ['src/a.ts'],
+    }
   );
   const execute = { ...READ, scope: 'execute' as const, paths: ['**'] };
   const ticket = await authority.queue(
@@ -125,6 +131,7 @@ if (mode === 'crash') {
   const usedProof = proveAction(agent, kept, READ);
   await authority.authorize(kept, READ, usedProof);
   const revokeRequest = {
+    service: authority.did,
     tenant: TENANT,
     actor: admin.did,
     target: { credential: revoked },

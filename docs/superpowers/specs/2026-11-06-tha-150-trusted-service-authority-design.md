@@ -62,9 +62,9 @@ or a control character is refused as malformed.
 
 ## 3. Credentials
 
-A member signs an issue request naming the tenant, itself as principal, the
-holder key as subject, a kind, grants and an optional lifetime. The service
-issues a credential when:
+A member signs an issue request naming the service, the tenant, itself as
+principal, the holder key as subject, a kind, grants and an optional lifetime.
+The service issues a credential when:
 
 1. The principal's signature verifies, the proof is fresh and its nonce is
    unused.
@@ -82,6 +82,10 @@ issues a credential when:
 | `worker` | 15 minutes | 1 hour   |
 
 A host may lower these, never raise them.
+
+Issue, revocation and policy-change requests all name the DID of the service
+they are for, so a request signed for one deployment is refused at another with
+`wrong_service`, even where the same key is a member of both.
 
 The token is `thc1.<base64url JSON claims>.<base64url signature>`. The service
 signs the domain tag `thaddeus.authority.credential.v1` and the exact payload
@@ -114,7 +118,9 @@ millisecond timestamp and a nonce. The service authorizes when:
 Steps 4 to 7 run again after the nonce is consumed, because the policy can
 change while that write is in flight. The result is an `Authorization` object.
 Only the authority creates them, and gates refuse a look-alike object with the
-same fields.
+same fields. Gates read the checked scope, repository and paths from the
+authority's own state, never from the object's fields, and the object is frozen
+besides.
 
 Effective authority is always the credential's grants intersected with the
 current policy. Narrowing a member's policy narrows its live credentials at the
@@ -133,9 +139,9 @@ it, so a browser session is holder-bound like an agent credential. A proof's
 - **One credential.** Revoked by token. An admin, the principal or the holder
   may do it.
 - **A DID.** Revokes every credential issued so far to or through that DID.
-  Revoking a human revokes the agent sessions they issued. An admin or the DID
-  itself may do it. Credentials issued afterwards work, so to stop new ones too,
-  remove the member from the policy.
+  Revoking a human revokes the agent sessions they issued. An admin may do it,
+  or the DID itself when it is a member. Credentials issued afterwards work, so
+  to stop new ones too, remove the member from the policy.
 - **A member.** Removing a member, or narrowing their grants, refuses their live
   credentials at the next check.
 
@@ -172,11 +178,13 @@ with `read` scope and goes through the same gate.
 
 ## 7. History advancement and attribution
 
-A shared view's history advances only under an `integrate` authorization whose
-patterns cover the changed paths. The caller names the version it saw, or null
-for a new view. Inside the tenant's serialized section the service:
+A shared view's history advances only under an `integrate` authorization. The
+host passes every path the revision changes, from its own diff, and each must be
+inside the authorization's patterns. The caller names the version it saw, or
+null for a new view. Inside the tenant's serialized section the service:
 
-1. Checks the authorization against the current policy.
+1. Checks every changed path against the authorization, and the authorization
+   against the current policy.
 2. Checks the view is at the expected version.
 3. Verifies every actor claim against the exact new content.
 4. Signs a `ServiceHeadRecord` and creates it at the next version with an atomic
@@ -201,6 +209,11 @@ ADR 0003 require. ADR 0006 applies the same rule to change journal entries.
 
 The service signature covers `requestedBy`, so relabelling who asked breaks
 `verifyHeadRecord`. An owner no longer has to be online to sign each landing.
+
+`head` also checks that a record sits under its own tenant, repository, view and
+version, because the signature covers the content and not where it is stored. A
+genuine record copied to another place in storage is refused with
+`invalid_claim`.
 
 ## 8. Queued work
 
@@ -229,6 +242,9 @@ commits under the old version and names it. One called after is checked against
 the new version. Reads through `KeyCustody` do not take the tenant lock; they
 check before and after their audit write instead.
 
+The policies, head records and lifetime table the authority hands out are
+frozen, so a caller cannot widen them in place.
+
 ## 10. Audit
 
 The service writes an audit record for tenant creation, policy changes,
@@ -236,6 +252,18 @@ issuance, revocation, refused authorizations, every plaintext read and write,
 queued and redeemed tickets and every advancement. Refusals carry their error
 code. Records are the service's own account; they never stand in for a signature
 by the people they name.
+
+Once a token proves to be the service's, every refused use of it is audited, a
+bad proof or malformed action included. Two refusals leave no record in a
+tenant:
+
+- A token another service issued, or one that does not decode. It names no
+  tenant worth trusting.
+- An issue, revocation or policy-change request signed by a key that is neither
+  an admin nor a member of the tenant, nor the holder or principal of the
+  credential it revokes. It is refused before its nonce is spent, so strangers
+  cannot fill a tenant's audit or the replay store. The host's request log and
+  rate limits cover them.
 
 ## 11. Durability and limits
 
@@ -254,11 +282,11 @@ redeemed tickets, head records, wrapped data keys and audit records.
 ## 12. Errors
 
 Every refusal is an `AuthorityError` with a stable `code`: `malformed`,
-`unknown_tenant`, `tenant_exists`, `not_a_member`, `not_an_admin`,
-`bad_credential`, `wrong_tenant`, `not_yet_valid`, `expired`, `revoked`,
-`bad_proof`, `stale_proof`, `replayed`, `replay_capacity`, `scope_denied`,
-`policy_denied`, `conflict`, `stale_head`, `ticket_used`, `bad_ticket`,
-`invalid_claim` or `decrypt_failed`.
+`wrong_service`, `unknown_tenant`, `tenant_exists`, `not_a_member`,
+`not_an_admin`, `bad_credential`, `wrong_tenant`, `not_yet_valid`, `expired`,
+`revoked`, `bad_proof`, `stale_proof`, `replayed`, `replay_capacity`,
+`scope_denied`, `policy_denied`, `conflict`, `stale_head`, `ticket_used`,
+`bad_ticket`, `invalid_claim` or `decrypt_failed`.
 
 ## Decisions taken without a grill round
 
@@ -279,9 +307,12 @@ choices a reviewer should check first:
 
 ## Verification
 
-`moonx authority:test` runs 61 tests. One of them starts a real process that
+`moonx authority:test` runs 68 tests. One of them starts a real process that
 does the work and dies by SIGKILL, then a second process that opens the same
-`FileBackend` directory. Breaking each guard in turn (nonce consumption,
-revocation, the current-policy check, expiry, tenant binding of keys, the tenant
-lock around advancement, the re-check after the read audit and the holder
-signature) makes at least one test fail.
+`FileBackend` directory. Breaking each guard in turn makes at least one test
+fail: nonce consumption, revocation, the current-policy check, expiry, tenant
+binding of keys, the tenant lock around advancement, the re-check after the read
+audit, the holder signature, freezing `Authorization`, gates reading the checked
+action, frozen policies and head records, the changed-path check, refusing
+strangers before their nonce, the service check, and both halves of the head
+place check.

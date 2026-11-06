@@ -46,7 +46,10 @@ export interface Action {
 }
 
 // A member asks the service for a credential for itself or for an agent key.
+// `service` is the DID of the service asked, so the signed request cannot be
+// replayed at another deployment where the same key is a member.
 export interface IssueRequest {
+  readonly service: string;
   readonly tenant: string;
   readonly principal: string;
   readonly subject: string;
@@ -60,6 +63,7 @@ export type RevokeTarget =
   | { readonly did: string };
 
 export interface RevokeRequest {
+  readonly service: string;
   readonly tenant: string;
   readonly actor: string;
   readonly target: RevokeTarget;
@@ -119,6 +123,7 @@ export function actionBody(token: string, action: Action): unknown {
 
 export function issueBody(request: IssueRequest): unknown {
   return [
+    request.service,
     request.tenant,
     request.principal,
     request.subject,
@@ -133,7 +138,7 @@ export function revokeBody(request: RevokeRequest): unknown {
     'credential' in request.target
       ? { credential: tokenDigest(request.target.credential) }
       : { did: request.target.did };
-  return [request.tenant, request.actor, target];
+  return [request.service, request.tenant, request.actor, target];
 }
 
 function signProof(

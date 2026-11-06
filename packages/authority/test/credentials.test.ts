@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 
-import { Authority, decodeCredential, proveIssue } from '../src';
+import { Authority, decodeCredential, DEFAULT_TTL, proveIssue } from '../src';
 import {
   HOUR,
   Identity,
@@ -299,6 +299,7 @@ describe('issuing credentials', () => {
 
     // A request naming the agent as principal but signed by the stranger.
     const request = {
+      service: w.authority.did,
       tenant: TENANT,
       principal: agent.did,
       subject: stranger.did,
@@ -371,5 +372,33 @@ describe('issuing credentials', () => {
       ['deny', agent.did, 'policy_denied'],
     ]);
     expect(issues[0]?.credential).toMatch(/^[0-9a-f]{32}$/);
+  });
+});
+
+describe('what the authority hands out', () => {
+  test('policies and lifetime ceilings cannot be edited in place', async () => {
+    const { w, agent } = await acme();
+    const current = w.authority.policy(TENANT);
+    const grant = current.members.find((m) => m.subject === agent.did)
+      ?.grants[0];
+    if (grant === undefined) throw new Error('expected the agent grant');
+    expect(() => {
+      (grant.paths as string[]).push('**');
+    }).toThrow(TypeError);
+    expect(() => {
+      (current.admins as string[]).push(agent.did);
+    }).toThrow(TypeError);
+    expect(() => {
+      (DEFAULT_TTL.agent as { maxMs: number }).maxMs = 1000 * HOUR;
+    }).toThrow(TypeError);
+    // The authority still decides with the policy it stored.
+    await refused(
+      issue(w, agent, {
+        tenant: TENANT,
+        kind: 'agent',
+        grants: [{ repo: 'app', scopes: ['read'], paths: ['**'] }],
+      }),
+      'policy_denied'
+    );
   });
 });

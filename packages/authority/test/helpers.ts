@@ -64,6 +64,7 @@ export async function world(
     clock?: Clock;
     service?: Identity;
     rootBytes?: Uint8Array;
+    nonceCapacity?: number;
   } = {}
 ): Promise<World> {
   const clock = options.clock ?? new Clock();
@@ -76,6 +77,9 @@ export async function world(
     backend,
     signer: service,
     now: clock.now,
+    ...(options.nonceCapacity === undefined
+      ? {}
+      : { nonceCapacity: options.nonceCapacity }),
   });
   const custody = new KeyCustody({ authority, backend, root });
   return {
@@ -87,7 +91,13 @@ export async function world(
     rootBytes,
     custody,
     reopen: (next?: Durable) =>
-      world({ backend: next ?? backend, clock, service, rootBytes }),
+      world({
+        ...options,
+        backend: next ?? backend,
+        clock,
+        service,
+        rootBytes,
+      }),
   };
 }
 
@@ -120,10 +130,13 @@ export function policy(
 export async function issue(
   w: World,
   principal: Identity,
-  request: Omit<IssueRequest, 'principal' | 'subject'> & { subject?: string }
+  request: Omit<IssueRequest, 'service' | 'principal' | 'subject'> & {
+    subject?: string;
+  }
 ): Promise<string> {
   const full: IssueRequest = {
     ...request,
+    service: w.authority.did,
     principal: principal.did,
     subject: request.subject ?? principal.did,
   };
@@ -154,7 +167,12 @@ export function revoke(
   actor: Identity,
   target: RevokeTarget
 ): Promise<void> {
-  const request = { tenant, actor: actor.did, target };
+  const request = {
+    service: w.authority.did,
+    tenant,
+    actor: actor.did,
+    target,
+  };
   return w.authority.revoke(
     request,
     proveRevoke(actor, request, { now: w.clock.now() })
@@ -168,7 +186,13 @@ export function changePolicy(
   expectedVersion: number,
   body: PolicyBody
 ): Promise<unknown> {
-  const change = { tenant, admin: admin.did, expectedVersion, policy: body };
+  const change = {
+    service: w.authority.did,
+    tenant,
+    admin: admin.did,
+    expectedVersion,
+    policy: body,
+  };
   return w.authority.changePolicy(
     change,
     proveChangePolicy(admin, change, { now: w.clock.now() })

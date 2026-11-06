@@ -50,6 +50,24 @@ export function digest(domain: string, value: string): string {
   return bytesToHex(blake3(utf8(`${domain}\0${value}`)));
 }
 
+/**
+ * Freezes a plain record and everything inside it. The authority hands out
+ * the policies and head records it decides with, so callers must not be able
+ * to edit them in place. Byte arrays cannot be frozen and are left alone.
+ */
+export function deepFreeze<T>(value: T): T {
+  if (
+    value !== null &&
+    typeof value === 'object' &&
+    !ArrayBuffer.isView(value) &&
+    !Object.isFrozen(value)
+  ) {
+    Object.freeze(value);
+    for (const inner of Object.values(value)) deepFreeze(inner);
+  }
+  return value;
+}
+
 /** 128 random bits as hex, for credential, ticket and record ids. */
 export function randomId(): string {
   return bytesToHex(crypto.getRandomValues(new Uint8Array(16)));

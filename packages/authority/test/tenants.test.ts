@@ -104,11 +104,14 @@ describe('tenant isolation', () => {
     await refused(use(w, shared, tokenA, action('tenant-a')), 'revoked');
     await use(w, shared, tokenB, action('tenant-b'));
 
-    // Tenant A's admin cannot revoke in tenant B.
+    // Tenant A's admin is a stranger in tenant B, refused without writing to
+    // B's audit.
+    const before = (await w.authority.audit('tenant-b')).length;
     await refused(
       revoke(w, 'tenant-b', adminA, { did: shared.did }),
-      'not_an_admin'
+      'not_a_member'
     );
+    expect(await w.authority.audit('tenant-b')).toHaveLength(before);
     // Nor revoke a tenant B credential by naming tenant A.
     await refused(
       revoke(w, 'tenant-a', adminA, { credential: tokenB }),

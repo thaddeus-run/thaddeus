@@ -15,8 +15,9 @@ Browsers, external agents and integration workers all go through it.
   authorization and out under a `read` authorization, and every access is
   audited before plaintext is returned.
 - `Authority.advance` moves a view's shared history under an `integrate`
-  authorization and signs a record that keeps who asked (`requestedBy`, recorded
-  by the service) apart from who signed (`actorClaims`).
+  authorization that covers every changed path, and signs a record that keeps
+  who asked (`requestedBy`, recorded by the service) apart from who signed
+  (`actorClaims`).
 - `Authority.queue` and `redeem` carry an authorization through a work queue and
   re-check it when the work starts.
 
@@ -42,6 +43,7 @@ const custody = new KeyCustody({
 
 // An agent that is a member of tenant `acme` asks for a 15-minute credential.
 const request = {
+  service: authority.did,
   tenant: 'acme',
   principal: agent.did,
   subject: agent.did,

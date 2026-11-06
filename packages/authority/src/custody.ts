@@ -7,11 +7,21 @@ import {
   type Authority,
   type Authorization,
   internalsOf,
+  reaches,
   writeAudit,
 } from './authority';
 import { digest, utf8 } from './codec';
 import { AuthorityError } from './errors';
 import { assertPath, type Scope } from './scope';
+import type { CredentialClaims } from './token';
+
+// What a gate acts on: the credential and the exact repository the authority
+// checked, read from its own state rather than from the public object.
+interface Checked {
+  readonly claims: CredentialClaims;
+  readonly repo: string;
+  readonly scope: Scope;
+}
 
 /**
  * Wraps and unwraps data keys under a root key the custody never sees. A
@@ -157,25 +167,20 @@ export class KeyCustody {
     path: string,
     plaintext: Uint8Array
   ): Promise<SealedContent> {
-    return this.#gate(authorization, 'edit', path, async () => {
+    return this.#gate(authorization, 'edit', path, async (checked) => {
       await sodium.ready;
-      const key = await this.#dataKey(authorization.tenant, authorization.repo);
+      const key = await this.#dataKey(checked.claims.tenant, checked.repo);
       const nonce = sodium.randombytes_buf(
         sodium.crypto_aead_xchacha20poly1305_ietf_NPUBBYTES
       );
       const ciphertext = sodium.crypto_aead_xchacha20poly1305_ietf_encrypt(
         plaintext,
-        contentContext(
-          authorization.tenant,
-          authorization.repo,
-          path,
-          KEY_VERSION
-        ),
+        contentContext(checked.claims.tenant, checked.repo, path, KEY_VERSION),
         null,
         nonce,
         key
       );
-      await this.#record(authorization, 'plaintext.write', path, 'allow');
+      await this.#record(checked, 'plaintext.write', path, 'allow');
       return { v: 1, keyVersion: KEY_VERSION, nonce, ciphertext };
     });
   }
@@ -191,7 +196,7 @@ export class KeyCustody {
     path: string,
     sealed: SealedContent
   ): Promise<Uint8Array> {
-    return this.#gate(authorization, 'read', path, async () => {
+    return this.#gate(authorization, 'read', path, async (checked) => {
       if (
         sealed === null ||
         typeof sealed !== 'object' ||
@@ -203,15 +208,15 @@ export class KeyCustody {
         throw new AuthorityError('malformed', 'unsupported sealed content');
       }
       await sodium.ready;
-      const key = await this.#dataKey(authorization.tenant, authorization.repo);
+      const key = await this.#dataKey(checked.claims.tenant, checked.repo);
       let plaintext: Uint8Array;
       try {
         plaintext = sodium.crypto_aead_xchacha20poly1305_ietf_decrypt(
           null,
           sealed.ciphertext,
           contentContext(
-            authorization.tenant,
-            authorization.repo,
+            checked.claims.tenant,
+            checked.repo,
             path,
             sealed.keyVersion
           ),
@@ -221,10 +226,10 @@ export class KeyCustody {
       } catch {
         throw new AuthorityError(
           'decrypt_failed',
-          `the content does not belong to ${authorization.repo}:${path} in this tenant`
+          `the content does not belong to ${checked.repo}:${path} in this tenant`
         );
       }
-      await this.#record(authorization, 'plaintext.read', path, 'allow');
+      await this.#record(checked, 'plaintext.read', path, 'allow');
       this.#authority.check(authorization);
       return plaintext;
     });
@@ -236,7 +241,7 @@ export class KeyCustody {
     authorization: Authorization,
     scope: Scope,
     path: string,
-    work: () => Promise<T>
+    work: (checked: Checked) => Promise<T>
   ): Promise<T> {
     const internals = internalsOf(authorization);
     if (internals.authority !== this.#authority) {
@@ -245,49 +250,56 @@ export class KeyCustody {
         'the authorization came from another authority'
       );
     }
+    const { claims, action } = internals;
+    const checked: Checked = {
+      claims,
+      repo: action.repo,
+      scope: action.scope,
+    };
     const event = scope === 'read' ? 'plaintext.read' : 'plaintext.write';
     try {
       assertPath(path);
-      if (authorization.scope !== scope) {
+      if (action.scope !== scope) {
         throw new AuthorityError(
           'scope_denied',
-          `${event} needs a ${scope} authorization, not ${authorization.scope}`
+          `${event} needs a ${scope} authorization, not ${action.scope}`
         );
       }
-      if (!authorization.allows(path)) {
+      if (!reaches(action.paths, path)) {
         throw new AuthorityError(
           'scope_denied',
           `${path} is outside the authorized paths`
         );
       }
       this.#authority.check(authorization);
-      return await work();
+      return await work(checked);
     } catch (error) {
       if (error instanceof AuthorityError) {
-        await this.#record(authorization, event, path, 'deny', error);
+        await this.#record(checked, event, path, 'deny', error);
       }
       throw error;
     }
   }
 
   #record(
-    authorization: Authorization,
+    checked: Checked,
     event: 'plaintext.read' | 'plaintext.write',
     path: string,
     outcome: 'allow' | 'deny',
     error?: AuthorityError
   ): Promise<void> {
+    const { claims } = checked;
     return writeAudit(this.#authority, {
-      tenant: authorization.tenant,
+      tenant: claims.tenant,
       event,
       outcome,
-      actor: authorization.subject,
-      principal: authorization.principal,
-      subject: authorization.subject,
-      kind: authorization.kind,
-      credential: authorization.credential,
-      scope: authorization.scope,
-      repo: authorization.repo,
+      actor: claims.subject,
+      principal: claims.principal,
+      subject: claims.subject,
+      kind: claims.kind,
+      credential: claims.id,
+      scope: checked.scope,
+      repo: checked.repo,
       paths: [path],
       ...(error === undefined
         ? {}

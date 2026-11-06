@@ -3,7 +3,13 @@ import { decodeRecord } from '@thaddeus.run/store';
 import { describe, expect, test } from 'bun:test';
 import sodium from 'libsodium-wrappers-sumo';
 
-import { Authority, KeyCustody, LocalRootKey, proveRevoke } from '../src';
+import {
+  Authority,
+  Authorization,
+  KeyCustody,
+  LocalRootKey,
+  proveRevoke,
+} from '../src';
 import {
   bytes,
   fileBackend,
@@ -290,6 +296,7 @@ describe('key custody', () => {
       ) {
         revoking = true;
         const request = {
+          service: w.authority.did,
           tenant: TENANT,
           actor: admin.did,
           target: { did: agent.did },
@@ -302,6 +309,36 @@ describe('key custody', () => {
       return put(key, value);
     };
     await refused(w.custody.open(read, 'src/a.ts', sealed), 'revoked');
+  });
+
+  test('gates act on what the authority checked, not on the public object', async () => {
+    const { w, as } = await setup();
+    const sealed = await w.custody.seal(
+      await as('edit', 'src/b.ts'),
+      'src/b.ts',
+      bytes('secret b')
+    );
+    const narrow = await as('read');
+    // Even with the public path check replaced for every authorization, a
+    // read authorized for src/a.ts does not open src/b.ts.
+    const original = Object.getOwnPropertyDescriptor(
+      Authorization.prototype,
+      'allows'
+    );
+    Object.defineProperty(Authorization.prototype, 'allows', {
+      value: () => true,
+      configurable: true,
+      writable: true,
+    });
+    try {
+      expect(narrow.allows('src/b.ts')).toBe(true);
+      await refused(w.custody.open(narrow, 'src/b.ts', sealed), 'scope_denied');
+    } finally {
+      if (original !== undefined) {
+        Object.defineProperty(Authorization.prototype, 'allows', original);
+      }
+    }
+    expect(narrow.allows('src/b.ts')).toBe(false);
   });
 
   test('authorizations from another authority are refused', async () => {
@@ -324,6 +361,14 @@ describe('key custody', () => {
       foreign.open(await as('read'), 'src/a.ts', sealed),
       'bad_credential'
     );
+    // A genuine authorization cannot be widened after the fact.
+    const narrow = await as('read');
+    expect(() => {
+      (narrow as unknown as { paths: string[] }).paths = ['src/**'];
+    }).toThrow(TypeError);
+    expect(() => {
+      (narrow.paths as string[]).push('src/b.ts');
+    }).toThrow(TypeError);
     // Nor does a look-alike object pass for an authorization.
     const fake = Object.fromEntries(
       Object.entries(await as('read'))

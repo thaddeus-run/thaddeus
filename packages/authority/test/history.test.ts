@@ -1,8 +1,11 @@
+import { decodeRecord } from '@thaddeus.run/store';
 import { describe, expect, test } from 'bun:test';
 
 import {
+  type AdvanceInput,
   describeAttribution,
   type HeadContent,
+  type ServiceHeadRecord,
   signActorClaim,
   verifyHeadRecord,
 } from '../src';
@@ -61,11 +64,13 @@ describe('service-authorized history advancement', () => {
       view: 'main',
       expectedVersion: null,
       revision: 'rev-1',
+      changedPaths: ['src/a.ts'],
     });
     const second = await w.authority.advance(await integrate(['src/b.ts']), {
       view: 'main',
       expectedVersion: 0,
       revision: 'rev-2',
+      changedPaths: ['src/b.ts'],
     });
     expect([first.version, second.version]).toEqual([0, 1]);
     expect(second.previous).toBe(first.id);
@@ -78,6 +83,10 @@ describe('service-authorized history advancement', () => {
       kind: 'worker',
     });
     expect(await w.authority.head(TENANT, 'app', 'main')).toEqual(second);
+    // The record the authority keeps as the tip cannot be edited in place.
+    expect(() => {
+      (second.paths as string[]).push('src/c.ts');
+    }).toThrow(TypeError);
   });
 
   test('a service record is never presented as an actor signature', async () => {
@@ -86,6 +95,7 @@ describe('service-authorized history advancement', () => {
       view: 'main',
       expectedVersion: null,
       revision: 'rev-1',
+      changedPaths: ['src/a.ts'],
     });
     const attribution = describeAttribution(record);
     expect(attribution.recordedBy).toBe(w.authority.did);
@@ -108,6 +118,7 @@ describe('service-authorized history advancement', () => {
       view: 'main',
       expectedVersion: null,
       revision: 'rev-1',
+      changedPaths: ['src/a.ts'],
       actorClaims: [signActorClaim(agent, content)],
     });
     expect(describeAttribution(record).signedBy).toEqual([agent.did]);
@@ -130,6 +141,7 @@ describe('service-authorized history advancement', () => {
         view: 'main',
         expectedVersion: null,
         revision: 'rev-1',
+        changedPaths: ['src/a.ts'],
         actorClaims: [claim],
       }),
       'invalid_claim'
@@ -143,6 +155,7 @@ describe('service-authorized history advancement', () => {
       view: 'main',
       expectedVersion: null,
       revision: 'rev-1',
+      changedPaths: ['src/a.ts'],
     });
     const relabelled = {
       ...record,
@@ -181,10 +194,97 @@ describe('service-authorized history advancement', () => {
           view: 'main',
           expectedVersion: null,
           revision: 'r',
+          changedPaths: ['src/a.ts'],
         }),
       'scope_denied'
     );
     await refused(integrate(['docs/a.md']), 'scope_denied');
+  });
+
+  test('every changed path must be inside the authorization', async () => {
+    const { w, integrate } = await setup();
+    const input = (changedPaths: string[]): AdvanceInput => ({
+      view: 'main',
+      expectedVersion: null,
+      revision: 'rev-1',
+      changedPaths,
+    });
+    // Authorized for src/a.ts, but the revision also changes other files.
+    for (const changed of [['src/b.ts'], ['src/a.ts', 'docs/a.md']]) {
+      await refused(
+        w.authority.advance(await integrate(), input(changed)),
+        'scope_denied'
+      );
+    }
+    const auth = await integrate();
+    await refused(
+      () => w.authority.advance(auth, input(['../a.ts'])),
+      'malformed'
+    );
+    expect(await w.authority.head(TENANT, 'app', 'main')).toBeNull();
+
+    const record = await w.authority.advance(
+      await integrate(['src/**']),
+      input(['src/b.ts', 'src/a.ts', 'src/a.ts'])
+    );
+    expect(record.paths).toEqual(['src/a.ts', 'src/b.ts']);
+    const denials = (await w.authority.audit(TENANT)).filter(
+      (r) => r.event === 'history.advance' && r.outcome === 'deny'
+    );
+    expect(denials.map((r) => r.paths)).toEqual([
+      ['src/b.ts'],
+      ['docs/a.md', 'src/a.ts'],
+    ]);
+  });
+
+  test('a genuine record copied under another view is not its head', async () => {
+    const { w, integrate } = await setup();
+    const input = (view: string): AdvanceInput => ({
+      view,
+      expectedVersion: null,
+      revision: 'rev-1',
+      changedPaths: ['src/a.ts'],
+    });
+    await w.authority.advance(await integrate(), input('main'));
+    await w.authority.advance(await integrate(), input('other'));
+    let mainBytes: Uint8Array | undefined;
+    let otherBytes: Uint8Array | undefined;
+    let otherKey: string | undefined;
+    for (const key of await w.backend.list('authority/head/')) {
+      const raw = await w.backend.get(key);
+      if (raw === undefined) continue;
+      const { view } = decodeRecord(raw) as ServiceHeadRecord;
+      if (view === 'main') mainBytes = raw;
+      else [otherKey, otherBytes] = [key, raw];
+    }
+    if (
+      mainBytes === undefined ||
+      otherBytes === undefined ||
+      otherKey === undefined
+    ) {
+      throw new Error('expected one record per view');
+    }
+    // Someone with write access to storage plants a genuine record where it
+    // does not belong: main's record in other's place, or other's first
+    // record as its second. The signatures are real; the places are not.
+    const next = otherKey.replace(/\d{12}$/, '000000000001');
+    const plants: [string, Uint8Array][] = [
+      [otherKey, mainBytes],
+      [next, otherBytes],
+    ];
+    for (const [key, planted] of plants) {
+      await w.backend.put(key, planted);
+      const restarted = await w.reopen();
+      await refused(
+        restarted.authority.head(TENANT, 'app', 'other'),
+        'invalid_claim'
+      );
+      expect(
+        (await restarted.authority.head(TENANT, 'app', 'main'))?.view
+      ).toBe('main');
+      await w.backend.put(otherKey, otherBytes);
+      await w.backend.delete(next);
+    }
   });
 
   test('a stale expected version is refused', async () => {
@@ -193,6 +293,7 @@ describe('service-authorized history advancement', () => {
       view: 'main',
       expectedVersion: null,
       revision: 'rev-1',
+      changedPaths: ['src/a.ts'],
     });
     for (const expectedVersion of [null, 1]) {
       await refused(
@@ -200,6 +301,7 @@ describe('service-authorized history advancement', () => {
           view: 'main',
           expectedVersion,
           revision: 'rev-2',
+          changedPaths: ['src/a.ts'],
         }),
         'stale_head'
       );
@@ -214,6 +316,7 @@ describe('service-authorized history advancement', () => {
         view: 'main',
         expectedVersion: null,
         revision: 'rev-1',
+        changedPaths: ['src/a.ts'],
       });
       const restarted = await w.reopen(fileBackend(dir));
       expect(await restarted.authority.head(TENANT, 'app', 'main')).toEqual(

@@ -2,6 +2,7 @@
 // message or a retry rule without parsing text.
 export type AuthorityErrorCode =
   | 'malformed'
+  | 'wrong_service'
   | 'unknown_tenant'
   | 'tenant_exists'
   | 'not_a_member'

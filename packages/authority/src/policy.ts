@@ -33,7 +33,9 @@ export interface TenantPolicy extends PolicyBody {
   readonly changedAt: number;
 }
 
+// `service` is the DID of the service asked, as in an issue request.
 export interface PolicyChange {
+  readonly service: string;
   readonly tenant: string;
   readonly admin: string;
   readonly expectedVersion: number;
@@ -81,6 +83,7 @@ export function canonicalPolicyBody(body: PolicyBody): PolicyBody {
 export function policyChangeBody(change: PolicyChange): unknown {
   assertTenant(change.tenant);
   return [
+    change.service,
     change.tenant,
     change.admin,
     change.expectedVersion,

@@ -18,12 +18,13 @@ All notable changes to Thaddeus. Format follows
   narrowing a policy or revoking a credential or DID takes effect at the next
   use. `KeyCustody` keeps one data key per repository, stored only wrapped by a
   root key provider, and audits every plaintext read and write before it
-  returns. `advance` moves shared history under an `integrate` authorization and
-  signs a record that names who asked separately from who signed, as ADR 0006
-  decides. Queued work re-checks its authorization when it starts and redeems
-  once. Policy changes, revocations and advancements for a tenant run one at a
-  time, and atomic creates stop two writers from forking a policy or a history
-  chain. The server does not use the package yet.
+  returns. `advance` moves shared history under an `integrate` authorization
+  that covers every changed path, and signs a record that names who asked
+  separately from who signed, as ADR 0006 decides. Queued work re-checks its
+  authorization when it starts and redeems once. Policy changes, revocations and
+  advancements for a tenant run one at a time, and atomic creates stop two
+  writers from forking a policy or a history chain. The server does not use the
+  package yet.
 
 - `thaddeus update` replaces an installed binary with the newest build on your
   update channel, and updates a `lazythad` that sits beside it.

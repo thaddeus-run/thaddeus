@@ -101,6 +101,7 @@ describe('concurrent policy changes', () => {
       view: 'main',
       expectedVersion: null,
       revision: 'r1',
+      changedPaths: ['src/a.ts'],
     });
     const changing = changePolicy(w, TENANT, admin1, 0, withoutWorker);
     const record = await advancing;
@@ -112,6 +113,7 @@ describe('concurrent policy changes', () => {
         view: 'main',
         expectedVersion: 0,
         revision: 'r2',
+        changedPaths: ['src/a.ts'],
       }),
       'policy_denied'
     );
@@ -125,6 +127,7 @@ describe('concurrent policy changes', () => {
       view: 'main',
       expectedVersion: null,
       revision: 'r1',
+      changedPaths: ['src/a.ts'],
     });
     await changing;
     await refused(advancing, 'policy_denied');
@@ -136,7 +139,12 @@ describe('concurrent policy changes', () => {
     const auth = await authorize();
     let advanced = false;
     const advancing = w.authority
-      .advance(auth, { view: 'main', expectedVersion: null, revision: 'r1' })
+      .advance(auth, {
+        view: 'main',
+        expectedVersion: null,
+        revision: 'r1',
+        changedPaths: ['src/a.ts'],
+      })
       .then(() => {
         advanced = true;
       });
@@ -148,6 +156,7 @@ describe('concurrent policy changes', () => {
         view: 'main',
         expectedVersion: 0,
         revision: 'r2',
+        changedPaths: ['src/a.ts'],
       }),
       'revoked'
     );
@@ -161,11 +170,13 @@ describe('concurrent policy changes', () => {
         view: 'main',
         expectedVersion: null,
         revision: 'ra',
+        changedPaths: ['src/a.ts'],
       }),
       w.authority.advance(b, {
         view: 'main',
         expectedVersion: null,
         revision: 'rb',
+        changedPaths: ['src/a.ts'],
       }),
     ]);
     expect(won).toHaveLength(1);
@@ -193,11 +204,13 @@ describe('concurrent policy changes', () => {
         view: 'main',
         expectedVersion: null,
         revision: 'ra',
+        changedPaths: ['src/a.ts'],
       }),
       second.advance(b, {
         view: 'main',
         expectedVersion: null,
         revision: 'rb',
+        changedPaths: ['src/a.ts'],
       }),
     ]);
     expect(won).toHaveLength(1);

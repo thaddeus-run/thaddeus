@@ -7,7 +7,14 @@ import {
   type ReplayNonceBackend,
 } from '@thaddeus.run/store';
 
-import { assertDid, base64url, byCodeUnit, digest, randomId } from './codec';
+import {
+  assertDid,
+  base64url,
+  byCodeUnit,
+  deepFreeze,
+  digest,
+  randomId,
+} from './codec';
 import { AuthorityError, type AuthorityErrorCode } from './errors';
 import {
   type ActorClaim,
@@ -43,6 +50,7 @@ import {
 import {
   assertKind,
   assertName,
+  assertPath,
   assertPattern,
   assertScope,
   assertTenant,
@@ -76,11 +84,13 @@ export interface TtlRule {
 
 // Agents and workers get short-lived credentials; humans get sessions that
 // last a working day at most. A host may lower these, never raise them.
-export const DEFAULT_TTL: Readonly<Record<PrincipalKind, TtlRule>> = {
-  human: { defaultMs: 8 * HOUR, maxMs: 12 * HOUR },
-  agent: { defaultMs: 15 * MINUTE, maxMs: HOUR },
-  worker: { defaultMs: 15 * MINUTE, maxMs: HOUR },
-};
+export const DEFAULT_TTL: Readonly<Record<PrincipalKind, TtlRule>> = deepFreeze(
+  {
+    human: { defaultMs: 8 * HOUR, maxMs: 12 * HOUR },
+    agent: { defaultMs: 15 * MINUTE, maxMs: HOUR },
+    worker: { defaultMs: 15 * MINUTE, maxMs: HOUR },
+  }
+);
 
 export interface AuthorityOptions {
   // Durable state. The nonce capability makes replay protection survive a
@@ -136,6 +146,10 @@ export interface AdvanceInput {
   // The version the caller saw, or null to create the view's first record.
   readonly expectedVersion: number | null;
   readonly revision: string;
+  // Every file path the revision changes against the view's current
+  // revision, from the host's own diff. Each must be inside the
+  // authorization's paths, and the record names them.
+  readonly changedPaths: readonly string[];
   readonly actorClaims?: readonly ActorClaim[];
 }
 
@@ -143,6 +157,9 @@ interface Internals {
   readonly authority: Authority;
   readonly claims: CredentialClaims;
   readonly token: string;
+  // The canonical action the authority checked. Gates read scope, repository
+  // and paths from here, never from the public object.
+  readonly action: Action;
 }
 
 // Authorizations are only real if this module made them. Gates look an
@@ -150,6 +167,17 @@ interface Internals {
 // refused.
 const genuine = new WeakMap<Authorization, Internals>();
 
+/** @internal True when one of `patterns` covers the exact file `path`. */
+export function reaches(patterns: readonly string[], path: string): boolean {
+  try {
+    assertPattern(path);
+  } catch {
+    return false;
+  }
+  return patterns.some((pattern) => patternCovers(pattern, path));
+}
+
+type AuditBase = Omit<AuditRecord, 'id' | 'at' | 'outcome'>;
 type AuditWriter = (record: Omit<AuditRecord, 'id' | 'at'>) => Promise<void>;
 const auditors = new WeakMap<Authority, AuditWriter>();
 
@@ -192,7 +220,7 @@ export class Authorization {
     this.tenant = claims.tenant;
     this.repo = action.repo;
     this.scope = action.scope;
-    this.paths = action.paths;
+    this.paths = Object.freeze([...action.paths]);
     this.principal = claims.principal;
     this.subject = claims.subject;
     this.kind = claims.kind;
@@ -200,6 +228,9 @@ export class Authorization {
     this.expiresAt = claims.expiresAt;
     this.policyVersion = policyVersion;
     this.ticket = ticket;
+    // Gates read these fields, so they must not change after the check that
+    // produced them, not even through a cast.
+    Object.freeze(this);
   }
 
   /**
@@ -207,12 +238,7 @@ export class Authorization {
    * search hits, logs and subscription events through this.
    */
   allows(path: string): boolean {
-    try {
-      assertPattern(path);
-    } catch {
-      return false;
-    }
-    return this.paths.some((pattern) => patternCovers(pattern, path));
+    return reaches(this.paths, path);
   }
 }
 
@@ -297,7 +323,10 @@ export class Authority {
           `${kind} ttl must satisfy 1 <= default <= max <= ${ceiling.maxMs}`
         );
       }
-      ttl[kind] = rule;
+      ttl[kind] = Object.freeze({
+        defaultMs: rule.defaultMs,
+        maxMs: rule.maxMs,
+      });
     }
     const skew = options.proofSkewMs ?? PROOF_SKEW_MS;
     if (!Number.isSafeInteger(skew) || skew < 1 || skew > PROOF_SKEW_MS) {
@@ -339,7 +368,9 @@ export class Authority {
     }
     for (const key of latest.values()) {
       const policy = await this.#read<TenantPolicy>(key);
-      if (policy !== undefined) this.#policies.set(policy.tenant, policy);
+      if (policy !== undefined) {
+        this.#policies.set(policy.tenant, deepFreeze(policy));
+      }
     }
     for (const key of await this.#backend.list(REVOCATION_PREFIX)) {
       const record = await this.#read<{
@@ -377,7 +408,7 @@ export class Authority {
     return result;
   }
 
-  /** The tenant's current policy. */
+  /** The tenant's current policy. It is frozen; change it with changePolicy. */
   policy(tenant: string): TenantPolicy {
     const policy = this.#policies.get(tenant);
     if (policy === undefined) {
@@ -394,13 +425,13 @@ export class Authority {
     assertTenant(tenant);
     const canonical = canonicalPolicyBody(body);
     return this.#lock(tenant, async () => {
-      const policy: TenantPolicy = {
+      const policy: TenantPolicy = deepFreeze({
         tenant,
         version: 0,
         ...canonical,
         changedBy: null,
         changedAt: this.#now(),
-      };
+      });
       if (
         this.#policies.has(tenant) ||
         !(await this.#create(policyKey(tenant, 0), policy))
@@ -425,11 +456,13 @@ export class Authority {
    * held to the new policy from the moment this resolves.
    */
   changePolicy(change: PolicyChange, proof: Proof): Promise<TenantPolicy> {
+    this.#assertService(change.service);
     const body = policyChangeBody(change);
     assertDid('admin', change.admin);
     checkProofSignature(change.admin, POLICY_DOMAIN, body, proof);
     return this.#lock(change.tenant, async () => {
       const current = this.policy(change.tenant);
+      this.#assertKnown(current, change.admin);
       return this.#audited(
         {
           tenant: change.tenant,
@@ -450,13 +483,13 @@ export class Authority {
               `policy is at version ${current.version}, not ${change.expectedVersion}`
             );
           }
-          const next: TenantPolicy = {
+          const next: TenantPolicy = deepFreeze({
             tenant: change.tenant,
             version: current.version + 1,
             ...canonicalPolicyBody(change.policy),
             changedBy: change.admin,
             changedAt: this.#now(),
-          };
+          });
           if (
             !(await this.#create(policyKey(change.tenant, next.version), next))
           ) {
@@ -480,6 +513,7 @@ export class Authority {
    * and the lifetime inside the subject kind's ceiling.
    */
   async issue(request: IssueRequest, proof: Proof): Promise<Issued> {
+    this.#assertService(request.service);
     assertTenant(request.tenant);
     assertDid('principal', request.principal);
     assertDid('subject', request.subject);
@@ -491,7 +525,7 @@ export class Authority {
       issueBody(request),
       proof
     );
-    this.policy(request.tenant);
+    this.#assertKnown(this.policy(request.tenant), request.principal);
     return this.#audited(
       {
         tenant: request.tenant,
@@ -561,11 +595,12 @@ export class Authority {
 
   /**
    * Revokes one credential, or every credential issued so far to or through a
-   * DID. Admins may revoke anything in the tenant; a principal or holder may
-   * revoke its own. To stop new credentials too, remove the member from the
-   * policy.
+   * DID. Admins may revoke anything in the tenant. A credential's principal or
+   * holder may revoke that credential, and a member may revoke its own DID.
+   * To stop new credentials too, remove the member from the policy.
    */
   revoke(request: RevokeRequest, proof: Proof): Promise<void> {
+    this.#assertService(request.service);
     assertTenant(request.tenant);
     assertDid('actor', request.actor);
     checkProofSignature(
@@ -574,9 +609,17 @@ export class Authority {
       revokeBody(request),
       proof
     );
+    const claims =
+      'credential' in request.target
+        ? decodeCredential(request.target.credential, this.did)
+        : undefined;
+    const holds =
+      claims !== undefined &&
+      (request.actor === claims.principal || request.actor === claims.subject);
     return this.#lock(request.tenant, async () => {
       const policy = this.policy(request.tenant);
       const isAdmin = policy.admins.includes(request.actor);
+      if (!holds) this.#assertKnown(policy, request.actor);
       await this.#audited(
         {
           tenant: request.tenant,
@@ -586,22 +629,14 @@ export class Authority {
         async () => {
           await this.#consumeProof(request.actor, proof);
           const at = this.#now();
-          if ('credential' in request.target) {
-            const claims = decodeCredential(
-              request.target.credential,
-              this.did
-            );
+          if (claims !== undefined) {
             if (claims.tenant !== request.tenant) {
               throw new AuthorityError(
                 'wrong_tenant',
                 'the credential belongs to another tenant'
               );
             }
-            if (
-              !isAdmin &&
-              request.actor !== claims.principal &&
-              request.actor !== claims.subject
-            ) {
+            if (!isAdmin && !holds) {
               throw new AuthorityError(
                 'not_an_admin',
                 `${request.actor} may not revoke this credential`
@@ -619,7 +654,7 @@ export class Authority {
             );
             return `credential ${claims.id}`;
           }
-          const { did } = request.target;
+          const { did } = request.target as { readonly did: string };
           assertDid('revoked did', did);
           if (!isAdmin && request.actor !== did) {
             throw new AuthorityError(
@@ -639,6 +674,30 @@ export class Authority {
     });
   }
 
+  // Throws unless the request is for this service. Signed requests name the
+  // service, so one made for another deployment cannot be replayed here.
+  #assertService(service: string): void {
+    if (service !== this.did) {
+      throw new AuthorityError(
+        'wrong_service',
+        `the request is for ${String(service)}, not ${this.did}`
+      );
+    }
+  }
+
+  // Throws unless `did` is an admin or member of the tenant. A key the tenant
+  // does not know is refused here, before it spends a nonce or writes to the
+  // tenant's audit, so strangers cannot fill either. The host's request log
+  // and rate limits cover them.
+  #assertKnown(policy: TenantPolicy, did: string): void {
+    if (!policy.admins.includes(did) && memberOf(policy, did) === undefined) {
+      throw new AuthorityError(
+        'not_a_member',
+        `${did} holds nothing in ${policy.tenant}`
+      );
+    }
+  }
+
   #noteDidRevocation(tenant: string, did: string, at: number): void {
     const key = `${tenant}\n${did}`;
     this.#revokedDids.set(key, Math.max(at, this.#revokedDids.get(key) ?? 0));
@@ -649,6 +708,11 @@ export class Authority {
    * proof must be the holder's signature over this exact action with a fresh
    * timestamp and an unused nonce, and the action must fit both the
    * credential's grants and the principal's grants in the current policy.
+   *
+   * Once the token proves to be this service's, every refusal is audited in
+   * its tenant, including a bad proof or a malformed action. A token that is
+   * not this service's names no tenant worth trusting, so it is refused
+   * without an audit record.
    */
   async authorize(
     token: string,
@@ -656,40 +720,51 @@ export class Authority {
     proof: Proof
   ): Promise<Authorization> {
     const claims = decodeCredential(token, this.did);
-    const canonical = canonicalAction(action);
-    if (canonical.tenant !== claims.tenant) {
-      throw new AuthorityError(
-        'wrong_tenant',
-        `the credential is for ${claims.tenant}, not ${canonical.tenant}`
-      );
-    }
-    checkProofSignature(
-      claims.subject,
-      ACTION_DOMAIN,
-      actionBody(token, canonical),
-      proof
-    );
+    let canonical: Action | undefined;
     return this.#audited(
-      {
+      () => ({
         tenant: claims.tenant,
         event: 'authorize',
         ...this.#who(claims),
-        scope: canonical.scope,
-        repo: canonical.repo,
-        paths: canonical.paths,
-      },
+        ...(canonical === undefined
+          ? {}
+          : {
+              scope: canonical.scope,
+              repo: canonical.repo,
+              paths: canonical.paths,
+            }),
+      }),
       async () => {
-        this.#validate(claims, canonical);
+        const checked = canonicalAction(action);
+        canonical = checked;
+        if (checked.tenant !== claims.tenant) {
+          throw new AuthorityError(
+            'wrong_tenant',
+            `the credential is for ${claims.tenant}, not ${checked.tenant}`
+          );
+        }
+        checkProofSignature(
+          claims.subject,
+          ACTION_DOMAIN,
+          actionBody(token, checked),
+          proof
+        );
+        this.#validate(claims, checked);
         await this.#consumeProof(claims.subject, proof);
         // The policy may have changed while the nonce was consumed.
-        const policyVersion = this.#validate(claims, canonical);
+        const policyVersion = this.#validate(claims, checked);
         const authorization = new Authorization(
           claims,
-          canonical,
+          checked,
           policyVersion,
           null
         );
-        genuine.set(authorization, { authority: this, claims, token });
+        genuine.set(authorization, {
+          authority: this,
+          claims,
+          token,
+          action: checked,
+        });
         return authorization;
       },
       undefined,
@@ -711,7 +786,7 @@ export class Authority {
         'the authorization came from another authority'
       );
     }
-    this.#validate(internals.claims, authorization);
+    this.#validate(internals.claims, internals.action);
   }
 
   // Throws unless the credential is live, unrevoked and covers the action in
@@ -799,29 +874,29 @@ export class Authority {
    * policy of that later moment, and it can be redeemed once.
    */
   async queue(authorization: Authorization): Promise<string> {
-    const internals = internalsOf(authorization);
+    const { claims, token, action } = internalsOf(authorization);
     this.check(authorization);
     const id = randomId();
     const ticket = await encodeTicket(
       {
         v: 1,
         id,
-        credential: internals.token,
-        scope: authorization.scope,
-        repo: authorization.repo,
-        paths: authorization.paths,
+        credential: token,
+        scope: action.scope,
+        repo: action.repo,
+        paths: action.paths,
         queuedAt: this.#now(),
       },
       this.#signer
     );
     await this.#audit({
-      tenant: authorization.tenant,
+      tenant: claims.tenant,
       event: 'ticket.queue',
       outcome: 'allow',
-      ...this.#who(internals.claims),
-      scope: authorization.scope,
-      repo: authorization.repo,
-      paths: authorization.paths,
+      ...this.#who(claims),
+      scope: action.scope,
+      repo: action.repo,
+      paths: action.paths,
       detail: `ticket ${id}`,
     });
     return ticket;
@@ -875,6 +950,7 @@ export class Authority {
             authority: this,
             claims: credential,
             token: claims.credential,
+            action,
           });
           return authorization;
         },
@@ -883,12 +959,18 @@ export class Authority {
     );
   }
 
-  /** The newest service head record for a view, or null before the first. */
+  /**
+   * The newest service head record for a view, or null before the first.
+   * The record is frozen.
+   */
   async head(
     tenant: string,
     repo: string,
     view: string
   ): Promise<ServiceHeadRecord | null> {
+    assertTenant(tenant);
+    assertName('repo', repo);
+    assertName('view', view);
     const prefix = headPrefix(tenant, repo, view);
     const cached = this.#heads.get(prefix);
     if (cached !== undefined) return cached;
@@ -898,7 +980,24 @@ export class Authority {
       newest === undefined
         ? null
         : ((await this.#read<ServiceHeadRecord>(newest)) ?? null);
-    if (record !== null) verifyHeadRecord(record, this.did);
+    if (record !== null) {
+      verifyHeadRecord(record, this.did);
+      // The signature covers the content, not where it is stored, so a
+      // genuine record copied under another view's key must not pass as
+      // that view's head.
+      if (
+        record.tenant !== tenant ||
+        record.repo !== repo ||
+        record.view !== view ||
+        `${prefix}${pad(record.version, 12)}` !== newest
+      ) {
+        throw new AuthorityError(
+          'invalid_claim',
+          'the head record is stored under another view or version'
+        );
+      }
+      deepFreeze(record);
+    }
     // An advancement may have cached a newer record while this one loaded.
     if (!this.#heads.has(prefix)) this.#heads.set(prefix, record);
     return this.#heads.get(prefix) ?? null;
@@ -909,14 +1008,15 @@ export class Authority {
    * policy check and the version check happen inside the tenant's lock, so a
    * policy change or revocation either lands first and refuses this, or lands
    * after a record that names the policy version it was authorized under.
-   * The record says who requested it; only `actorClaims` are signatures.
+   * Every changed path must be inside the authorization, and the record names
+   * them. The record says who requested it; only `actorClaims` are signatures.
    */
   advance(
     authorization: Authorization,
     input: AdvanceInput
   ): Promise<ServiceHeadRecord> {
-    const internals = internalsOf(authorization);
-    if (authorization.scope !== 'integrate') {
+    const { claims, action } = internalsOf(authorization);
+    if (action.scope !== 'integrate') {
       throw new AuthorityError(
         'scope_denied',
         'advancing shared history needs an integrate authorization'
@@ -934,18 +1034,35 @@ export class Authority {
         'expectedVersion must be null or a version number'
       );
     }
-    const { tenant, repo } = authorization;
+    if (!Array.isArray(input.changedPaths)) {
+      throw new AuthorityError(
+        'malformed',
+        'changedPaths must list the paths the revision changes'
+      );
+    }
+    for (const path of input.changedPaths) assertPath(path);
+    const changed = [...new Set(input.changedPaths)].sort(byCodeUnit);
+    const { tenant } = claims;
+    const { repo } = action;
     return this.#lock(tenant, () =>
       this.#audited(
         {
           tenant,
           event: 'history.advance',
-          ...this.#who(internals.claims),
+          ...this.#who(claims),
           scope: 'integrate',
           repo,
-          paths: authorization.paths,
+          paths: changed,
         },
         async () => {
+          for (const path of changed) {
+            if (!reaches(action.paths, path)) {
+              throw new AuthorityError(
+                'scope_denied',
+                `${path} changed but is outside the authorized paths`
+              );
+            }
+          }
           this.check(authorization);
           const tip = await this.head(tenant, repo, input.view);
           const current = tip?.version ?? null;
@@ -962,10 +1079,10 @@ export class Authority {
             version: current === null ? 0 : current + 1,
             previous: tip?.id ?? null,
             revision: input.revision,
-            paths: [...authorization.paths].sort(byCodeUnit),
+            paths: changed,
           };
-          const actorClaims = [...(input.actorClaims ?? [])];
-          for (const claim of actorClaims) {
+          const given = [...(input.actorClaims ?? [])];
+          for (const claim of given) {
             if (!verifyActorClaim(content, claim)) {
               throw new AuthorityError(
                 'invalid_claim',
@@ -973,6 +1090,11 @@ export class Authority {
               );
             }
           }
+          // Copied, so freezing the record leaves the caller's objects alone.
+          const actorClaims = given.map(({ did, signature }) => ({
+            did,
+            signature,
+          }));
           const unsigned = {
             v: 1 as const,
             ...content,
@@ -980,19 +1102,19 @@ export class Authority {
             at: this.#now(),
             policyVersion: this.policy(tenant).version,
             requestedBy: {
-              principal: authorization.principal,
-              subject: authorization.subject,
-              kind: authorization.kind,
-              credential: authorization.credential,
+              principal: claims.principal,
+              subject: claims.subject,
+              kind: claims.kind,
+              credential: claims.id,
             },
             actorClaims,
           };
           const signature = await this.#signer.sign(headBytes(unsigned));
-          const record: ServiceHeadRecord = {
+          const record: ServiceHeadRecord = deepFreeze({
             ...unsigned,
             id: headId(unsigned),
             signature: base64url(signature),
-          };
+          });
           const prefix = headPrefix(tenant, repo, input.view);
           if (
             !(await this.#create(`${prefix}${pad(record.version, 12)}`, record))
@@ -1038,21 +1160,23 @@ export class Authority {
   }
 
   // Runs `work` and audits its outcome. Refusals are always recorded; a
-  // success is recorded unless `mode` is 'deny-only'.
+  // success is recorded unless `mode` is 'deny-only'. `base` may be a
+  // function when `work` learns some of the record's fields as it runs.
   async #audited<T>(
-    base: Omit<AuditRecord, 'id' | 'at' | 'outcome'>,
+    base: AuditBase | (() => AuditBase),
     work: () => Promise<T>,
     detail?: (value: T) => string,
     extra?: (value: T) => Partial<AuditRecord>,
     mode: 'all' | 'deny-only' = 'all'
   ): Promise<T> {
+    const describe = typeof base === 'function' ? base : () => base;
     let value: T;
     try {
       value = await work();
     } catch (error) {
       if (error instanceof AuthorityError) {
         await this.#audit({
-          ...base,
+          ...describe(),
           outcome: 'deny',
           code: error.code,
           detail: error.message,
@@ -1062,7 +1186,7 @@ export class Authority {
     }
     if (mode === 'all') {
       await this.#audit({
-        ...base,
+        ...describe(),
         ...extra?.(value),
         outcome: 'allow',
         ...(detail === undefined ? {} : { detail: detail(value) }),
