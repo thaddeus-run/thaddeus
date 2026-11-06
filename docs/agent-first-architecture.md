@@ -39,6 +39,17 @@ signs it. Timed reveal is the known exception, because the chosen host holds a
 publishable key until the reveal time. [ARCHITECTURE.md](../ARCHITECTURE.md)
 describes this in full.
 
+The trusted service's authorization contract ships as the
+`@thaddeus.run/authority` package, which the server does not use yet. It covers
+guarantees 1 to 4 and 6 below as a library: separate scopes per repository and
+path, holder-bound credentials with lifetime ceilings and revocation,
+service-managed key custody whose every plaintext access is audited, and
+service-signed history advancement that keeps actor signatures separate. The
+[design](superpowers/specs/2026-11-06-tha-150-trusted-service-authority-design.md)
+and [ADR 0006](adr/0006-the-service-records-actors-may-sign.md) hold the
+details. Revocation is single-node until
+[THA-83](https://linear.app/thaddeus-run/issue/THA-83).
+
 ### Direction
 
 [ADR 0003](adr/0003-trusted-code-processing-service.md) adopts a trusted service

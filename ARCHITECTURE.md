@@ -28,13 +28,14 @@ of work.
 
 ## Shared primitives (reused, not duplicated)
 
-| Primitive                             | Package                  | Reused by                                               |
-| ------------------------------------- | ------------------------ | ------------------------------------------------------- |
-| Identity (`did:key`)                  | `@thaddeus.run/identity` | P01 caps · P04 provenance · P07 reputation · P09 agents |
-| Object (encrypted, content-addressed) | `@thaddeus.run/store`    | P01 · P02 membrane · P03 snapshots · P11 query          |
-| Capability (sealed key)               | `@thaddeus.run/store`    | P01 · P02 reveal · P09 revocation                       |
-| Op (operation log entry)              | `@thaddeus.run/log`      | P03 · P04 · P05 · P06 · P08 · P10 · P11 query           |
-| Head (owner-signed shared view)       | `@thaddeus.run/log`      | P03 · platform · server · client                        |
+| Primitive                             | Package                   | Reused by                                               |
+| ------------------------------------- | ------------------------- | ------------------------------------------------------- |
+| Identity (`did:key`)                  | `@thaddeus.run/identity`  | P01 caps · P04 provenance · P07 reputation · P09 agents |
+| Object (encrypted, content-addressed) | `@thaddeus.run/store`     | P01 · P02 membrane · P03 snapshots · P11 query          |
+| Capability (sealed key)               | `@thaddeus.run/store`     | P01 · P02 reveal · P09 revocation                       |
+| Op (operation log entry)              | `@thaddeus.run/log`       | P03 · P04 · P05 · P06 · P08 · P10 · P11 query           |
+| Head (owner-signed shared view)       | `@thaddeus.run/log`       | P03 · platform · server · client                        |
+| Credential (holder-bound, scoped)     | `@thaddeus.run/authority` | Trusted service (not wired into the server yet)         |
 
 ## Build order (each tier depends only on tiers below)
 
@@ -125,9 +126,14 @@ repository decryption keys. Timed reveal remains the deliberate exception
 described below: it temporarily handles a deliberately publishable content key
 using a world-known public seed. Multi-node concurrency, dynamic federation
 discovery, and the Git gateway are the next steps. ADR 0003 replaces this
-keyless design with a trusted code-processing service for the hosted path. The
-change ships under THA-150 and THA-151, and this section will be updated when it
-does.
+keyless design with a trusted code-processing service for the hosted path.
+THA-150 shipped its authorization contract as `@thaddeus.run/authority`:
+holder-bound scoped credentials, revocation, service-managed key custody with
+audited plaintext access, and service-signed history advancement that keeps
+actor signatures separate
+([ADR 0006](docs/adr/0006-the-service-records-actors-may-sign.md)). This server
+does not use it yet. THA-151 migrates existing repositories, and the remote
+workspace, query and shared-head work puts the contract behind routes.
 
 Timed reveal is the deliberate exception to that normal trust boundary. An owner
 uploads a public-wrapped capability before its start time so the server can

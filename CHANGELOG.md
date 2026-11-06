@@ -7,6 +7,24 @@ All notable changes to Thaddeus. Format follows
 
 ### Added
 
+- `@thaddeus.run/authority` (THA-150 / #219) defines how a trusted service
+  authorizes browsers, external agents and integration workers. A member of a
+  tenant's policy gets a credential with separate `read`, `edit`, `execute`,
+  `review` and `integrate` scopes, limited by repository and path, that lives at
+  most an hour for agents and workers and 12 hours for humans. A member can also
+  issue a narrower agent session to an agent key it runs. Every use is signed by
+  the credential's holder key with a single-use nonce that stays used after a
+  restart, and is checked against the policy current at that moment, so
+  narrowing a policy or revoking a credential or DID takes effect at the next
+  use. `KeyCustody` keeps one data key per repository, stored only wrapped by a
+  root key provider, and audits every plaintext read and write before it
+  returns. `advance` moves shared history under an `integrate` authorization and
+  signs a record that names who asked separately from who signed, as ADR 0006
+  decides. Queued work re-checks its authorization when it starts and redeems
+  once. Policy changes, revocations and advancements for a tenant run one at a
+  time, and atomic creates stop two writers from forking a policy or a history
+  chain. The server does not use the package yet.
+
 - `thaddeus update` replaces an installed binary with the newest build on your
   update channel, and updates a `lazythad` that sits beside it.
   `--channel release|nightly` switches the channel and saves it in
@@ -25,6 +43,13 @@ All notable changes to Thaddeus. Format follows
   of a hand-edited copy.
 
 ### Documentation
+
+- ADR 0006 decides that the trusted service records history advancements and
+  change journal entries, and that only an actor's own signature over the
+  content is shown as theirs. The THA-150 design in
+  `docs/superpowers/specs/2026-11-06-tha-150-trusted-service-authority-design.md`
+  holds the authorization contract. CONTEXT gains Tenant, Scope, Credential,
+  Agent session, Service record and Actor claim.
 
 - Decided semantic authority and mixed-edit transactions for THA-113 / #169 in
   ADR 0005 and `docs/specs/2026-10-18-thaddeus-semantic-authority-design.md`.

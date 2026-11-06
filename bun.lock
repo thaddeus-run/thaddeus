@@ -325,6 +325,24 @@
         "typescript": "catalog:",
       },
     },
+    "packages/authority": {
+      "name": "@thaddeus.run/authority",
+      "version": "0.1.11-alpha",
+      "dependencies": {
+        "@noble/hashes": "catalog:",
+        "@thaddeus.run/identity": "workspace:*",
+        "@thaddeus.run/store": "workspace:*",
+        "libsodium-wrappers-sumo": "catalog:",
+      },
+      "devDependencies": {
+        "@thaddeus.run/persist": "workspace:*",
+        "@types/bun": "catalog:",
+        "@types/libsodium-wrappers-sumo": "catalog:",
+        "@typescript/native-preview": "catalog:",
+        "tsdown": "catalog:",
+        "typescript": "catalog:",
+      },
+    },
     "packages/cli": {
       "name": "@thaddeus.run/cli",
       "version": "0.1.11-alpha",
@@ -1047,6 +1065,8 @@
     "@tanstack/virtual-file-routes": ["@tanstack/virtual-file-routes@1.162.0", "", {}, "sha512-uhOeFyxLcU41HzvrxsGpiWdcMbScY1EDgbZ5K7DVRMYInbLYWAC0EA/kx9wXAoSM8q82bUG2hRl8+EAjE6XAbA=="],
 
     "@thaddeus.run/agent": ["@thaddeus.run/agent@workspace:packages/agent"],
+
+    "@thaddeus.run/authority": ["@thaddeus.run/authority@workspace:packages/authority"],
 
     "@thaddeus.run/bench": ["@thaddeus.run/bench@workspace:bench"],
 
