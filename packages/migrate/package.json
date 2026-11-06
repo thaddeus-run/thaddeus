@@ -1,0 +1,65 @@
+{
+  "name": "@thaddeus.run/migrate",
+  "version": "0.1.11-alpha",
+  "description": "Owner-authorized migration of keyless encrypted repositories into trusted-service storage, with preserved signed evidence, resumable import, verification before cutover, rollback and export.",
+  "keywords": [
+    "evidence",
+    "migration",
+    "substrate",
+    "trusted-service"
+  ],
+  "homepage": "https://thaddeus.run",
+  "bugs": {
+    "url": "https://github.com/thaddeus-run/thaddeus/issues"
+  },
+  "license": "Apache-2.0",
+  "author": {
+    "name": "thaddeus.run",
+    "url": "https://thaddeus.run"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/thaddeus-run/thaddeus.git",
+    "directory": "packages/migrate"
+  },
+  "files": [
+    "dist",
+    "LICENSE.md",
+    "README.md"
+  ],
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "scripts": {
+    "prepublishOnly": "moon run migrate:prepublish"
+  },
+  "dependencies": {
+    "@noble/hashes": "catalog:",
+    "@thaddeus.run/authority": "workspace:*",
+    "@thaddeus.run/client": "workspace:*",
+    "@thaddeus.run/graph": "workspace:*",
+    "@thaddeus.run/identity": "workspace:*",
+    "@thaddeus.run/log": "workspace:*",
+    "@thaddeus.run/persist": "workspace:*",
+    "@thaddeus.run/platform": "workspace:*",
+    "@thaddeus.run/provenance": "workspace:*",
+    "@thaddeus.run/review": "workspace:*",
+    "@thaddeus.run/store": "workspace:*"
+  },
+  "devDependencies": {
+    "@thaddeus.run/agent": "workspace:*",
+    "@thaddeus.run/cli": "workspace:*",
+    "@thaddeus.run/server": "workspace:*",
+    "@types/bun": "catalog:",
+    "@typescript/native-preview": "catalog:",
+    "tsdown": "catalog:",
+    "typescript": "catalog:"
+  }
+}
