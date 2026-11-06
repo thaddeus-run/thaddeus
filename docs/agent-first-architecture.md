@@ -50,6 +50,11 @@ and [ADR 0006](adr/0006-the-service-records-actors-may-sign.md) hold the
 details. Revocation is single-node until
 [THA-83](https://linear.app/thaddeus-run/issue/THA-83).
 
+The `@thaddeus.run/migrate` package implements the migration contract in section
+8 as a library, again without server routes. The
+[THA-151 design](superpowers/specs/2026-11-06-tha-151-repository-migration-design.md)
+maps each of the six rules to the step that enforces it.
+
 ### Direction
 
 [ADR 0003](adr/0003-trusted-code-processing-service.md) adopts a trusted service
@@ -312,6 +317,14 @@ portable export.
    counts as migrated.
 5. An export and rollback path exists before the first production migration.
 6. Repositories that are not migrated keep working against the keyless server.
+
+`@thaddeus.run/migrate` enforces these. The owner signs a consent that names the
+service, the target and the exact history (rule 1). The owner's client decrypts
+and sends plaintext, so no key is sent, and the original records are kept
+unchanged as evidence (rule 2). Content is sealed in the
+`thaddeus.trusted-repo.v1` format (rule 3). Every version is rebuilt and every
+file reopened before cutover (rule 4). Rollback and a deterministic export exist
+(rule 5). The migration never writes to the keyless server (rule 6).
 
 ## 9. Verification standard
 

@@ -125,6 +125,24 @@ actor's signature. _Avoid_: Attestation by the agent, signed by the agent.
 record. Only actor claims are presented as signatures by the actor. _Avoid_:
 Service record.
 
+**Migration consent**: A repository owner's signed authorization to move one
+keyless repository into one trusted service. It names the service, the target
+tenant and repository, the exact source history and an expiry. _Avoid_:
+Credential, which the service issues rather than the owner.
+
+**Evidence**: The original signed records of a migrated repository, kept
+unchanged: head chains, operations, ciphertext, capabilities and the signed
+records around them. _Avoid_: Backup, which suggests a copy anyone may restore
+from without checking it.
+
+**Cutover**: The step that makes a verified migrated copy the repository's
+history in the trusted service. The keyless source is not changed by it.
+_Avoid_: Switch-over or move, which suggest the source is gone.
+
+**Rollback**: Withdrawing a migrated copy so the keyless source is the only copy
+again. It is possible only while no trusted history goes past what was migrated.
+_Avoid_: Revert, which names undoing a change in history.
+
 **Performance target**: A number a build is held to, as distinct from a
 measurement, which names the environment and the run that observed it. _Avoid_:
 Capability, result or benchmark when no run is linked.

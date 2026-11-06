@@ -462,6 +462,32 @@
         "typescript": "catalog:",
       },
     },
+    "packages/migrate": {
+      "name": "@thaddeus.run/migrate",
+      "version": "0.1.11-alpha",
+      "dependencies": {
+        "@noble/hashes": "catalog:",
+        "@thaddeus.run/authority": "workspace:*",
+        "@thaddeus.run/client": "workspace:*",
+        "@thaddeus.run/graph": "workspace:*",
+        "@thaddeus.run/identity": "workspace:*",
+        "@thaddeus.run/log": "workspace:*",
+        "@thaddeus.run/persist": "workspace:*",
+        "@thaddeus.run/platform": "workspace:*",
+        "@thaddeus.run/provenance": "workspace:*",
+        "@thaddeus.run/review": "workspace:*",
+        "@thaddeus.run/store": "workspace:*",
+      },
+      "devDependencies": {
+        "@thaddeus.run/agent": "workspace:*",
+        "@thaddeus.run/cli": "workspace:*",
+        "@thaddeus.run/server": "workspace:*",
+        "@types/bun": "catalog:",
+        "@typescript/native-preview": "catalog:",
+        "tsdown": "catalog:",
+        "typescript": "catalog:",
+      },
+    },
     "packages/persist": {
       "name": "@thaddeus.run/persist",
       "version": "0.1.11-alpha",
@@ -1117,6 +1143,8 @@
     "@thaddeus.run/landing": ["@thaddeus.run/landing@workspace:apps/landing"],
 
     "@thaddeus.run/log": ["@thaddeus.run/log@workspace:packages/log"],
+
+    "@thaddeus.run/migrate": ["@thaddeus.run/migrate@workspace:packages/migrate"],
 
     "@thaddeus.run/persist": ["@thaddeus.run/persist@workspace:packages/persist"],
 

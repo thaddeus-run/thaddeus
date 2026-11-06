@@ -7,6 +7,22 @@ All notable changes to Thaddeus. Format follows
 
 ### Added
 
+- `@thaddeus.run/migrate` (THA-151 / #220) moves a repository from the keyless
+  server into trusted-service storage. The owner's client clones every signed
+  view, signs a consent that names the service, the target tenant and
+  repository, the exact history with its revision at every version, and an
+  expiry, then decrypts and sends one file at a time. No key leaves the owner's
+  machine. The service accepts the consent only from the DID that signs the
+  source's head chains, using that owner's own credential, and keeps every
+  original signed record unchanged after checking it. Each file must hash to the
+  content id the owner signed. An interrupted import resumes from the files
+  still missing. Verification reopens every sealed file and rebuilds every
+  version's revision before cutover, which refuses a source that moved and
+  writes each source version as a service head record. Rollback withdraws the
+  trusted copy while no service history goes past what was migrated, and a
+  deterministic export can be checked offline and restored into a keyless
+  repository store. The keyless server is unchanged.
+
 - `@thaddeus.run/authority` (THA-150 / #219) defines how a trusted service
   authorizes browsers, external agents and integration workers. A member of a
   tenant's policy gets a credential with separate `read`, `edit`, `execute`,
@@ -44,6 +60,11 @@ All notable changes to Thaddeus. Format follows
   of a hand-edited copy.
 
 ### Documentation
+
+- The THA-151 design in
+  `docs/superpowers/specs/2026-11-06-tha-151-repository-migration-design.md`
+  holds the migration contract. CONTEXT gains Migration consent, Evidence,
+  Cutover and Rollback.
 
 - ADR 0006 decides that the trusted service records history advancements and
   change journal entries, and that only an actor's own signature over the

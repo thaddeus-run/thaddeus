@@ -35,7 +35,8 @@ The acceptance criteria and where each is met:
   deployment supplies one.
 - Revocation that is consistent across nodes. THA-83 owns it. This
   implementation is single-node, like the shipped server.
-- Migrating existing encrypted repositories. THA-151 owns it.
+- Migrating existing encrypted repositories. THA-151 owns it, and
+  `@thaddeus.run/migrate` implements it.
 
 ## 1. Parties
 

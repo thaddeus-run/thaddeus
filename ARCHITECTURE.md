@@ -36,6 +36,7 @@ of work.
 | Op (operation log entry)              | `@thaddeus.run/log`       | P03 · P04 · P05 · P06 · P08 · P10 · P11 query           |
 | Head (owner-signed shared view)       | `@thaddeus.run/log`       | P03 · platform · server · client                        |
 | Credential (holder-bound, scoped)     | `@thaddeus.run/authority` | Trusted service (not wired into the server yet)         |
+| Migration consent (owner-signed)      | `@thaddeus.run/migrate`   | Trusted service (not wired into the server yet)         |
 
 ## Build order (each tier depends only on tiers below)
 
@@ -132,8 +133,11 @@ holder-bound scoped credentials, revocation, service-managed key custody with
 audited plaintext access, and service-signed history advancement that keeps
 actor signatures separate
 ([ADR 0006](docs/adr/0006-the-service-records-actors-may-sign.md)). This server
-does not use it yet. THA-151 migrates existing repositories, and the remote
-workspace, query and shared-head work puts the contract behind routes.
+does not use it yet. THA-151 shipped `@thaddeus.run/migrate`, which moves an
+existing repository into trusted-service storage under the owner's signed
+consent, keeps its original signed records as evidence, and verifies every
+version before cutover. The remote workspace, query and shared-head work puts
+both behind routes.
 
 Timed reveal is the deliberate exception to that normal trust boundary. An owner
 uploads a public-wrapped capability before its start time so the server can

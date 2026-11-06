@@ -1,0 +1,899 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="color-scheme" content="dark" />
+    <title>THA-151 repository migration plan</title>
+    <style>
+      :root {
+        /* Near-black editorial palette. Dark-only by design — do not add a light theme. */
+        --bg: #000000;
+        --surface: #0c0c0c; /* cards */
+        --rule: #232323; /* hairlines, card borders */
+        --fg: #ededed; /* body text */
+        --fg-strong: #ffffff; /* headings */
+        --muted: #8b8b8b; /* secondary text, table heads */
+        --code-bg: #242424; /* inline code chip */
+        --block-bg: #0e0e0e; /* pre blocks */
+        --accent: #6fdc8c; /* links, skill names, checked state */
+        --s: #5ee08a;
+        --a: #a8e05f;
+        --b: #e0c95e;
+        --c: #e0a35e;
+        --d: #e06f6f;
+        --x: #7a7a7a;
+      }
+      * {
+        box-sizing: border-box;
+      }
+      html {
+        -webkit-text-size-adjust: 100%;
+      }
+      body {
+        margin: 0;
+        background: var(--bg);
+        color: var(--fg);
+        font:
+          17px/1.7 system-ui,
+          -apple-system,
+          'Helvetica Neue',
+          'Segoe UI',
+          Arial,
+          sans-serif;
+        font-synthesis-weight: none;
+        -webkit-font-smoothing: antialiased;
+      }
+      .wrap {
+        max-width: 900px;
+        margin: 0 auto;
+        padding: 4rem 1.5rem 8rem;
+      }
+
+      /* ---------- Type ---------- */
+      h1,
+      h2,
+      h3 {
+        color: var(--fg-strong);
+        font-weight: 700;
+        letter-spacing: -0.021em;
+      }
+      h1 {
+        font-size: 2.25rem;
+        line-height: 1.15;
+        margin: 0 0 1rem;
+      }
+      h2 {
+        font-size: 1.4rem;
+        line-height: 1.25;
+        margin: 0 0 1.25rem;
+      }
+      h3 {
+        font-size: 1.05rem;
+        line-height: 1.4;
+        margin: 2rem 0 0.5rem;
+      }
+      p {
+        margin: 0 0 1.1rem;
+      }
+      a {
+        color: var(--accent);
+        text-decoration: none;
+      }
+      a:hover {
+        text-decoration: underline;
+      }
+      .lede {
+        color: var(--muted);
+        font-size: 1.05rem;
+        margin: 0;
+      }
+      .muted {
+        color: var(--muted);
+      }
+
+      /* Sections are separated by a hairline and a lot of air — no boxes around prose. */
+      section.block {
+        border-top: 1px solid var(--rule);
+        padding-top: 2.5rem;
+        margin-top: 2.5rem;
+      }
+      header {
+        padding-bottom: 1.75rem;
+      }
+
+      /* ---------- Code ---------- */
+      code {
+        font-family: ui-monospace, SFMono-Regular, 'SF Mono', Menlo, monospace;
+        font-size: 0.855em;
+        background: var(--code-bg);
+        color: #e8e8e8;
+        padding: 0.12em 0.42em;
+        border-radius: 4px;
+        white-space: nowrap;
+      }
+      pre {
+        background: var(--block-bg);
+        border: 1px solid var(--rule);
+        border-radius: 8px;
+        padding: 1rem 1.1rem;
+        overflow-x: auto;
+        font-size: 0.875rem;
+        line-height: 1.6;
+        margin: 0.9rem 0;
+      }
+      pre code {
+        background: none;
+        padding: 0;
+        font-size: inherit;
+        white-space: pre;
+        color: var(--fg);
+      }
+
+      /* ---------- Stat cards ---------- */
+      .stats {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
+        gap: 0.9rem;
+        margin: 1.75rem 0;
+      }
+      .stat {
+        background: var(--surface);
+        border: 1px solid var(--rule);
+        border-radius: 10px;
+        padding: 1.2rem 1.3rem 1.35rem;
+      }
+      .stat b {
+        display: block;
+        color: var(--fg-strong);
+        font-size: 2rem;
+        font-weight: 500;
+        letter-spacing: -0.02em;
+        line-height: 1.1;
+        margin-bottom: 0.5rem;
+      }
+      .stat span {
+        color: var(--muted);
+        font-size: 0.95rem;
+        line-height: 1.45;
+      }
+
+      /* ---------- Tables: uppercase muted heads, hairline rows, no vertical rules ---------- */
+      .table-scroll {
+        overflow-x: auto;
+        margin: 1.5rem 0;
+      }
+      table {
+        border-collapse: collapse;
+        width: 100%;
+      }
+      th {
+        text-align: left;
+        vertical-align: bottom;
+        color: var(--muted);
+        font-size: 0.74rem;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.1em;
+        padding: 0 1.5rem 0.8rem 0;
+        border-bottom: 1px solid var(--rule);
+        white-space: nowrap;
+      }
+      td {
+        text-align: left;
+        vertical-align: top;
+        padding: 0.95rem 1.5rem 0.95rem 0;
+        border-bottom: 1px solid var(--rule);
+      }
+      th:last-child,
+      td:last-child {
+        padding-right: 0;
+      }
+      tbody tr:last-child td {
+        border-bottom: 0;
+      }
+      td.num {
+        color: var(--muted);
+        font-variant-numeric: tabular-nums;
+      }
+
+      /* ---------- Tier / status legend ---------- */
+      .legend {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 1.25rem;
+        color: var(--muted);
+        font-size: 0.95rem;
+        margin: 0 0 0.75rem;
+      }
+      .tier {
+        font-weight: 700;
+      }
+      .tier-s {
+        color: var(--s);
+      }
+      .tier-a {
+        color: var(--a);
+      }
+      .tier-b {
+        color: var(--b);
+      }
+      .tier-c {
+        color: var(--c);
+      }
+      .tier-d {
+        color: var(--d);
+      }
+      .tier-x {
+        color: var(--x);
+      }
+      .name {
+        color: var(--accent);
+        font-weight: 600;
+      }
+
+      /* ---------- Callout ---------- */
+      .callout {
+        background: var(--surface);
+        border: 1px solid var(--rule);
+        border-radius: 10px;
+        padding: 1.15rem 1.35rem;
+        margin: 1.5rem 0;
+      }
+      .callout > :last-child {
+        margin-bottom: 0;
+      }
+      .callout strong {
+        color: var(--fg-strong);
+      }
+      .callout ul {
+        margin: 0.6rem 0 0;
+        padding-left: 1.15rem;
+      }
+      .callout li {
+        margin: 0.3rem 0;
+      }
+
+      /* ---------- Tasks ---------- */
+      section.task {
+        background: var(--surface);
+        border: 1px solid var(--rule);
+        border-radius: 10px;
+        padding: 1.4rem 1.6rem;
+        margin: 1.25rem 0;
+      }
+      .files {
+        font-size: 0.92rem;
+        color: var(--muted);
+        margin: 0 0 1rem;
+      }
+      .files code {
+        color: var(--fg);
+        white-space: normal;
+      }
+      .io {
+        margin: 0 0 1.25rem;
+        font-size: 0.95rem;
+      }
+      .io dt {
+        color: var(--muted);
+        font-size: 0.74rem;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.1em;
+      }
+      .io dd {
+        margin: 0.2rem 0 0.75rem;
+      }
+      ol.steps {
+        list-style: none;
+        padding: 0;
+        margin: 0;
+      }
+      ol.steps > li {
+        display: flex;
+        gap: 0.7rem;
+        align-items: flex-start;
+        padding: 0.7rem 0;
+        border-top: 1px solid var(--rule);
+      }
+      ol.steps > li:first-child {
+        border-top: 0;
+        padding-top: 0;
+      }
+      ol.steps input {
+        margin: 0.42rem 0 0;
+        flex: none;
+        width: 1rem;
+        height: 1rem;
+        accent-color: var(--accent);
+      }
+      ol.steps input:checked + .label {
+        color: var(--muted);
+      }
+      ol.steps input:checked + .label strong {
+        color: var(--muted);
+        text-decoration: line-through;
+      }
+      .label {
+        flex: 1;
+        min-width: 0;
+      }
+      .label strong {
+        color: var(--fg-strong);
+        font-weight: 600;
+      }
+
+      .progress {
+        color: var(--muted);
+        font-size: 0.95rem;
+        margin-top: 3rem;
+        border-top: 1px solid var(--rule);
+        padding-top: 1.5rem;
+      }
+      .progress b {
+        color: var(--accent);
+      }
+
+      @media (max-width: 620px) {
+        body {
+          font-size: 16px;
+        }
+        h1 {
+          font-size: 1.8rem;
+        }
+        .wrap {
+          padding: 2.5rem 1.1rem 5rem;
+        }
+        section.task {
+          padding: 1.1rem 1.15rem;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="wrap">
+      <header>
+        <h1>
+          THA-151 migrating encrypted repositories to trusted-service storage
+        </h1>
+        <p class="lede">
+          How an owner moves a keyless repository into the trusted service that
+          THA-150 defined: a signed consent, the original records kept as
+          evidence, an import that resumes, a check of every version before
+          cutover, and a way back. Built on <code>f9ced0d</code>.
+        </p>
+      </header>
+
+      <section class="block">
+        <h2>Goal and shape</h2>
+        <p>
+          <strong>Goal.</strong> Implement the six migration rules in section 8
+          of the architecture contract as a library in public core.
+        </p>
+        <p>
+          <strong>Architecture.</strong> A new package,
+          <code>@thaddeus.run/migrate</code>. The owner's client reads the
+          source through the shipped <code>Client</code>, signs a consent and
+          decrypts files on its own machine. A <code>Migrator</code> on the
+          service side checks the consent and every original record, seals files
+          through THA-150's <code>KeyCustody</code>, rebuilds every version
+          before cutover and writes service head records through
+          <code>Authority.advance</code>. The keyless server and the CLI do not
+          change.
+        </p>
+        <p>
+          <strong>Tech stack.</strong> TypeScript on Bun,
+          <code>@thaddeus.run/authority</code>, <code>log</code>,
+          <code>store</code>, <code>client</code>, <code>platform</code>, BLAKE3
+          from <code>@noble/hashes</code>.
+        </p>
+
+        <div class="stats">
+          <div class="stat">
+            <b>1</b><span>new package, no server or CLI change</span>
+          </div>
+          <div class="stat">
+            <b>22</b
+            ><span
+              >tests, one of them through the compiled CLI and two killed
+              processes</span
+            >
+          </div>
+          <div class="stat"><b>0</b><span>new external dependencies</span></div>
+        </div>
+
+        <div class="callout">
+          <strong>Global constraints</strong>
+          <ul>
+            <li>
+              Only the DID that signs the source's head chains may migrate it,
+              through its own credential.
+            </li>
+            <li>No content key or identity key leaves the owner's machine.</li>
+            <li>
+              No original record is re-signed or changed. Service records never
+              pass for an actor's signature (ADR 0006).
+            </li>
+            <li>
+              The migration never writes to the keyless server, so repositories
+              that are not migrated keep working.
+            </li>
+            <li>
+              Every stored record carries a format version, and readers refuse
+              versions they do not know.
+            </li>
+          </ul>
+        </div>
+      </section>
+
+      <section class="block">
+        <h2>What the code says today</h2>
+        <div class="table-scroll">
+          <table>
+            <thead>
+              <tr>
+                <th>Signal</th>
+                <th>Evidence</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>Only the owner can read everything</td>
+                <td>
+                  <code>MemoryStore.put</code> issues one capability to the
+                  author. Delegates' content reaches the owner only because the
+                  CLI grants it, so the owner's client is the one place every
+                  file decrypts.
+                </td>
+              </tr>
+              <tr>
+                <td>Plaintext ids are signed</td>
+                <td>
+                  <code>canonicalOp</code> signs
+                  <code>[payload.id, payload.plaintext_id]</code>, and
+                  <code>plaintext_id</code> is the BLAKE3 of the bytes. The
+                  service can check each file it receives against the owner's
+                  signature without any key.
+                </td>
+              </tr>
+              <tr>
+                <td>Head sets only grow</td>
+                <td>
+                  <code>verifyHeadChain</code> refuses
+                  <code>dropped_heads</code>, so the newest record's closure
+                  contains every earlier version's operations.
+                </td>
+              </tr>
+              <tr>
+                <td>
+                  The trusted side has custody and history, not a repository
+                  format
+                </td>
+                <td>
+                  <code>KeyCustody.seal</code> binds content to tenant,
+                  repository and path, and <code>Authority.advance</code> names
+                  a <code>revision</code> string. Nothing defines what a
+                  revision is.
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section class="block">
+        <h2>Task 1: Consent tokens</h2>
+        <section class="task">
+          <p class="files">
+            Create <code>packages/migrate/src/consent.ts</code>,
+            <code>errors.ts</code>, <code>codec.ts</code> · Test
+            <code>packages/migrate/test/consent.test.ts</code>
+          </p>
+          <dl class="io">
+            <dt>Produces</dt>
+            <dd>
+              <code>signConsent(owner, input): string</code>,
+              <code>decodeConsent(token): Consent</code>,
+              <code>MigrationError</code> with a stable <code>code</code>.
+            </dd>
+          </dl>
+          <ol class="steps">
+            <li>
+              <input type="checkbox" id="t1s1" checked /><span class="label">
+                <strong>Write the failing tests</strong> for a round trip, an
+                edited payload, a signature by someone else, unknown fields,
+                <code>v: 2</code>, unsorted views and a lifetime over a week.
+              </span>
+            </li>
+            <li>
+              <input type="checkbox" id="t1s2" checked /><span class="label">
+                <strong>Implement the token</strong> as
+                <code>thm1.&lt;payload&gt;.&lt;signature&gt;</code> over
+                <code>thaddeus.migrate.consent.v1\n&lt;payload text&gt;</code>,
+                with a strict field check and
+                <code>transfer: "owner-decrypts"</code> as the only transfer
+                mode.
+              </span>
+            </li>
+            <li>
+              <input type="checkbox" id="t1s3" checked /><span class="label">
+                <strong>Run</strong>
+                <code>moonx migrate:test -- test/consent.test.ts</code>, expect
+                4 pass.
+              </span>
+            </li>
+          </ol>
+        </section>
+      </section>
+
+      <section class="block">
+        <h2>Task 2: Evidence and revisions</h2>
+        <section class="task">
+          <p class="files">
+            Create <code>packages/migrate/src/evidence.ts</code>,
+            <code>history.ts</code>
+          </p>
+          <dl class="io">
+            <dt>Consumes</dt>
+            <dd><code>Consent</code> from task 1.</dd>
+            <dt>Produces</dt>
+            <dd>
+              <code>verifyEvidence(evidence, consent): VerifiedEvidence</code>,
+              <code>historyOf(ops, chain): Version[]</code>,
+              <code>revisionId(entries)</code>, <code>evidenceRecords</code> and
+              <code>fromRecords</code>.
+            </dd>
+          </dl>
+          <ol class="steps">
+            <li>
+              <input type="checkbox" id="t2s1" checked /><span class="label">
+                <strong>Write the failing tests</strong>: a missing, extra or
+                forged operation, a forged capability, a chain re-signed by a
+                delegate, and a consent whose revisions differ.
+              </span>
+            </li>
+            <li>
+              <input type="checkbox" id="t2s2" checked /><span class="label">
+                <strong>Walk each pinned head back to genesis</strong>, check it
+                with <code>verifyHeadChain</code> against the consent's owner,
+                then check the exact closure with
+                <code>verifyHeadSnapshot</code>. Refuse any record nothing
+                references.
+              </span>
+            </li>
+            <li>
+              <input type="checkbox" id="t2s3" checked /><span class="label">
+                <strong>Rebuild every version</strong> with
+                <code>OpLog.materialize</code> and compare the revision ids with
+                the ones in the consent.
+                <pre><code>revisionId(entries) = BLAKE3("thaddeus.migrate.revision.v1\0" +
+  JSON.stringify(sorted entries.map(e =&gt; [e.path, e.contentId])))</code></pre>
+              </span>
+            </li>
+          </ol>
+        </section>
+      </section>
+
+      <section class="block">
+        <h2>Task 3: Import and verification</h2>
+        <section class="task">
+          <p class="files">
+            Create <code>packages/migrate/src/migrator.ts</code>,
+            <code>report.ts</code> · Test
+            <code>packages/migrate/test/migration.test.ts</code>
+          </p>
+          <dl class="io">
+            <dt>Consumes</dt>
+            <dd>
+              <code>Authority</code>, <code>Authorization</code> and
+              <code>KeyCustody</code> from THA-150; tasks 1 and 2.
+            </dd>
+            <dt>Produces</dt>
+            <dd>
+              <code>Migrator.begin</code>, <code>missing</code>,
+              <code>put</code>, <code>verify</code>, <code>status</code>; the
+              deterministic <code>Report</code>.
+            </dd>
+          </dl>
+          <ol class="steps">
+            <li>
+              <input type="checkbox" id="t3s1" checked /><span class="label">
+                <strong>Write the failing tests</strong>: begin refuses another
+                service, another target, a non-owner principal, a
+                delegate-signed consent, an expired consent and the wrong scope.
+                Put refuses bytes that do not hash to the signed id and a path
+                no version holds. Verify refuses while files are missing and
+                when stored evidence changed.
+              </span>
+            </li>
+            <li>
+              <input type="checkbox" id="t3s2" checked /><span class="label">
+                <strong>Store records unchanged</strong> under content keys with
+                an index per consent, and append state entries with
+                <code>putIfAbsent</code>.
+              </span>
+            </li>
+            <li>
+              <input type="checkbox" id="t3s3" checked /><span class="label">
+                <strong>Seal each file</strong> through
+                <code>KeyCustody.seal</code> under
+                <code>trusted/&lt;tenant&gt;/&lt;repo&gt;/content/</code>, and
+                make <code>missing</code> the resume point.
+              </span>
+            </li>
+            <li>
+              <input type="checkbox" id="t3s4" checked /><span class="label">
+                <strong>Verify from storage</strong>: reload and re-check the
+                evidence, open every file through <code>KeyCustody.open</code>,
+                check its hash, build the report.
+              </span>
+            </li>
+          </ol>
+        </section>
+      </section>
+
+      <section class="block">
+        <h2>Task 4: Cutover, rollback and export</h2>
+        <section class="task">
+          <p class="files">
+            Modify <code>packages/migrate/src/migrator.ts</code> · Create
+            <code>packages/migrate/src/archive.ts</code>
+          </p>
+          <dl class="io">
+            <dt>Produces</dt>
+            <dd>
+              <code>cutover(integrate, latest)</code>,
+              <code>rollback(integrate)</code>, <code>export(read)</code>,
+              <code>tree</code>, <code>read</code>,
+              <code>verifyArchive(text)</code>,
+              <code>restoreArchive(text, backend)</code>.
+            </dd>
+          </dl>
+          <ol class="steps">
+            <li>
+              <input type="checkbox" id="t4s1" checked /><span class="label">
+                <strong>Write the failing tests</strong>: a push after the
+                consent gives <code>source_moved</code>; a cutover stopped after
+                two versions resumes; rollback works before and after cutover
+                and gives <code>diverged</code> once service history went
+                further; two exports are identical and
+                <code>verifyArchive</code> rebuilds the same report.
+              </span>
+            </li>
+            <li>
+              <input type="checkbox" id="t4s2" checked /><span class="label">
+                <strong>Cut over</strong> by writing each source version as a
+                service head record at the same version, continuing after any
+                record that already matches.
+              </span>
+            </li>
+            <li>
+              <input type="checkbox" id="t4s3" checked /><span class="label">
+                <strong>Roll back</strong> by deleting <code>trusted/</code> for
+                the repository and appending <code>rolled_back</code>. Evidence,
+                state and service head records stay.
+              </span>
+            </li>
+            <li>
+              <input type="checkbox" id="t4s4" checked /><span class="label">
+                <strong>Export</strong> the consent, every record in key order
+                and every file in path order, and restore the original records
+                with <code>Platform.createDurable</code>.
+              </span>
+            </li>
+          </ol>
+        </section>
+      </section>
+
+      <section class="block">
+        <h2>Task 5: The owner's client</h2>
+        <section class="task">
+          <p class="files">
+            Create <code>packages/migrate/src/source.ts</code>
+          </p>
+          <dl class="io">
+            <dt>Produces</dt>
+            <dd>
+              <code>Source.read(client, name, options)</code>,
+              <code>source.consent</code>, <code>source.plaintext</code>,
+              <code>source.latest</code>, and
+              <code
+                >transfer(source, owner, migrator, edit, token, options)</code
+              >.
+            </dd>
+          </dl>
+          <ol class="steps">
+            <li>
+              <input type="checkbox" id="t5s1" checked /><span class="label">
+                <strong>Write the failing tests</strong>: a delegate cannot sign
+                a consent for the source, and <code>transfer</code> refuses to
+                send to a service the consent does not name.
+              </span>
+            </li>
+            <li>
+              <input type="checkbox" id="t5s2" checked /><span class="label">
+                <strong>Clone every signed view</strong> into memory through
+                <code>Client.clone</code> and <code>Client.pull</code>, and
+                collect the records reachable from the pinned heads.
+              </span>
+            </li>
+            <li>
+              <input type="checkbox" id="t5s3" checked /><span class="label">
+                <strong>Decrypt one file at a time</strong> with
+                <code>store.get</code> and the owner's identity, just before it
+                is sent.
+              </span>
+            </li>
+          </ol>
+        </section>
+      </section>
+
+      <section class="block">
+        <h2>Task 6: The real path</h2>
+        <section class="task">
+          <p class="files">
+            Create <code>packages/migrate/test/real-path.test.ts</code>,
+            <code>packages/migrate/test/fixtures/migrate-process.ts</code>
+          </p>
+          <ol class="steps">
+            <li>
+              <input type="checkbox" id="t6s1" checked /><span class="label">
+                <strong>Build the source with the compiled CLI</strong>: owner
+                <code>init</code> and two <code>push</code>es,
+                <code>grant</code>, a second identity's <code>push</code>, owner
+                <code>land</code>, and a second repository that is never
+                migrated.
+              </span>
+            </li>
+            <li>
+              <input type="checkbox" id="t6s2" checked /><span class="label">
+                <strong>Kill the import</strong> after two of four files,
+                restart <code>thaddeus serve</code>, and keep pushing and
+                cloning with the CLI.
+              </span>
+            </li>
+            <li>
+              <input type="checkbox" id="t6s3" checked /><span class="label">
+                <strong>Kill the cutover</strong> after two of four service head
+                records, then finish in a third process, read the files back,
+                export and check the archive.
+              </span>
+            </li>
+            <li>
+              <input type="checkbox" id="t6s4" checked /><span class="label">
+                <strong>Scan the service directory</strong> for the owner's
+                seed, every content key and every file's plaintext. Expect none.
+              </span>
+            </li>
+          </ol>
+        </section>
+      </section>
+
+      <section class="block">
+        <h2>Task 7: Documentation</h2>
+        <section class="task">
+          <p class="files">
+            Create
+            <code
+              >docs/superpowers/specs/2026-11-06-tha-151-repository-migration-design.md</code
+            >, <code>packages/migrate/README.md</code> · Modify
+            <code>ARCHITECTURE.md</code>, <code>CONTEXT.md</code>,
+            <code>CHANGELOG.md</code>,
+            <code>docs/agent-first-architecture.md</code>
+          </p>
+          <ol class="steps">
+            <li>
+              <input type="checkbox" id="t7s1" checked /><span class="label">
+                <strong>Map each contract rule</strong> to the step that
+                enforces it, and list the decisions taken without a grill round.
+              </span>
+            </li>
+            <li>
+              <input type="checkbox" id="t7s2" checked /><span class="label">
+                <strong>Run</strong>
+                <code>moon run root:format root:lint</code> and
+                <code>moonx migrate:typecheck migrate:test</code>.
+              </span>
+            </li>
+          </ol>
+        </section>
+      </section>
+
+      <section class="block">
+        <h2>Decisions to check first</h2>
+        <div class="table-scroll">
+          <table>
+            <thead>
+              <tr>
+                <th>#</th>
+                <th>Decision</th>
+                <th>Why</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td class="num">1</td>
+                <td>The owner's client decrypts and sends plaintext</td>
+                <td>
+                  No key ever leaves, so there is no key-upload mode to
+                  authorize or misuse.
+                </td>
+              </tr>
+              <tr>
+                <td class="num">2</td>
+                <td>Only the source owner may migrate</td>
+                <td>
+                  The owner is the DID the head chains name and the only one
+                  that reads every file.
+                </td>
+              </tr>
+              <tr>
+                <td class="num">3</td>
+                <td>The consent pins every version's revision</td>
+                <td>
+                  The service proves it rebuilt the history the owner saw, not
+                  just the newest tree.
+                </td>
+              </tr>
+              <tr>
+                <td class="num">4</td>
+                <td>Evidence keeps the original ciphertext and capabilities</td>
+                <td>
+                  An archive restores the keyless repository with every original
+                  signature intact.
+                </td>
+              </tr>
+              <tr>
+                <td class="num">5</td>
+                <td>One service head record per source version</td>
+                <td>
+                  History survives the move, and an interrupted cutover resumes
+                  by version.
+                </td>
+              </tr>
+              <tr>
+                <td class="num">6</td>
+                <td>The keyless source is never frozen</td>
+                <td>
+                  Rule 6 keeps it working. Cutover refuses a source that moved
+                  instead.
+                </td>
+              </tr>
+              <tr>
+                <td class="num">7</td>
+                <td>Rollback keeps service head records</td>
+                <td>
+                  They are append-only under THA-150. Hosts serve only the
+                  <code>cutover</code> state.
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <p class="progress">
+        <b><span id="done">0</span></b> of <span id="total">0</span> steps
+        complete
+      </p>
+    </div>
+    <script>
+      // Progress counter. Inline only — external script src is rejected by postplan.
+      var boxes = document.querySelectorAll('ol.steps input[type=checkbox]');
+      var doneEl = document.getElementById('done');
+      document.getElementById('total').textContent = String(boxes.length);
+      function refresh() {
+        var n = 0;
+        boxes.forEach(function (b) {
+          if (b.checked) n++;
+        });
+        doneEl.textContent = String(n);
+      }
+      boxes.forEach(function (b) {
+        b.addEventListener('change', refresh);
+      });
+      refresh();
+    </script>
+  </body>
+</html>
